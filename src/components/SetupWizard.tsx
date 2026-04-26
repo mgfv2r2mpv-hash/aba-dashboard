@@ -249,7 +249,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                     <div style={{ flex: 1 }}>
                       <input
                         type="number" step="0.1"
-                        value={rbtOverride ? supRBTStr : BACB_RBT_SUPERVISION_MIN_PERCENT}
+                        value={rbtOverride ? supRBTStr : String(BACB_RBT_SUPERVISION_MIN_PERCENT)}
                         onChange={(e) => setSupRBTStr(e.target.value)}
                         disabled={!rbtOverride}
                         style={{ ...inputStyle, opacity: rbtOverride ? 1 : 0.6 }}

@@ -57,7 +57,7 @@ export default function Calendar({
   const goToNextMonth = () => setCurrentDate(addMonths(currentDate, 1));
 
   return (
-    <div style={{ padding: '24px' }}>
+    <div style={{ padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }}>
       {/* Month Navigation */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <button onClick={goToPreviousMonth} style={{

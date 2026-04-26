@@ -207,7 +207,7 @@ export default function App() {
             borderRadius: '6px',
             cursor: 'pointer',
         }, children: label }));
-    return (_jsxs("div", { style: { display: 'flex', height: '100vh', flexDirection: 'column' }, children: [_jsx("header", { style: {
+    return (_jsxs("div", { style: { display: 'flex', height: '100vh', maxWidth: '100vw', overflowX: 'hidden', flexDirection: 'column' }, children: [_jsx("header", { style: {
                     backgroundColor: '#1f2937',
                     color: 'white',
                     padding: '12px 16px',

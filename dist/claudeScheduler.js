@@ -47,7 +47,7 @@ All people are referenced by opaque tokens (CLIENT_n, TECH_n, APT_n). Use these 
 
 CONSTRAINTS:
 - Supervision requirement: ${this.data.settings.supervisionDirectHoursPercent}% of direct hours + ${this.data.settings.supervisionRBTHoursPercent}% of RBT hours
-- Parent training requirement: minimum ${this.data.settings.parentTrainingHoursPerMonth.minimum} hours/month (target ${this.data.settings.parentTrainingHoursPerMonth.target.min}-${this.data.settings.parentTrainingHoursPerMonth.target.max})
+- Parent training requirement: minimum ${this.data.settings.parentTraining.minimumHours} hours per ${this.data.settings.parentTraining.periodUnit} (target ${this.data.settings.parentTraining.targetMinHours}-${this.data.settings.parentTraining.targetMaxHours})
 - Items marked "Fixed" cannot be moved
 - Technician availability must be respected
 - Client availability must be respected

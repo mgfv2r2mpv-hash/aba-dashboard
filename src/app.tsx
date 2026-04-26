@@ -208,12 +208,12 @@ export default function App() {
       <header style={{
         backgroundColor: '#1f2937',
         color: 'white',
-        padding: '16px 24px',
+        padding: '12px 16px',
         boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 style={{ fontSize: '24px', fontWeight: 'bold' }}>ABA Schedule Assistant</h1>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          <h1 style={{ fontSize: '18px', fontWeight: 'bold' }}>ABA Schedule Assistant</h1>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
             {/* AI status indicator */}
             <div style={{
               padding: '4px 10px',
@@ -240,12 +240,12 @@ export default function App() {
         </div>
       </header>
 
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', flexWrap: 'wrap' }}>
         {scheduleData ? (
           <>
             {!showAdmin ? (
               <>
-                <div style={{ flex: 1, overflow: 'auto' }}>
+                <div style={{ flex: '1 1 320px', minWidth: 0, overflow: 'auto' }}>
                   <Calendar
                     appointments={scheduleData.appointments}
                     technicians={scheduleData.technicians}
@@ -254,23 +254,32 @@ export default function App() {
                     onSelectAppointment={setSelectedAppointment}
                   />
                 </div>
-                <div style={{ width: '350px', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column' }}>
-                  {conflicts.length > 0 && <ConflictPanel conflicts={conflicts} />}
-                  {!aiSettings.apiKey && conflicts.length > 0 && (
-                    <div style={{ padding: '12px', backgroundColor: '#fef3c7', fontSize: '12px', color: '#92400e' }}>
-                      Add a Claude API key in Settings to get AI-powered solutions for these conflicts.
-                    </div>
-                  )}
-                  {solutions.length > 0 && <SolutionPanel solutions={solutions} onApply={handleApplySolution} />}
-                  {selectedAppointment && (
-                    <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb' }}>
-                      <h3 style={{ marginBottom: '12px' }}>Selected Appointment</h3>
-                      <p><strong>{selectedAppointment.title}</strong></p>
-                      <p>{selectedAppointment.startTime}</p>
-                      {selectedAppointment.isFixed && <span style={{ color: '#dc2626' }}>🔒 Fixed</span>}
-                    </div>
-                  )}
-                </div>
+                {(conflicts.length > 0 || solutions.length > 0 || selectedAppointment) && (
+                  <div style={{
+                    flex: '0 0 auto',
+                    width: 'min(350px, 100%)',
+                    borderLeft: '1px solid #e5e7eb',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflowY: 'auto',
+                  }}>
+                    {conflicts.length > 0 && <ConflictPanel conflicts={conflicts} />}
+                    {!aiSettings.apiKey && conflicts.length > 0 && (
+                      <div style={{ padding: '12px', backgroundColor: '#fef3c7', fontSize: '12px', color: '#92400e' }}>
+                        Add a Claude API key in Settings to get AI-powered solutions for these conflicts.
+                      </div>
+                    )}
+                    {solutions.length > 0 && <SolutionPanel solutions={solutions} onApply={handleApplySolution} />}
+                    {selectedAppointment && (
+                      <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb' }}>
+                        <h3 style={{ marginBottom: '12px' }}>Selected Appointment</h3>
+                        <p><strong>{selectedAppointment.title}</strong></p>
+                        <p>{selectedAppointment.startTime}</p>
+                        {selectedAppointment.isFixed && <span style={{ color: '#dc2626' }}>🔒 Fixed</span>}
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               <AdminPanel data={scheduleData} />

@@ -5,6 +5,8 @@ export declare class ConstraintValidator {
     validateSchedule(): ScheduleConflict[];
     private validateSupervisionRequirements;
     private validateParentTraining;
+    private getPeriodsForUnit;
+    private calculateParentTrainingHoursInRange;
     private validateAvailability;
     private validateBillableRequirements;
     private calculateDirectHours;

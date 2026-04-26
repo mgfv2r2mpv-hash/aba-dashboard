@@ -13,7 +13,8 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+// Serve built frontend from dist-client if it exists
+app.use(express.static(path.join(__dirname, '../dist-client')));
 // In-memory storage for current schedule data and encryption
 // NOTE: API keys are NEVER stored server-side. They live only in the client browser
 // and travel via X-Claude-Api-Key header for individual requests.

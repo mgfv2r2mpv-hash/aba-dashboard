@@ -25,10 +25,18 @@ export interface Technician {
     };
     notes?: string;
 }
+export declare const BACB_RBT_SUPERVISION_MIN_PERCENT = 5;
+export type TrainingPeriodUnit = 'week' | 'month' | 'sixMonths' | 'year';
 export interface CompanySettings {
     supervisionDirectHoursPercent: number;
     supervisionRBTHoursPercent: number;
-    parentTrainingHoursPerMonth: {
+    parentTraining: {
+        minimumHours: number;
+        targetMinHours: number;
+        targetMaxHours: number;
+        periodUnit: TrainingPeriodUnit;
+    };
+    parentTrainingHoursPerMonth?: {
         minimum: number;
         target: {
             min: number;

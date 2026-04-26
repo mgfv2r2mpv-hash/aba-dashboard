@@ -29,10 +29,23 @@ export interface Technician {
   notes?: string;
 }
 
+// BACB-mandated minimum supervision percentage for RBTs.
+// This is set by the Behavior Analyst Certification Board, not the company.
+export const BACB_RBT_SUPERVISION_MIN_PERCENT = 5;
+
+export type TrainingPeriodUnit = 'week' | 'month' | 'sixMonths' | 'year';
+
 export interface CompanySettings {
-  supervisionDirectHoursPercent: number; // e.g., 5
-  supervisionRBTHoursPercent: number;    // e.g., 5
-  parentTrainingHoursPerMonth: {
+  supervisionDirectHoursPercent: number; // company target, defaults to BACB min
+  supervisionRBTHoursPercent: number;    // fixed at BACB min (5%) but override allowed
+  parentTraining: {
+    minimumHours: number;
+    targetMinHours: number;
+    targetMaxHours: number;
+    periodUnit: TrainingPeriodUnit;
+  };
+  // Legacy field kept for older Excel files; mirrors `parentTraining` when present.
+  parentTrainingHoursPerMonth?: {
     minimum: number;
     target: { min: number; max: number };
   };

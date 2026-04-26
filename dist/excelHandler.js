@@ -56,25 +56,28 @@ function parseTechnicians(workbook) {
 }
 function parseSettings(workbook) {
     const sheet = workbook.Sheets['Settings'];
-    if (!sheet) {
-        return {
-            supervisionDirectHoursPercent: 5,
-            supervisionRBTHoursPercent: 5,
-            parentTrainingHoursPerMonth: { minimum: 1.5, target: { min: 2, max: 4 } },
-        };
-    }
+    const defaultSettings = {
+        supervisionDirectHoursPercent: 5,
+        supervisionRBTHoursPercent: 5,
+        parentTraining: {
+            minimumHours: 1.5,
+            targetMinHours: 2,
+            targetMaxHours: 4,
+            periodUnit: 'month',
+        },
+    };
+    if (!sheet)
+        return defaultSettings;
     const data = XLSX.utils.sheet_to_json(sheet);
     const row = (data && data[0]) || {};
+    const periodUnit = row.parentTrainingPeriodUnit || 'month';
+    const minimumHours = parseFloat(row.parentTrainingMinimum) || 1.5;
+    const targetMinHours = parseFloat(row.parentTrainingTargetMin) || 2;
+    const targetMaxHours = parseFloat(row.parentTrainingTargetMax) || 4;
     return {
         supervisionDirectHoursPercent: parseFloat(row.supervisionDirectHoursPercent) || 5,
         supervisionRBTHoursPercent: parseFloat(row.supervisionRBTHoursPercent) || 5,
-        parentTrainingHoursPerMonth: {
-            minimum: parseFloat(row.parentTrainingMinimum) || 1.5,
-            target: {
-                min: parseFloat(row.parentTrainingTargetMin) || 2,
-                max: parseFloat(row.parentTrainingTargetMax) || 4,
-            },
-        },
+        parentTraining: { minimumHours, targetMinHours, targetMaxHours, periodUnit },
         billableRequirements: row.billableHoursPerCycle ? {
             hoursPerCycle: parseFloat(row.billableHoursPerCycle),
             cycleWeeks: parseFloat(row.billableCycleWeeks) || 4,
@@ -105,8 +108,20 @@ function parseAvailabilityWindows(row) {
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     const availability = {};
     days.forEach(day => {
-        const key = `${day}Start`;
-        const start = row[key];
+        // Multi-window format: JSON-encoded array in `${day}Windows`
+        const windowsRaw = row[`${day}Windows`];
+        if (typeof windowsRaw === 'string' && windowsRaw.trim()) {
+            try {
+                const parsed = JSON.parse(windowsRaw);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    availability[day] = parsed.filter(w => w && w.start && w.end);
+                    return;
+                }
+            }
+            catch (_e) { /* fall through to legacy */ }
+        }
+        // Legacy single-window format: `${day}Start` / `${day}End`
+        const start = row[`${day}Start`];
         const end = row[`${day}End`];
         if (start && end) {
             availability[day] = [{ start, end }];
@@ -158,9 +173,10 @@ export function generateExcelFile(data, embeddedConfig) {
     const settingsData = [{
             supervisionDirectHoursPercent: data.settings.supervisionDirectHoursPercent,
             supervisionRBTHoursPercent: data.settings.supervisionRBTHoursPercent,
-            parentTrainingMinimum: data.settings.parentTrainingHoursPerMonth.minimum,
-            parentTrainingTargetMin: data.settings.parentTrainingHoursPerMonth.target.min,
-            parentTrainingTargetMax: data.settings.parentTrainingHoursPerMonth.target.max,
+            parentTrainingMinimum: data.settings.parentTraining.minimumHours,
+            parentTrainingTargetMin: data.settings.parentTraining.targetMinHours,
+            parentTrainingTargetMax: data.settings.parentTraining.targetMaxHours,
+            parentTrainingPeriodUnit: data.settings.parentTraining.periodUnit,
             billableHoursPerCycle: data.settings.billableRequirements?.hoursPerCycle,
             billableCycleWeeks: data.settings.billableRequirements?.cycleWeeks,
         }];
@@ -187,9 +203,13 @@ function flattenAvailability(availability) {
     const result = {};
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     days.forEach(day => {
-        if (availability[day] && availability[day].length > 0) {
-            result[`${day}Start`] = availability[day][0].start;
-            result[`${day}End`] = availability[day][0].end;
+        const windows = availability[day];
+        if (windows && windows.length > 0) {
+            // Always write the first window in legacy columns for human readability,
+            // and write the full array in `${day}Windows` for round-tripping multi-window data.
+            result[`${day}Start`] = windows[0].start;
+            result[`${day}End`] = windows[0].end;
+            result[`${day}Windows`] = JSON.stringify(windows);
         }
     });
     return result;

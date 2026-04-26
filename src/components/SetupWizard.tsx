@@ -39,7 +39,12 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
   const [settings, setSettings] = useState<CompanySettings>({
     supervisionDirectHoursPercent: 5,
     supervisionRBTHoursPercent: 5,
-    parentTrainingHoursPerMonth: { minimum: 1.5, target: { min: 2, max: 4 } },
+    parentTraining: {
+      minimumHours: 1.5,
+      targetMinHours: 2,
+      targetMaxHours: 4,
+      periodUnit: 'month',
+    },
   });
 
   const [clients, setClients] = useState<Client[]>([]);
@@ -126,8 +131,9 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
     }}>
       <div style={{
-        backgroundColor: 'white', borderRadius: '8px', padding: '24px',
-        width: '720px', maxHeight: '90vh', overflowY: 'auto',
+        backgroundColor: 'white', borderRadius: '8px', padding: '20px',
+        width: 'min(720px, 95vw)', maxHeight: '90vh', overflowY: 'auto',
+        boxSizing: 'border-box',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
           <h2 style={{ fontSize: '20px', fontWeight: 'bold' }}>Setup Wizard</h2>
@@ -159,7 +165,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
               <li>Review &amp; create</li>
             </ol>
             <p style={{ color: '#6b7280', marginTop: '12px', fontSize: '13px' }}>
-              Use anonymized client info — this stays in your browser and your encrypted Excel file.
+              Use anonymized identifiers (e.g. "Client A") — never enter real names.
               You can add appointments after the wizard completes.
             </p>
           </div>
@@ -192,15 +198,31 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                   />
                 </div>
               </div>
+              <div>
+                <label style={labelStyle}>Parent training period</label>
+                <select
+                  value={settings.parentTraining.periodUnit}
+                  onChange={(e) => setSettings({
+                    ...settings,
+                    parentTraining: { ...settings.parentTraining, periodUnit: e.target.value as any },
+                  })}
+                  style={inputStyle}
+                >
+                  <option value="week">per week</option>
+                  <option value="month">per month</option>
+                  <option value="sixMonths">per 6 months</option>
+                  <option value="year">per year</option>
+                </select>
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
                 <div>
-                  <label style={labelStyle}>Parent training min/month</label>
+                  <label style={labelStyle}>Min hours</label>
                   <input
                     type="number" step="0.1"
-                    value={settings.parentTrainingHoursPerMonth.minimum}
+                    value={settings.parentTraining.minimumHours}
                     onChange={(e) => setSettings({
                       ...settings,
-                      parentTrainingHoursPerMonth: { ...settings.parentTrainingHoursPerMonth, minimum: parseFloat(e.target.value) || 0 },
+                      parentTraining: { ...settings.parentTraining, minimumHours: parseFloat(e.target.value) || 0 },
                     })}
                     style={inputStyle}
                   />
@@ -209,13 +231,10 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                   <label style={labelStyle}>Target min</label>
                   <input
                     type="number" step="0.5"
-                    value={settings.parentTrainingHoursPerMonth.target.min}
+                    value={settings.parentTraining.targetMinHours}
                     onChange={(e) => setSettings({
                       ...settings,
-                      parentTrainingHoursPerMonth: {
-                        ...settings.parentTrainingHoursPerMonth,
-                        target: { ...settings.parentTrainingHoursPerMonth.target, min: parseFloat(e.target.value) || 0 },
-                      },
+                      parentTraining: { ...settings.parentTraining, targetMinHours: parseFloat(e.target.value) || 0 },
                     })}
                     style={inputStyle}
                   />
@@ -224,13 +243,10 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                   <label style={labelStyle}>Target max</label>
                   <input
                     type="number" step="0.5"
-                    value={settings.parentTrainingHoursPerMonth.target.max}
+                    value={settings.parentTraining.targetMaxHours}
                     onChange={(e) => setSettings({
                       ...settings,
-                      parentTrainingHoursPerMonth: {
-                        ...settings.parentTrainingHoursPerMonth,
-                        target: { ...settings.parentTrainingHoursPerMonth.target, max: parseFloat(e.target.value) || 0 },
-                      },
+                      parentTraining: { ...settings.parentTraining, targetMaxHours: parseFloat(e.target.value) || 0 },
                     })}
                     style={inputStyle}
                   />
@@ -381,8 +397,8 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                 <strong>Company Settings</strong>
                 <p style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
                   Supervision: {settings.supervisionDirectHoursPercent}% direct + {settings.supervisionRBTHoursPercent}% RBT<br />
-                  Parent training: {settings.parentTrainingHoursPerMonth.minimum}h min,
-                  target {settings.parentTrainingHoursPerMonth.target.min}-{settings.parentTrainingHoursPerMonth.target.max}h/mo
+                  Parent training: {settings.parentTraining.minimumHours}h min,
+                  target {settings.parentTraining.targetMinHours}-{settings.parentTraining.targetMaxHours}h/{settings.parentTraining.periodUnit}
                 </p>
               </div>
               <div style={cardStyle}>

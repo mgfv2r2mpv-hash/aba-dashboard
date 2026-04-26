@@ -108,6 +108,7 @@ const settingsData = [
         parentTrainingMinimum: 1.5,
         parentTrainingTargetMin: 2,
         parentTrainingTargetMax: 4,
+        parentTrainingPeriodUnit: 'month',
         billableHoursPerCycle: 80,
         billableCycleWeeks: 4,
     },

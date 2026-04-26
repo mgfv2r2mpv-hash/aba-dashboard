@@ -34,20 +34,65 @@ export class ConstraintValidator {
     }
     validateParentTraining() {
         const conflicts = [];
-        // Check parent training hours per month
-        const months = this.getMonthsInSchedule();
-        months.forEach(month => {
-            const trainingHours = this.calculateParentTrainingHours(month);
-            const required = this.data.settings.parentTrainingHoursPerMonth.minimum;
-            if (trainingHours < required) {
+        const pt = this.data.settings.parentTraining;
+        if (!pt)
+            return conflicts;
+        const periods = this.getPeriodsForUnit(pt.periodUnit);
+        periods.forEach(period => {
+            const trainingHours = this.calculateParentTrainingHoursInRange(period.start, period.end);
+            if (trainingHours < pt.minimumHours) {
                 conflicts.push({
                     type: 'training-violation',
                     severity: 'warning',
-                    message: `${month} has ${trainingHours} hours of parent training but requires minimum ${required}`,
+                    message: `${period.label} has ${trainingHours.toFixed(1)} hours of parent training but requires minimum ${pt.minimumHours} per ${pt.periodUnit}`,
                 });
             }
         });
         return conflicts;
+    }
+    getPeriodsForUnit(unit) {
+        if (this.data.appointments.length === 0)
+            return [];
+        const dates = this.data.appointments.map(a => new Date(a.startTime));
+        const min = new Date(Math.min(...dates.map(d => d.getTime())));
+        const max = new Date(Math.max(...dates.map(d => d.getTime())));
+        const periods = [];
+        let cursor = new Date(min);
+        cursor.setHours(0, 0, 0, 0);
+        while (cursor <= max) {
+            const start = new Date(cursor);
+            const end = new Date(cursor);
+            let label;
+            if (unit === 'week') {
+                end.setDate(end.getDate() + 7);
+                label = `Week of ${start.toISOString().slice(0, 10)}`;
+            }
+            else if (unit === 'month') {
+                end.setMonth(end.getMonth() + 1);
+                label = start.toISOString().slice(0, 7);
+            }
+            else if (unit === 'sixMonths') {
+                end.setMonth(end.getMonth() + 6);
+                label = `${start.toISOString().slice(0, 7)} (6mo)`;
+            }
+            else {
+                end.setFullYear(end.getFullYear() + 1);
+                label = String(start.getFullYear());
+            }
+            periods.push({ start, end, label });
+            cursor = end;
+        }
+        return periods;
+    }
+    calculateParentTrainingHoursInRange(start, end) {
+        return this.data.appointments
+            .filter(a => {
+            if (a.type !== 'parent-training')
+                return false;
+            const t = new Date(a.startTime);
+            return t >= start && t < end;
+        })
+            .reduce((sum, a) => sum + this.getHoursDuration(a.startTime, a.endTime), 0);
     }
     validateAvailability() {
         const conflicts = [];

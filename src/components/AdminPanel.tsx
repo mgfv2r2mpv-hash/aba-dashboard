@@ -169,9 +169,9 @@ export default function AdminPanel({ data }: AdminPanelProps) {
                   Parent Training
                 </p>
                 <p style={{ color: '#6b7280' }}>
-                  Minimum: {data.settings.parentTrainingHoursPerMonth.minimum}h/month
+                  Minimum: {data.settings.parentTraining.minimumHours}h/{data.settings.parentTraining.periodUnit}
                   <br />
-                  Target: {data.settings.parentTrainingHoursPerMonth.target.min}-{data.settings.parentTrainingHoursPerMonth.target.max}h/month
+                  Target: {data.settings.parentTraining.targetMinHours}-{data.settings.parentTraining.targetMaxHours}h/{data.settings.parentTraining.periodUnit}
                 </p>
               </div>
             </div>

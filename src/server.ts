@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 import { ScheduleData, Appointment, ScheduleSolution } from './types';
 import { parseExcelFile, generateExcelFile } from './excelHandler';
 import { ConstraintValidator } from './constraintValidator';
-import { ClaudeScheduler } from './claudeScheduler';
+import { ClaudeScheduler, ClaudeModel } from './claudeScheduler';
 import { ExcelEncryption } from './encryption';
 
 dotenv.config();
@@ -17,11 +17,15 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+// Serve built frontend from dist-client if it exists
+app.use(express.static(path.join(__dirname, '../dist-client')));
 
 // In-memory storage for current schedule data and encryption
+// NOTE: API keys are NEVER stored server-side. They live only in the client browser
+// and travel via X-Claude-Api-Key header for individual requests.
 let currentScheduleData: ScheduleData | null = null;
 let encryptionPassword: string = process.env.EXCEL_PASSWORD || ExcelEncryption.generatePassword();
+let lastEmbeddedConfig: string | undefined; // Encrypted blob from uploaded Excel (returned to client, not used here)
 
 // Health check
 app.get('/api/health', (req: Request, res: Response) => {
@@ -43,7 +47,9 @@ app.post('/api/upload', express.raw({ type: ['application/vnd.openxmlformats-off
 
     fs.writeFileSync(tempPath, buffer);
 
-    currentScheduleData = parseExcelFile(tempPath);
+    const parsed = parseExcelFile(tempPath);
+    currentScheduleData = parsed.data;
+    lastEmbeddedConfig = parsed.embeddedConfig;
 
     // Validate immediately
     const validator = new ConstraintValidator(currentScheduleData);
@@ -55,6 +61,7 @@ app.post('/api/upload', express.raw({ type: ['application/vnd.openxmlformats-off
       success: true,
       data: currentScheduleData,
       conflicts,
+      embeddedConfig: parsed.embeddedConfig, // Encrypted blob - client decrypts with user-supplied password
     });
   } catch (error: any) {
     res.status(400).json({
@@ -73,6 +80,8 @@ app.get('/api/schedule', (req: Request, res: Response) => {
 });
 
 // Update appointment
+// API key and model are passed via request headers (X-Claude-Api-Key, X-Claude-Model)
+// They are NEVER stored server-side - used only for the duration of the request
 app.post('/api/appointment/:id', express.json(), async (req: Request, res: Response) => {
   try {
     if (!currentScheduleData) {
@@ -88,23 +97,27 @@ app.post('/api/appointment/:id', express.json(), async (req: Request, res: Respo
       return res.status(404).json({ error: 'Appointment not found' });
     }
 
-    const oldAppointment = { ...appointment };
     Object.assign(appointment, updates);
 
     // Validate constraints
     const validator = new ConstraintValidator(currentScheduleData);
     const conflicts = validator.validateSchedule();
 
-    // If conflicts exist, generate solutions using Claude
+    // Get API key and model from headers (per-request only, never stored)
+    const apiKey = req.headers['x-claude-api-key'] as string | undefined;
+    const model = req.headers['x-claude-model'] as ClaudeModel | undefined;
+
+    // If conflicts exist and user has provided API key, generate solutions
     let solutions: ScheduleSolution[] = [];
-    if (conflicts.length > 0 && process.env.CLAUDE_API_KEY) {
+    let claudeError: string | undefined;
+    if (conflicts.length > 0 && apiKey) {
       try {
-        const scheduler = new ClaudeScheduler(process.env.CLAUDE_API_KEY, currentScheduleData);
+        const scheduler = new ClaudeScheduler(apiKey, currentScheduleData, model);
         const conflictMessages = conflicts.map(c => c.message);
         solutions = await scheduler.generateSolutions(appointment, conflictMessages);
-      } catch (claudeError: any) {
-        console.error('Claude API error:', claudeError.message);
-        // Continue without Claude solutions
+      } catch (err: any) {
+        console.error('Claude API error:', err.message);
+        claudeError = err.message;
       }
     }
 
@@ -113,6 +126,8 @@ app.post('/api/appointment/:id', express.json(), async (req: Request, res: Respo
       appointment,
       conflicts,
       solutions,
+      claudeError,
+      hasApiKey: !!apiKey,
     });
   } catch (error: any) {
     res.status(500).json({
@@ -158,13 +173,16 @@ app.post('/api/apply-solution', express.json(), (req: Request, res: Response) =>
 });
 
 // Download schedule as encrypted Excel
-app.get('/api/download', (req: Request, res: Response) => {
+// Optional: pass ?embedConfig=<base64-encrypted-blob> to embed user's API key + model
+// in the file. The blob is encrypted client-side; the server never sees plaintext keys.
+app.post('/api/download', express.json(), (req: Request, res: Response) => {
   if (!currentScheduleData) {
     return res.status(400).json({ error: 'No schedule loaded' });
   }
 
   try {
-    const buffer = generateExcelFile(currentScheduleData);
+    const { embeddedConfig } = req.body as { embeddedConfig?: string };
+    const buffer = generateExcelFile(currentScheduleData, embeddedConfig);
     const encrypted = ExcelEncryption.encrypt(buffer, encryptionPassword);
 
     res.setHeader('Content-Type', 'application/octet-stream');

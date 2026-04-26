@@ -6,15 +6,27 @@ export function parseExcelFile(filePath) {
     const technicians = parseTechnicians(workbook);
     const settings = parseSettings(workbook);
     const appointments = parseAppointments(workbook);
+    const embeddedConfig = parseEmbeddedConfig(workbook);
     return {
-        id: uuidv4(),
-        version: 1,
-        clients,
-        technicians,
-        settings,
-        appointments,
-        lastModified: new Date().toISOString(),
+        data: {
+            id: uuidv4(),
+            version: 1,
+            clients,
+            technicians,
+            settings,
+            appointments,
+            lastModified: new Date().toISOString(),
+        },
+        embeddedConfig,
     };
+}
+function parseEmbeddedConfig(workbook) {
+    const sheet = workbook.Sheets['_Config'];
+    if (!sheet)
+        return undefined;
+    const data = XLSX.utils.sheet_to_json(sheet);
+    const row = data[0];
+    return row?.encryptedBlob;
 }
 function parseClients(workbook) {
     const sheet = workbook.Sheets['Clients'];
@@ -117,8 +129,13 @@ function parseAssignments(row) {
     }
     return assignments;
 }
-export function generateExcelFile(data) {
+export function generateExcelFile(data, embeddedConfig) {
     const workbook = XLSX.utils.book_new();
+    // _Config sheet (optional) - holds encrypted API key + model
+    if (embeddedConfig) {
+        const configData = [{ encryptedBlob: embeddedConfig }];
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(configData), '_Config');
+    }
     // Clients sheet
     const clientsData = data.clients.map(c => ({
         id: c.id,

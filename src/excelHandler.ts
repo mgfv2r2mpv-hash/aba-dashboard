@@ -2,23 +2,41 @@ import XLSX from 'xlsx';
 import { ScheduleData, Appointment, Technician, Client, CompanySettings, DayOfWeek } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
-export function parseExcelFile(filePath: string): ScheduleData {
+export interface ParsedSchedule {
+  data: ScheduleData;
+  embeddedConfig?: string; // Encrypted blob containing API key + model preferences
+}
+
+export function parseExcelFile(filePath: string): ParsedSchedule {
   const workbook = XLSX.readFile(filePath);
 
   const clients = parseClients(workbook);
   const technicians = parseTechnicians(workbook);
   const settings = parseSettings(workbook);
   const appointments = parseAppointments(workbook);
+  const embeddedConfig = parseEmbeddedConfig(workbook);
 
   return {
-    id: uuidv4(),
-    version: 1,
-    clients,
-    technicians,
-    settings,
-    appointments,
-    lastModified: new Date().toISOString(),
+    data: {
+      id: uuidv4(),
+      version: 1,
+      clients,
+      technicians,
+      settings,
+      appointments,
+      lastModified: new Date().toISOString(),
+    },
+    embeddedConfig,
   };
+}
+
+function parseEmbeddedConfig(workbook: XLSX.WorkBook): string | undefined {
+  const sheet = workbook.Sheets['_Config'];
+  if (!sheet) return undefined;
+
+  const data = XLSX.utils.sheet_to_json(sheet) as any[];
+  const row = data[0];
+  return row?.encryptedBlob;
 }
 
 function parseClients(workbook: XLSX.WorkBook): Client[] {
@@ -132,8 +150,14 @@ function parseAssignments(row: any) {
   return assignments;
 }
 
-export function generateExcelFile(data: ScheduleData): Buffer {
+export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): Buffer {
   const workbook = XLSX.utils.book_new();
+
+  // _Config sheet (optional) - holds encrypted API key + model
+  if (embeddedConfig) {
+    const configData = [{ encryptedBlob: embeddedConfig }];
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(configData), '_Config');
+  }
 
   // Clients sheet
   const clientsData = data.clients.map(c => ({

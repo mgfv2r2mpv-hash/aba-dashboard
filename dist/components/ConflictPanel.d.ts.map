@@ -1,0 +1,1 @@
+{"version":3,"file":"ConflictPanel.d.ts","sourceRoot":"","sources":["../../src/components/ConflictPanel.tsx"],"names":[],"mappings":"AACA,OAAO,EAAE,gBAAgB,EAAE,MAAM,UAAU,CAAC;AAE5C,UAAU,kBAAkB;IAC1B,SAAS,EAAE,gBAAgB,EAAE,CAAC;CAC/B;AAED,MAAM,CAAC,OAAO,UAAU,aAAa,CAAC,EAAE,SAAS,EAAE,EAAE,kBAAkB,2CAwDtE"}

@@ -7,6 +7,7 @@ export declare class ConstraintValidator {
     private validateParentTraining;
     private getPeriodsForUnit;
     private calculateParentTrainingHoursInRange;
+    private calculateClientParentTrainingHoursInRange;
     private validateAvailability;
     private validateBillableRequirements;
     private calculateDirectHours;

@@ -33,12 +33,22 @@ function parseClients(workbook) {
     if (!sheet)
         return [];
     const data = XLSX.utils.sheet_to_json(sheet);
-    return data.map((row) => ({
-        id: row.id || uuidv4(),
-        name: row.name,
-        availabilityWindows: parseAvailabilityWindows(row),
-        notes: row.notes,
-    }));
+    return data.map((row) => {
+        const ptMaxRaw = row.parentTrainingMaxHours;
+        const ptMax = ptMaxRaw === undefined || ptMaxRaw === '' || ptMaxRaw === null
+            ? undefined
+            : parseFloat(ptMaxRaw);
+        const client = {
+            id: row.id || uuidv4(),
+            name: row.name,
+            availabilityWindows: parseAvailabilityWindows(row),
+            notes: row.notes,
+        };
+        if (ptMax !== undefined && Number.isFinite(ptMax)) {
+            client.parentTrainingMaxHours = ptMax;
+        }
+        return client;
+    });
 }
 function parseTechnicians(workbook) {
     const sheet = workbook.Sheets['Technicians'];
@@ -155,6 +165,7 @@ export function generateExcelFile(data, embeddedConfig) {
     const clientsData = data.clients.map(c => ({
         id: c.id,
         name: c.name,
+        parentTrainingMaxHours: c.parentTrainingMaxHours ?? '',
         ...flattenAvailability(c.availabilityWindows),
         notes: c.notes,
     }));

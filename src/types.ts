@@ -11,6 +11,11 @@ export interface Client {
   availabilityWindows: {
     [key in DayOfWeek]?: TimeWindow[];
   };
+  // Per-case parent-training cap (uses the company-wide periodUnit).
+  // If set and lower than CompanySettings.parentTraining.targetMinHours,
+  // the per-case max takes precedence — i.e. the client is capped below
+  // the company target floor and is not flagged for being below target.
+  parentTrainingMaxHours?: number;
   notes?: string;
 }
 

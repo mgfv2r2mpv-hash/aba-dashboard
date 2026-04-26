@@ -9,6 +9,7 @@ export interface Client {
     availabilityWindows: {
         [key in DayOfWeek]?: TimeWindow[];
     };
+    parentTrainingMaxHours?: number;
     notes?: string;
 }
 export interface Technician {

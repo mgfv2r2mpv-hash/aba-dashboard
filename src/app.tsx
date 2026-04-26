@@ -38,6 +38,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
+  const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   const [loading, setLoading] = useState(false);
   const [aiSettings, setAiSettings] = useState<AISettings>(loadSessionSettings);
   const [pendingEmbedBlob, setPendingEmbedBlob] = useState<string | undefined>(undefined);
@@ -153,12 +154,32 @@ export default function App() {
       await axios.post(`${API_BASE}/admin/appointment`, appointment);
       if (scheduleData) {
         const updated = { ...scheduleData };
-        updated.appointments = [...updated.appointments, appointment];
+        const idx = updated.appointments.findIndex(a => a.id === appointment.id);
+        if (idx >= 0) {
+          updated.appointments[idx] = appointment;
+        } else {
+          updated.appointments = [...updated.appointments, appointment];
+        }
         setScheduleData(updated);
       }
       setShowAddAppointment(false);
+      setEditingAppointment(null);
     } catch (error: any) {
-      alert('Error adding appointment: ' + (error.response?.data?.error || error.message));
+      alert('Error saving appointment: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
+  const handleDeleteAppointment = async (id: string) => {
+    if (!confirm('Delete this appointment?')) return;
+    try {
+      await axios.delete(`${API_BASE}/admin/appointment/${id}`);
+      if (scheduleData) {
+        setScheduleData({ ...scheduleData, appointments: scheduleData.appointments.filter(a => a.id !== id) });
+      }
+      setSelectedAppointment(null);
+      setEditingAppointment(null);
+    } catch (error: any) {
+      alert('Error deleting appointment: ' + (error.response?.data?.error || error.message));
     }
   };
 
@@ -274,15 +295,39 @@ export default function App() {
                       <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb' }}>
                         <h3 style={{ marginBottom: '12px' }}>Selected Appointment</h3>
                         <p><strong>{selectedAppointment.title}</strong></p>
-                        <p>{selectedAppointment.startTime}</p>
-                        {selectedAppointment.isFixed && <span style={{ color: '#dc2626' }}>🔒 Fixed</span>}
+                        <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                          {new Date(selectedAppointment.startTime).toLocaleString()} →{' '}
+                          {new Date(selectedAppointment.endTime).toLocaleString()}
+                        </p>
+                        {selectedAppointment.technician && (
+                          <p style={{ fontSize: '12px', color: '#374151', marginTop: '4px' }}>
+                            Tech: {selectedAppointment.technician}
+                          </p>
+                        )}
+                        {selectedAppointment.isFixed && <p style={{ color: '#dc2626', marginTop: '4px' }}>🔒 Fixed</p>}
+                        <div style={{ display: 'flex', gap: '6px', marginTop: '12px' }}>
+                          <button
+                            onClick={() => setEditingAppointment(selectedAppointment)}
+                            style={{
+                              flex: 1, padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
+                              border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                            }}
+                          >Edit</button>
+                          <button
+                            onClick={() => handleDeleteAppointment(selectedAppointment.id)}
+                            style={{
+                              padding: '6px 12px', backgroundColor: '#fee2e2', color: '#dc2626',
+                              border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                            }}
+                          >Delete</button>
+                        </div>
                       </div>
                     )}
                   </div>
                 )}
               </>
             ) : (
-              <AdminPanel data={scheduleData} />
+              <AdminPanel data={scheduleData} onDataChange={setScheduleData} />
             )}
           </>
         ) : (
@@ -323,6 +368,16 @@ export default function App() {
           clients={scheduleData.clients}
           onSave={handleAddAppointment}
           onCancel={() => setShowAddAppointment(false)}
+        />
+      )}
+
+      {editingAppointment && scheduleData && (
+        <AppointmentForm
+          appointment={editingAppointment}
+          technicians={scheduleData.technicians}
+          clients={scheduleData.clients}
+          onSave={handleAddAppointment}
+          onCancel={() => setEditingAppointment(null)}
         />
       )}
     </div>

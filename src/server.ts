@@ -243,6 +243,34 @@ app.post('/api/admin/technician/:id', express.json(), (req: Request, res: Respon
   }
 });
 
+// Admin: Create technician
+app.post('/api/admin/technicians', express.json(), (req: Request, res: Response) => {
+  try {
+    if (!currentScheduleData) {
+      return res.status(400).json({ error: 'No schedule loaded' });
+    }
+    const technician = req.body;
+    if (!technician.id || !technician.name) {
+      return res.status(400).json({ error: 'Technician must have id and name' });
+    }
+    if (currentScheduleData.technicians.some(t => t.id === technician.id)) {
+      return res.status(409).json({ error: 'Technician with that id already exists' });
+    }
+    currentScheduleData.technicians.push(technician);
+    res.json({ success: true, technician });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: Delete technician
+app.delete('/api/admin/technician/:id', (req: Request, res: Response) => {
+  if (!currentScheduleData) return res.status(400).json({ error: 'No schedule loaded' });
+  const before = currentScheduleData.technicians.length;
+  currentScheduleData.technicians = currentScheduleData.technicians.filter(t => t.id !== req.params.id);
+  res.json({ success: true, removed: before - currentScheduleData.technicians.length });
+});
+
 // Admin: Update client
 app.post('/api/admin/client/:id', express.json(), (req: Request, res: Response) => {
   try {
@@ -270,6 +298,42 @@ app.post('/api/admin/client/:id', express.json(), (req: Request, res: Response) 
       error: error.message,
     });
   }
+});
+
+// Admin: Create client
+app.post('/api/admin/clients', express.json(), (req: Request, res: Response) => {
+  try {
+    if (!currentScheduleData) {
+      return res.status(400).json({ error: 'No schedule loaded' });
+    }
+    const client = req.body;
+    if (!client.id || !client.name) {
+      return res.status(400).json({ error: 'Client must have id and name' });
+    }
+    if (currentScheduleData.clients.some(c => c.id === client.id)) {
+      return res.status(409).json({ error: 'Client with that id already exists' });
+    }
+    currentScheduleData.clients.push(client);
+    res.json({ success: true, client });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: Delete client
+app.delete('/api/admin/client/:id', (req: Request, res: Response) => {
+  if (!currentScheduleData) return res.status(400).json({ error: 'No schedule loaded' });
+  const before = currentScheduleData.clients.length;
+  currentScheduleData.clients = currentScheduleData.clients.filter(c => c.id !== req.params.id);
+  res.json({ success: true, removed: before - currentScheduleData.clients.length });
+});
+
+// Admin: Delete appointment
+app.delete('/api/admin/appointment/:id', (req: Request, res: Response) => {
+  if (!currentScheduleData) return res.status(400).json({ error: 'No schedule loaded' });
+  const before = currentScheduleData.appointments.length;
+  currentScheduleData.appointments = currentScheduleData.appointments.filter(a => a.id !== req.params.id);
+  res.json({ success: true, removed: before - currentScheduleData.appointments.length });
 });
 
 // Admin: Create/update appointment

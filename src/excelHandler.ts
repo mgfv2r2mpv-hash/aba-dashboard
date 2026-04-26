@@ -44,12 +44,22 @@ function parseClients(workbook: XLSX.WorkBook): Client[] {
   if (!sheet) return [];
 
   const data = XLSX.utils.sheet_to_json(sheet);
-  return data.map((row: any) => ({
-    id: row.id || uuidv4(),
-    name: row.name,
-    availabilityWindows: parseAvailabilityWindows(row),
-    notes: row.notes,
-  }));
+  return data.map((row: any) => {
+    const ptMaxRaw = row.parentTrainingMaxHours;
+    const ptMax = ptMaxRaw === undefined || ptMaxRaw === '' || ptMaxRaw === null
+      ? undefined
+      : parseFloat(ptMaxRaw);
+    const client: Client = {
+      id: row.id || uuidv4(),
+      name: row.name,
+      availabilityWindows: parseAvailabilityWindows(row),
+      notes: row.notes,
+    };
+    if (ptMax !== undefined && Number.isFinite(ptMax)) {
+      client.parentTrainingMaxHours = ptMax;
+    }
+    return client;
+  });
 }
 
 function parseTechnicians(workbook: XLSX.WorkBook): Technician[] {
@@ -177,6 +187,7 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
   const clientsData = data.clients.map(c => ({
     id: c.id,
     name: c.name,
+    parentTrainingMaxHours: c.parentTrainingMaxHours ?? '',
     ...flattenAvailability(c.availabilityWindows),
     notes: c.notes,
   }));

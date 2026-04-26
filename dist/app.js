@@ -36,6 +36,7 @@ export default function App() {
     const [showSettings, setShowSettings] = useState(false);
     const [showWizard, setShowWizard] = useState(false);
     const [showAddAppointment, setShowAddAppointment] = useState(false);
+    const [editingAppointment, setEditingAppointment] = useState(null);
     const [loading, setLoading] = useState(false);
     const [aiSettings, setAiSettings] = useState(loadSessionSettings);
     const [pendingEmbedBlob, setPendingEmbedBlob] = useState(undefined);
@@ -148,13 +149,35 @@ export default function App() {
             await axios.post(`${API_BASE}/admin/appointment`, appointment);
             if (scheduleData) {
                 const updated = { ...scheduleData };
-                updated.appointments = [...updated.appointments, appointment];
+                const idx = updated.appointments.findIndex(a => a.id === appointment.id);
+                if (idx >= 0) {
+                    updated.appointments[idx] = appointment;
+                }
+                else {
+                    updated.appointments = [...updated.appointments, appointment];
+                }
                 setScheduleData(updated);
             }
             setShowAddAppointment(false);
+            setEditingAppointment(null);
         }
         catch (error) {
-            alert('Error adding appointment: ' + (error.response?.data?.error || error.message));
+            alert('Error saving appointment: ' + (error.response?.data?.error || error.message));
+        }
+    };
+    const handleDeleteAppointment = async (id) => {
+        if (!confirm('Delete this appointment?'))
+            return;
+        try {
+            await axios.delete(`${API_BASE}/admin/appointment/${id}`);
+            if (scheduleData) {
+                setScheduleData({ ...scheduleData, appointments: scheduleData.appointments.filter(a => a.id !== id) });
+            }
+            setSelectedAppointment(null);
+            setEditingAppointment(null);
+        }
+        catch (error) {
+            alert('Error deleting appointment: ' + (error.response?.data?.error || error.message));
         }
     };
     const handleWizardComplete = (data) => {
@@ -201,7 +224,13 @@ export default function App() {
                                     display: 'flex',
                                     flexDirection: 'column',
                                     overflowY: 'auto',
-                                }, children: [conflicts.length > 0 && _jsx(ConflictPanel, { conflicts: conflicts }), !aiSettings.apiKey && conflicts.length > 0 && (_jsx("div", { style: { padding: '12px', backgroundColor: '#fef3c7', fontSize: '12px', color: '#92400e' }, children: "Add a Claude API key in Settings to get AI-powered solutions for these conflicts." })), solutions.length > 0 && _jsx(SolutionPanel, { solutions: solutions, onApply: handleApplySolution }), selectedAppointment && (_jsxs("div", { style: { padding: '16px', borderTop: '1px solid #e5e7eb' }, children: [_jsx("h3", { style: { marginBottom: '12px' }, children: "Selected Appointment" }), _jsx("p", { children: _jsx("strong", { children: selectedAppointment.title }) }), _jsx("p", { children: selectedAppointment.startTime }), selectedAppointment.isFixed && _jsx("span", { style: { color: '#dc2626' }, children: "\uD83D\uDD12 Fixed" })] }))] }))] })) : (_jsx(AdminPanel, { data: scheduleData })) })) : (_jsx("div", { style: {
+                                }, children: [conflicts.length > 0 && _jsx(ConflictPanel, { conflicts: conflicts }), !aiSettings.apiKey && conflicts.length > 0 && (_jsx("div", { style: { padding: '12px', backgroundColor: '#fef3c7', fontSize: '12px', color: '#92400e' }, children: "Add a Claude API key in Settings to get AI-powered solutions for these conflicts." })), solutions.length > 0 && _jsx(SolutionPanel, { solutions: solutions, onApply: handleApplySolution }), selectedAppointment && (_jsxs("div", { style: { padding: '16px', borderTop: '1px solid #e5e7eb' }, children: [_jsx("h3", { style: { marginBottom: '12px' }, children: "Selected Appointment" }), _jsx("p", { children: _jsx("strong", { children: selectedAppointment.title }) }), _jsxs("p", { style: { fontSize: '12px', color: '#6b7280', marginTop: '4px' }, children: [new Date(selectedAppointment.startTime).toLocaleString(), " \u2192", ' ', new Date(selectedAppointment.endTime).toLocaleString()] }), selectedAppointment.technician && (_jsxs("p", { style: { fontSize: '12px', color: '#374151', marginTop: '4px' }, children: ["Tech: ", selectedAppointment.technician] })), selectedAppointment.isFixed && _jsx("p", { style: { color: '#dc2626', marginTop: '4px' }, children: "\uD83D\uDD12 Fixed" }), _jsxs("div", { style: { display: 'flex', gap: '6px', marginTop: '12px' }, children: [_jsx("button", { onClick: () => setEditingAppointment(selectedAppointment), style: {
+                                                            flex: 1, padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
+                                                            border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                                                        }, children: "Edit" }), _jsx("button", { onClick: () => handleDeleteAppointment(selectedAppointment.id), style: {
+                                                            padding: '6px 12px', backgroundColor: '#fee2e2', color: '#dc2626',
+                                                            border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                                                        }, children: "Delete" })] })] }))] }))] })) : (_jsx(AdminPanel, { data: scheduleData, onDataChange: setScheduleData })) })) : (_jsx("div", { style: {
                         flex: 1,
                         display: 'flex',
                         alignItems: 'center',
@@ -209,6 +238,6 @@ export default function App() {
                         color: '#9ca3af',
                         flexDirection: 'column',
                         gap: '16px',
-                    }, children: _jsx("p", { children: "Upload an Excel file or run the Setup Wizard to get started." }) })) }), showSettings && (_jsx(Settings, { settings: aiSettings, onSave: handleAISettingsSave, onClose: () => setShowSettings(false), onEmbedInExcel: handlePrepareEmbed, onClearKey: handleClearKey })), showWizard && (_jsx(SetupWizard, { onComplete: handleWizardComplete, onCancel: () => setShowWizard(false) })), showAddAppointment && scheduleData && (_jsx(AppointmentForm, { technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleAddAppointment, onCancel: () => setShowAddAppointment(false) }))] }));
+                    }, children: _jsx("p", { children: "Upload an Excel file or run the Setup Wizard to get started." }) })) }), showSettings && (_jsx(Settings, { settings: aiSettings, onSave: handleAISettingsSave, onClose: () => setShowSettings(false), onEmbedInExcel: handlePrepareEmbed, onClearKey: handleClearKey })), showWizard && (_jsx(SetupWizard, { onComplete: handleWizardComplete, onCancel: () => setShowWizard(false) })), showAddAppointment && scheduleData && (_jsx(AppointmentForm, { technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleAddAppointment, onCancel: () => setShowAddAppointment(false) })), editingAppointment && scheduleData && (_jsx(AppointmentForm, { appointment: editingAppointment, technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleAddAppointment, onCancel: () => setEditingAppointment(null) }))] }));
 }
 //# sourceMappingURL=app.js.map

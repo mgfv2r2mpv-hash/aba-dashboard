@@ -38,15 +38,32 @@ export class ConstraintValidator {
         if (!pt)
             return conflicts;
         const periods = this.getPeriodsForUnit(pt.periodUnit);
-        periods.forEach(period => {
-            const trainingHours = this.calculateParentTrainingHoursInRange(period.start, period.end);
-            if (trainingHours < pt.minimumHours) {
-                conflicts.push({
-                    type: 'training-violation',
-                    severity: 'warning',
-                    message: `${period.label} has ${trainingHours.toFixed(1)} hours of parent training but requires minimum ${pt.minimumHours} per ${pt.periodUnit}`,
-                });
-            }
+        // Per-client validation: minimum/target are company-wide defaults, but the
+        // per-case max (Client.parentTrainingMaxHours) overrides them when lower.
+        this.data.clients.forEach(client => {
+            const caseMax = client.parentTrainingMaxHours;
+            // If a case max is set and is below the target floor, the case max becomes
+            // the effective minimum too (we don't fault a client for being below target
+            // when their cap doesn't allow them to reach it).
+            const effectiveMin = caseMax !== undefined && caseMax < pt.minimumHours ? caseMax : pt.minimumHours;
+            periods.forEach(period => {
+                const hours = this.calculateClientParentTrainingHoursInRange(client, period.start, period.end);
+                if (caseMax !== undefined && hours > caseMax) {
+                    conflicts.push({
+                        type: 'training-violation',
+                        severity: 'error',
+                        message: `${client.name} in ${period.label} has ${hours.toFixed(1)}h parent training, exceeding the case max of ${caseMax}h per ${pt.periodUnit}`,
+                    });
+                    return;
+                }
+                if (hours < effectiveMin) {
+                    conflicts.push({
+                        type: 'training-violation',
+                        severity: 'warning',
+                        message: `${client.name} in ${period.label} has ${hours.toFixed(1)}h parent training but requires at least ${effectiveMin}h per ${pt.periodUnit}`,
+                    });
+                }
+            });
         });
         return conflicts;
     }
@@ -91,6 +108,18 @@ export class ConstraintValidator {
                 return false;
             const t = new Date(a.startTime);
             return t >= start && t < end;
+        })
+            .reduce((sum, a) => sum + this.getHoursDuration(a.startTime, a.endTime), 0);
+    }
+    calculateClientParentTrainingHoursInRange(client, start, end) {
+        return this.data.appointments
+            .filter(a => {
+            if (a.type !== 'parent-training')
+                return false;
+            const t = new Date(a.startTime);
+            if (t < start || t >= end)
+                return false;
+            return a.client === client.id || a.client === client.name;
         })
             .reduce((sum, a) => sum + this.getHoursDuration(a.startTime, a.endTime), 0);
     }

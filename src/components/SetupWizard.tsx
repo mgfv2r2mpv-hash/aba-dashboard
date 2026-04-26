@@ -353,6 +353,26 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                       border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer',
                     }}>Remove</button>
                   </div>
+                  <div style={{ marginBottom: '8px' }}>
+                    <label style={{ ...labelStyle, fontSize: '12px' }}>
+                      Parent-training max (per {settings.parentTraining.periodUnit}, optional)
+                    </label>
+                    <input
+                      type="number" step="0.5" min="0"
+                      placeholder={`e.g. ${settings.parentTraining.targetMaxHours}`}
+                      value={c.parentTrainingMaxHours ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        updateClient(c.id, {
+                          parentTrainingMaxHours: v === '' ? undefined : parseFloat(v) || 0,
+                        });
+                      }}
+                      style={{ ...inputStyle, maxWidth: '180px' }}
+                    />
+                    <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+                      Hard cap for this case. If lower than the company target floor, this cap wins.
+                    </p>
+                  </div>
                   {useGridView ? (
                     <AvailabilityGrid
                       availability={c.availabilityWindows}

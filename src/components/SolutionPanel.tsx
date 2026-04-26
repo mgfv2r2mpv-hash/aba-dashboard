@@ -44,6 +44,23 @@ export default function SolutionPanel({ solutions, onApply }: SolutionPanelProps
 
           {expanded === idx && (
             <div style={{ padding: '12px', borderTop: '1px solid #10b981' }}>
+              {solution.affectedWeeks > 1 && (
+                <div style={{
+                  marginBottom: '12px',
+                  padding: '8px 10px',
+                  backgroundColor: '#fef3c7',
+                  border: '1px solid #f59e0b',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  color: '#92400e',
+                }}>
+                  ⚠️ This solution spans {solution.affectedWeeks} weeks
+                  {solution.weekSpan && (
+                    <> ({solution.weekSpan.startDate} to {solution.weekSpan.endDate})</>
+                  )}.
+                  Review changes carefully before applying.
+                </div>
+              )}
               <div style={{ marginBottom: '12px' }}>
                 <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>
                   <strong>Reasoning:</strong>

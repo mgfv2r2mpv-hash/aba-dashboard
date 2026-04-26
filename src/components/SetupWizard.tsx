@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { ScheduleData, Client, Technician, CompanySettings, DayOfWeek } from '../types';
+import { ScheduleData, Client, Technician, CompanySettings, DayOfWeek, BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import AvailabilityGrid from './AvailabilityGrid';
 
 interface SetupWizardProps {
   onComplete: (data: ScheduleData) => void;
@@ -38,7 +39,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
 
   const [settings, setSettings] = useState<CompanySettings>({
     supervisionDirectHoursPercent: 5,
-    supervisionRBTHoursPercent: 5,
+    supervisionRBTHoursPercent: BACB_RBT_SUPERVISION_MIN_PERCENT,
     parentTraining: {
       minimumHours: 1.5,
       targetMinHours: 2,
@@ -47,8 +48,20 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
     },
   });
 
+  // String state for numeric inputs (allows clearing/editing without parseFloat || 0 trapping)
+  const [supDirectStr, setSupDirectStr] = useState('5');
+  const [supRBTStr, setSupRBTStr] = useState(String(BACB_RBT_SUPERVISION_MIN_PERCENT));
+  const [rbtOverride, setRBTOverride] = useState(false);
+  const [minHoursStr, setMinHoursStr] = useState('1.5');
+  const [targetMinStr, setTargetMinStr] = useState('2');
+  const [targetMaxStr, setTargetMaxStr] = useState('4');
+
   const [clients, setClients] = useState<Client[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
+  // String state for assignment hours (keyed by techId_assignmentIdx)
+  const [assignmentHoursStr, setAssignmentHoursStr] = useState<{ [key: string]: string }>({});
+  // Toggle for grid view
+  const [useGridView, setUseGridView] = useState(false);
 
   const addClient = () => setClients([...clients, {
     id: uuidv4(),
@@ -80,41 +93,83 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
     list: 'client' | 'tech',
     id: string,
     day: DayOfWeek,
-    field: 'start' | 'end' | 'clear',
-    value?: string
+    action: string,
+    value?: string | number
   ) => {
+    const updateWindowsForDay = (windows: any[]) => {
+      if (action === 'clear') {
+        return undefined;
+      } else if (action === 'add') {
+        return [...windows, { start: '09:00', end: '17:00' }];
+      } else if (action === 'removeWindow') {
+        const idx = value as number;
+        const updated = windows.filter((_, i) => i !== idx);
+        return updated.length === 0 ? undefined : updated;
+      } else if (action.startsWith('windowIdx_')) {
+        const [, idxStr, fieldName] = action.split('_');
+        const idx = parseInt(idxStr);
+        const updated = [...windows];
+        updated[idx] = { ...updated[idx], [fieldName]: value };
+        return updated;
+      }
+      return windows;
+    };
+
     if (list === 'client') {
       const c = clients.find(c => c.id === id);
       if (!c) return;
       const win = { ...c.availabilityWindows };
-      if (field === 'clear') {
-        delete win[day];
-      } else {
-        const existing = win[day]?.[0] || { start: '09:00', end: '17:00' };
-        win[day] = [{ ...existing, [field]: value }];
-      }
+      const windows = win[day] || [];
+      win[day] = updateWindowsForDay(windows);
+      if (win[day] === undefined) delete win[day];
       updateClient(id, { availabilityWindows: win });
     } else {
       const t = technicians.find(t => t.id === id);
       if (!t) return;
       const av = { ...t.availability };
-      if (field === 'clear') {
-        delete av[day];
-      } else {
-        const existing = av[day]?.[0] || { start: '09:00', end: '17:00' };
-        av[day] = [{ ...existing, [field]: value }];
-      }
+      const windows = av[day] || [];
+      av[day] = updateWindowsForDay(windows);
+      if (av[day] === undefined) delete av[day];
       updateTechnician(id, { availability: av });
     }
   };
 
+  const parseNumericString = (val: string, fallback: number = 0): number => {
+    const parsed = parseFloat(val);
+    return isNaN(parsed) ? fallback : parsed;
+  };
+
+  const updateSettingsFromStrings = (): CompanySettings => {
+    const rbtValue = rbtOverride ? parseNumericString(supRBTStr, BACB_RBT_SUPERVISION_MIN_PERCENT) : BACB_RBT_SUPERVISION_MIN_PERCENT;
+    return {
+      ...settings,
+      supervisionDirectHoursPercent: parseNumericString(supDirectStr, 5),
+      supervisionRBTHoursPercent: rbtValue,
+      parentTraining: {
+        ...settings.parentTraining,
+        minimumHours: parseNumericString(minHoursStr, 1.5),
+        targetMinHours: parseNumericString(targetMinStr, 2),
+        targetMaxHours: parseNumericString(targetMaxStr, 4),
+      },
+    };
+  };
+
   const finish = () => {
+    // Parse assignment hours from string state
+    const techniciansWithParsedHours = technicians.map(t => ({
+      ...t,
+      assignments: t.assignments.map((a, idx) => {
+        const assignmentKey = `${t.id}_${idx}`;
+        const hoursStr = assignmentHoursStr[assignmentKey] ?? String(a.hoursPerWeek);
+        return { ...a, hoursPerWeek: parseNumericString(hoursStr, 0) };
+      }),
+    }));
     const data: ScheduleData = {
       id: uuidv4(),
       version: 1,
       clients,
-      technicians,
-      settings,
+      technicians: techniciansWithParsedHours,
+      settings: updateSettingsFromStrings(),
       appointments: [],
       lastModified: new Date().toISOString(),
     };
@@ -183,19 +238,35 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                   <label style={labelStyle}>Supervision: % of direct hours</label>
                   <input
                     type="number" step="0.1"
-                    value={settings.supervisionDirectHoursPercent}
-                    onChange={(e) => setSettings({ ...settings, supervisionDirectHoursPercent: parseFloat(e.target.value) || 0 })}
+                    value={supDirectStr}
+                    onChange={(e) => setSupDirectStr(e.target.value)}
                     style={inputStyle}
                   />
                 </div>
                 <div>
-                  <label style={labelStyle}>Supervision: % of RBT hours</label>
-                  <input
-                    type="number" step="0.1"
-                    value={settings.supervisionRBTHoursPercent}
-                    onChange={(e) => setSettings({ ...settings, supervisionRBTHoursPercent: parseFloat(e.target.value) || 0 })}
-                    style={inputStyle}
-                  />
+                  <label style={labelStyle}>Supervision: % of RBT hours (BACB minimum)</label>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1 }}>
+                      <input
+                        type="number" step="0.1"
+                        value={rbtOverride ? supRBTStr : BACB_RBT_SUPERVISION_MIN_PERCENT}
+                        onChange={(e) => setSupRBTStr(e.target.value)}
+                        disabled={!rbtOverride}
+                        style={{ ...inputStyle, opacity: rbtOverride ? 1 : 0.6 }}
+                      />
+                    </div>
+                  </div>
+                  <label style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px', marginTop: '6px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={rbtOverride}
+                      onChange={(e) => setRBTOverride(e.target.checked)}
+                    />
+                    <span>Override BACB minimum</span>
+                  </label>
+                  <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+                    The BACB requires a minimum of {BACB_RBT_SUPERVISION_MIN_PERCENT}% for RBTs. Check the box to exceed this requirement.
+                  </p>
                 </div>
               </div>
               <div>
@@ -219,11 +290,8 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                   <label style={labelStyle}>Min hours</label>
                   <input
                     type="number" step="0.1"
-                    value={settings.parentTraining.minimumHours}
-                    onChange={(e) => setSettings({
-                      ...settings,
-                      parentTraining: { ...settings.parentTraining, minimumHours: parseFloat(e.target.value) || 0 },
-                    })}
+                    value={minHoursStr}
+                    onChange={(e) => setMinHoursStr(e.target.value)}
                     style={inputStyle}
                   />
                 </div>
@@ -231,11 +299,8 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                   <label style={labelStyle}>Target min</label>
                   <input
                     type="number" step="0.5"
-                    value={settings.parentTraining.targetMinHours}
-                    onChange={(e) => setSettings({
-                      ...settings,
-                      parentTraining: { ...settings.parentTraining, targetMinHours: parseFloat(e.target.value) || 0 },
-                    })}
+                    value={targetMinStr}
+                    onChange={(e) => setTargetMinStr(e.target.value)}
                     style={inputStyle}
                   />
                 </div>
@@ -243,11 +308,8 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                   <label style={labelStyle}>Target max</label>
                   <input
                     type="number" step="0.5"
-                    value={settings.parentTraining.targetMaxHours}
-                    onChange={(e) => setSettings({
-                      ...settings,
-                      parentTraining: { ...settings.parentTraining, targetMaxHours: parseFloat(e.target.value) || 0 },
-                    })}
+                    value={targetMaxStr}
+                    onChange={(e) => setTargetMaxStr(e.target.value)}
                     style={inputStyle}
                   />
                 </div>
@@ -268,6 +330,14 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
             <p style={{ color: '#6b7280', fontSize: '13px', marginBottom: '12px' }}>
               Use anonymized identifiers (e.g. "Client A"). Set availability windows per day.
             </p>
+            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '13px', marginBottom: '12px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={useGridView}
+                onChange={(e) => setUseGridView(e.target.checked)}
+              />
+              <span>Use drag-select grid view</span>
+            </label>
             <div style={{ display: 'grid', gap: '12px' }}>
               {clients.map(c => (
                 <div key={c.id} style={cardStyle}>
@@ -283,10 +353,17 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                       border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer',
                     }}>Remove</button>
                   </div>
-                  <DayAvailabilityRow
-                    availability={c.availabilityWindows}
-                    onChange={(day, field, value) => setDayAvailability('client', c.id, day, field, value)}
-                  />
+                  {useGridView ? (
+                    <AvailabilityGrid
+                      availability={c.availabilityWindows}
+                      onChange={(av) => updateClient(c.id, { availabilityWindows: av })}
+                    />
+                  ) : (
+                    <DayAvailabilityRow
+                      availability={c.availabilityWindows}
+                      onChange={(day, field, value) => setDayAvailability('client', c.id, day, field, value)}
+                    />
+                  )}
                 </div>
               ))}
               {clients.length === 0 && (
@@ -310,6 +387,14 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
             <p style={{ color: '#6b7280', fontSize: '13px', marginBottom: '12px' }}>
               Mark RBT certification (affects supervision math). Add availability and client assignments.
             </p>
+            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '13px', marginBottom: '12px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={useGridView}
+                onChange={(e) => setUseGridView(e.target.checked)}
+              />
+              <span>Use drag-select grid view</span>
+            </label>
             <div style={{ display: 'grid', gap: '12px' }}>
               {technicians.map(t => (
                 <div key={t.id} style={cardStyle}>
@@ -333,44 +418,60 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                       border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer',
                     }}>Remove</button>
                   </div>
-                  <DayAvailabilityRow
-                    availability={t.availability}
-                    onChange={(day, field, value) => setDayAvailability('tech', t.id, day, field, value)}
-                  />
+                  {useGridView ? (
+                    <AvailabilityGrid
+                      availability={t.availability}
+                      onChange={(av) => updateTechnician(t.id, { availability: av })}
+                    />
+                  ) : (
+                    <DayAvailabilityRow
+                      availability={t.availability}
+                      onChange={(day, field, value) => setDayAvailability('tech', t.id, day, field, value)}
+                    />
+                  )}
                   <div style={{ marginTop: '8px' }}>
                     <label style={labelStyle}>Assignments</label>
-                    {t.assignments.map((a, idx) => (
-                      <div key={idx} style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
-                        <select
-                          value={a.clientId}
-                          onChange={(e) => {
-                            const updated = [...t.assignments];
-                            updated[idx] = { ...a, clientId: e.target.value };
-                            updateTechnician(t.id, { assignments: updated });
-                          }}
-                          style={{ ...inputStyle, flex: 2 }}
-                        >
-                          <option value="">— Pick client —</option>
-                          {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                        </select>
-                        <input
-                          type="number" step="0.5" placeholder="Hours/wk"
-                          value={a.hoursPerWeek}
-                          onChange={(e) => {
-                            const updated = [...t.assignments];
-                            updated[idx] = { ...a, hoursPerWeek: parseFloat(e.target.value) || 0 };
-                            updateTechnician(t.id, { assignments: updated });
-                          }}
-                          style={{ ...inputStyle, flex: 1 }}
-                        />
-                        <button onClick={() => {
-                          updateTechnician(t.id, { assignments: t.assignments.filter((_, i) => i !== idx) });
-                        }} style={{
-                          padding: '4px 8px', backgroundColor: '#fee2e2', color: '#dc2626',
-                          border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer',
-                        }}>×</button>
-                      </div>
-                    ))}
+                    {t.assignments.map((a, idx) => {
+                      const assignmentKey = `${t.id}_${idx}`;
+                      const hoursStr = assignmentHoursStr[assignmentKey] ?? String(a.hoursPerWeek);
+                      return (
+                        <div key={idx}>
+                          <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+                            <select
+                              value={a.clientId}
+                              onChange={(e) => {
+                                const updated = [...t.assignments];
+                                updated[idx] = { ...a, clientId: e.target.value };
+                                updateTechnician(t.id, { assignments: updated });
+                              }}
+                              style={{ ...inputStyle, flex: 2 }}
+                            >
+                              <option value="">— Pick client —</option>
+                              {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                            </select>
+                            <div style={{ flex: 1 }}>
+                              <label style={{ ...labelStyle, marginBottom: '4px' }}>Hours/wk</label>
+                              <input
+                                type="number" step="0.5"
+                                value={hoursStr}
+                                onChange={(e) => setAssignmentHoursStr({ ...assignmentHoursStr, [assignmentKey]: e.target.value })}
+                                style={inputStyle}
+                              />
+                            </div>
+                            <button onClick={() => {
+                              const newAssignments = t.assignments.filter((_, i) => i !== idx);
+                              const newHoursStr = { ...assignmentHoursStr };
+                              delete newHoursStr[assignmentKey];
+                              setAssignmentHoursStr(newHoursStr);
+                              updateTechnician(t.id, { assignments: newAssignments });
+                            }} style={{
+                              padding: '4px 8px', backgroundColor: '#fee2e2', color: '#dc2626',
+                              border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer',
+                            }}>×</button>
+                          </div>
+                        </div>
+                      );
+                    })}
                     <button onClick={() => updateTechnician(t.id, {
                       assignments: [...t.assignments, { clientId: '', hoursPerWeek: 0, billable: true }],
                     })} style={{
@@ -439,6 +540,9 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
             }}>Create Dashboard</button>
           ) : (
             <button onClick={() => {
+              if (step === 'company') {
+                setSettings(updateSettingsFromStrings());
+              }
               const order: Step[] = ['welcome', 'company', 'clients', 'technicians', 'review'];
               const idx = order.indexOf(step);
               if (idx < order.length - 1) setStep(order[idx + 1]!);
@@ -455,43 +559,66 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
 
 interface DayAvailabilityRowProps {
   availability: { [key in DayOfWeek]?: { start: string; end: string }[] };
-  onChange: (day: DayOfWeek, field: 'start' | 'end' | 'clear', value?: string) => void;
+  onChange: (day: DayOfWeek, action: string, value?: string | number) => void;
 }
 
 function DayAvailabilityRow({ availability, onChange }: DayAvailabilityRowProps) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', fontSize: '11px' }}>
       {DAYS.map(day => {
-        const window = availability[day]?.[0];
+        const windows = availability[day] || [];
         return (
           <div key={day} style={{
             border: '1px solid #d1d5db',
             borderRadius: '4px',
             padding: '4px',
-            backgroundColor: window ? 'white' : '#f3f4f6',
+            backgroundColor: windows.length > 0 ? 'white' : '#f3f4f6',
           }}>
-            <div style={{ fontWeight: '600', textAlign: 'center', marginBottom: '2px' }}>
+            <div style={{ fontWeight: '600', textAlign: 'center', marginBottom: '4px' }}>
               {day.slice(0, 3)}
             </div>
-            {window ? (
+            {windows.length > 0 ? (
               <>
-                <input
-                  type="time"
-                  value={window.start}
-                  onChange={(e) => onChange(day, 'start', e.target.value)}
-                  style={{ width: '100%', fontSize: '11px', padding: '2px' }}
-                />
-                <input
-                  type="time"
-                  value={window.end}
-                  onChange={(e) => onChange(day, 'end', e.target.value)}
-                  style={{ width: '100%', fontSize: '11px', padding: '2px', marginTop: '2px' }}
-                />
+                {windows.map((window, idx) => (
+                  <div key={idx} style={{ marginBottom: '4px', display: 'flex', gap: '2px' }}>
+                    <div style={{ flex: 1 }}>
+                      <input
+                        type="time"
+                        value={window.start}
+                        onChange={(e) => onChange(day, `windowIdx_${idx}_start` as any, e.target.value)}
+                        style={{ width: '100%', fontSize: '10px', padding: '2px' }}
+                      />
+                      <input
+                        type="time"
+                        value={window.end}
+                        onChange={(e) => onChange(day, `windowIdx_${idx}_end` as any, e.target.value)}
+                        style={{ width: '100%', fontSize: '10px', padding: '2px', marginTop: '1px' }}
+                      />
+                    </div>
+                    {windows.length > 1 && (
+                      <button
+                        onClick={() => onChange(day, 'removeWindow', idx)}
+                        style={{
+                          padding: '1px 4px', fontSize: '9px',
+                          backgroundColor: '#fee2e2', color: '#dc2626', border: 'none',
+                          borderRadius: '2px', cursor: 'pointer', alignSelf: 'flex-start', marginTop: '2px',
+                        }}
+                      >×</button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={() => onChange(day, 'add')}
+                  style={{
+                    width: '100%', padding: '2px 0', fontSize: '9px',
+                    border: '1px solid #3b82f6', backgroundColor: 'white', color: '#3b82f6',
+                    borderRadius: '2px', cursor: 'pointer', marginBottom: '2px',
+                  }}
+                >+ window</button>
                 <button
                   onClick={() => onChange(day, 'clear')}
                   style={{
-                    width: '100%', marginTop: '2px', padding: '2px',
-                    fontSize: '10px', cursor: 'pointer',
+                    width: '100%', padding: '2px 0', fontSize: '9px', cursor: 'pointer',
                     border: 'none', backgroundColor: '#fee2e2', color: '#dc2626',
                     borderRadius: '2px',
                   }}
@@ -499,7 +626,7 @@ function DayAvailabilityRow({ availability, onChange }: DayAvailabilityRowProps)
               </>
             ) : (
               <button
-                onClick={() => onChange(day, 'start', '09:00')}
+                onClick={() => onChange(day, 'add')}
                 style={{
                   width: '100%', padding: '4px 0', fontSize: '11px',
                   border: 'none', backgroundColor: 'transparent',

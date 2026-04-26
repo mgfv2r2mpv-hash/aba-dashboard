@@ -9,6 +9,10 @@ const TOTAL_SLOTS = HOURS_PER_DAY * SLOTS_PER_HOUR; // 96
 interface AvailabilityGridProps {
   availability: { [key in DayOfWeek]?: TimeWindow[] };
   onChange: (availability: { [key in DayOfWeek]?: TimeWindow[] }) => void;
+  // Optional: clinician's weekly availability sets the default visible time
+  // range (sessions can't be scheduled when the supervisor isn't available).
+  // If absent, the grid falls back to 06:00–22:00.
+  clinicianAvailability?: { [key in DayOfWeek]?: TimeWindow[] };
 }
 
 type DragMode = 'select' | 'deselect' | null;
@@ -60,14 +64,33 @@ const matrixToWindows = (matrix: boolean[][]): { [key in DayOfWeek]?: TimeWindow
   return result;
 };
 
-export default function AvailabilityGrid({ availability, onChange }: AvailabilityGridProps) {
+export default function AvailabilityGrid({ availability, onChange, clinicianAvailability }: AvailabilityGridProps) {
   const [matrix, setMatrix] = useState<boolean[][]>(() => windowsToMatrix(availability));
   const [dragMode, setDragMode] = useState<DragMode>(null);
+  const [showAllHours, setShowAllHours] = useState(false);
   const dragStartRef = useRef<{ day: number; slot: number } | null>(null);
   const dragModeRef = useRef<DragMode>(null);
   const matrixRef = useRef<boolean[][]>(matrix);
   const gridRef = useRef<HTMLDivElement>(null);
   const cellLookupRef = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // Default visible slot range: derived from the clinician's weekly availability
+  // (sessions can't be scheduled outside it). Falls back to 06:00–22:00 if no
+  // clinician availability is configured.
+  const clinicianRange = computeClinicianSlotRange(clinicianAvailability);
+  const fallbackStart = 6 * SLOTS_PER_HOUR;
+  const fallbackEnd = 22 * SLOTS_PER_HOUR;
+  const defaultStart = clinicianRange ? clinicianRange.start : fallbackStart;
+  const defaultEnd = clinicianRange ? clinicianRange.end : fallbackEnd;
+  const visibleStart = showAllHours ? 0 : defaultStart;
+  const visibleEnd = showAllHours ? TOTAL_SLOTS : defaultEnd;
+  // Auto-show 24h if any selected availability falls outside the clinician's
+  // window, so users can see and edit those late/early windows.
+  const hasOutsideClinicianRange = matrix.some(row =>
+    row.some((on, s) => on && (s < defaultStart || s >= defaultEnd))
+  );
+  const effectiveStart = hasOutsideClinicianRange ? 0 : visibleStart;
+  const effectiveEnd = hasOutsideClinicianRange ? TOTAL_SLOTS : visibleEnd;
 
   // Keep matrixRef in sync with state for use in event handlers that close over old state
   useEffect(() => {
@@ -199,17 +222,29 @@ export default function AvailabilityGrid({ availability, onChange }: Availabilit
     commitMatrix(next);
   };
 
-  const cellSize = 20;
+  const cellSize = 18;
   const dayColWidth = cellSize;
+
+  // Helper used above; declared here so nothing in JSX needs a forward ref.
+  // (computeClinicianSlotRange is a module-level pure function; see bottom.)
 
   return (
     <div style={{ marginTop: '16px' }}>
       <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '8px' }}>
         Drag to select (or deselect, if starting on a selected cell). 15-minute granularity.
       </div>
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
         <button onClick={copyMondayToWeekdays} style={chipBtn}>Copy Mon → Tue–Fri</button>
         <button onClick={clearAll} style={{ ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }}>Clear all</button>
+        <label style={{ display: 'flex', gap: '4px', alignItems: 'center', fontSize: '12px', cursor: hasOutsideClinicianRange ? 'not-allowed' : 'pointer', marginLeft: 'auto' }}>
+          <input
+            type="checkbox"
+            checked={showAllHours || hasOutsideClinicianRange}
+            disabled={hasOutsideClinicianRange}
+            onChange={(e) => setShowAllHours(e.target.checked)}
+          />
+          <span>24h{hasOutsideClinicianRange ? ' (auto)' : ''}</span>
+        </label>
       </div>
       <div
         ref={gridRef}
@@ -221,6 +256,9 @@ export default function AvailabilityGrid({ availability, onChange }: Availabilit
         onTouchCancel={handleEnd}
         style={{
           overflowX: 'auto',
+          // No vertical inner scroll: nested scroll-with-touch-action:none traps users on iOS.
+          // Keep the grid compact via working-hours default + 18px cells, then let the modal
+          // / page scroll naturally past it.
           border: '1px solid #d1d5db',
           borderRadius: '6px',
           padding: '8px',
@@ -258,7 +296,9 @@ export default function AvailabilityGrid({ availability, onChange }: Availabilit
         </div>
 
         {/* Grid rows */}
-        {Array.from({ length: TOTAL_SLOTS }).map((_, slot) => (
+        {Array.from({ length: effectiveEnd - effectiveStart }).map((_, i) => {
+          const slot = effectiveStart + i;
+          return (
           <div key={slot} style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
             <div style={{
               width: '40px', fontSize: '10px', color: '#9ca3af', textAlign: 'right', paddingRight: '4px',
@@ -287,7 +327,8 @@ export default function AvailabilityGrid({ availability, onChange }: Availabilit
               );
             })}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Per-day text refinement (always visible, reflects committed state) */}
@@ -348,3 +389,27 @@ const chipBtn: React.CSSProperties = {
   cursor: 'pointer',
   color: '#374151',
 };
+
+// Compute the union earliest-start and latest-end (in 15-minute slots) across
+// the clinician's weekly availability. Returns null if the clinician has no
+// availability set so callers can fall back to a default range.
+function computeClinicianSlotRange(
+  clinician?: { [key in DayOfWeek]?: TimeWindow[] },
+): { start: number; end: number } | null {
+  if (!clinician) return null;
+  let minStart = Infinity;
+  let maxEnd = -Infinity;
+  Object.values(clinician).forEach(windows => {
+    (windows || []).forEach(w => {
+      const s = timeStringToSlot(w.start);
+      const e = timeStringToSlot(w.end);
+      if (s < minStart) minStart = s;
+      if (e > maxEnd) maxEnd = e;
+    });
+  });
+  if (!Number.isFinite(minStart) || !Number.isFinite(maxEnd)) return null;
+  // Snap to hour boundaries so the time-label column always aligns.
+  const startHour = Math.floor(minStart / SLOTS_PER_HOUR) * SLOTS_PER_HOUR;
+  const endHour = Math.ceil(maxEnd / SLOTS_PER_HOUR) * SLOTS_PER_HOUR;
+  return { start: startHour, end: Math.max(endHour, startHour + SLOTS_PER_HOUR) };
+}

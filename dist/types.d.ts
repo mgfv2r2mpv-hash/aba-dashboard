@@ -37,6 +37,9 @@ export interface CompanySettings {
         targetMaxHours: number;
         periodUnit: TrainingPeriodUnit;
     };
+    clinicianAvailability?: {
+        [key in DayOfWeek]?: TimeWindow[];
+    };
     parentTrainingHoursPerMonth?: {
         minimum: number;
         target: {

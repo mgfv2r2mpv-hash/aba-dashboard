@@ -46,6 +46,13 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
       targetMaxHours: 4,
       periodUnit: 'month',
     },
+    clinicianAvailability: {
+      Monday: [{ start: '09:00', end: '17:00' }],
+      Tuesday: [{ start: '09:00', end: '17:00' }],
+      Wednesday: [{ start: '09:00', end: '17:00' }],
+      Thursday: [{ start: '09:00', end: '17:00' }],
+      Friday: [{ start: '09:00', end: '17:00' }],
+    },
   });
 
   // String state for numeric inputs (allows clearing/editing without parseFloat || 0 trapping)
@@ -89,6 +96,33 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
 
   const removeTechnician = (id: string) => setTechnicians(technicians.filter(t => t.id !== id));
 
+  const updateWindowsForDay = (windows: any[], action: string, value?: string | number) => {
+    if (action === 'clear') {
+      return undefined;
+    } else if (action === 'add') {
+      return [...windows, { start: '09:00', end: '17:00' }];
+    } else if (action === 'removeWindow') {
+      const idx = value as number;
+      const updated = windows.filter((_, i) => i !== idx);
+      return updated.length === 0 ? undefined : updated;
+    } else if (action.startsWith('windowIdx_')) {
+      const [, idxStr, fieldName] = action.split('_');
+      const idx = parseInt(idxStr);
+      const updated = [...windows];
+      updated[idx] = { ...updated[idx], [fieldName]: value };
+      return updated;
+    }
+    return windows;
+  };
+
+  const setClinicianAvailability = (day: DayOfWeek, action: string, value?: string | number) => {
+    const av = { ...(settings.clinicianAvailability || {}) };
+    const windows = av[day] || [];
+    const next = updateWindowsForDay(windows, action, value);
+    if (next === undefined) delete av[day]; else av[day] = next;
+    setSettings({ ...settings, clinicianAvailability: av });
+  };
+
   const setDayAvailability = (
     list: 'client' | 'tech',
     id: string,
@@ -96,31 +130,13 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
     action: string,
     value?: string | number
   ) => {
-    const updateWindowsForDay = (windows: any[]) => {
-      if (action === 'clear') {
-        return undefined;
-      } else if (action === 'add') {
-        return [...windows, { start: '09:00', end: '17:00' }];
-      } else if (action === 'removeWindow') {
-        const idx = value as number;
-        const updated = windows.filter((_, i) => i !== idx);
-        return updated.length === 0 ? undefined : updated;
-      } else if (action.startsWith('windowIdx_')) {
-        const [, idxStr, fieldName] = action.split('_');
-        const idx = parseInt(idxStr);
-        const updated = [...windows];
-        updated[idx] = { ...updated[idx], [fieldName]: value };
-        return updated;
-      }
-      return windows;
-    };
 
     if (list === 'client') {
       const c = clients.find(c => c.id === id);
       if (!c) return;
       const win = { ...c.availabilityWindows };
       const windows = win[day] || [];
-      win[day] = updateWindowsForDay(windows);
+      win[day] = updateWindowsForDay(windows, action, value);
       if (win[day] === undefined) delete win[day];
       updateClient(id, { availabilityWindows: win });
     } else {
@@ -128,7 +144,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
       if (!t) return;
       const av = { ...t.availability };
       const windows = av[day] || [];
-      av[day] = updateWindowsForDay(windows);
+      av[day] = updateWindowsForDay(windows, action, value);
       if (av[day] === undefined) delete av[day];
       updateTechnician(id, { availability: av });
     }
@@ -232,6 +248,18 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
             <p style={{ color: '#6b7280', marginBottom: '16px', fontSize: '13px' }}>
               These are the constraints we'll check against. Defaults match BACB minimums and a common parent-training target.
             </p>
+            <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
+              <label style={labelStyle}>Clinician (supervisor) availability</label>
+              <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
+                Sessions can't ethically be scheduled when you're not available to supervise.
+                This sets the default visible range for the schedule grid (you can toggle 24h
+                later for occasional late or early work).
+              </p>
+              <DayAvailabilityRow
+                availability={settings.clinicianAvailability || {}}
+                onChange={(day, action, value) => setClinicianAvailability(day, action, value)}
+              />
+            </div>
             <div style={{ display: 'grid', gap: '12px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
@@ -377,6 +405,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                     <AvailabilityGrid
                       availability={c.availabilityWindows}
                       onChange={(av) => updateClient(c.id, { availabilityWindows: av })}
+                      clinicianAvailability={settings.clinicianAvailability}
                     />
                   ) : (
                     <DayAvailabilityRow
@@ -442,6 +471,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                     <AvailabilityGrid
                       availability={t.availability}
                       onChange={(av) => updateTechnician(t.id, { availability: av })}
+                      clinicianAvailability={settings.clinicianAvailability}
                     />
                   ) : (
                     <DayAvailabilityRow
@@ -541,8 +571,15 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
           </div>
         )}
 
-        {/* Navigation */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '20px' }}>
+        {/* Navigation (sticky to viewport bottom inside the modal) */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between',
+          position: 'sticky', bottom: 0, marginTop: '20px',
+          padding: '12px 0 4px',
+          background: 'linear-gradient(to bottom, rgba(255,255,255,0.6), white 30%)',
+          borderTop: '1px solid #e5e7eb',
+          zIndex: 10,
+        }}>
           <button onClick={() => {
             if (step === 'welcome') return onCancel();
             const order: Step[] = ['welcome', 'company', 'clients', 'technicians', 'review'];

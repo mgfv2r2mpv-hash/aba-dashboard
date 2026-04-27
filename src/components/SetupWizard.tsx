@@ -32,6 +32,8 @@ const cardStyle: React.CSSProperties = {
   border: '1px solid #e5e7eb',
   borderRadius: '6px',
   backgroundColor: '#f9fafb',
+  minWidth: 0,
+  overflow: 'hidden',
 };
 
 export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) {
@@ -214,7 +216,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
               <p style={{ color: '#6b7280', marginBottom: '16px', fontSize: '13px' }}>
                 These are the constraints we'll check against. Defaults match BACB minimums and a common parent-training target.
               </p>
-              <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
+              <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', minWidth: 0 }}>
                 <label style={labelStyle}>Clinician (supervisor) availability</label>
                 <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
                   Sessions can't ethically be scheduled when you're not available to supervise.
@@ -709,6 +711,7 @@ const chipTimeInput: React.CSSProperties = {
   border: 'none',
   background: 'transparent',
   fontFamily: 'inherit',
+  width: '70px',
   minWidth: 0,
 };
 

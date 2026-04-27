@@ -534,4 +534,6 @@ const editTimeInput: React.CSSProperties = {
   border: '1px solid #d1d5db',
   borderRadius: '4px',
   fontFamily: 'inherit',
+  width: '75px',
+  minWidth: 0,
 };

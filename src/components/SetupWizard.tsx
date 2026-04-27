@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { ScheduleData, Client, Technician, CompanySettings, DayOfWeek, BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
+import { ScheduleData, Client, Technician, CompanySettings, DayOfWeek, TimeWindow, BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import AvailabilityGrid from './AvailabilityGrid';
 
 interface SetupWizardProps {
   onComplete: (data: ScheduleData) => void;
@@ -65,10 +64,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
 
   const [clients, setClients] = useState<Client[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
-  // String state for assignment hours (keyed by techId_assignmentIdx)
   const [assignmentHoursStr, setAssignmentHoursStr] = useState<{ [key: string]: string }>({});
-  // Toggle for grid view
-  const [useGridView, setUseGridView] = useState(false);
 
   const addClient = () => setClients([...clients, {
     id: uuidv4(),
@@ -148,26 +144,28 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
     }}>
       <div style={{
-        backgroundColor: 'white', borderRadius: '8px', padding: '20px',
-        width: 'min(720px, 95vw)', maxHeight: '90vh', overflowY: 'auto',
+        backgroundColor: 'white', borderRadius: '8px',
+        width: 'min(720px, 100vw)', height: 'min(720px, 100vh)',
+        overflow: 'hidden', display: 'flex', flexDirection: 'column',
         boxSizing: 'border-box',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <h2 style={{ fontSize: '20px', fontWeight: 'bold' }}>Setup Wizard</h2>
-          <button onClick={onCancel} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+        <div style={{ padding: '20px 20px 0', flexShrink: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 'bold' }}>Setup Wizard</h2>
+            <button onClick={onCancel} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+          </div>
+          <div style={{ display: 'flex', gap: '4px', marginBottom: '16px' }}>
+            {Array.from({ length: totalSteps }).map((_, i) => (
+              <div key={i} style={{
+                flex: 1, height: '4px',
+                backgroundColor: i <= stepIndex ? '#3b82f6' : '#e5e7eb',
+                borderRadius: '2px',
+              }} />
+            ))}
+          </div>
         </div>
 
-        {/* Progress bar */}
-        <div style={{ display: 'flex', gap: '4px', marginBottom: '20px' }}>
-          {Array.from({ length: totalSteps }).map((_, i) => (
-            <div key={i} style={{
-              flex: 1,
-              height: '4px',
-              backgroundColor: i <= stepIndex ? '#3b82f6' : '#e5e7eb',
-              borderRadius: '2px',
-            }} />
-          ))}
-        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 20px 16px' }}>
 
         {step === 'welcome' && (
           <div>
@@ -201,7 +199,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                 This sets the default visible range for the schedule grid (you can toggle 24h
                 later for occasional late or early work).
               </p>
-              <DayAvailabilityRow
+              <WeeklyAvailability
                 availability={settings.clinicianAvailability || {}}
                 onChange={(av) => setSettings({ ...settings, clinicianAvailability: av })}
               />
@@ -304,14 +302,6 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
             <p style={{ color: '#6b7280', fontSize: '13px', marginBottom: '12px' }}>
               Use anonymized identifiers (e.g. "Client A"). Set availability windows per day.
             </p>
-            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '13px', marginBottom: '12px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={useGridView}
-                onChange={(e) => setUseGridView(e.target.checked)}
-              />
-              <span>Use drag-select grid view</span>
-            </label>
             <div style={{ display: 'grid', gap: '12px' }}>
               {clients.map(c => (
                 <div key={c.id} style={cardStyle}>
@@ -347,18 +337,11 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                       Hard cap for this case. If lower than the company target floor, this cap wins.
                     </p>
                   </div>
-                  {useGridView ? (
-                    <AvailabilityGrid
-                      availability={c.availabilityWindows}
-                      onChange={(av) => updateClient(c.id, { availabilityWindows: av })}
-                      clinicianAvailability={settings.clinicianAvailability}
-                    />
-                  ) : (
-                    <DayAvailabilityRow
-                      availability={c.availabilityWindows}
-                      onChange={(av) => updateClient(c.id, { availabilityWindows: av })}
-                    />
-                  )}
+                  <WeeklyAvailability
+                    availability={c.availabilityWindows}
+                    onChange={(av) => updateClient(c.id, { availabilityWindows: av })}
+                    defaultWindow={{ start: '15:00', end: '19:00' }}
+                  />
                 </div>
               ))}
               {clients.length === 0 && (
@@ -382,14 +365,6 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
             <p style={{ color: '#6b7280', fontSize: '13px', marginBottom: '12px' }}>
               Mark RBT certification (affects supervision math). Add availability and client assignments.
             </p>
-            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '13px', marginBottom: '12px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={useGridView}
-                onChange={(e) => setUseGridView(e.target.checked)}
-              />
-              <span>Use drag-select grid view</span>
-            </label>
             <div style={{ display: 'grid', gap: '12px' }}>
               {technicians.map(t => (
                 <div key={t.id} style={cardStyle}>
@@ -413,58 +388,54 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                       border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer',
                     }}>Remove</button>
                   </div>
-                  {useGridView ? (
-                    <AvailabilityGrid
-                      availability={t.availability}
-                      onChange={(av) => updateTechnician(t.id, { availability: av })}
-                      clinicianAvailability={settings.clinicianAvailability}
-                    />
-                  ) : (
-                    <DayAvailabilityRow
-                      availability={t.availability}
-                      onChange={(av) => updateTechnician(t.id, { availability: av })}
-                    />
-                  )}
+                  <WeeklyAvailability
+                    availability={t.availability}
+                    onChange={(av) => updateTechnician(t.id, { availability: av })}
+                    defaultWindow={{ start: '15:00', end: '19:00' }}
+                  />
                   <div style={{ marginTop: '8px' }}>
                     <label style={labelStyle}>Assignments</label>
+                    {t.assignments.length > 0 && (
+                      <div style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
+                        <span style={{ flex: 2, fontSize: '11px', color: '#6b7280', fontWeight: 600, paddingLeft: '2px' }}>Client</span>
+                        <span style={{ flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600, paddingLeft: '2px' }}>Hrs/wk</span>
+                        <span style={{ width: '38px' }} />
+                      </div>
+                    )}
                     {t.assignments.map((a, idx) => {
                       const assignmentKey = `${t.id}_${idx}`;
                       const hoursStr = assignmentHoursStr[assignmentKey] ?? String(a.hoursPerWeek);
                       return (
-                        <div key={idx}>
-                          <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
-                            <select
-                              value={a.clientId}
-                              onChange={(e) => {
-                                const updated = [...t.assignments];
-                                updated[idx] = { ...a, clientId: e.target.value };
-                                updateTechnician(t.id, { assignments: updated });
-                              }}
-                              style={{ ...inputStyle, flex: 2 }}
-                            >
-                              <option value="">— Pick client —</option>
-                              {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                            </select>
-                            <div style={{ flex: 1 }}>
-                              <label style={{ ...labelStyle, marginBottom: '4px' }}>Hours/wk</label>
-                              <input
-                                type="number" step="0.5"
-                                value={hoursStr}
-                                onChange={(e) => setAssignmentHoursStr({ ...assignmentHoursStr, [assignmentKey]: e.target.value })}
-                                style={inputStyle}
-                              />
-                            </div>
-                            <button onClick={() => {
-                              const newAssignments = t.assignments.filter((_, i) => i !== idx);
-                              const newHoursStr = { ...assignmentHoursStr };
-                              delete newHoursStr[assignmentKey];
-                              setAssignmentHoursStr(newHoursStr);
-                              updateTechnician(t.id, { assignments: newAssignments });
-                            }} style={{
-                              padding: '4px 8px', backgroundColor: '#fee2e2', color: '#dc2626',
-                              border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer',
-                            }}>×</button>
-                          </div>
+                        <div key={idx} style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                          <select
+                            value={a.clientId}
+                            onChange={(e) => {
+                              const updated = [...t.assignments];
+                              updated[idx] = { ...a, clientId: e.target.value };
+                              updateTechnician(t.id, { assignments: updated });
+                            }}
+                            style={{ ...inputStyle, flex: 2 }}
+                          >
+                            <option value="">— Pick client —</option>
+                            {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                          </select>
+                          <input
+                            type="number" step="0.5"
+                            value={hoursStr}
+                            onChange={(e) => setAssignmentHoursStr({ ...assignmentHoursStr, [assignmentKey]: e.target.value })}
+                            style={{ ...inputStyle, flex: 1 }}
+                          />
+                          <button onClick={() => {
+                            const newAssignments = t.assignments.filter((_, i) => i !== idx);
+                            const newHoursStr = { ...assignmentHoursStr };
+                            delete newHoursStr[assignmentKey];
+                            setAssignmentHoursStr(newHoursStr);
+                            updateTechnician(t.id, { assignments: newAssignments });
+                          }} style={{
+                            padding: '4px 8px', backgroundColor: '#fee2e2', color: '#dc2626',
+                            border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer',
+                            alignSelf: 'center',
+                          }}>×</button>
                         </div>
                       );
                     })}
@@ -517,14 +488,14 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
           </div>
         )}
 
-        {/* Navigation (sticky to viewport bottom inside the modal) */}
+        </div>
+
         <div style={{
           display: 'flex', justifyContent: 'space-between',
-          position: 'sticky', bottom: 0, marginTop: '20px',
-          padding: '12px 0 4px',
-          background: 'linear-gradient(to bottom, rgba(255,255,255,0.6), white 30%)',
+          padding: '12px 20px',
           borderTop: '1px solid #e5e7eb',
-          zIndex: 10,
+          flexShrink: 0,
+          backgroundColor: 'white',
         }}>
           <button onClick={() => {
             if (step === 'welcome') return onCancel();
@@ -560,12 +531,13 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
   );
 }
 
-interface DayAvailabilityRowProps {
-  availability: { [key in DayOfWeek]?: { start: string; end: string }[] };
-  onChange: (availability: { [key in DayOfWeek]?: { start: string; end: string }[] }) => void;
+interface WeeklyAvailabilityProps {
+  availability: { [key in DayOfWeek]?: TimeWindow[] };
+  onChange: (availability: { [key in DayOfWeek]?: TimeWindow[] }) => void;
+  defaultWindow?: TimeWindow;
 }
 
-function DayAvailabilityRow({ availability, onChange }: DayAvailabilityRowProps) {
+function WeeklyAvailability({ availability, onChange, defaultWindow = { start: '09:00', end: '17:00' } }: WeeklyAvailabilityProps) {
   const updateWindow = (day: DayOfWeek, idx: number, field: 'start' | 'end', value: string) => {
     const next = { ...availability };
     const list = (next[day] || []).slice();
@@ -576,7 +548,7 @@ function DayAvailabilityRow({ availability, onChange }: DayAvailabilityRowProps)
 
   const addWindow = (day: DayOfWeek) => {
     const next = { ...availability };
-    next[day] = [...(next[day] || []), { start: '09:00', end: '17:00' }];
+    next[day] = [...(next[day] || []), { ...defaultWindow }];
     onChange(next);
   };
 
@@ -606,10 +578,10 @@ function DayAvailabilityRow({ availability, onChange }: DayAvailabilityRowProps)
     onChange(next);
   };
 
-  const setStandardWeekdays = () => {
+  const setWeekdays = (start: string, end: string) => {
     const next = { ...availability };
     (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
-      next[d] = [{ start: '09:00', end: '17:00' }];
+      next[d] = [{ start, end }];
     });
     onChange(next);
   };
@@ -618,19 +590,19 @@ function DayAvailabilityRow({ availability, onChange }: DayAvailabilityRowProps)
 
   return (
     <div>
-      <div style={{
-        display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center',
-      }}>
-        <button onClick={setStandardWeekdays} style={rowChipBtn} title="Set Mon–Fri 9 AM–5 PM">
-          Weekdays 9–5
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <button onClick={() => setWeekdays('09:00', '17:00')} style={presetBtn} title="Set Mon-Fri 9 AM-5 PM">
+          Weekdays 9-5
         </button>
-        <button onClick={copyMondayToWeekdays} style={rowChipBtn} title="Copy Monday's windows to Tue–Fri">
-          Copy Mon → Tue–Fri
+        <button onClick={() => setWeekdays('15:00', '19:00')} style={presetBtn} title="Set Mon-Fri 3 PM-7 PM">
+          After-school 3-7
         </button>
-        <button
-          onClick={clearAll}
-          style={{ ...rowChipBtn, color: '#dc2626', borderColor: '#fca5a5' }}
-        >Clear all</button>
+        <button onClick={copyMondayToWeekdays} style={presetBtn} title="Copy Monday's windows to Tue-Fri">
+          Copy Mon to Tue-Fri
+        </button>
+        <button onClick={clearAll} style={{ ...presetBtn, color: '#dc2626', borderColor: '#fca5a5' }}>
+          Clear all
+        </button>
       </div>
       <div style={{ display: 'grid', gap: '4px' }}>
         {DAYS.map((day, dayIdx) => {
@@ -639,45 +611,38 @@ function DayAvailabilityRow({ availability, onChange }: DayAvailabilityRowProps)
             <div
               key={day}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                flexWrap: 'wrap',
-                padding: '6px 8px',
-                borderRadius: '4px',
+                display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap',
+                padding: '6px 8px', borderRadius: '4px',
                 background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
                 border: '1px solid #e5e7eb',
               }}
             >
-              <span style={{
-                fontSize: '13px', fontWeight: 600, color: '#374151',
-                width: '44px', flexShrink: 0,
-              }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151', width: '36px', flexShrink: 0 }}>
                 {day.slice(0, 3)}
               </span>
               {windows.length === 0 ? (
-                <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>
-                  Off
-                </span>
+                <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>Off</span>
               ) : (
                 windows.map((w, idx) => (
-                  <span key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                  <span key={idx} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '3px',
+                    backgroundColor: '#eff6ff', border: '1px solid #bfdbfe',
+                    borderRadius: '4px', padding: '2px 5px',
+                  }}>
                     <input
-                      type="time"
-                      value={w.start}
+                      type="time" value={w.start}
                       onChange={(e) => updateWindow(day, idx, 'start', e.target.value)}
-                      style={rowTimeInput}
+                      style={timeInput}
                     />
-                    <span style={{ fontSize: '12px', color: '#6b7280' }}>–</span>
+                    <span style={{ fontSize: '12px', color: '#93c5fd' }}>-</span>
                     <input
-                      type="time"
-                      value={w.end}
+                      type="time" value={w.end}
                       onChange={(e) => updateWindow(day, idx, 'end', e.target.value)}
-                      style={rowTimeInput}
+                      style={timeInput}
                     />
                     <button
                       onClick={() => removeWindow(day, idx)}
-                      style={rowRemoveBtn}
+                      style={removeWindowBtn}
                       title="Remove this window"
                     >×</button>
                   </span>
@@ -685,13 +650,13 @@ function DayAvailabilityRow({ availability, onChange }: DayAvailabilityRowProps)
               )}
               <button
                 onClick={() => addWindow(day)}
-                style={rowAddBtn}
+                style={addWindowBtn}
                 title={`Add a time window on ${day}`}
               >+ window</button>
               {windows.length > 0 && (
                 <button
                   onClick={() => clearDay(day)}
-                  style={{ ...rowChipBtn, fontSize: '11px', padding: '2px 8px', marginLeft: 'auto' }}
+                  style={{ ...presetBtn, fontSize: '11px', padding: '2px 8px', marginLeft: 'auto' }}
                   title={`Clear ${day}`}
                 >Off</button>
               )}
@@ -703,7 +668,7 @@ function DayAvailabilityRow({ availability, onChange }: DayAvailabilityRowProps)
   );
 }
 
-const rowChipBtn: React.CSSProperties = {
+const presetBtn: React.CSSProperties = {
   padding: '4px 10px',
   fontSize: '12px',
   border: '1px solid #d1d5db',
@@ -713,15 +678,15 @@ const rowChipBtn: React.CSSProperties = {
   color: '#374151',
 };
 
-const rowTimeInput: React.CSSProperties = {
-  fontSize: '13px',
-  padding: '3px 6px',
-  border: '1px solid #d1d5db',
-  borderRadius: '4px',
+const timeInput: React.CSSProperties = {
+  fontSize: '12px',
+  padding: '1px 2px',
+  border: 'none',
+  background: 'transparent',
   fontFamily: 'inherit',
 };
 
-const rowAddBtn: React.CSSProperties = {
+const addWindowBtn: React.CSSProperties = {
   padding: '3px 8px',
   fontSize: '11px',
   border: '1px dashed #3b82f6',
@@ -731,13 +696,14 @@ const rowAddBtn: React.CSSProperties = {
   cursor: 'pointer',
 };
 
-const rowRemoveBtn: React.CSSProperties = {
-  padding: '1px 6px',
-  fontSize: '12px',
-  border: '1px solid #fca5a5',
-  background: '#fee2e2',
-  color: '#dc2626',
-  borderRadius: '3px',
+const removeWindowBtn: React.CSSProperties = {
+  padding: '0 4px',
+  fontSize: '13px',
+  border: 'none',
+  background: 'transparent',
+  color: '#60a5fa',
+  borderRadius: '2px',
   cursor: 'pointer',
   lineHeight: 1,
+  fontWeight: 600,
 };

@@ -158,17 +158,24 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
       backgroundColor: 'rgba(0,0,0,0.5)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+      display: 'flex', alignItems: 'stretch', justifyContent: 'center', zIndex: 1000,
+      paddingTop: 'env(safe-area-inset-top)',
+      paddingBottom: 'env(safe-area-inset-bottom)',
+      paddingLeft: 'env(safe-area-inset-left)',
+      paddingRight: 'env(safe-area-inset-right)',
     }}>
       <div style={{
         backgroundColor: 'white',
         borderRadius: '8px',
-        width: 'min(720px, 100vw)',
-        height: 'min(720px, 100vh)',
+        width: '100%',
+        maxWidth: '720px',
+        height: '100%',
+        maxHeight: '100%',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
         boxSizing: 'border-box',
+        minWidth: 0,
       }}>
 
         {/* Fixed header */}
@@ -314,12 +321,13 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
 
           {step === 'clients' && (
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <h3 style={{ fontSize: '18px', margin: 0 }}>Clients ({clients.length})</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '8px' }}>
+                <h3 style={{ fontSize: '18px', margin: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Clients ({clients.length})</h3>
                 <button onClick={addClient} style={{
                   padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
                   border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                }}>+ Add Client</button>
+                  flexShrink: 0, whiteSpace: 'nowrap',
+                }}>+ Add</button>
               </div>
               <p style={{ color: '#6b7280', fontSize: '13px', marginBottom: '12px' }}>
                 Use anonymized identifiers (e.g. "Client A"). Set availability windows per day.
@@ -335,9 +343,10 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                         style={{ ...inputStyle, flex: 1, width: 'auto' }}
                       />
                       <button onClick={() => removeClient(c.id)} style={{
-                        padding: '6px 10px', backgroundColor: '#fee2e2', color: '#dc2626',
+                        width: '32px', height: '32px', padding: 0, backgroundColor: '#fee2e2', color: '#dc2626',
                         border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
-                      }}>Remove</button>
+                        fontSize: '18px', lineHeight: 1,
+                      }} aria-label="Remove client">×</button>
                     </div>
                     <div style={{ marginBottom: '8px' }}>
                       <label style={{ ...labelStyle, fontSize: '12px' }}>
@@ -377,12 +386,13 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
 
           {step === 'technicians' && (
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <h3 style={{ fontSize: '18px', margin: 0 }}>Technicians ({technicians.length})</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '8px' }}>
+                <h3 style={{ fontSize: '18px', margin: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Technicians ({technicians.length})</h3>
                 <button onClick={addTechnician} style={{
                   padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
                   border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                }}>+ Add Technician</button>
+                  flexShrink: 0, whiteSpace: 'nowrap',
+                }}>+ Add</button>
               </div>
               <p style={{ color: '#6b7280', fontSize: '13px', marginBottom: '12px' }}>
                 Mark RBT certification (affects supervision math). Add availability and client assignments.
@@ -406,9 +416,10 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                         <span>RBT</span>
                       </label>
                       <button onClick={() => removeTechnician(t.id)} style={{
-                        padding: '6px 10px', backgroundColor: '#fee2e2', color: '#dc2626',
+                        width: '32px', height: '32px', padding: 0, backgroundColor: '#fee2e2', color: '#dc2626',
                         border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
-                      }}>Remove</button>
+                        fontSize: '18px', lineHeight: 1,
+                      }} aria-label="Remove technician">×</button>
                     </div>
                     <WeeklyAvailability
                       availability={t.availability}

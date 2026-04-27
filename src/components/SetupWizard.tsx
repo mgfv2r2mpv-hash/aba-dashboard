@@ -96,60 +96,6 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
 
   const removeTechnician = (id: string) => setTechnicians(technicians.filter(t => t.id !== id));
 
-  const updateWindowsForDay = (windows: any[], action: string, value?: string | number) => {
-    if (action === 'clear') {
-      return undefined;
-    } else if (action === 'add') {
-      return [...windows, { start: '09:00', end: '17:00' }];
-    } else if (action === 'removeWindow') {
-      const idx = value as number;
-      const updated = windows.filter((_, i) => i !== idx);
-      return updated.length === 0 ? undefined : updated;
-    } else if (action.startsWith('windowIdx_')) {
-      const [, idxStr, fieldName] = action.split('_');
-      const idx = parseInt(idxStr);
-      const updated = [...windows];
-      updated[idx] = { ...updated[idx], [fieldName]: value };
-      return updated;
-    }
-    return windows;
-  };
-
-  const setClinicianAvailability = (day: DayOfWeek, action: string, value?: string | number) => {
-    const av = { ...(settings.clinicianAvailability || {}) };
-    const windows = av[day] || [];
-    const next = updateWindowsForDay(windows, action, value);
-    if (next === undefined) delete av[day]; else av[day] = next;
-    setSettings({ ...settings, clinicianAvailability: av });
-  };
-
-  const setDayAvailability = (
-    list: 'client' | 'tech',
-    id: string,
-    day: DayOfWeek,
-    action: string,
-    value?: string | number
-  ) => {
-
-    if (list === 'client') {
-      const c = clients.find(c => c.id === id);
-      if (!c) return;
-      const win = { ...c.availabilityWindows };
-      const windows = win[day] || [];
-      win[day] = updateWindowsForDay(windows, action, value);
-      if (win[day] === undefined) delete win[day];
-      updateClient(id, { availabilityWindows: win });
-    } else {
-      const t = technicians.find(t => t.id === id);
-      if (!t) return;
-      const av = { ...t.availability };
-      const windows = av[day] || [];
-      av[day] = updateWindowsForDay(windows, action, value);
-      if (av[day] === undefined) delete av[day];
-      updateTechnician(id, { availability: av });
-    }
-  };
-
   const parseNumericString = (val: string, fallback: number = 0): number => {
     const parsed = parseFloat(val);
     return isNaN(parsed) ? fallback : parsed;
@@ -257,7 +203,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
               </p>
               <DayAvailabilityRow
                 availability={settings.clinicianAvailability || {}}
-                onChange={(day, action, value) => setClinicianAvailability(day, action, value)}
+                onChange={(av) => setSettings({ ...settings, clinicianAvailability: av })}
               />
             </div>
             <div style={{ display: 'grid', gap: '12px' }}>
@@ -410,7 +356,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                   ) : (
                     <DayAvailabilityRow
                       availability={c.availabilityWindows}
-                      onChange={(day, field, value) => setDayAvailability('client', c.id, day, field, value)}
+                      onChange={(av) => updateClient(c.id, { availabilityWindows: av })}
                     />
                   )}
                 </div>
@@ -476,7 +422,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                   ) : (
                     <DayAvailabilityRow
                       availability={t.availability}
-                      onChange={(day, field, value) => setDayAvailability('tech', t.id, day, field, value)}
+                      onChange={(av) => updateTechnician(t.id, { availability: av })}
                     />
                   )}
                   <div style={{ marginTop: '8px' }}>
@@ -616,108 +562,182 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
 
 interface DayAvailabilityRowProps {
   availability: { [key in DayOfWeek]?: { start: string; end: string }[] };
-  onChange: (day: DayOfWeek, action: string, value?: string | number) => void;
+  onChange: (availability: { [key in DayOfWeek]?: { start: string; end: string }[] }) => void;
 }
 
 function DayAvailabilityRow({ availability, onChange }: DayAvailabilityRowProps) {
-  // Hide weekend columns by default — they push the row off-screen on iPhone.
-  // Auto-show if there's already weekend availability so existing data is editable.
-  const hasWeekendData =
-    (availability.Saturday && availability.Saturday.length > 0) ||
-    (availability.Sunday && availability.Sunday.length > 0);
-  const [showWeekend, setShowWeekend] = useState(false);
-  const weekendVisible = showWeekend || hasWeekendData;
-  const visibleDays = weekendVisible ? DAYS : DAYS.filter(d => d !== 'Saturday' && d !== 'Sunday');
-  const colCount = visibleDays.length;
+  const updateWindow = (day: DayOfWeek, idx: number, field: 'start' | 'end', value: string) => {
+    const next = { ...availability };
+    const list = (next[day] || []).slice();
+    list[idx] = { ...list[idx], [field]: value };
+    next[day] = list;
+    onChange(next);
+  };
+
+  const addWindow = (day: DayOfWeek) => {
+    const next = { ...availability };
+    next[day] = [...(next[day] || []), { start: '09:00', end: '17:00' }];
+    onChange(next);
+  };
+
+  const removeWindow = (day: DayOfWeek, idx: number) => {
+    const next = { ...availability };
+    next[day] = (next[day] || []).filter((_, i) => i !== idx);
+    if ((next[day] || []).length === 0) delete next[day];
+    onChange(next);
+  };
+
+  const clearDay = (day: DayOfWeek) => {
+    const next = { ...availability };
+    delete next[day];
+    onChange(next);
+  };
+
+  const copyMondayToWeekdays = () => {
+    const monWindows = availability['Monday'] || [];
+    const next = { ...availability };
+    (['Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
+      if (monWindows.length === 0) {
+        delete next[d];
+      } else {
+        next[d] = monWindows.map(w => ({ ...w }));
+      }
+    });
+    onChange(next);
+  };
+
+  const setStandardWeekdays = () => {
+    const next = { ...availability };
+    (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
+      next[d] = [{ start: '09:00', end: '17:00' }];
+    });
+    onChange(next);
+  };
+
+  const clearAll = () => onChange({});
+
   return (
-    <>
-      <label style={{
-        display: 'flex', gap: '6px', alignItems: 'center',
-        fontSize: '11px', color: '#6b7280', marginBottom: '6px',
-        cursor: hasWeekendData ? 'not-allowed' : 'pointer',
+    <div>
+      <div style={{
+        display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center',
       }}>
-        <input
-          type="checkbox"
-          checked={weekendVisible}
-          disabled={hasWeekendData}
-          onChange={(e) => setShowWeekend(e.target.checked)}
-        />
-        <span>Show weekend{hasWeekendData ? ' (auto)' : ''}</span>
-      </label>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${colCount}, 1fr)`, gap: '4px', fontSize: '11px' }}>
-      {visibleDays.map(day => {
-        const windows = availability[day] || [];
-        return (
-          <div key={day} style={{
-            border: '1px solid #d1d5db',
-            borderRadius: '4px',
-            padding: '4px',
-            backgroundColor: windows.length > 0 ? 'white' : '#f3f4f6',
-          }}>
-            <div style={{ fontWeight: '600', textAlign: 'center', marginBottom: '4px' }}>
-              {day.slice(0, 3)}
-            </div>
-            {windows.length > 0 ? (
-              <>
-                {windows.map((window, idx) => (
-                  <div key={idx} style={{ marginBottom: '4px', display: 'flex', gap: '2px' }}>
-                    <div style={{ flex: 1 }}>
-                      <input
-                        type="time"
-                        value={window.start}
-                        onChange={(e) => onChange(day, `windowIdx_${idx}_start` as any, e.target.value)}
-                        style={{ width: '100%', fontSize: '10px', padding: '2px' }}
-                      />
-                      <input
-                        type="time"
-                        value={window.end}
-                        onChange={(e) => onChange(day, `windowIdx_${idx}_end` as any, e.target.value)}
-                        style={{ width: '100%', fontSize: '10px', padding: '2px', marginTop: '1px' }}
-                      />
-                    </div>
-                    {windows.length > 1 && (
-                      <button
-                        onClick={() => onChange(day, 'removeWindow', idx)}
-                        style={{
-                          padding: '1px 4px', fontSize: '9px',
-                          backgroundColor: '#fee2e2', color: '#dc2626', border: 'none',
-                          borderRadius: '2px', cursor: 'pointer', alignSelf: 'flex-start', marginTop: '2px',
-                        }}
-                      >×</button>
-                    )}
-                  </div>
-                ))}
-                <button
-                  onClick={() => onChange(day, 'add')}
-                  style={{
-                    width: '100%', padding: '2px 0', fontSize: '9px',
-                    border: '1px solid #3b82f6', backgroundColor: 'white', color: '#3b82f6',
-                    borderRadius: '2px', cursor: 'pointer', marginBottom: '2px',
-                  }}
-                >+ window</button>
-                <button
-                  onClick={() => onChange(day, 'clear')}
-                  style={{
-                    width: '100%', padding: '2px 0', fontSize: '9px', cursor: 'pointer',
-                    border: 'none', backgroundColor: '#fee2e2', color: '#dc2626',
-                    borderRadius: '2px',
-                  }}
-                >Off</button>
-              </>
-            ) : (
-              <button
-                onClick={() => onChange(day, 'add')}
-                style={{
-                  width: '100%', padding: '4px 0', fontSize: '11px',
-                  border: 'none', backgroundColor: 'transparent',
-                  color: '#3b82f6', cursor: 'pointer',
-                }}
-              >+ add</button>
-            )}
-          </div>
-        );
-      })}
+        <button onClick={setStandardWeekdays} style={rowChipBtn} title="Set Mon–Fri 9 AM–5 PM">
+          Weekdays 9–5
+        </button>
+        <button onClick={copyMondayToWeekdays} style={rowChipBtn} title="Copy Monday's windows to Tue–Fri">
+          Copy Mon → Tue–Fri
+        </button>
+        <button
+          onClick={clearAll}
+          style={{ ...rowChipBtn, color: '#dc2626', borderColor: '#fca5a5' }}
+        >Clear all</button>
       </div>
-    </>
+      <div style={{ display: 'grid', gap: '4px' }}>
+        {DAYS.map((day, dayIdx) => {
+          const windows = availability[day] || [];
+          return (
+            <div
+              key={day}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                flexWrap: 'wrap',
+                padding: '6px 8px',
+                borderRadius: '4px',
+                background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
+                border: '1px solid #e5e7eb',
+              }}
+            >
+              <span style={{
+                fontSize: '13px', fontWeight: 600, color: '#374151',
+                width: '44px', flexShrink: 0,
+              }}>
+                {day.slice(0, 3)}
+              </span>
+              {windows.length === 0 ? (
+                <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>
+                  Off
+                </span>
+              ) : (
+                windows.map((w, idx) => (
+                  <span key={idx} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                    <input
+                      type="time"
+                      value={w.start}
+                      onChange={(e) => updateWindow(day, idx, 'start', e.target.value)}
+                      style={rowTimeInput}
+                    />
+                    <span style={{ fontSize: '12px', color: '#6b7280' }}>–</span>
+                    <input
+                      type="time"
+                      value={w.end}
+                      onChange={(e) => updateWindow(day, idx, 'end', e.target.value)}
+                      style={rowTimeInput}
+                    />
+                    <button
+                      onClick={() => removeWindow(day, idx)}
+                      style={rowRemoveBtn}
+                      title="Remove this window"
+                    >×</button>
+                  </span>
+                ))
+              )}
+              <button
+                onClick={() => addWindow(day)}
+                style={rowAddBtn}
+                title={`Add a time window on ${day}`}
+              >+ window</button>
+              {windows.length > 0 && (
+                <button
+                  onClick={() => clearDay(day)}
+                  style={{ ...rowChipBtn, fontSize: '11px', padding: '2px 8px', marginLeft: 'auto' }}
+                  title={`Clear ${day}`}
+                >Off</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
+
+const rowChipBtn: React.CSSProperties = {
+  padding: '4px 10px',
+  fontSize: '12px',
+  border: '1px solid #d1d5db',
+  borderRadius: '4px',
+  background: 'white',
+  cursor: 'pointer',
+  color: '#374151',
+};
+
+const rowTimeInput: React.CSSProperties = {
+  fontSize: '13px',
+  padding: '3px 6px',
+  border: '1px solid #d1d5db',
+  borderRadius: '4px',
+  fontFamily: 'inherit',
+};
+
+const rowAddBtn: React.CSSProperties = {
+  padding: '3px 8px',
+  fontSize: '11px',
+  border: '1px dashed #3b82f6',
+  background: 'white',
+  color: '#3b82f6',
+  borderRadius: '4px',
+  cursor: 'pointer',
+};
+
+const rowRemoveBtn: React.CSSProperties = {
+  padding: '1px 6px',
+  fontSize: '12px',
+  border: '1px solid #fca5a5',
+  background: '#fee2e2',
+  color: '#dc2626',
+  borderRadius: '3px',
+  cursor: 'pointer',
+  lineHeight: 1,
+};

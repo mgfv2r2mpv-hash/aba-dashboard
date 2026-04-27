@@ -333,8 +333,8 @@ function AvailabilityEditor({ initial, onSave, onCancel }: {
   const clearAll = () => setDraft({});
 
   return (
-    <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+    <div style={{ width: '100%', overflowX: 'hidden', marginTop: '8px' }}>
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
         <button onClick={setStandardWeekdays} style={chipBtn} title="Set Mon–Fri 9 AM–5 PM">
           Weekdays 9–5
         </button>
@@ -346,60 +346,65 @@ function AvailabilityEditor({ initial, onSave, onCancel }: {
           style={{ ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }}
         >Clear all</button>
       </div>
-      {DAYS.map((day, dayIdx) => {
-        const windows = draft[day] || [];
-        return (
-          <div
-            key={day}
-            style={{
-              display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap',
-              padding: '6px 8px', borderRadius: '4px',
-              background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
-              border: '1px solid #e5e7eb',
-            }}
-          >
-            <span style={{ width: '44px', fontSize: '13px', fontWeight: 600 }}>{day.slice(0, 3)}</span>
-            {windows.length === 0 ? (
-              <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>Off</span>
-            ) : (
-              windows.map((w, idx) => (
-                <span key={idx} style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
-                  <input
-                    type="time"
-                    value={w.start}
-                    onChange={(e) => setDayWindow(day, idx, 'start', e.target.value)}
-                    style={editTimeInput}
-                  />
-                  <span style={{ fontSize: '12px', color: '#6b7280' }}>–</span>
-                  <input
-                    type="time"
-                    value={w.end}
-                    onChange={(e) => setDayWindow(day, idx, 'end', e.target.value)}
-                    style={editTimeInput}
-                  />
-                  <button
-                    onClick={() => removeWindow(day, idx)}
-                    style={{ ...dangerBtn, padding: '2px 6px', fontSize: '11px' }}
-                    title="Remove this window"
-                  >×</button>
-                </span>
-              ))
-            )}
-            <button
-              onClick={() => addWindow(day)}
-              style={{ ...chipBtn, padding: '2px 8px', fontSize: '11px' }}
-            >+ window</button>
-            {windows.length > 0 && (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {DAYS.map((day, dayIdx) => {
+          const windows = draft[day] || [];
+          return (
+            <div
+              key={day}
+              style={{
+                display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap',
+                padding: '6px 8px', borderRadius: '4px',
+                background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
+                border: '1px solid #e5e7eb',
+                boxSizing: 'border-box', width: '100%', minWidth: 0,
+              }}
+            >
+              <span style={{ width: '36px', flexShrink: 0, fontSize: '13px', fontWeight: 600 }}>{day.slice(0, 3)}</span>
+              {windows.length === 0 ? (
+                <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>Off</span>
+              ) : (
+                windows.map((w, idx) => (
+                  <span key={idx} style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
+                    <input
+                      type="time"
+                      step="900"
+                      value={w.start}
+                      onChange={(e) => setDayWindow(day, idx, 'start', e.target.value)}
+                      style={editTimeInput}
+                    />
+                    <span style={{ fontSize: '12px', color: '#6b7280' }}>–</span>
+                    <input
+                      type="time"
+                      step="900"
+                      value={w.end}
+                      onChange={(e) => setDayWindow(day, idx, 'end', e.target.value)}
+                      style={editTimeInput}
+                    />
+                    <button
+                      onClick={() => removeWindow(day, idx)}
+                      style={{ ...dangerBtn, padding: '2px 6px', fontSize: '11px' }}
+                      title="Remove this window"
+                    >×</button>
+                  </span>
+                ))
+              )}
               <button
-                onClick={() => clearDay(day)}
-                style={{ ...chipBtn, fontSize: '11px', padding: '2px 8px', marginLeft: 'auto' }}
-                title={`Clear ${day}`}
-              >Off</button>
-            )}
-          </div>
-        );
-      })}
-      <div style={{ display: 'flex', gap: '8px' }}>
+                onClick={() => addWindow(day)}
+                style={{ ...chipBtn, padding: '2px 8px', fontSize: '11px' }}
+              >+ window</button>
+              {windows.length > 0 && (
+                <button
+                  onClick={() => clearDay(day)}
+                  style={{ ...chipBtn, fontSize: '11px', padding: '2px 8px', marginLeft: 'auto' }}
+                  title={`Clear ${day}`}
+                >Off</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
         <button onClick={() => onSave(draft)} style={primaryBtn}>Save</button>
         <button onClick={onCancel} style={chipBtn}>Cancel</button>
       </div>

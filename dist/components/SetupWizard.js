@@ -258,7 +258,7 @@ function WeeklyAvailability({ availability, onChange, defaultWindow = { start: '
         onChange(next);
     };
     const clearAll = () => onChange({});
-    return (_jsxs("div", { children: [_jsxs("div", { style: { display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }, children: [_jsx("button", { onClick: setWeekdays9to5, style: presetBtn, children: "Weekdays 9\u20135" }), _jsx("button", { onClick: setAfterSchool, style: presetBtn, children: "After-school 3\u20137" }), _jsx("button", { onClick: copyMondayToWeekdays, style: presetBtn, children: "Copy Mon \u2192 Tue\u2013Fri" }), _jsx("button", { onClick: clearAll, style: { ...presetBtn, color: '#dc2626', borderColor: '#fca5a5' }, children: "Clear all" })] }), _jsx("div", { style: { display: 'grid', gap: '4px' }, children: DAYS.map((day, dayIdx) => {
+    return (_jsxs("div", { style: { width: '100%', overflowX: 'hidden' }, children: [_jsxs("div", { style: { display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }, children: [_jsx("button", { onClick: setWeekdays9to5, style: presetBtn, children: "Weekdays 9\u20135" }), _jsx("button", { onClick: setAfterSchool, style: presetBtn, children: "After-school 3\u20137" }), _jsx("button", { onClick: copyMondayToWeekdays, style: presetBtn, children: "Copy Mon \u2192 Tue\u2013Fri" }), _jsx("button", { onClick: clearAll, style: { ...presetBtn, color: '#dc2626', borderColor: '#fca5a5' }, children: "Clear all" })] }), _jsx("div", { style: { display: 'flex', flexDirection: 'column', gap: '4px' }, children: DAYS.map((day, dayIdx) => {
                     const windows = availability[day] || [];
                     return (_jsxs("div", { style: {
                             display: 'flex',
@@ -269,13 +269,14 @@ function WeeklyAvailability({ availability, onChange, defaultWindow = { start: '
                             borderRadius: '4px',
                             background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
                             border: '1px solid #e5e7eb',
+                            boxSizing: 'border-box',
+                            width: '100%',
                             minWidth: 0,
                         }, children: [_jsx("span", { style: { fontSize: '13px', fontWeight: 600, color: '#374151', width: '36px', flexShrink: 0 }, children: day.slice(0, 3) }), windows.length === 0 && (_jsx("span", { style: { fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }, children: "Off" })), windows.map((w, idx) => (_jsxs("span", { style: {
                                     display: 'inline-flex', alignItems: 'center', gap: '3px',
                                     backgroundColor: '#eff6ff', border: '1px solid #bfdbfe',
                                     borderRadius: '4px', padding: '2px 6px',
-                                    flexShrink: 0,
-                                }, children: [_jsx("input", { type: "time", value: w.start, onChange: (e) => updateWindow(day, idx, 'start', e.target.value), style: chipTimeInput }), _jsx("span", { style: { fontSize: '12px', color: '#6b7280' }, children: "\u2013" }), _jsx("input", { type: "time", value: w.end, onChange: (e) => updateWindow(day, idx, 'end', e.target.value), style: chipTimeInput }), _jsx("button", { onClick: () => removeWindow(day, idx), style: chipRemoveBtn, title: "Remove this window", children: "\u00D7" })] }, idx))), _jsx("button", { onClick: () => addWindow(day), style: addWindowBtn, children: "+ window" }), windows.length > 0 && (_jsx("button", { onClick: () => clearDay(day), style: { ...presetBtn, fontSize: '11px', padding: '2px 8px', marginLeft: 'auto' }, children: "Off" }))] }, day));
+                                }, children: [_jsx("input", { type: "time", step: "900", value: w.start, onChange: (e) => updateWindow(day, idx, 'start', e.target.value), style: chipTimeInput }), _jsx("span", { style: { fontSize: '12px', color: '#6b7280' }, children: "\u2013" }), _jsx("input", { type: "time", step: "900", value: w.end, onChange: (e) => updateWindow(day, idx, 'end', e.target.value), style: chipTimeInput }), _jsx("button", { onClick: () => removeWindow(day, idx), style: chipRemoveBtn, title: "Remove this window", children: "\u00D7" })] }, idx))), _jsx("button", { onClick: () => addWindow(day), style: addWindowBtn, children: "+ window" }), windows.length > 0 && (_jsx("button", { onClick: () => clearDay(day), style: { ...presetBtn, fontSize: '11px', padding: '2px 8px', marginLeft: 'auto' }, children: "Off" }))] }, day));
                 }) })] }));
 }
 const presetBtn = {

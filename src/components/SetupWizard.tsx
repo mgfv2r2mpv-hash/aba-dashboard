@@ -613,14 +613,14 @@ function WeeklyAvailability({
   const clearAll = () => onChange({});
 
   return (
-    <div>
+    <div style={{ width: '100%', overflowX: 'hidden' }}>
       <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
         <button onClick={setWeekdays9to5} style={presetBtn}>Weekdays 9–5</button>
         <button onClick={setAfterSchool} style={presetBtn}>After-school 3–7</button>
         <button onClick={copyMondayToWeekdays} style={presetBtn}>Copy Mon → Tue–Fri</button>
         <button onClick={clearAll} style={{ ...presetBtn, color: '#dc2626', borderColor: '#fca5a5' }}>Clear all</button>
       </div>
-      <div style={{ display: 'grid', gap: '4px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {DAYS.map((day, dayIdx) => {
           const windows = availability[day] || [];
           return (
@@ -635,6 +635,8 @@ function WeeklyAvailability({
                 borderRadius: '4px',
                 background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
                 border: '1px solid #e5e7eb',
+                boxSizing: 'border-box',
+                width: '100%',
                 minWidth: 0,
               }}
             >
@@ -651,11 +653,11 @@ function WeeklyAvailability({
                     display: 'inline-flex', alignItems: 'center', gap: '3px',
                     backgroundColor: '#eff6ff', border: '1px solid #bfdbfe',
                     borderRadius: '4px', padding: '2px 6px',
-                    flexShrink: 0,
                   }}
                 >
                   <input
                     type="time"
+                    step="900"
                     value={w.start}
                     onChange={(e) => updateWindow(day, idx, 'start', e.target.value)}
                     style={chipTimeInput}
@@ -663,6 +665,7 @@ function WeeklyAvailability({
                   <span style={{ fontSize: '12px', color: '#6b7280' }}>–</span>
                   <input
                     type="time"
+                    step="900"
                     value={w.end}
                     onChange={(e) => updateWindow(day, idx, 'end', e.target.value)}
                     style={chipTimeInput}

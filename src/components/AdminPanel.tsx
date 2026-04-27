@@ -11,6 +11,21 @@ interface AdminPanelProps {
 const API_BASE = '/api';
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
+function mergeWindows(windows: TimeWindow[]): TimeWindow[] {
+  if (windows.length === 0) return [];
+  const sorted = [...windows].sort((a, b) => a.start.localeCompare(b.start));
+  const result: TimeWindow[] = [{ ...sorted[0] }];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = result[result.length - 1]!;
+    if (sorted[i].start <= last.end) {
+      if (sorted[i].end > last.end) last.end = sorted[i].end;
+    } else {
+      result.push({ ...sorted[i] });
+    }
+  }
+  return result;
+}
+
 export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'settings'>('technicians');
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -221,15 +236,16 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
   const [editing, setEditing] = useState(false);
   const [hoursDraft, setHoursDraft] = useState<{ [idx: number]: string }>({});
 
+  const assignments = tech.assignments || [];
   const updateAssignment = (idx: number, patch: Partial<Technician['assignments'][number]>) => {
-    const next = tech.assignments.map((a, i) => i === idx ? { ...a, ...patch } : a);
+    const next = assignments.map((a, i) => i === idx ? { ...a, ...patch } : a);
     onChange({ assignments: next });
   };
   const addAssignment = () => {
-    onChange({ assignments: [...tech.assignments, { clientId: '', hoursPerWeek: 0, billable: true }] });
+    onChange({ assignments: [...assignments, { clientId: '', hoursPerWeek: 0, billable: true }] });
   };
   const removeAssignment = (idx: number) => {
-    onChange({ assignments: tech.assignments.filter((_, i) => i !== idx) });
+    onChange({ assignments: assignments.filter((_, i) => i !== idx) });
     setHoursDraft(prev => {
       const next = { ...prev };
       delete next[idx];
@@ -239,7 +255,7 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
   const commitHours = (idx: number, raw: string) => {
     const parsed = parseFloat(raw);
     const hours = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-    if (hours !== tech.assignments[idx]?.hoursPerWeek) updateAssignment(idx, { hoursPerWeek: hours });
+    if (hours !== assignments[idx]?.hoursPerWeek) updateAssignment(idx, { hoursPerWeek: hours });
     setHoursDraft(prev => {
       const next = { ...prev };
       delete next[idx];
@@ -286,14 +302,14 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
 
       <div style={{ marginTop: '12px' }}>
         <p style={{ fontWeight: 600, fontSize: '13px', marginBottom: '6px' }}>Assignments</p>
-        {tech.assignments.length > 0 && (
+        {assignments.length > 0 && (
           <div style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
             <div style={{ flex: 2, fontSize: '11px', color: '#6b7280', fontWeight: 600, minWidth: 0 }}>Client</div>
             <div style={{ flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600, minWidth: 0 }}>Hrs/wk</div>
             <div style={{ width: '32px', flexShrink: 0 }} />
           </div>
         )}
-        {tech.assignments.map((a, idx) => (
+        {assignments.map((a, idx) => (
           <div key={idx} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
             <select
               value={a.clientId}
@@ -355,6 +371,7 @@ function AvailabilityEditor({ initial, onSave, onCancel }: {
   onCancel: () => void;
 }) {
   const [draft, setDraft] = useState<{ [key in DayOfWeek]?: TimeWindow[] }>(initial || {});
+  const [presets, setPresets] = useState({ mornings: false, midday: false, evenings: false });
 
   const setDayWindow = (day: DayOfWeek, idx: number, field: 'start' | 'end', value: string) => {
     const next = { ...draft };
@@ -383,36 +400,43 @@ function AvailabilityEditor({ initial, onSave, onCancel }: {
     const monWindows = draft['Monday'] || [];
     const next = { ...draft };
     (['Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
-      if (monWindows.length === 0) {
-        delete next[d];
-      } else {
-        next[d] = monWindows.map(w => ({ ...w }));
-      }
+      if (monWindows.length === 0) delete next[d];
+      else next[d] = monWindows.map(w => ({ ...w }));
     });
     setDraft(next);
   };
-  const setStandardWeekdays = () => {
-    const next = { ...draft };
+  const clearAll = () => { setPresets({ mornings: false, midday: false, evenings: false }); setDraft({}); };
+
+  const togglePreset = (key: 'mornings' | 'midday' | 'evenings') => {
+    const next = { ...presets, [key]: !presets[key] };
+    setPresets(next);
+    const windows: TimeWindow[] = [];
+    if (next.mornings) windows.push({ start: '07:00', end: '12:00' });
+    if (next.midday) windows.push({ start: '10:00', end: '15:00' });
+    if (next.evenings) windows.push({ start: '15:00', end: '20:00' });
+    const merged = mergeWindows(windows);
+    const nextDraft = { ...draft };
     (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
-      next[d] = [{ start: '09:00', end: '17:00' }];
+      if (merged.length === 0) delete nextDraft[d];
+      else nextDraft[d] = merged.map(w => ({ ...w }));
     });
-    setDraft(next);
+    setDraft(nextDraft);
   };
-  const clearAll = () => setDraft({});
 
   return (
     <div style={{ width: '100%', overflowX: 'hidden', marginTop: '8px' }}>
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
-        <button onClick={setStandardWeekdays} style={chipBtn} title="Set Mon–Fri 9 AM–5 PM">
-          Weekdays 9–5
-        </button>
-        <button onClick={copyMondayToWeekdays} style={chipBtn} title="Copy Monday's windows to Tue–Fri">
-          Copy Mon → Tue–Fri
-        </button>
-        <button
-          onClick={clearAll}
-          style={{ ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }}
-        >Clear all</button>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px', alignItems: 'center' }}>
+        {(['mornings', 'midday', 'evenings'] as const).map(key => {
+          const label = key === 'mornings' ? 'Mornings 7–12' : key === 'midday' ? 'Midday 10–3' : 'Evenings 3–8';
+          return (
+            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox" checked={presets[key]} onChange={() => togglePreset(key)} style={{ cursor: 'pointer' }} />
+              {label}
+            </label>
+          );
+        })}
+        <button onClick={copyMondayToWeekdays} style={chipBtn}>Copy Mon → Tue–Fri</button>
+        <button onClick={clearAll} style={{ ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }}>Clear all</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {DAYS.map((day, dayIdx) => {

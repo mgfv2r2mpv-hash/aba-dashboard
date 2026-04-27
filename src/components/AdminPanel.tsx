@@ -237,6 +237,7 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
   const [hoursDraft, setHoursDraft] = useState<{ [idx: number]: string }>({});
 
   const assignments = tech.assignments || [];
+  const safeClients = clients || [];
   const updateAssignment = (idx: number, patch: Partial<Technician['assignments'][number]>) => {
     const next = assignments.map((a, i) => i === idx ? { ...a, ...patch } : a);
     onChange({ assignments: next });
@@ -317,7 +318,7 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
               style={{ ...inputStyle, flex: 2, width: 'auto', minWidth: 0 }}
             >
               <option value="">— Pick client —</option>
-              {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+              {safeClients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
             </select>
             <input
               type="number"

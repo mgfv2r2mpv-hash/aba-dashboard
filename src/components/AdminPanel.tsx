@@ -151,6 +151,7 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
                 <TechnicianCard
                   key={tech.id}
                   tech={tech}
+                  clients={data.clients}
                   saving={savingId === tech.id}
                   onChange={(patch) => persistTechnician(tech.id, patch)}
                   onRemove={() => removeTechnician(tech.id)}
@@ -209,14 +210,42 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
   );
 }
 
-function TechnicianCard({ tech, saving, onChange, onRemove }: {
+function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
   tech: Technician;
+  clients: Client[];
   saving: boolean;
   onChange: (patch: Partial<Technician>) => void;
   onRemove: () => void;
 }) {
   const [name, setName] = useState(tech.name);
   const [editing, setEditing] = useState(false);
+  const [hoursDraft, setHoursDraft] = useState<{ [idx: number]: string }>({});
+
+  const updateAssignment = (idx: number, patch: Partial<Technician['assignments'][number]>) => {
+    const next = tech.assignments.map((a, i) => i === idx ? { ...a, ...patch } : a);
+    onChange({ assignments: next });
+  };
+  const addAssignment = () => {
+    onChange({ assignments: [...tech.assignments, { clientId: '', hoursPerWeek: 0, billable: true }] });
+  };
+  const removeAssignment = (idx: number) => {
+    onChange({ assignments: tech.assignments.filter((_, i) => i !== idx) });
+    setHoursDraft(prev => {
+      const next = { ...prev };
+      delete next[idx];
+      return next;
+    });
+  };
+  const commitHours = (idx: number, raw: string) => {
+    const parsed = parseFloat(raw);
+    const hours = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    if (hours !== tech.assignments[idx]?.hoursPerWeek) updateAssignment(idx, { hoursPerWeek: hours });
+    setHoursDraft(prev => {
+      const next = { ...prev };
+      delete next[idx];
+      return next;
+    });
+  };
   return (
     <div style={cardStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px', gap: '8px', flexWrap: 'wrap' }}>
@@ -255,14 +284,53 @@ function TechnicianCard({ tech, saving, onChange, onRemove }: {
         />
       )}
 
-      {tech.assignments && tech.assignments.length > 0 && (
-        <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '8px' }}>
-          <p style={{ marginBottom: '4px', fontWeight: '600' }}>Assignments:</p>
-          {tech.assignments.map((a, idx) => (
-            <p key={idx}>• {a.clientId || '(unassigned)'}: {a.hoursPerWeek}h/week</p>
-          ))}
-        </div>
-      )}
+      <div style={{ marginTop: '12px' }}>
+        <p style={{ fontWeight: 600, fontSize: '13px', marginBottom: '6px' }}>Assignments</p>
+        {tech.assignments.length > 0 && (
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
+            <div style={{ flex: 2, fontSize: '11px', color: '#6b7280', fontWeight: 600, minWidth: 0 }}>Client</div>
+            <div style={{ flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600, minWidth: 0 }}>Hrs/wk</div>
+            <div style={{ width: '32px', flexShrink: 0 }} />
+          </div>
+        )}
+        {tech.assignments.map((a, idx) => (
+          <div key={idx} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
+            <select
+              value={a.clientId}
+              onChange={(e) => updateAssignment(idx, { clientId: e.target.value })}
+              style={{ ...inputStyle, flex: 2, width: 'auto', minWidth: 0 }}
+            >
+              <option value="">— Pick client —</option>
+              {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+            <input
+              type="number"
+              step="0.5"
+              min="0"
+              value={hoursDraft[idx] ?? String(a.hoursPerWeek)}
+              onChange={(e) => setHoursDraft({ ...hoursDraft, [idx]: e.target.value })}
+              onBlur={(e) => commitHours(idx, e.target.value)}
+              style={{ ...inputStyle, flex: 1, width: 'auto', minWidth: 0 }}
+            />
+            <button
+              onClick={() => removeAssignment(idx)}
+              style={{
+                width: '32px', height: '32px', padding: 0, backgroundColor: '#fee2e2', color: '#dc2626',
+                border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
+                fontSize: '18px', lineHeight: 1,
+              }}
+              aria-label="Remove assignment"
+            >×</button>
+          </div>
+        ))}
+        <button
+          onClick={addAssignment}
+          style={{
+            padding: '6px 12px', fontSize: '13px', backgroundColor: 'white', color: '#3b82f6',
+            border: '1px solid #3b82f6', borderRadius: '4px', cursor: 'pointer',
+          }}
+        >+ Assignment</button>
+      </div>
     </div>
   );
 }

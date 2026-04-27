@@ -163,7 +163,41 @@ function AvailabilityEditor({ initial, onSave, onCancel }) {
             delete next[day];
         setDraft(next);
     };
-    return (_jsxs("div", { style: { display: 'grid', gap: '8px', marginTop: '8px' }, children: [DAYS.map(day => (_jsxs("div", { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }, children: [_jsx("span", { style: { width: '40px', fontSize: '12px', fontWeight: 600 }, children: day.slice(0, 3) }), (draft[day] || []).map((w, idx) => (_jsxs("span", { style: { display: 'inline-flex', gap: '4px', alignItems: 'center' }, children: [_jsx("input", { type: "time", value: w.start, onChange: (e) => setDayWindow(day, idx, 'start', e.target.value), style: { fontSize: '12px' } }), _jsx("span", { children: "\u2013" }), _jsx("input", { type: "time", value: w.end, onChange: (e) => setDayWindow(day, idx, 'end', e.target.value), style: { fontSize: '12px' } }), _jsx("button", { onClick: () => removeWindow(day, idx), style: { ...dangerBtn, padding: '2px 6px', fontSize: '10px' }, children: "\u00D7" })] }, idx))), _jsx("button", { onClick: () => addWindow(day), style: { ...chipBtn, padding: '2px 8px', fontSize: '11px' }, children: "+ window" })] }, day))), _jsxs("div", { style: { display: 'flex', gap: '8px' }, children: [_jsx("button", { onClick: () => onSave(draft), style: primaryBtn, children: "Save" }), _jsx("button", { onClick: onCancel, style: chipBtn, children: "Cancel" })] })] }));
+    const clearDay = (day) => {
+        const next = { ...draft };
+        delete next[day];
+        setDraft(next);
+    };
+    const copyMondayToWeekdays = () => {
+        const monWindows = draft['Monday'] || [];
+        const next = { ...draft };
+        ['Tuesday', 'Wednesday', 'Thursday', 'Friday'].forEach(d => {
+            if (monWindows.length === 0) {
+                delete next[d];
+            }
+            else {
+                next[d] = monWindows.map(w => ({ ...w }));
+            }
+        });
+        setDraft(next);
+    };
+    const setStandardWeekdays = () => {
+        const next = { ...draft };
+        ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].forEach(d => {
+            next[d] = [{ start: '09:00', end: '17:00' }];
+        });
+        setDraft(next);
+    };
+    const clearAll = () => setDraft({});
+    return (_jsxs("div", { style: { display: 'grid', gap: '8px', marginTop: '8px' }, children: [_jsxs("div", { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' }, children: [_jsx("button", { onClick: setStandardWeekdays, style: chipBtn, title: "Set Mon\u2013Fri 9 AM\u20135 PM", children: "Weekdays 9\u20135" }), _jsx("button", { onClick: copyMondayToWeekdays, style: chipBtn, title: "Copy Monday's windows to Tue\u2013Fri", children: "Copy Mon \u2192 Tue\u2013Fri" }), _jsx("button", { onClick: clearAll, style: { ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }, children: "Clear all" })] }), DAYS.map((day, dayIdx) => {
+                const windows = draft[day] || [];
+                return (_jsxs("div", { style: {
+                        display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap',
+                        padding: '6px 8px', borderRadius: '4px',
+                        background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
+                        border: '1px solid #e5e7eb',
+                    }, children: [_jsx("span", { style: { width: '44px', fontSize: '13px', fontWeight: 600 }, children: day.slice(0, 3) }), windows.length === 0 ? (_jsx("span", { style: { fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }, children: "Off" })) : (windows.map((w, idx) => (_jsxs("span", { style: { display: 'inline-flex', gap: '3px', alignItems: 'center' }, children: [_jsx("input", { type: "time", value: w.start, onChange: (e) => setDayWindow(day, idx, 'start', e.target.value), style: editTimeInput }), _jsx("span", { style: { fontSize: '12px', color: '#6b7280' }, children: "\u2013" }), _jsx("input", { type: "time", value: w.end, onChange: (e) => setDayWindow(day, idx, 'end', e.target.value), style: editTimeInput }), _jsx("button", { onClick: () => removeWindow(day, idx), style: { ...dangerBtn, padding: '2px 6px', fontSize: '11px' }, title: "Remove this window", children: "\u00D7" })] }, idx)))), _jsx("button", { onClick: () => addWindow(day), style: { ...chipBtn, padding: '2px 8px', fontSize: '11px' }, children: "+ window" }), windows.length > 0 && (_jsx("button", { onClick: () => clearDay(day), style: { ...chipBtn, fontSize: '11px', padding: '2px 8px', marginLeft: 'auto' }, title: `Clear ${day}`, children: "Off" }))] }, day));
+            }), _jsxs("div", { style: { display: 'flex', gap: '8px' }, children: [_jsx("button", { onClick: () => onSave(draft), style: primaryBtn, children: "Save" }), _jsx("button", { onClick: onCancel, style: chipBtn, children: "Cancel" })] })] }));
 }
 function ClientCard({ client, saving, onChange, onRemove }) {
     const [name, setName] = useState(client.name);
@@ -221,5 +255,12 @@ const chipBtn = {
     background: 'white',
     cursor: 'pointer',
     color: '#374151',
+};
+const editTimeInput = {
+    fontSize: '13px',
+    padding: '3px 6px',
+    border: '1px solid #d1d5db',
+    borderRadius: '4px',
+    fontFamily: 'inherit',
 };
 //# sourceMappingURL=AdminPanel.js.map

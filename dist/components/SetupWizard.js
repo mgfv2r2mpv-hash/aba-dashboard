@@ -260,30 +260,42 @@ export default function SetupWizard({ onComplete, onCancel }) {
                             }, children: "Next" }))] })] }) }));
 }
 function DayAvailabilityRow({ availability, onChange }) {
-    return (_jsx("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', fontSize: '11px' }, children: DAYS.map(day => {
-            const windows = availability[day] || [];
-            return (_jsxs("div", { style: {
-                    border: '1px solid #d1d5db',
-                    borderRadius: '4px',
-                    padding: '4px',
-                    backgroundColor: windows.length > 0 ? 'white' : '#f3f4f6',
-                }, children: [_jsx("div", { style: { fontWeight: '600', textAlign: 'center', marginBottom: '4px' }, children: day.slice(0, 3) }), windows.length > 0 ? (_jsxs(_Fragment, { children: [windows.map((window, idx) => (_jsxs("div", { style: { marginBottom: '4px', display: 'flex', gap: '2px' }, children: [_jsxs("div", { style: { flex: 1 }, children: [_jsx("input", { type: "time", value: window.start, onChange: (e) => onChange(day, `windowIdx_${idx}_start`, e.target.value), style: { width: '100%', fontSize: '10px', padding: '2px' } }), _jsx("input", { type: "time", value: window.end, onChange: (e) => onChange(day, `windowIdx_${idx}_end`, e.target.value), style: { width: '100%', fontSize: '10px', padding: '2px', marginTop: '1px' } })] }), windows.length > 1 && (_jsx("button", { onClick: () => onChange(day, 'removeWindow', idx), style: {
-                                            padding: '1px 4px', fontSize: '9px',
-                                            backgroundColor: '#fee2e2', color: '#dc2626', border: 'none',
-                                            borderRadius: '2px', cursor: 'pointer', alignSelf: 'flex-start', marginTop: '2px',
-                                        }, children: "\u00D7" }))] }, idx))), _jsx("button", { onClick: () => onChange(day, 'add'), style: {
-                                    width: '100%', padding: '2px 0', fontSize: '9px',
-                                    border: '1px solid #3b82f6', backgroundColor: 'white', color: '#3b82f6',
-                                    borderRadius: '2px', cursor: 'pointer', marginBottom: '2px',
-                                }, children: "+ window" }), _jsx("button", { onClick: () => onChange(day, 'clear'), style: {
-                                    width: '100%', padding: '2px 0', fontSize: '9px', cursor: 'pointer',
-                                    border: 'none', backgroundColor: '#fee2e2', color: '#dc2626',
-                                    borderRadius: '2px',
-                                }, children: "Off" })] })) : (_jsx("button", { onClick: () => onChange(day, 'add'), style: {
-                            width: '100%', padding: '4px 0', fontSize: '11px',
-                            border: 'none', backgroundColor: 'transparent',
-                            color: '#3b82f6', cursor: 'pointer',
-                        }, children: "+ add" }))] }, day));
-        }) }));
+    // Hide weekend columns by default — they push the row off-screen on iPhone.
+    // Auto-show if there's already weekend availability so existing data is editable.
+    const hasWeekendData = (availability.Saturday && availability.Saturday.length > 0) ||
+        (availability.Sunday && availability.Sunday.length > 0);
+    const [showWeekend, setShowWeekend] = useState(false);
+    const weekendVisible = showWeekend || hasWeekendData;
+    const visibleDays = weekendVisible ? DAYS : DAYS.filter(d => d !== 'Saturday' && d !== 'Sunday');
+    const colCount = visibleDays.length;
+    return (_jsxs(_Fragment, { children: [_jsxs("label", { style: {
+                    display: 'flex', gap: '6px', alignItems: 'center',
+                    fontSize: '11px', color: '#6b7280', marginBottom: '6px',
+                    cursor: hasWeekendData ? 'not-allowed' : 'pointer',
+                }, children: [_jsx("input", { type: "checkbox", checked: weekendVisible, disabled: hasWeekendData, onChange: (e) => setShowWeekend(e.target.checked) }), _jsxs("span", { children: ["Show weekend", hasWeekendData ? ' (auto)' : ''] })] }), _jsx("div", { style: { display: 'grid', gridTemplateColumns: `repeat(${colCount}, 1fr)`, gap: '4px', fontSize: '11px' }, children: visibleDays.map(day => {
+                    const windows = availability[day] || [];
+                    return (_jsxs("div", { style: {
+                            border: '1px solid #d1d5db',
+                            borderRadius: '4px',
+                            padding: '4px',
+                            backgroundColor: windows.length > 0 ? 'white' : '#f3f4f6',
+                        }, children: [_jsx("div", { style: { fontWeight: '600', textAlign: 'center', marginBottom: '4px' }, children: day.slice(0, 3) }), windows.length > 0 ? (_jsxs(_Fragment, { children: [windows.map((window, idx) => (_jsxs("div", { style: { marginBottom: '4px', display: 'flex', gap: '2px' }, children: [_jsxs("div", { style: { flex: 1 }, children: [_jsx("input", { type: "time", value: window.start, onChange: (e) => onChange(day, `windowIdx_${idx}_start`, e.target.value), style: { width: '100%', fontSize: '10px', padding: '2px' } }), _jsx("input", { type: "time", value: window.end, onChange: (e) => onChange(day, `windowIdx_${idx}_end`, e.target.value), style: { width: '100%', fontSize: '10px', padding: '2px', marginTop: '1px' } })] }), windows.length > 1 && (_jsx("button", { onClick: () => onChange(day, 'removeWindow', idx), style: {
+                                                    padding: '1px 4px', fontSize: '9px',
+                                                    backgroundColor: '#fee2e2', color: '#dc2626', border: 'none',
+                                                    borderRadius: '2px', cursor: 'pointer', alignSelf: 'flex-start', marginTop: '2px',
+                                                }, children: "\u00D7" }))] }, idx))), _jsx("button", { onClick: () => onChange(day, 'add'), style: {
+                                            width: '100%', padding: '2px 0', fontSize: '9px',
+                                            border: '1px solid #3b82f6', backgroundColor: 'white', color: '#3b82f6',
+                                            borderRadius: '2px', cursor: 'pointer', marginBottom: '2px',
+                                        }, children: "+ window" }), _jsx("button", { onClick: () => onChange(day, 'clear'), style: {
+                                            width: '100%', padding: '2px 0', fontSize: '9px', cursor: 'pointer',
+                                            border: 'none', backgroundColor: '#fee2e2', color: '#dc2626',
+                                            borderRadius: '2px',
+                                        }, children: "Off" })] })) : (_jsx("button", { onClick: () => onChange(day, 'add'), style: {
+                                    width: '100%', padding: '4px 0', fontSize: '11px',
+                                    border: 'none', backgroundColor: 'transparent',
+                                    color: '#3b82f6', cursor: 'pointer',
+                                }, children: "+ add" }))] }, day));
+                }) })] }));
 }
 //# sourceMappingURL=SetupWizard.js.map

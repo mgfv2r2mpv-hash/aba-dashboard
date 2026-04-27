@@ -620,9 +620,32 @@ interface DayAvailabilityRowProps {
 }
 
 function DayAvailabilityRow({ availability, onChange }: DayAvailabilityRowProps) {
+  // Hide weekend columns by default — they push the row off-screen on iPhone.
+  // Auto-show if there's already weekend availability so existing data is editable.
+  const hasWeekendData =
+    (availability.Saturday && availability.Saturday.length > 0) ||
+    (availability.Sunday && availability.Sunday.length > 0);
+  const [showWeekend, setShowWeekend] = useState(false);
+  const weekendVisible = showWeekend || hasWeekendData;
+  const visibleDays = weekendVisible ? DAYS : DAYS.filter(d => d !== 'Saturday' && d !== 'Sunday');
+  const colCount = visibleDays.length;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', fontSize: '11px' }}>
-      {DAYS.map(day => {
+    <>
+      <label style={{
+        display: 'flex', gap: '6px', alignItems: 'center',
+        fontSize: '11px', color: '#6b7280', marginBottom: '6px',
+        cursor: hasWeekendData ? 'not-allowed' : 'pointer',
+      }}>
+        <input
+          type="checkbox"
+          checked={weekendVisible}
+          disabled={hasWeekendData}
+          onChange={(e) => setShowWeekend(e.target.checked)}
+        />
+        <span>Show weekend{hasWeekendData ? ' (auto)' : ''}</span>
+      </label>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${colCount}, 1fr)`, gap: '4px', fontSize: '11px' }}>
+      {visibleDays.map(day => {
         const windows = availability[day] || [];
         return (
           <div key={day} style={{
@@ -694,6 +717,7 @@ function DayAvailabilityRow({ availability, onChange }: DayAvailabilityRowProps)
           </div>
         );
       })}
-    </div>
+      </div>
+    </>
   );
 }

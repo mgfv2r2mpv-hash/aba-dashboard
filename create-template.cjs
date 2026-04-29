@@ -7,11 +7,11 @@ const XLSX = require('xlsx');
 const workbook = XLSX.utils.book_new();
 
 // --- Clients ---------------------------------------------------------------
-// Client AA: M-Th 4:30pm – 7:00pm, off Fri/Sat/Sun
+// Client 1: M-Th 4:30pm – 7:00pm, off Fri/Sat/Sun
 const clientsData = [
   {
-    id: 'AA',
-    name: 'Client AA',
+    id: 'C001',
+    name: 'Client 1',
     MondayStart: '16:30',
     MondayEnd: '19:00',
     TuesdayStart: '16:30',

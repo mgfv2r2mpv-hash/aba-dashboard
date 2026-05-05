@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution } from './types';
 import Calendar from './components/Calendar';
 import ConflictPanel from './components/ConflictPanel';
@@ -27,6 +30,20 @@ function saveSessionSettings(settings: AISettings) {
   try {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(settings));
   } catch (_e) { /* ignore */ }
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      // Strip the "data:<mime>;base64," prefix that FileReader prepends.
+      const comma = dataUrl.indexOf(',');
+      resolve(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl);
+    };
+    reader.readAsDataURL(blob);
+  });
 }
 
 export default function App() {
@@ -195,16 +212,41 @@ export default function App() {
         { embeddedConfig: pendingEmbedBlob },
         { responseType: 'blob' }
       );
+      const blob = new Blob([response.data]);
+      const filename = 'schedule.enc.xlsx';
 
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'schedule.enc.xlsx');
-      document.body.appendChild(link);
-      link.click();
-      link.parentElement?.removeChild(link);
+      if (Capacitor.isNativePlatform()) {
+        // iOS WKWebView ignores <a download>. Write the file to the app's
+        // Cache directory and pop the iOS share sheet so the user can
+        // Save to Files / AirDrop / email.
+        const base64 = await blobToBase64(blob);
+        const written = await Filesystem.writeFile({
+          path: filename,
+          data: base64,
+          directory: Directory.Cache,
+        });
+        try {
+          await Share.share({
+            title: 'ABA Schedule',
+            url: written.uri,
+            dialogTitle: 'Save your schedule',
+          });
+        } catch (shareErr: any) {
+          // User canceled the share sheet — not an error worth alerting on.
+          if (!/cancel/i.test(shareErr?.message || '')) throw shareErr;
+        }
+      } else {
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        link.parentElement?.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      }
     } catch (error: any) {
-      alert('Error downloading file: ' + error.message);
+      alert('Error downloading file: ' + (error.message || error));
     }
   };
 

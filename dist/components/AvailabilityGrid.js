@@ -50,60 +50,53 @@ const matrixToWindows = (matrix, slotsPerHour) => {
     });
     return result;
 };
-// Union earliest-start and latest-end across the clinician's week, in HOURS.
-// Returns null if no clinician availability is configured so callers fall back.
-function computeClinicianHourRange(clinician) {
+// Earliest hour across the clinician's weekly windows, snapped down to the hour.
+function earliestClinicianHour(clinician) {
     if (!clinician)
         return null;
-    let minStart = Infinity;
-    let maxEnd = -Infinity;
+    let min = Infinity;
     Object.values(clinician).forEach(windows => {
         (windows || []).forEach(w => {
-            const [sh, sm] = w.start.split(':').map(Number);
-            const [eh, em] = w.end.split(':').map(Number);
-            const s = sh + sm / 60;
-            const e = eh + em / 60;
-            if (s < minStart)
-                minStart = s;
-            if (e > maxEnd)
-                maxEnd = e;
+            const [h, m] = w.start.split(':').map(Number);
+            const minutes = h * 60 + m;
+            if (minutes < min)
+                min = minutes;
         });
     });
-    if (!Number.isFinite(minStart) || !Number.isFinite(maxEnd))
+    if (!Number.isFinite(min))
         return null;
-    const startHour = Math.floor(minStart);
-    const endHour = Math.ceil(maxEnd);
-    return { startHour, endHour: Math.max(endHour, startHour + 1) };
+    return Math.floor(min / 60);
 }
-export default function AvailabilityGrid({ availability, onChange, clinicianAvailability }) {
+export default function AvailabilityGrid({ availability, onChange, clinicianAvailability, }) {
     const [granularity, setGranularity] = useState(30);
     const slotsPerHour = 60 / granularity;
     const totalSlots = HOURS_PER_DAY * slotsPerHour;
     const [matrix, setMatrix] = useState(() => windowsToMatrix(availability, slotsPerHour));
-    const [showAllHours, setShowAllHours] = useState(false);
     const dragStartRef = useRef(null);
     const dragModeRef = useRef(null);
     const matrixRef = useRef(matrix);
     const baseRef = useRef(null);
-    // Default visible range comes from clinician availability (working hours).
-    // Falls back to 06:00–22:00. Auto-expands to 24h if any selection falls
-    // outside that window, so users can see and edit those late/early slots.
-    const clinicianRange = computeClinicianHourRange(clinicianAvailability);
-    const defaultStartHour = clinicianRange ? clinicianRange.startHour : 6;
-    const defaultEndHour = clinicianRange ? clinicianRange.endHour : 22;
-    const defaultStartSlot = defaultStartHour * slotsPerHour;
-    const defaultEndSlot = defaultEndHour * slotsPerHour;
-    const hasOutsideClinicianRange = matrix.some(row => row.some((on, s) => on && (s < defaultStartSlot || s >= defaultEndSlot)));
-    const visibleStartSlot = showAllHours || hasOutsideClinicianRange ? 0 : defaultStartSlot;
-    const visibleEndSlot = showAllHours || hasOutsideClinicianRange ? totalSlots : defaultEndSlot;
-    const visibleStartHour = visibleStartSlot / slotsPerHour;
-    const visibleEndHour = visibleEndSlot / slotsPerHour;
+    const gridScrollRef = useRef(null);
+    const initialScrollDoneRef = useRef(false);
     useEffect(() => {
         matrixRef.current = matrix;
     }, [matrix]);
+    // Re-derive matrix from availability when prop or granularity changes
     useEffect(() => {
         setMatrix(windowsToMatrix(availability, slotsPerHour));
     }, [availability, slotsPerHour]);
+    // Scroll to the clinician's earliest hour on first mount so the user doesn't
+    // start staring at midnight.
+    useEffect(() => {
+        if (initialScrollDoneRef.current)
+            return;
+        const startHour = earliestClinicianHour(clinicianAvailability);
+        if (startHour == null || !gridScrollRef.current)
+            return;
+        const slotWidth = granularity === 15 ? 8 : granularity === 30 ? 14 : 26;
+        gridScrollRef.current.scrollLeft = startHour * slotsPerHour * slotWidth;
+        initialScrollDoneRef.current = true;
+    }, [clinicianAvailability, granularity, slotsPerHour]);
     const commitMatrix = (m) => {
         setMatrix(m);
         onChange(matrixToWindows(m, slotsPerHour));
@@ -205,8 +198,6 @@ export default function AvailabilityGrid({ availability, onChange, clinicianAvai
     const slotWidth = granularity === 15 ? 8 : granularity === 30 ? 14 : 26;
     const cellHeight = 26;
     const dayLabelWidth = 44;
-    const visibleSlots = visibleEndSlot - visibleStartSlot;
-    const visibleHours = visibleEndHour - visibleStartHour;
     const windowsByDay = useMemo(() => matrixToWindows(matrix, slotsPerHour), [matrix, slotsPerHour]);
     const updateWindow = (day, idx, field, value) => {
         const next = { ...windowsByDay };
@@ -227,18 +218,13 @@ export default function AvailabilityGrid({ availability, onChange, clinicianAvai
             delete next[day];
         onChange(next);
     };
-    return (_jsxs("div", { style: { marginTop: '12px' }, children: [_jsxs("div", { style: {
-                    display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center',
-                }, children: [_jsx("button", { onClick: setStandardWeekdays, style: chipBtn, title: "Set Mon\u2013Fri 9 AM\u20135 PM", children: "Weekdays 9\u20135" }), _jsx("button", { onClick: copyMondayToWeekdays, style: chipBtn, title: "Copy Monday's selection to Tue\u2013Fri", children: "Copy Mon \u2192 Tue\u2013Fri" }), _jsx("button", { onClick: clearAll, style: { ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }, children: "Clear all" }), _jsxs("div", { style: { marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }, children: [_jsxs("div", { style: { display: 'flex', gap: '4px', alignItems: 'center', fontSize: '12px', color: '#6b7280' }, children: [_jsx("span", { children: "Snap:" }), [15, 30, 60].map(g => (_jsx("button", { onClick: () => setGranularity(g), style: {
-                                            ...chipBtn,
-                                            padding: '2px 8px',
-                                            background: granularity === g ? '#3b82f6' : 'white',
-                                            color: granularity === g ? 'white' : '#374151',
-                                            borderColor: granularity === g ? '#3b82f6' : '#d1d5db',
-                                        }, children: g === 60 ? '1h' : `${g}m` }, g)))] }), _jsxs("label", { style: {
-                                    display: 'flex', gap: '4px', alignItems: 'center', fontSize: '12px',
-                                    cursor: hasOutsideClinicianRange ? 'not-allowed' : 'pointer',
-                                }, children: [_jsx("input", { type: "checkbox", checked: showAllHours || hasOutsideClinicianRange, disabled: hasOutsideClinicianRange, onChange: (e) => setShowAllHours(e.target.checked) }), _jsxs("span", { children: ["24h", hasOutsideClinicianRange ? ' (auto)' : ''] })] })] })] }), _jsx("div", { style: { fontSize: '12px', color: '#6b7280', marginBottom: '6px' }, children: "Click and drag to paint availability. Click a day name to toggle the entire day. Or type exact times below." }), _jsxs("div", { onMouseLeave: handleEnd, onMouseUp: handleEnd, onTouchStart: handleTouchStart, onTouchMove: handleTouchMove, onTouchEnd: handleEnd, onTouchCancel: handleEnd, style: {
+    return (_jsxs("div", { style: { marginTop: '12px' }, children: [_jsxs("div", { style: { display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center' }, children: [_jsx("button", { onClick: setStandardWeekdays, style: chipBtn, title: "Set Mon\u2013Fri 9 AM\u20135 PM", children: "Weekdays 9\u20135" }), _jsx("button", { onClick: copyMondayToWeekdays, style: chipBtn, title: "Copy Monday's selection to Tue\u2013Fri", children: "Copy Mon \u2192 Tue\u2013Fri" }), _jsx("button", { onClick: clearAll, style: { ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }, children: "Clear all" }), _jsxs("div", { style: { marginLeft: 'auto', display: 'flex', gap: '4px', alignItems: 'center', fontSize: '12px', color: '#6b7280' }, children: [_jsx("span", { children: "Snap:" }), [15, 30, 60].map(g => (_jsx("button", { onClick: () => setGranularity(g), style: {
+                                    ...chipBtn,
+                                    padding: '2px 8px',
+                                    background: granularity === g ? '#3b82f6' : 'white',
+                                    color: granularity === g ? 'white' : '#374151',
+                                    borderColor: granularity === g ? '#3b82f6' : '#d1d5db',
+                                }, children: g === 60 ? '1h' : `${g}m` }, g)))] })] }), _jsx("div", { style: { fontSize: '12px', color: '#6b7280', marginBottom: '6px' }, children: "Click and drag to paint availability. Click a day name to toggle the entire day. Or type exact times below." }), _jsxs("div", { ref: gridScrollRef, onMouseLeave: handleEnd, onMouseUp: handleEnd, onTouchStart: handleTouchStart, onTouchMove: handleTouchMove, onTouchEnd: handleEnd, onTouchCancel: handleEnd, style: {
                     overflowX: 'auto',
                     border: '1px solid #d1d5db',
                     borderRadius: '6px',
@@ -246,41 +232,29 @@ export default function AvailabilityGrid({ availability, onChange, clinicianAvai
                     backgroundColor: '#f9fafb',
                     touchAction: 'none',
                     userSelect: 'none',
-                }, children: [_jsxs("div", { style: { display: 'flex', marginBottom: '2px' }, children: [_jsx("div", { style: { width: dayLabelWidth, flexShrink: 0 } }), Array.from({ length: visibleHours }).map((_, i) => {
-                                const h = visibleStartHour + i;
-                                const labelEvery = granularity === 60 ? 1 : 2;
-                                return (_jsx("div", { style: {
-                                        width: slotWidth * slotsPerHour,
-                                        flexShrink: 0,
-                                        fontSize: '10px',
-                                        color: '#6b7280',
-                                        textAlign: 'left',
-                                        borderLeft: i === 0 ? 'none' : '1px solid #e5e7eb',
-                                        paddingLeft: '2px',
-                                        lineHeight: '14px',
-                                    }, children: (h - visibleStartHour) % labelEvery === 0 ? `${h}` : '' }, h));
-                            })] }), DAYS.map((day, dayIdx) => {
+                }, children: [_jsxs("div", { style: { display: 'flex', marginBottom: '2px' }, children: [_jsx("div", { style: { width: dayLabelWidth, flexShrink: 0 } }), Array.from({ length: HOURS_PER_DAY }).map((_, h) => (_jsx("div", { style: {
+                                    width: slotWidth * slotsPerHour,
+                                    flexShrink: 0,
+                                    fontSize: '10px',
+                                    color: '#6b7280',
+                                    textAlign: 'left',
+                                    borderLeft: h === 0 ? 'none' : '1px solid #e5e7eb',
+                                    paddingLeft: '2px',
+                                    lineHeight: '14px',
+                                }, children: h % (granularity === 60 ? 1 : 2) === 0 ? `${h}` : '' }, h)))] }), DAYS.map((day, dayIdx) => {
                         const allOn = matrix[dayIdx].every(v => v);
                         return (_jsxs("div", { style: { display: 'flex', alignItems: 'center', marginBottom: '1px' }, children: [_jsx("button", { onClick: () => selectWholeDay(dayIdx, !allOn), style: {
-                                        width: dayLabelWidth,
-                                        flexShrink: 0,
-                                        height: cellHeight,
-                                        fontSize: '11px',
-                                        fontWeight: 600,
-                                        border: '1px solid #d1d5db',
-                                        borderRadius: '3px',
-                                        background: 'white',
-                                        color: '#374151',
-                                        cursor: 'pointer',
+                                        width: dayLabelWidth, flexShrink: 0, height: cellHeight,
+                                        fontSize: '11px', fontWeight: 600,
+                                        border: '1px solid #d1d5db', borderRadius: '3px',
+                                        background: 'white', color: '#374151', cursor: 'pointer',
                                         marginRight: '2px',
-                                    }, title: `Toggle entire ${day}`, children: DAY_LABELS[dayIdx] }), _jsx("div", { style: { display: 'flex', flexShrink: 0 }, children: Array.from({ length: visibleSlots }).map((_, i) => {
-                                        const slot = visibleStartSlot + i;
+                                    }, title: `Toggle entire ${day}`, children: DAY_LABELS[dayIdx] }), _jsx("div", { style: { display: 'flex', flexShrink: 0 }, children: Array.from({ length: totalSlots }).map((_, slot) => {
                                         const on = matrix[dayIdx][slot];
                                         const isHourBoundary = slot % slotsPerHour === 0;
                                         const isHalfHour = slotsPerHour > 1 && slot % slotsPerHour === slotsPerHour / 2;
                                         return (_jsx("div", { "data-cell": `${dayIdx}-${slot}`, onMouseDown: (e) => { e.preventDefault(); handleStart(dayIdx, slot); }, onMouseEnter: () => handleMove(dayIdx, slot), title: formatSlot(slot, slotsPerHour), style: {
-                                                width: slotWidth,
-                                                height: cellHeight,
+                                                width: slotWidth, height: cellHeight,
                                                 backgroundColor: on ? '#3b82f6' : '#e5e7eb',
                                                 borderLeft: isHourBoundary
                                                     ? '1px solid #9ca3af'
@@ -293,12 +267,8 @@ export default function AvailabilityGrid({ availability, onChange, clinicianAvai
                     })] }), _jsxs("div", { style: { marginTop: '12px' }, children: [_jsx("div", { style: { fontSize: '12px', fontWeight: 600, color: '#374151', marginBottom: '6px' }, children: "Or type exact times:" }), _jsx("div", { style: { display: 'grid', gap: '4px' }, children: DAYS.map((day, dayIdx) => {
                             const windows = windowsByDay[day] || [];
                             return (_jsxs("div", { style: {
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    flexWrap: 'wrap',
-                                    padding: '4px 6px',
-                                    borderRadius: '4px',
+                                    display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap',
+                                    padding: '4px 6px', borderRadius: '4px',
                                     background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
                                 }, children: [_jsx("span", { style: {
                                             fontSize: '12px', fontWeight: 600, color: '#374151',

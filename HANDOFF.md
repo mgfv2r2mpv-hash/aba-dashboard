@@ -1,142 +1,85 @@
 # ABA Schedule Assistant — Handoff for Next Worker
 
 ## Context
-This is a Capacitor-wrapped React + Express ABA scheduling app currently running on the user's iPhone (iOS Simulator via Xcode). The user (Kaleb) tested the wizard flow and reported issues. Some are fixed; the rest are queued.
+Capacitor-wrapped React + Express ABA scheduling app running on Kaleb's iPhone (Xcode iOS Simulator, iPhone 17 Pro). Active feature branch: **`claude/schedule-assistant-ai-app-tWVZ6`**. Both the feature branch and **`main`** are kept in sync — Kaleb pulls `main` on his Mac.
 
-The app branch is `claude/schedule-assistant-ai-app-hJkiS`. The user previously asked us to push to `main`, so both branches should be kept in sync when you finish.
+Repo layout:
+- React frontend in `src/components/` + `src/app.tsx`
+- Express backend in `src/server.ts`
+- Shared types in `src/types.ts`
+- Excel I/O in `src/excelHandler.ts`, validator in `src/constraintValidator.ts`
+- Capacitor iOS project lives in `ios/` (not in this repo's source — present on Kaleb's Mac)
 
-## What's already done in this commit
-
-### Type system overhaul (BREAKING)
-`src/types.ts` now has a flexible `parentTraining` shape that replaces the old `parentTrainingHoursPerMonth`:
-```ts
-parentTraining: {
-  minimumHours: number;
-  targetMinHours: number;
-  targetMaxHours: number;
-  periodUnit: 'week' | 'month' | 'sixMonths' | 'year';
-}
-```
-The legacy `parentTrainingHoursPerMonth` field is kept as optional for backward-compat reading of old Excel files but is no longer written.
-
-Also exported: `BACB_RBT_SUPERVISION_MIN_PERCENT = 5` constant.
-
-All consumers updated: `excelHandler.ts`, `constraintValidator.ts`, `claudeScheduler.ts`, `AdminPanel.tsx`, `SetupWizard.tsx`, `createSampleData.ts`.
-
-### Multi-window availability in Excel
-`excelHandler.ts` now reads/writes a `${day}Windows` JSON-encoded column for arrays of windows. The legacy `${day}Start`/`${day}End` columns still parse for backward compat. **The UI does not yet expose multi-window editing — that's task #3 below.**
-
-### White-screen fix (partial)
-`src/app.tsx` dashboard layout now uses `flex-wrap` and conditionally renders the side panel only when there are conflicts/solutions/selectedAppointment. This fixes the white screen on iPhone when the wizard completes (previously the 350px side panel ate the entire viewport).
-
-### Header is responsive
-`src/app.tsx` header now wraps and uses smaller padding/font on mobile.
-
-### Modal width is responsive
-`src/components/SetupWizard.tsx` modal is now `width: min(720px, 95vw)` instead of fixed 720px. Fixes wizard cut-off on iPhone.
-
-### Parent training period selector
-`src/components/SetupWizard.tsx` now has a period unit dropdown (week/month/6mo/year). User reported this was needed because some funders set targets like "max 24h/6mo" or "max 1h/wk".
-
-### Removed Excel-specific copy
-Welcome step no longer mentions "encrypted Excel file".
-
-## What's still pending — your work
-
-These are all in the user's feedback. Read it carefully (full feedback in conversation history of session `241d66d0-d265-4936-91ef-327c256b7c45.jsonl`):
-
-### 1. Supervision % field cannot clear "0" default
-**File**: `src/components/SetupWizard.tsx`, the company step.
-
-**Problem**: When user backspaces to empty the field, `parseFloat(e.target.value) || 0` forces it to `0`, and you can't delete the `0`. The user has to type a digit BEFORE backspacing the 0 or they get stuck typing "010" etc.
-
-**Fix**: Use string state for these fields, parse to number only on save. Pattern:
-```ts
-const [supDirectStr, setSupDirectStr] = useState('5');
-// in input:
-value={supDirectStr}
-onChange={(e) => setSupDirectStr(e.target.value)}
-// on Next/save:
-const supDirect = parseFloat(supDirectStr) || 0;
-```
-Apply to all numeric inputs in the wizard (supervision %, parent training hours, target min/max, technician assignment hours).
-
-### 2. RBT supervision % is a BACB global, not per-company
-**File**: `src/components/SetupWizard.tsx`, company step.
-
-**Behavior**: The 5% RBT supervision minimum is set by the BACB, not the company. Show it as a fixed value with a note explaining it's BACB-mandated. Allow override (some companies exceed the minimum) but make the override explicit (checkbox: "Override BACB minimum").
-
-Use the `BACB_RBT_SUPERVISION_MIN_PERCENT` constant from `types.ts`.
-
-### 3. Multiple availability windows per day (Client + Tech wizards)
-**Files**: `src/components/SetupWizard.tsx` — `DayAvailabilityRow` component.
-
-**Problem**: Some clients have split availability like "11am-1pm, 3pm-6pm". Current UI only supports one window per day. The data model already supports `TimeWindow[]` (it's an array) and the Excel handler now round-trips it via the `${day}Windows` column. Just need UI.
-
-**Suggested UI**: Within each day cell, list each window as a row with start/end inputs and a remove (×) button, plus a "+ window" button below.
-
-### 4. Drag-select schedule grid (NEW component)
-**Files**: New component, used in both client and technician steps of `SetupWizard.tsx`.
-
-**User's request (verbatim)**: "What about a calendar widget click and drag to select 15-min chunks, and then a text field to refine beyond the 15 minute mark?"
-
-**Spec**:
-- 7-column × 96-row grid (7 days, 24 hours × 4 fifteen-minute slots)
-- Mouse/touch drag selects a range; second drag deselects (or shift-drag deselects)
-- Selection produces a `TimeWindow[]` per day
-- After drag-select, show editable HH:MM text inputs to refine to the minute
-- Should also work on touch (this runs on iPhone)
-- Also user request: "Need a way to set multiple days at once" — consider a "copy Mon to all weekdays" or column-header click-to-select-all-day
-
-This is the biggest piece. Consider extracting to `src/components/AvailabilityGrid.tsx`. The current `DayAvailabilityRow` per-day input can be kept as an alternative compact view.
-
-### 5. Technician assignment text field is unclear
-**File**: `src/components/SetupWizard.tsx`, technician step, the `+ Assignment` row.
-
-**Problem**: User saw a text field with "0" next to a client picker and didn't know what it was. It's the `hoursPerWeek` field. Add a label "Hours/wk" above or change the placeholder text to be unmistakable.
-
-### 6. iOS overall polish
-- The wizard renders fine now after the responsive fix, but verify on iPhone 17 Pro simulator.
-- Check the technician step modal — user noted "Modal looks bad" with a screenshot showing content cut off on the right.
-- Bottom navigation buttons (Back / Next / Create Dashboard) should stay visible — currently they may scroll out of view on long content; consider sticky footer.
-
-## How to test
-
+## Build cycle (on Mac)
 ```bash
-# from repo root
-npm run build:server  # tsc
-npm run build:client  # vite build
-npx cap sync ios      # copy to iOS project
-# then in Xcode press Play to run on simulator
+git pull origin main
+npm install                 # only if package.json changed
+npm run build:server        # tsc
+npm run build:client        # vite build
+npx cap sync ios            # copy web assets + sync plugins
+# Then ⌘R in Xcode
 ```
 
-If you change React code, `npm run build:client && npx cap sync ios` is the cycle. The user is using iPhone 17 Pro simulator.
+## What's already done in this session
 
-## Compliance answer the user asked
+### Major UX work this turn
+- **AvailabilityGrid rotated** (`src/components/AvailabilityGrid.tsx`): days are now rows, hours are columns. Grid is ~250px tall instead of ~1280–1900px. Has snap toggle (15/30/60m, default 30m), Weekdays 9-5 / Copy Mon → Tue-Fri / Clear all chips, and an always-visible per-day type-able editor below. Preserves the `clinicianAvailability` prop and uses it for initial horizontal scroll position.
+- **Weekend hidden by default** in `DayAvailabilityRow` with a "Show weekend" checkbox; auto-shows when existing data has Sat/Sun.
 
-The user genuinely asked: "Do they need to use anonymized if encrypted and backend anonymized too?"
+### Earlier this session
+- iOS download via Capacitor Filesystem + Share plugins (was silently a no-op via `<a download>` in WKWebView). See `handleDownload` in `src/app.tsx`.
+- AdminPanel: technicians editable (availability + name + RBT toggle), clients editable (availability + parent-training max), add/remove buttons, all persisted via the API.
+- Server: added create/delete endpoints for technicians, clients, appointments.
+- SetupWizard: per-case parent-training cap on clients; clinician availability section at the top of the company step.
+- Per-case parent-training validation: `Client.parentTrainingMaxHours` is a hard cap; if cap < company minimum, the cap becomes the effective floor too (no false low-target warnings for capped cases).
+- Calendar appointment click → side panel with Edit/Delete buttons that open `AppointmentForm` in edit mode.
+- SolutionPanel: amber warning banner when a solution spans multiple weeks.
+- iPhone scroll fixes: html/body/#root locked to 100vw, overflow-x: hidden, viewport-fit=cover, Calendar padding `clamp(8px, 3vw, 24px)`.
+- `.gitignore` added (was missing — accidentally committed `node_modules` once; cleaned up in `00d524b`).
 
-The answer (already given in chat): **Yes**, because:
-1. Defense in depth — anonymizer + encryption are safety nets, not primary defense
-2. HIPAA Safe Harbor de-identification is automatic if no real identifiers are entered
-3. Minimum-necessary disclosure rule
-4. Decrypted data still sits in browser memory, exposed via screenshots/screen-share
+## Pending — your work
 
-The wizard copy now says "Use anonymized identifiers (e.g. 'Client A') — never enter real names."
+### 1. Port DayAvailabilityRow vertical-stack layout from `claude/improve-calendar-input-RyhnP`
+The "Show weekend" checkbox is a stopgap. The cleaner fix from that branch is a vertical stack — one row per day with `flex-wrap` time inputs. Naturally fits all 7 days on a phone, no overflow.
+
+**Reference**: `git show 45837fe:src/components/SetupWizard.tsx` — look for `function DayAvailabilityRow`.
+
+**Port plan**:
+- Replace the 7-column grid with a vertical stack of day rows.
+- Change `DayAvailabilityRowProps.onChange` to `(availability) => void` (single full-map callback).
+- Add chip bar: Weekdays 9–5, Copy Mon → Tue-Fri, Clear all.
+- Each day row: day label + window time inputs + `+ window` + `Off` button (when populated).
+- Drop the "Show weekend" checkbox — vertical layout handles it.
+- Update SetupWizard call sites (3 places: clinician availability, clients step, technicians step) to use the new signature.
+- Drop the now-redundant `setDayAvailability` helper and `updateWindowsForDay` extraction from SetupWizard — they exist only because of the per-action callback signature.
+
+### 2. Add chip buttons to AdminPanel's `AvailabilityEditor`
+Currently the inline editor in AdminPanel (used by both `ClientCard` and `TechnicianCard`) only has the per-day window controls. Add the same "Weekdays 9–5", "Copy Mon → Tue-Fri", and "Clear all" chip bar at the top of the editor.
+
+**Reference**: `git show 45837fe -- src/components/AdminPanel.tsx`.
+
+### 3. Verify on iPhone
+After 1 + 2, build and check:
+- Wizard "Clinician availability" section: vertical day rows, no horizontal overflow.
+- Grid view in clients/tech steps: grid + type-able editor render and scroll horizontally.
+- AdminPanel: edit a tech's availability, save persists across navigations.
+- Download still works (Capacitor share sheet on native).
+
+## Don't break
+- **Anonymizer must still scrub PII before any Claude call** — see `src/anonymizer.ts`. Don't add fields to the Claude prompt without considering anonymization.
+- **API keys are NEVER stored server-side**. Per-request `X-Claude-Api-Key` header only.
+- **Capacitor iOS build**: don't add Node-only APIs to client code. The Capacitor packages we depend on are `@capacitor/core`, `@capacitor/filesystem`, `@capacitor/share`. `@capacitor/storage` was an obsolete leftover and was removed.
+- **Server has a pre-existing ESM/`__dirname` bug** in `src/server.ts:21`. Compiled `dist/server.js` won't start (`__dirname is not defined in ES module scope`). Not in this scope; flag if someone needs to deploy.
 
 ## Branch / push instructions
-
-The user expects the result on `main` so they can pull on their Mac. After your work:
-
 ```bash
 git add -A
 git commit -m "..."
-git push origin claude/schedule-assistant-ai-app-hJkiS
-git push origin claude/schedule-assistant-ai-app-hJkiS:main
+git push origin claude/schedule-assistant-ai-app-tWVZ6
+git push origin claude/schedule-assistant-ai-app-tWVZ6:main
 ```
+Both branches must end up at the same commit.
 
-## Don't break
-
-- The anonymizer must still scrub all PII before any Claude call. Don't add new fields to the prompt without considering anonymization.
-- The Capacitor iOS build must keep working. Don't add Node-only APIs to client code.
-- API keys are NEVER stored server-side. Per-request headers only.
+## Useful refs
+- Other branch with the rotated layout: `claude/improve-calendar-input-RyhnP` — only one commit ahead of `3a3cdda` (`45837fe`). The AvailabilityGrid changes are already ported to `main`; only DayAvailabilityRow + AdminPanel chip buttons remain.
+- Latest commit on `main`: `16b7d33`.

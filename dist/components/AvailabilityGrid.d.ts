@@ -10,6 +10,6 @@ interface AvailabilityGridProps {
         [key in DayOfWeek]?: TimeWindow[];
     };
 }
-export default function AvailabilityGrid({ availability, onChange, clinicianAvailability }: AvailabilityGridProps): import("react/jsx-runtime").JSX.Element;
+export default function AvailabilityGrid({ availability, onChange, clinicianAvailability, }: AvailabilityGridProps): import("react/jsx-runtime").JSX.Element;
 export {};
 //# sourceMappingURL=AvailabilityGrid.d.ts.map

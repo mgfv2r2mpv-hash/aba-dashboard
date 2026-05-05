@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow } from '../types';
+import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 
 interface AdminPanelProps {
   data: ScheduleData;
@@ -151,6 +152,7 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
                 <TechnicianCard
                   key={tech.id}
                   tech={tech}
+                  clients={data.clients}
                   saving={savingId === tech.id}
                   onChange={(patch) => persistTechnician(tech.id, patch)}
                   onRemove={() => removeTechnician(tech.id)}
@@ -209,14 +211,44 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
   );
 }
 
-function TechnicianCard({ tech, saving, onChange, onRemove }: {
+function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
   tech: Technician;
+  clients: Client[];
   saving: boolean;
   onChange: (patch: Partial<Technician>) => void;
   onRemove: () => void;
 }) {
   const [name, setName] = useState(tech.name);
   const [editing, setEditing] = useState(false);
+  const [hoursDraft, setHoursDraft] = useState<{ [idx: number]: string }>({});
+
+  const assignments = tech.assignments || [];
+  const safeClients = clients || [];
+  const updateAssignment = (idx: number, patch: Partial<Technician['assignments'][number]>) => {
+    const next = assignments.map((a, i) => i === idx ? { ...a, ...patch } : a);
+    onChange({ assignments: next });
+  };
+  const addAssignment = () => {
+    onChange({ assignments: [...assignments, { clientId: '', hoursPerWeek: 0, billable: true }] });
+  };
+  const removeAssignment = (idx: number) => {
+    onChange({ assignments: assignments.filter((_, i) => i !== idx) });
+    setHoursDraft(prev => {
+      const next = { ...prev };
+      delete next[idx];
+      return next;
+    });
+  };
+  const commitHours = (idx: number, raw: string) => {
+    const parsed = parseFloat(raw);
+    const hours = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    if (hours !== assignments[idx]?.hoursPerWeek) updateAssignment(idx, { hoursPerWeek: hours });
+    setHoursDraft(prev => {
+      const next = { ...prev };
+      delete next[idx];
+      return next;
+    });
+  };
   return (
     <div style={cardStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px', gap: '8px', flexWrap: 'wrap' }}>
@@ -255,14 +287,53 @@ function TechnicianCard({ tech, saving, onChange, onRemove }: {
         />
       )}
 
-      {tech.assignments && tech.assignments.length > 0 && (
-        <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '8px' }}>
-          <p style={{ marginBottom: '4px', fontWeight: '600' }}>Assignments:</p>
-          {tech.assignments.map((a, idx) => (
-            <p key={idx}>• {a.clientId || '(unassigned)'}: {a.hoursPerWeek}h/week</p>
-          ))}
-        </div>
-      )}
+      <div style={{ marginTop: '12px' }}>
+        <p style={{ fontWeight: 600, fontSize: '13px', marginBottom: '6px' }}>Assignments</p>
+        {assignments.length > 0 && (
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
+            <div style={{ flex: 2, fontSize: '11px', color: '#6b7280', fontWeight: 600, minWidth: 0 }}>Client</div>
+            <div style={{ flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600, minWidth: 0 }}>Hrs/wk</div>
+            <div style={{ width: '32px', flexShrink: 0 }} />
+          </div>
+        )}
+        {assignments.map((a, idx) => (
+          <div key={idx} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
+            <select
+              value={a.clientId}
+              onChange={(e) => updateAssignment(idx, { clientId: e.target.value })}
+              style={{ ...inputStyle, flex: 2, width: 'auto', minWidth: 0 }}
+            >
+              <option value="">— Pick client —</option>
+              {safeClients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+            </select>
+            <input
+              type="number"
+              step="0.5"
+              min="0"
+              value={hoursDraft[idx] ?? String(a.hoursPerWeek)}
+              onChange={(e) => setHoursDraft({ ...hoursDraft, [idx]: e.target.value })}
+              onBlur={(e) => commitHours(idx, e.target.value)}
+              style={{ ...inputStyle, flex: 1, width: 'auto', minWidth: 0 }}
+            />
+            <button
+              onClick={() => removeAssignment(idx)}
+              style={{
+                width: '32px', height: '32px', padding: 0, backgroundColor: '#fee2e2', color: '#dc2626',
+                border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
+                fontSize: '18px', lineHeight: 1,
+              }}
+              aria-label="Remove assignment"
+            >×</button>
+          </div>
+        ))}
+        <button
+          onClick={addAssignment}
+          style={{
+            padding: '6px 12px', fontSize: '13px', backgroundColor: 'white', color: '#3b82f6',
+            border: '1px solid #3b82f6', borderRadius: '4px', cursor: 'pointer',
+          }}
+        >+ Assignment</button>
+      </div>
     </div>
   );
 }
@@ -311,97 +382,99 @@ function AvailabilityEditor({ initial, onSave, onCancel }: {
     delete next[day];
     setDraft(next);
   };
-
   const copyMondayToWeekdays = () => {
     const monWindows = draft['Monday'] || [];
     const next = { ...draft };
     (['Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
-      if (monWindows.length === 0) {
-        delete next[d];
-      } else {
-        next[d] = monWindows.map(w => ({ ...w }));
-      }
+      if (monWindows.length === 0) delete next[d];
+      else next[d] = monWindows.map(w => ({ ...w }));
     });
     setDraft(next);
   };
-
-  const setStandardWeekdays = () => {
-    const next = { ...draft };
-    (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
-      next[d] = [{ start: '09:00', end: '17:00' }];
-    });
-    setDraft(next);
-  };
-
   const clearAll = () => setDraft({});
 
+  const handleTogglePreset = (key: PresetKey) => {
+    const preset = PRESET_WINDOWS[key];
+    const active = isPresetActive(draft, preset);
+    setDraft(togglePreset(draft, preset, !active));
+  };
+
   return (
-    <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-        <button onClick={setStandardWeekdays} style={chipBtn} title="Set Mon–Fri 9 AM–5 PM">
-          Weekdays 9–5
-        </button>
-        <button onClick={copyMondayToWeekdays} style={chipBtn} title="Copy Monday's windows to Tue–Fri">
-          Copy Mon → Tue–Fri
-        </button>
-        <button onClick={clearAll} style={{ ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }}>
-          Clear all
-        </button>
+    <div style={{ width: '100%', overflowX: 'hidden', marginTop: '8px' }}>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px', alignItems: 'center' }}>
+        {(Object.keys(PRESET_WINDOWS) as PresetKey[]).map(key => (
+          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer', userSelect: 'none' }}>
+            <input
+              type="checkbox"
+              checked={isPresetActive(draft, PRESET_WINDOWS[key])}
+              onChange={() => handleTogglePreset(key)}
+              style={{ cursor: 'pointer' }}
+            />
+            {PRESET_LABELS[key]}
+          </label>
+        ))}
+        <button onClick={copyMondayToWeekdays} style={chipBtn}>Copy Mon → Tue–Fri</button>
+        <button onClick={clearAll} style={{ ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }}>Clear all</button>
       </div>
-      {DAYS.map((day, dayIdx) => {
-        const windows = draft[day] || [];
-        return (
-          <div
-            key={day}
-            style={{
-              display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap',
-              padding: '6px 8px', borderRadius: '4px',
-              background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
-              border: '1px solid #e5e7eb',
-            }}
-          >
-            <span style={{ width: '44px', fontSize: '13px', fontWeight: 600 }}>{day.slice(0, 3)}</span>
-            {windows.length === 0 ? (
-              <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>Off</span>
-            ) : (
-              windows.map((w, idx) => (
-                <span key={idx} style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
-                  <input
-                    type="time"
-                    value={w.start}
-                    onChange={(e) => setDayWindow(day, idx, 'start', e.target.value)}
-                    style={editTimeInput}
-                  />
-                  <span style={{ fontSize: '12px', color: '#6b7280' }}>–</span>
-                  <input
-                    type="time"
-                    value={w.end}
-                    onChange={(e) => setDayWindow(day, idx, 'end', e.target.value)}
-                    style={editTimeInput}
-                  />
-                  <button
-                    onClick={() => removeWindow(day, idx)}
-                    style={{ ...dangerBtn, padding: '2px 6px', fontSize: '11px' }}
-                    title="Remove this window"
-                  >×</button>
-                </span>
-              ))
-            )}
-            <button
-              onClick={() => addWindow(day)}
-              style={{ ...chipBtn, padding: '2px 8px', fontSize: '11px' }}
-            >+ window</button>
-            {windows.length > 0 && (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {DAYS.map((day, dayIdx) => {
+          const windows = draft[day] || [];
+          return (
+            <div
+              key={day}
+              style={{
+                display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap',
+                padding: '6px 8px', borderRadius: '4px',
+                background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
+                border: '1px solid #e5e7eb',
+                boxSizing: 'border-box', width: '100%', minWidth: 0,
+              }}
+            >
+              <span style={{ width: '36px', flexShrink: 0, fontSize: '13px', fontWeight: 600 }}>{day.slice(0, 3)}</span>
+              {windows.length === 0 ? (
+                <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>Off</span>
+              ) : (
+                windows.map((w, idx) => (
+                  <span key={idx} style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
+                    <input
+                      type="time"
+                      step="900"
+                      value={w.start}
+                      onChange={(e) => setDayWindow(day, idx, 'start', e.target.value)}
+                      style={editTimeInput}
+                    />
+                    <span style={{ fontSize: '12px', color: '#6b7280' }}>–</span>
+                    <input
+                      type="time"
+                      step="900"
+                      value={w.end}
+                      onChange={(e) => setDayWindow(day, idx, 'end', e.target.value)}
+                      style={editTimeInput}
+                    />
+                    <button
+                      onClick={() => removeWindow(day, idx)}
+                      style={{ ...dangerBtn, padding: '2px 6px', fontSize: '11px' }}
+                      title="Remove this window"
+                    >×</button>
+                  </span>
+                ))
+              )}
               <button
-                onClick={() => clearDay(day)}
-                style={{ ...chipBtn, padding: '2px 8px', fontSize: '11px', marginLeft: 'auto' }}
-                title={`Clear ${day}`}
-              >Off</button>
-            )}
-          </div>
-        );
-      })}
-      <div style={{ display: 'flex', gap: '8px' }}>
+                onClick={() => addWindow(day)}
+                style={{ ...chipBtn, padding: '2px 8px', fontSize: '11px' }}
+              >+ window</button>
+              {windows.length > 0 && (
+                <button
+                  onClick={() => clearDay(day)}
+                  style={{ ...chipBtn, fontSize: '11px', padding: '2px 8px', marginLeft: 'auto' }}
+                  title={`Clear ${day}`}
+                >Off</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
         <button onClick={() => onSave(draft)} style={primaryBtn}>Save</button>
         <button onClick={onCancel} style={chipBtn}>Cancel</button>
       </div>
@@ -531,4 +604,6 @@ const editTimeInput: React.CSSProperties = {
   border: '1px solid #d1d5db',
   borderRadius: '4px',
   fontFamily: 'inherit',
+  width: '75px',
+  minWidth: 0,
 };

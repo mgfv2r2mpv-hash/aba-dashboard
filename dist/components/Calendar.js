@@ -37,7 +37,7 @@ export default function Calendar({ appointments, technicians, clients, onAppoint
     };
     const goToPreviousMonth = () => setCurrentDate(subMonths(currentDate, 1));
     const goToNextMonth = () => setCurrentDate(addMonths(currentDate, 1));
-    return (_jsxs("div", { style: { padding: '24px' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }, children: [_jsx("button", { onClick: goToPreviousMonth, style: {
+    return (_jsxs("div", { style: { padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }, children: [_jsx("button", { onClick: goToPreviousMonth, style: {
                             padding: '8px 12px',
                             backgroundColor: '#e5e7eb',
                             border: 'none',

@@ -8,6 +8,10 @@ const HOURS_PER_DAY = 24;
 interface AvailabilityGridProps {
   availability: { [key in DayOfWeek]?: TimeWindow[] };
   onChange: (availability: { [key in DayOfWeek]?: TimeWindow[] }) => void;
+  // Clinician's weekly availability sets the default visible time range
+  // (sessions can't be scheduled when the supervisor isn't available).
+  // If absent, the grid falls back to 06:00–22:00.
+  clinicianAvailability?: { [key in DayOfWeek]?: TimeWindow[] };
 }
 
 type DragMode = 'select' | 'deselect' | null;
@@ -67,22 +71,62 @@ const matrixToWindows = (
   return result;
 };
 
-export default function AvailabilityGrid({ availability, onChange }: AvailabilityGridProps) {
+// Union earliest-start and latest-end across the clinician's week, in HOURS.
+// Returns null if no clinician availability is configured so callers fall back.
+function computeClinicianHourRange(
+  clinician?: { [key in DayOfWeek]?: TimeWindow[] },
+): { startHour: number; endHour: number } | null {
+  if (!clinician) return null;
+  let minStart = Infinity;
+  let maxEnd = -Infinity;
+  Object.values(clinician).forEach(windows => {
+    (windows || []).forEach(w => {
+      const [sh, sm] = w.start.split(':').map(Number);
+      const [eh, em] = w.end.split(':').map(Number);
+      const s = sh + sm / 60;
+      const e = eh + em / 60;
+      if (s < minStart) minStart = s;
+      if (e > maxEnd) maxEnd = e;
+    });
+  });
+  if (!Number.isFinite(minStart) || !Number.isFinite(maxEnd)) return null;
+  const startHour = Math.floor(minStart);
+  const endHour = Math.ceil(maxEnd);
+  return { startHour, endHour: Math.max(endHour, startHour + 1) };
+}
+
+export default function AvailabilityGrid({ availability, onChange, clinicianAvailability }: AvailabilityGridProps) {
   const [granularity, setGranularity] = useState<Granularity>(30);
   const slotsPerHour = 60 / granularity;
   const totalSlots = HOURS_PER_DAY * slotsPerHour;
 
   const [matrix, setMatrix] = useState<boolean[][]>(() => windowsToMatrix(availability, slotsPerHour));
+  const [showAllHours, setShowAllHours] = useState(false);
   const dragStartRef = useRef<{ day: number; slot: number } | null>(null);
   const dragModeRef = useRef<DragMode>(null);
   const matrixRef = useRef<boolean[][]>(matrix);
   const baseRef = useRef<boolean[][] | null>(null);
 
+  // Default visible range comes from clinician availability (working hours).
+  // Falls back to 06:00–22:00. Auto-expands to 24h if any selection falls
+  // outside that window, so users can see and edit those late/early slots.
+  const clinicianRange = computeClinicianHourRange(clinicianAvailability);
+  const defaultStartHour = clinicianRange ? clinicianRange.startHour : 6;
+  const defaultEndHour = clinicianRange ? clinicianRange.endHour : 22;
+  const defaultStartSlot = defaultStartHour * slotsPerHour;
+  const defaultEndSlot = defaultEndHour * slotsPerHour;
+  const hasOutsideClinicianRange = matrix.some(row =>
+    row.some((on, s) => on && (s < defaultStartSlot || s >= defaultEndSlot)),
+  );
+  const visibleStartSlot = showAllHours || hasOutsideClinicianRange ? 0 : defaultStartSlot;
+  const visibleEndSlot = showAllHours || hasOutsideClinicianRange ? totalSlots : defaultEndSlot;
+  const visibleStartHour = visibleStartSlot / slotsPerHour;
+  const visibleEndHour = visibleEndSlot / slotsPerHour;
+
   useEffect(() => {
     matrixRef.current = matrix;
   }, [matrix]);
 
-  // Re-derive matrix from availability when prop or granularity changes
   useEffect(() => {
     setMatrix(windowsToMatrix(availability, slotsPerHour));
   }, [availability, slotsPerHour]);
@@ -183,7 +227,6 @@ export default function AvailabilityGrid({ availability, onChange }: Availabilit
   };
 
   const setStandardWeekdays = () => {
-    // 9 AM – 5 PM, Mon-Fri only
     const off = new Array(totalSlots).fill(false);
     const start = 9 * slotsPerHour;
     const end = 17 * slotsPerHour;
@@ -200,12 +243,12 @@ export default function AvailabilityGrid({ availability, onChange }: Availabilit
     commitMatrix(next);
   };
 
-  // Cell sizing — horizontal layout. Each slot is small, hours are grouped.
   const slotWidth = granularity === 15 ? 8 : granularity === 30 ? 14 : 26;
   const cellHeight = 26;
   const dayLabelWidth = 44;
+  const visibleSlots = visibleEndSlot - visibleStartSlot;
+  const visibleHours = visibleEndHour - visibleStartHour;
 
-  // Pre-compute windows for the type-able editor
   const windowsByDay = useMemo(() => matrixToWindows(matrix, slotsPerHour), [matrix, slotsPerHour]);
 
   const updateWindow = (day: DayOfWeek, idx: number, field: 'start' | 'end', value: string) => {
@@ -231,7 +274,6 @@ export default function AvailabilityGrid({ availability, onChange }: Availabilit
 
   return (
     <div style={{ marginTop: '12px' }}>
-      {/* Action bar */}
       <div style={{
         display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center',
       }}>
@@ -244,23 +286,37 @@ export default function AvailabilityGrid({ availability, onChange }: Availabilit
         <button onClick={clearAll} style={{ ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }}>
           Clear all
         </button>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px', alignItems: 'center', fontSize: '12px', color: '#6b7280' }}>
-          <span>Snap:</span>
-          {[15, 30, 60].map(g => (
-            <button
-              key={g}
-              onClick={() => setGranularity(g as Granularity)}
-              style={{
-                ...chipBtn,
-                padding: '2px 8px',
-                background: granularity === g ? '#3b82f6' : 'white',
-                color: granularity === g ? 'white' : '#374151',
-                borderColor: granularity === g ? '#3b82f6' : '#d1d5db',
-              }}
-            >
-              {g === 60 ? '1h' : `${g}m`}
-            </button>
-          ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center', fontSize: '12px', color: '#6b7280' }}>
+            <span>Snap:</span>
+            {[15, 30, 60].map(g => (
+              <button
+                key={g}
+                onClick={() => setGranularity(g as Granularity)}
+                style={{
+                  ...chipBtn,
+                  padding: '2px 8px',
+                  background: granularity === g ? '#3b82f6' : 'white',
+                  color: granularity === g ? 'white' : '#374151',
+                  borderColor: granularity === g ? '#3b82f6' : '#d1d5db',
+                }}
+              >
+                {g === 60 ? '1h' : `${g}m`}
+              </button>
+            ))}
+          </div>
+          <label style={{
+            display: 'flex', gap: '4px', alignItems: 'center', fontSize: '12px',
+            cursor: hasOutsideClinicianRange ? 'not-allowed' : 'pointer',
+          }}>
+            <input
+              type="checkbox"
+              checked={showAllHours || hasOutsideClinicianRange}
+              disabled={hasOutsideClinicianRange}
+              onChange={(e) => setShowAllHours(e.target.checked)}
+            />
+            <span>24h{hasOutsideClinicianRange ? ' (auto)' : ''}</span>
+          </label>
         </div>
       </div>
 
@@ -268,7 +324,6 @@ export default function AvailabilityGrid({ availability, onChange }: Availabilit
         Click and drag to paint availability. Click a day name to toggle the entire day. Or type exact times below.
       </div>
 
-      {/* Horizontal grid: days = rows, hours = columns */}
       <div
         onMouseLeave={handleEnd}
         onMouseUp={handleEnd}
@@ -289,23 +344,27 @@ export default function AvailabilityGrid({ availability, onChange }: Availabilit
         {/* Hour header */}
         <div style={{ display: 'flex', marginBottom: '2px' }}>
           <div style={{ width: dayLabelWidth, flexShrink: 0 }} />
-          {Array.from({ length: HOURS_PER_DAY }).map((_, h) => (
-            <div
-              key={h}
-              style={{
-                width: slotWidth * slotsPerHour,
-                flexShrink: 0,
-                fontSize: '10px',
-                color: '#6b7280',
-                textAlign: 'left',
-                borderLeft: h === 0 ? 'none' : '1px solid #e5e7eb',
-                paddingLeft: '2px',
-                lineHeight: '14px',
-              }}
-            >
-              {h % (granularity === 60 ? 1 : 2) === 0 ? `${h}` : ''}
-            </div>
-          ))}
+          {Array.from({ length: visibleHours }).map((_, i) => {
+            const h = visibleStartHour + i;
+            const labelEvery = granularity === 60 ? 1 : 2;
+            return (
+              <div
+                key={h}
+                style={{
+                  width: slotWidth * slotsPerHour,
+                  flexShrink: 0,
+                  fontSize: '10px',
+                  color: '#6b7280',
+                  textAlign: 'left',
+                  borderLeft: i === 0 ? 'none' : '1px solid #e5e7eb',
+                  paddingLeft: '2px',
+                  lineHeight: '14px',
+                }}
+              >
+                {(h - visibleStartHour) % labelEvery === 0 ? `${h}` : ''}
+              </div>
+            );
+          })}
         </div>
 
         {/* Day rows */}
@@ -333,7 +392,8 @@ export default function AvailabilityGrid({ availability, onChange }: Availabilit
                 {DAY_LABELS[dayIdx]}
               </button>
               <div style={{ display: 'flex', flexShrink: 0 }}>
-                {Array.from({ length: totalSlots }).map((_, slot) => {
+                {Array.from({ length: visibleSlots }).map((_, i) => {
+                  const slot = visibleStartSlot + i;
                   const on = matrix[dayIdx][slot];
                   const isHourBoundary = slot % slotsPerHour === 0;
                   const isHalfHour = slotsPerHour > 1 && slot % slotsPerHour === slotsPerHour / 2;

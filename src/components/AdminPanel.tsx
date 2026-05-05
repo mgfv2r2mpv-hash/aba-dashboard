@@ -216,10 +216,11 @@ function TechnicianCard({ tech, saving, onChange, onRemove }: {
   onRemove: () => void;
 }) {
   const [name, setName] = useState(tech.name);
+  const [editing, setEditing] = useState(false);
   return (
     <div style={cardStyle}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px', gap: '8px' }}>
-        <div style={{ flex: 1 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -237,11 +238,25 @@ function TechnicianCard({ tech, saving, onChange, onRemove }: {
           />
           <span>RBT</span>
         </label>
+        <button onClick={() => setEditing(!editing)} style={chipBtn}>
+          {editing ? 'Done' : 'Edit availability'}
+        </button>
         <button onClick={onRemove} style={dangerBtn}>Remove</button>
       </div>
       {saving && <p style={{ fontSize: '11px', color: '#3b82f6' }}>Saving…</p>}
+
+      {!editing ? (
+        <AvailabilitySummary windows={tech.availability} />
+      ) : (
+        <AvailabilityEditor
+          initial={tech.availability}
+          onSave={(av) => { onChange({ availability: av }); setEditing(false); }}
+          onCancel={() => setEditing(false)}
+        />
+      )}
+
       {tech.assignments && tech.assignments.length > 0 && (
-        <div style={{ fontSize: '13px', color: '#6b7280' }}>
+        <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '8px' }}>
           <p style={{ marginBottom: '4px', fontWeight: '600' }}>Assignments:</p>
           {tech.assignments.map((a, idx) => (
             <p key={idx}>• {a.clientId || '(unassigned)'}: {a.hoursPerWeek}h/week</p>
@@ -252,23 +267,26 @@ function TechnicianCard({ tech, saving, onChange, onRemove }: {
   );
 }
 
-function ClientCard({ client, saving, onChange, onRemove }: {
-  client: Client;
-  saving: boolean;
-  onChange: (patch: Partial<Client>) => void;
-  onRemove: () => void;
-}) {
-  const [name, setName] = useState(client.name);
-  const [maxStr, setMaxStr] = useState(client.parentTrainingMaxHours !== undefined ? String(client.parentTrainingMaxHours) : '');
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<{ [key in DayOfWeek]?: TimeWindow[] }>(client.availabilityWindows || {});
+function AvailabilitySummary({ windows }: { windows?: { [key in DayOfWeek]?: TimeWindow[] } }) {
+  const entries = Object.entries(windows || {}).filter(([, w]) => w && w.length > 0);
+  if (entries.length === 0) {
+    return <p style={{ fontSize: '13px', color: '#6b7280', fontStyle: 'italic' }}>No availability set.</p>;
+  }
+  return (
+    <div style={{ fontSize: '13px', color: '#6b7280' }}>
+      {entries.map(([day, w]) => (
+        <p key={day}>{day}: {(w as TimeWindow[]).map(x => `${x.start}–${x.end}`).join(', ')}</p>
+      ))}
+    </div>
+  );
+}
 
-  const commitMax = () => {
-    const next = maxStr === '' ? undefined : parseFloat(maxStr);
-    if (next !== client.parentTrainingMaxHours) {
-      onChange({ parentTrainingMaxHours: Number.isFinite(next as number) ? next : undefined });
-    }
-  };
+function AvailabilityEditor({ initial, onSave, onCancel }: {
+  initial: { [key in DayOfWeek]?: TimeWindow[] };
+  onSave: (av: { [key in DayOfWeek]?: TimeWindow[] }) => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState<{ [key in DayOfWeek]?: TimeWindow[] }>(initial || {});
 
   const setDayWindow = (day: DayOfWeek, idx: number, field: 'start' | 'end', value: string) => {
     const next = { ...draft };
@@ -286,6 +304,11 @@ function ClientCard({ client, saving, onChange, onRemove }: {
     const next = { ...draft };
     next[day] = (next[day] || []).filter((_, i) => i !== idx);
     if ((next[day] || []).length === 0) delete next[day];
+    setDraft(next);
+  };
+  const clearDay = (day: DayOfWeek) => {
+    const next = { ...draft };
+    delete next[day];
     setDraft(next);
   };
 
@@ -312,15 +335,101 @@ function ClientCard({ client, saving, onChange, onRemove }: {
 
   const clearAll = () => setDraft({});
 
-  const save = () => {
-    onChange({ availabilityWindows: draft });
-    setEditing(false);
+  return (
+    <div style={{ display: 'grid', gap: '8px', marginTop: '8px' }}>
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        <button onClick={setStandardWeekdays} style={chipBtn} title="Set Mon–Fri 9 AM–5 PM">
+          Weekdays 9–5
+        </button>
+        <button onClick={copyMondayToWeekdays} style={chipBtn} title="Copy Monday's windows to Tue–Fri">
+          Copy Mon → Tue–Fri
+        </button>
+        <button onClick={clearAll} style={{ ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }}>
+          Clear all
+        </button>
+      </div>
+      {DAYS.map((day, dayIdx) => {
+        const windows = draft[day] || [];
+        return (
+          <div
+            key={day}
+            style={{
+              display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap',
+              padding: '6px 8px', borderRadius: '4px',
+              background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
+              border: '1px solid #e5e7eb',
+            }}
+          >
+            <span style={{ width: '44px', fontSize: '13px', fontWeight: 600 }}>{day.slice(0, 3)}</span>
+            {windows.length === 0 ? (
+              <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>Off</span>
+            ) : (
+              windows.map((w, idx) => (
+                <span key={idx} style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
+                  <input
+                    type="time"
+                    value={w.start}
+                    onChange={(e) => setDayWindow(day, idx, 'start', e.target.value)}
+                    style={editTimeInput}
+                  />
+                  <span style={{ fontSize: '12px', color: '#6b7280' }}>–</span>
+                  <input
+                    type="time"
+                    value={w.end}
+                    onChange={(e) => setDayWindow(day, idx, 'end', e.target.value)}
+                    style={editTimeInput}
+                  />
+                  <button
+                    onClick={() => removeWindow(day, idx)}
+                    style={{ ...dangerBtn, padding: '2px 6px', fontSize: '11px' }}
+                    title="Remove this window"
+                  >×</button>
+                </span>
+              ))
+            )}
+            <button
+              onClick={() => addWindow(day)}
+              style={{ ...chipBtn, padding: '2px 8px', fontSize: '11px' }}
+            >+ window</button>
+            {windows.length > 0 && (
+              <button
+                onClick={() => clearDay(day)}
+                style={{ ...chipBtn, padding: '2px 8px', fontSize: '11px', marginLeft: 'auto' }}
+                title={`Clear ${day}`}
+              >Off</button>
+            )}
+          </div>
+        );
+      })}
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <button onClick={() => onSave(draft)} style={primaryBtn}>Save</button>
+        <button onClick={onCancel} style={chipBtn}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function ClientCard({ client, saving, onChange, onRemove }: {
+  client: Client;
+  saving: boolean;
+  onChange: (patch: Partial<Client>) => void;
+  onRemove: () => void;
+}) {
+  const [name, setName] = useState(client.name);
+  const [maxStr, setMaxStr] = useState(client.parentTrainingMaxHours !== undefined ? String(client.parentTrainingMaxHours) : '');
+  const [editing, setEditing] = useState(false);
+
+  const commitMax = () => {
+    const next = maxStr === '' ? undefined : parseFloat(maxStr);
+    if (next !== client.parentTrainingMaxHours) {
+      onChange({ parentTrainingMaxHours: Number.isFinite(next as number) ? next : undefined });
+    }
   };
 
   return (
     <div style={cardStyle}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px', gap: '8px' }}>
-        <div style={{ flex: 1 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -329,12 +438,12 @@ function ClientCard({ client, saving, onChange, onRemove }: {
           />
         </div>
         <button onClick={() => setEditing(!editing)} style={chipBtn}>
-          {editing ? 'Cancel' : 'Edit availability'}
+          {editing ? 'Done' : 'Edit availability'}
         </button>
         <button onClick={onRemove} style={dangerBtn}>Remove</button>
       </div>
       {saving && <p style={{ fontSize: '11px', color: '#3b82f6' }}>Saving…</p>}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
         <label style={{ fontSize: '12px', color: '#374151', whiteSpace: 'nowrap' }}>
           Parent-training max:
         </label>
@@ -349,81 +458,13 @@ function ClientCard({ client, saving, onChange, onRemove }: {
         <span style={{ fontSize: '11px', color: '#6b7280' }}>h per case-period</span>
       </div>
       {!editing ? (
-        <div style={{ fontSize: '13px', color: '#6b7280' }}>
-          {Object.entries(client.availabilityWindows || {}).map(([day, windows]) =>
-            windows && windows.length > 0 ? (
-              <p key={day}>{day}: {windows.map(w => `${w.start}–${w.end}`).join(', ')}</p>
-            ) : null
-          )}
-          {Object.keys(client.availabilityWindows || {}).length === 0 && (
-            <p style={{ fontStyle: 'italic' }}>No availability set.</p>
-          )}
-        </div>
+        <AvailabilitySummary windows={client.availabilityWindows} />
       ) : (
-        <div style={{ display: 'grid', gap: '8px' }}>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            <button onClick={setStandardWeekdays} style={chipBtn} title="Set Mon–Fri 9 AM–5 PM">
-              Weekdays 9–5
-            </button>
-            <button onClick={copyMondayToWeekdays} style={chipBtn} title="Copy Monday's windows to Tue–Fri">
-              Copy Mon → Tue–Fri
-            </button>
-            <button
-              onClick={clearAll}
-              style={{ ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }}
-            >Clear all</button>
-          </div>
-          {DAYS.map((day, dayIdx) => {
-            const windows = draft[day] || [];
-            return (
-              <div
-                key={day}
-                style={{
-                  display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap',
-                  padding: '6px 8px', borderRadius: '4px',
-                  background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
-                  border: '1px solid #e5e7eb',
-                }}
-              >
-                <span style={{ width: '44px', fontSize: '13px', fontWeight: 600 }}>{day.slice(0, 3)}</span>
-                {windows.length === 0 ? (
-                  <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>Off</span>
-                ) : (
-                  windows.map((w, idx) => (
-                    <span key={idx} style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
-                      <input
-                        type="time"
-                        value={w.start}
-                        onChange={(e) => setDayWindow(day, idx, 'start', e.target.value)}
-                        style={editTimeInput}
-                      />
-                      <span style={{ fontSize: '12px', color: '#6b7280' }}>–</span>
-                      <input
-                        type="time"
-                        value={w.end}
-                        onChange={(e) => setDayWindow(day, idx, 'end', e.target.value)}
-                        style={editTimeInput}
-                      />
-                      <button
-                        onClick={() => removeWindow(day, idx)}
-                        style={{ ...dangerBtn, padding: '2px 6px', fontSize: '11px' }}
-                        title="Remove this window"
-                      >×</button>
-                    </span>
-                  ))
-                )}
-                <button
-                  onClick={() => addWindow(day)}
-                  style={{ ...chipBtn, padding: '2px 8px', fontSize: '11px' }}
-                >+ window</button>
-              </div>
-            );
-          })}
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button onClick={save} style={primaryBtn}>Save</button>
-            <button onClick={() => { setDraft(client.availabilityWindows || {}); setEditing(false); }} style={chipBtn}>Cancel</button>
-          </div>
-        </div>
+        <AvailabilityEditor
+          initial={client.availabilityWindows || {}}
+          onSave={(av) => { onChange({ availabilityWindows: av }); setEditing(false); }}
+          onCancel={() => setEditing(false)}
+        />
       )}
     </div>
   );
@@ -474,14 +515,6 @@ const dangerBtn: React.CSSProperties = {
   fontSize: '13px',
 };
 
-const editTimeInput: React.CSSProperties = {
-  fontSize: '13px',
-  padding: '3px 6px',
-  border: '1px solid #d1d5db',
-  borderRadius: '4px',
-  fontFamily: 'inherit',
-};
-
 const chipBtn: React.CSSProperties = {
   padding: '4px 10px',
   fontSize: '12px',
@@ -490,4 +523,12 @@ const chipBtn: React.CSSProperties = {
   background: 'white',
   cursor: 'pointer',
   color: '#374151',
+};
+
+const editTimeInput: React.CSSProperties = {
+  fontSize: '13px',
+  padding: '3px 6px',
+  border: '1px solid #d1d5db',
+  borderRadius: '4px',
+  fontFamily: 'inherit',
 };

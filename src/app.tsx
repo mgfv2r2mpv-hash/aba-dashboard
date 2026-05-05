@@ -225,7 +225,7 @@ export default function App() {
   );
 
   return (
-    <div style={{ display: 'flex', height: '100vh', flexDirection: 'column' }}>
+    <div style={{ display: 'flex', height: '100vh', maxWidth: '100vw', overflowX: 'hidden', flexDirection: 'column' }}>
       <header style={{
         backgroundColor: '#1f2937',
         color: 'white',

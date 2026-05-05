@@ -84,10 +84,21 @@ function parseSettings(workbook) {
     const minimumHours = parseFloat(row.parentTrainingMinimum) || 1.5;
     const targetMinHours = parseFloat(row.parentTrainingTargetMin) || 2;
     const targetMaxHours = parseFloat(row.parentTrainingTargetMax) || 4;
+    let clinicianAvailability = undefined;
+    const clinicianRaw = row.clinicianAvailability;
+    if (typeof clinicianRaw === 'string' && clinicianRaw.trim()) {
+        try {
+            const parsed = JSON.parse(clinicianRaw);
+            if (parsed && typeof parsed === 'object')
+                clinicianAvailability = parsed;
+        }
+        catch (_e) { /* ignore malformed clinician availability */ }
+    }
     return {
         supervisionDirectHoursPercent: parseFloat(row.supervisionDirectHoursPercent) || 5,
         supervisionRBTHoursPercent: parseFloat(row.supervisionRBTHoursPercent) || 5,
         parentTraining: { minimumHours, targetMinHours, targetMaxHours, periodUnit },
+        clinicianAvailability,
         billableRequirements: row.billableHoursPerCycle ? {
             hoursPerCycle: parseFloat(row.billableHoursPerCycle),
             cycleWeeks: parseFloat(row.billableCycleWeeks) || 4,
@@ -188,6 +199,9 @@ export function generateExcelFile(data, embeddedConfig) {
             parentTrainingTargetMin: data.settings.parentTraining.targetMinHours,
             parentTrainingTargetMax: data.settings.parentTraining.targetMaxHours,
             parentTrainingPeriodUnit: data.settings.parentTraining.periodUnit,
+            clinicianAvailability: data.settings.clinicianAvailability
+                ? JSON.stringify(data.settings.clinicianAvailability)
+                : '',
             billableHoursPerCycle: data.settings.billableRequirements?.hoursPerCycle,
             billableCycleWeeks: data.settings.billableRequirements?.cycleWeeks,
         }];

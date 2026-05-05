@@ -32,6 +32,8 @@ const cardStyle: React.CSSProperties = {
   border: '1px solid #e5e7eb',
   borderRadius: '6px',
   backgroundColor: '#f9fafb',
+  minWidth: 0,
+  overflow: 'hidden',
 };
 
 export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) {
@@ -98,7 +100,9 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
   };
 
   const updateSettingsFromStrings = (): CompanySettings => {
-    const rbtValue = rbtOverride ? parseNumericString(supRBTStr, BACB_RBT_SUPERVISION_MIN_PERCENT) : BACB_RBT_SUPERVISION_MIN_PERCENT;
+    const rbtValue = rbtOverride
+      ? parseNumericString(supRBTStr, BACB_RBT_SUPERVISION_MIN_PERCENT)
+      : BACB_RBT_SUPERVISION_MIN_PERCENT;
     return {
       ...settings,
       supervisionDirectHoursPercent: parseNumericString(supDirectStr, 5),
@@ -116,8 +120,8 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
     const techniciansWithParsedHours = technicians.map(t => ({
       ...t,
       assignments: t.assignments.map((a, idx) => {
-        const assignmentKey = `${t.id}_${idx}`;
-        const hoursStr = assignmentHoursStr[assignmentKey] ?? String(a.hoursPerWeek);
+        const key = `${t.id}_${idx}`;
+        const hoursStr = assignmentHoursStr[key] ?? String(a.hoursPerWeek);
         return { ...a, hoursPerWeek: parseNumericString(hoursStr, 0) };
       }),
     }));
@@ -136,15 +140,6 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
   const stepIndex = ['welcome', 'company', 'clients', 'technicians', 'review'].indexOf(step);
   const totalSteps = 5;
 
-  const goNext = () => {
-    if (step === 'company') {
-      setSettings(updateSettingsFromStrings());
-    }
-    const order: Step[] = ['welcome', 'company', 'clients', 'technicians', 'review'];
-    const idx = order.indexOf(step);
-    if (idx < order.length - 1) setStep(order[idx + 1]!);
-  };
-
   const goBack = () => {
     if (step === 'welcome') return onCancel();
     const order: Step[] = ['welcome', 'company', 'clients', 'technicians', 'review'];
@@ -152,32 +147,47 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
     if (idx > 0) setStep(order[idx - 1]!);
   };
 
+  const goNext = () => {
+    if (step === 'company') setSettings(updateSettingsFromStrings());
+    const order: Step[] = ['welcome', 'company', 'clients', 'technicians', 'review'];
+    const idx = order.indexOf(step);
+    if (idx < order.length - 1) setStep(order[idx + 1]!);
+  };
+
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
       backgroundColor: 'rgba(0,0,0,0.5)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+      display: 'flex', alignItems: 'stretch', justifyContent: 'center', zIndex: 1000,
+      paddingTop: 'env(safe-area-inset-top)',
+      paddingBottom: 'env(safe-area-inset-bottom)',
+      paddingLeft: 'env(safe-area-inset-left)',
+      paddingRight: 'env(safe-area-inset-right)',
     }}>
       <div style={{
         backgroundColor: 'white',
         borderRadius: '8px',
-        width: 'min(720px, 100vw)',
-        height: 'min(720px, 100vh)',
+        width: '100%',
+        maxWidth: '720px',
+        height: '100%',
+        maxHeight: '100%',
+        overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden',
         boxSizing: 'border-box',
+        minWidth: 0,
       }}>
+
+        {/* Fixed header */}
         <div style={{ padding: '16px 20px 12px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0 }}>Setup Wizard</h2>
-            <button onClick={onCancel} aria-label="Close" style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', lineHeight: 1, padding: 0 }}>×</button>
+            <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>Setup Wizard</h2>
+            <button onClick={onCancel} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', lineHeight: 1 }}>✕</button>
           </div>
           <div style={{ display: 'flex', gap: '4px' }}>
             {Array.from({ length: totalSteps }).map((_, i) => (
               <div key={i} style={{
-                flex: 1,
-                height: '4px',
+                flex: 1, height: '4px',
                 backgroundColor: i <= stepIndex ? '#3b82f6' : '#e5e7eb',
                 borderRadius: '2px',
               }} />
@@ -185,7 +195,9 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
           </div>
         </div>
 
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '16px 20px' }}>
+        {/* Scrollable body */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '20px' }}>
+
           {step === 'welcome' && (
             <div>
               <h3 style={{ fontSize: '18px', marginBottom: '12px' }}>Welcome! Let's set up your dashboard.</h3>
@@ -211,10 +223,11 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
               <p style={{ color: '#6b7280', marginBottom: '16px', fontSize: '13px' }}>
                 These are the constraints we'll check against. Defaults match BACB minimums and a common parent-training target.
               </p>
-              <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px' }}>
-                <label style={labelStyle}>BCBA (supervisor) availability</label>
+              <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', minWidth: 0 }}>
+                <label style={labelStyle}>Clinician (supervisor) availability</label>
                 <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
                   Sessions can't ethically be scheduled when you're not available to supervise.
+                  This sets the default visible range for the schedule grid.
                 </p>
                 <WeeklyAvailability
                   availability={settings.clinicianAvailability || {}}
@@ -235,13 +248,15 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                   </div>
                   <div>
                     <label style={labelStyle}>Supervision: % of RBT hours (BACB minimum)</label>
-                    <input
-                      type="number" step="0.1"
-                      value={rbtOverride ? supRBTStr : String(BACB_RBT_SUPERVISION_MIN_PERCENT)}
-                      onChange={(e) => setSupRBTStr(e.target.value)}
-                      disabled={!rbtOverride}
-                      style={{ ...inputStyle, opacity: rbtOverride ? 1 : 0.6 }}
-                    />
+                    <div style={{ flex: 1 }}>
+                      <input
+                        type="number" step="0.1"
+                        value={rbtOverride ? supRBTStr : String(BACB_RBT_SUPERVISION_MIN_PERCENT)}
+                        onChange={(e) => setSupRBTStr(e.target.value)}
+                        disabled={!rbtOverride}
+                        style={{ ...inputStyle, opacity: rbtOverride ? 1 : 0.6 }}
+                      />
+                    </div>
                     <label style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px', marginTop: '6px', cursor: 'pointer' }}>
                       <input
                         type="checkbox"
@@ -251,7 +266,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                       <span>Override BACB minimum</span>
                     </label>
                     <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
-                      The BACB requires a minimum of {BACB_RBT_SUPERVISION_MIN_PERCENT}% for RBTs. Check the box to exceed this requirement.
+                      The BACB requires a minimum of {BACB_RBT_SUPERVISION_MIN_PERCENT}% for RBTs.
                     </p>
                   </div>
                 </div>
@@ -307,12 +322,12 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
           {step === 'clients' && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '8px' }}>
-                <h3 style={{ fontSize: '18px', margin: 0 }}>Clients ({clients.length})</h3>
+                <h3 style={{ fontSize: '18px', margin: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Clients ({clients.length})</h3>
                 <button onClick={addClient} style={{
                   padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
                   border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                  whiteSpace: 'nowrap',
-                }}>+ Add Client</button>
+                  flexShrink: 0, whiteSpace: 'nowrap',
+                }}>+ Add</button>
               </div>
               <p style={{ color: '#6b7280', fontSize: '13px', marginBottom: '12px' }}>
                 Use anonymized identifiers (e.g. "Client A"). Set availability windows per day.
@@ -325,13 +340,13 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                         value={c.name}
                         onChange={(e) => updateClient(c.id, { name: e.target.value })}
                         placeholder="Client name (anonymized)"
-                        style={{ ...inputStyle, flex: 1, minWidth: 0 }}
+                        style={{ ...inputStyle, flex: 1, width: 'auto' }}
                       />
                       <button onClick={() => removeClient(c.id)} style={{
-                        padding: '6px 10px', backgroundColor: '#fee2e2', color: '#dc2626',
-                        border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                      }}>Remove</button>
+                        width: '32px', height: '32px', padding: 0, backgroundColor: '#fee2e2', color: '#dc2626',
+                        border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
+                        fontSize: '18px', lineHeight: 1,
+                      }} aria-label="Remove client">×</button>
                     </div>
                     <div style={{ marginBottom: '8px' }}>
                       <label style={{ ...labelStyle, fontSize: '12px' }}>
@@ -349,6 +364,9 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                         }}
                         style={{ ...inputStyle, maxWidth: '180px' }}
                       />
+                      <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+                        Hard cap for this case. If lower than the company target floor, this cap wins.
+                      </p>
                     </div>
                     <WeeklyAvailability
                       availability={c.availabilityWindows}
@@ -369,12 +387,12 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
           {step === 'technicians' && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '8px' }}>
-                <h3 style={{ fontSize: '18px', margin: 0 }}>Technicians ({technicians.length})</h3>
+                <h3 style={{ fontSize: '18px', margin: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Technicians ({technicians.length})</h3>
                 <button onClick={addTechnician} style={{
                   padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
                   border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                  whiteSpace: 'nowrap',
-                }}>+ Add Technician</button>
+                  flexShrink: 0, whiteSpace: 'nowrap',
+                }}>+ Add</button>
               </div>
               <p style={{ color: '#6b7280', fontSize: '13px', marginBottom: '12px' }}>
                 Mark RBT certification (affects supervision math). Add availability and client assignments.
@@ -382,14 +400,14 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
               <div style={{ display: 'grid', gap: '12px' }}>
                 {technicians.map(t => (
                   <div key={t.id} style={cardStyle}>
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
                       <input
                         value={t.name}
                         onChange={(e) => updateTechnician(t.id, { name: e.target.value })}
                         placeholder="Technician name"
-                        style={{ ...inputStyle, flex: '1 1 140px', minWidth: 0 }}
+                        style={{ ...inputStyle, flex: 1, width: 'auto' }}
                       />
-                      <label style={{ display: 'flex', gap: '4px', alignItems: 'center', whiteSpace: 'nowrap', fontSize: '13px' }}>
+                      <label style={{ display: 'flex', gap: '4px', alignItems: 'center', whiteSpace: 'nowrap', flexShrink: 0 }}>
                         <input
                           type="checkbox"
                           checked={t.isRBT}
@@ -398,21 +416,28 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                         <span>RBT</span>
                       </label>
                       <button onClick={() => removeTechnician(t.id)} style={{
-                        padding: '6px 10px', backgroundColor: '#fee2e2', color: '#dc2626',
-                        border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                      }}>Remove</button>
+                        width: '32px', height: '32px', padding: 0, backgroundColor: '#fee2e2', color: '#dc2626',
+                        border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
+                        fontSize: '18px', lineHeight: 1,
+                      }} aria-label="Remove technician">×</button>
                     </div>
                     <WeeklyAvailability
                       availability={t.availability}
                       onChange={(av) => updateTechnician(t.id, { availability: av })}
                       defaultWindow={{ start: '15:00', end: '19:00' }}
                     />
-                    <div style={{ marginTop: '10px' }}>
+                    <div style={{ marginTop: '8px' }}>
                       <label style={labelStyle}>Assignments</label>
+                      {t.assignments.length > 0 && (
+                        <div style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
+                          <div style={{ flex: 2, fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>Client</div>
+                          <div style={{ flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>Hrs/wk</div>
+                          <div style={{ width: '36px' }} />
+                        </div>
+                      )}
                       {t.assignments.map((a, idx) => {
-                        const assignmentKey = `${t.id}_${idx}`;
-                        const hoursStr = assignmentHoursStr[assignmentKey] ?? String(a.hoursPerWeek);
+                        const key = `${t.id}_${idx}`;
+                        const hoursStr = assignmentHoursStr[key] ?? String(a.hoursPerWeek);
                         return (
                           <div key={idx} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
                             <select
@@ -422,28 +447,26 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                                 updated[idx] = { ...a, clientId: e.target.value };
                                 updateTechnician(t.id, { assignments: updated });
                               }}
-                              style={{ ...inputStyle, flex: 2, minWidth: 0 }}
+                              style={{ ...inputStyle, flex: 2, width: 'auto' }}
                             >
                               <option value="">— Pick client —</option>
                               {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                             </select>
                             <input
                               type="number" step="0.5"
-                              placeholder="hrs/wk"
                               value={hoursStr}
-                              onChange={(e) => setAssignmentHoursStr({ ...assignmentHoursStr, [assignmentKey]: e.target.value })}
-                              style={{ ...inputStyle, flex: 1, minWidth: 0 }}
+                              onChange={(e) => setAssignmentHoursStr({ ...assignmentHoursStr, [key]: e.target.value })}
+                              style={{ ...inputStyle, flex: 1, width: 'auto' }}
                             />
                             <button onClick={() => {
                               const newAssignments = t.assignments.filter((_, i) => i !== idx);
                               const newHoursStr = { ...assignmentHoursStr };
-                              delete newHoursStr[assignmentKey];
+                              delete newHoursStr[key];
                               setAssignmentHoursStr(newHoursStr);
                               updateTechnician(t.id, { assignments: newAssignments });
                             }} style={{
-                              padding: '4px 8px', backgroundColor: '#fee2e2', color: '#dc2626',
-                              border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer',
-                              flexShrink: 0,
+                              width: '36px', padding: '4px', backgroundColor: '#fee2e2', color: '#dc2626',
+                              border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
                             }}>×</button>
                           </div>
                         );
@@ -475,7 +498,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                   <p style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
                     Supervision: {settings.supervisionDirectHoursPercent}% direct + {settings.supervisionRBTHoursPercent}% RBT<br />
                     Parent training: {settings.parentTraining.minimumHours}h min,
-                    target {settings.parentTraining.targetMinHours}-{settings.parentTraining.targetMaxHours}h/{settings.parentTraining.periodUnit}
+                    target {settings.parentTraining.targetMinHours}–{settings.parentTraining.targetMaxHours}h/{settings.parentTraining.periodUnit}
                   </p>
                 </div>
                 <div style={cardStyle}>
@@ -487,7 +510,9 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                 <div style={cardStyle}>
                   <strong>{technicians.length} technician(s)</strong>
                   <ul style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px', paddingLeft: '20px' }}>
-                    {technicians.map(t => <li key={t.id}>{t.name} {t.isRBT && '(RBT)'} - {t.assignments.length} assignment(s)</li>)}
+                    {technicians.map(t => (
+                      <li key={t.id}>{t.name} {t.isRBT && '(RBT)'} — {t.assignments.length} assignment(s)</li>
+                    ))}
                   </ul>
                 </div>
               </div>
@@ -496,33 +521,54 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
               </p>
             </div>
           )}
+
         </div>
 
+        {/* Fixed footer */}
         <div style={{
-          display: 'flex', justifyContent: 'space-between', gap: '8px',
-          padding: '12px 20px', borderTop: '1px solid #e5e7eb',
-          background: 'white', flexShrink: 0,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '12px 20px',
+          borderTop: '1px solid #e5e7eb',
+          backgroundColor: 'white',
+          flexShrink: 0,
         }}>
           <button onClick={goBack} style={{
             padding: '8px 16px', border: '1px solid #d1d5db', borderRadius: '6px',
-            background: 'white', cursor: 'pointer',
-          }}>{step === 'welcome' ? 'Cancel' : 'Back'}</button>
-
+            background: 'white', cursor: 'pointer', fontSize: '14px',
+          }}>
+            {step === 'welcome' ? 'Cancel' : 'Back'}
+          </button>
           {step === 'review' ? (
             <button onClick={finish} style={{
               padding: '8px 16px', backgroundColor: '#10b981', color: 'white',
-              border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600',
+              border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '14px',
             }}>Create Dashboard</button>
           ) : (
             <button onClick={goNext} style={{
               padding: '8px 16px', backgroundColor: '#3b82f6', color: 'white',
-              border: 'none', borderRadius: '6px', cursor: 'pointer',
+              border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '14px',
             }}>Next</button>
           )}
         </div>
+
       </div>
     </div>
   );
+}
+
+function mergeWindows(windows: TimeWindow[]): TimeWindow[] {
+  if (windows.length === 0) return [];
+  const sorted = [...windows].sort((a, b) => a.start.localeCompare(b.start));
+  const result: TimeWindow[] = [{ ...sorted[0] }];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = result[result.length - 1]!;
+    if (sorted[i].start <= last.end) {
+      if (sorted[i].end > last.end) last.end = sorted[i].end;
+    } else {
+      result.push({ ...sorted[i] });
+    }
+  }
+  return result;
 }
 
 interface WeeklyAvailabilityProps {
@@ -531,20 +577,40 @@ interface WeeklyAvailabilityProps {
   defaultWindow?: TimeWindow;
 }
 
-function WeeklyAvailability({ availability, onChange, defaultWindow }: WeeklyAvailabilityProps) {
-  const seedWindow: TimeWindow = defaultWindow ?? { start: '09:00', end: '17:00' };
+function WeeklyAvailability({
+  availability,
+  onChange,
+  defaultWindow = { start: '09:00', end: '17:00' },
+}: WeeklyAvailabilityProps) {
+  const [presets, setPresets] = useState({ mornings: false, midday: false, evenings: false });
+
+  const togglePreset = (key: 'mornings' | 'midday' | 'evenings') => {
+    const next = { ...presets, [key]: !presets[key] };
+    setPresets(next);
+    const windows: TimeWindow[] = [];
+    if (next.mornings) windows.push({ start: '07:00', end: '12:00' });
+    if (next.midday) windows.push({ start: '10:00', end: '15:00' });
+    if (next.evenings) windows.push({ start: '15:00', end: '20:00' });
+    const merged = mergeWindows(windows);
+    const nextAv = { ...availability };
+    (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
+      if (merged.length === 0) delete nextAv[d];
+      else nextAv[d] = merged.map(w => ({ ...w }));
+    });
+    onChange(nextAv);
+  };
 
   const updateWindow = (day: DayOfWeek, idx: number, field: 'start' | 'end', value: string) => {
     const next = { ...availability };
     const list = (next[day] || []).slice();
-    list[idx] = { ...list[idx]!, [field]: value } as TimeWindow;
+    list[idx] = { ...list[idx], [field]: value };
     next[day] = list;
     onChange(next);
   };
 
   const addWindow = (day: DayOfWeek) => {
     const next = { ...availability };
-    next[day] = [...(next[day] || []), { ...seedWindow }];
+    next[day] = [...(next[day] || []), { ...defaultWindow }];
     onChange(next);
   };
 
@@ -561,14 +627,6 @@ function WeeklyAvailability({ availability, onChange, defaultWindow }: WeeklyAva
     onChange(next);
   };
 
-  const setWeekdays = (window: TimeWindow) => {
-    const next = { ...availability };
-    (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
-      next[d] = [{ ...window }];
-    });
-    onChange(next);
-  };
-
   const copyMondayToWeekdays = () => {
     const monWindows = availability['Monday'] || [];
     const next = { ...availability };
@@ -582,28 +640,25 @@ function WeeklyAvailability({ availability, onChange, defaultWindow }: WeeklyAva
     onChange(next);
   };
 
-  const clearAll = () => onChange({});
+  const clearAll = () => { setPresets({ mornings: false, midday: false, evenings: false }); onChange({}); };
 
   return (
-    <div>
-      <div style={{
-        display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center',
-      }}>
-        <button onClick={() => setWeekdays({ start: '09:00', end: '17:00' })} style={presetBtn} title="Mon–Fri 9 AM–5 PM">
-          Weekdays 9–5
-        </button>
-        <button onClick={() => setWeekdays({ start: '15:00', end: '19:00' })} style={presetBtn} title="Mon–Fri 3 PM–7 PM">
-          After-school 3–7
-        </button>
-        <button onClick={copyMondayToWeekdays} style={presetBtn} title="Copy Monday to Tue–Fri">
-          Copy Mon → Tue–Fri
-        </button>
-        <button onClick={clearAll} style={{ ...presetBtn, color: '#dc2626', borderColor: '#fca5a5' }}>
-          Clear all
-        </button>
+    <div style={{ width: '100%', overflowX: 'hidden' }}>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+        {(['mornings', 'midday', 'evenings'] as const).map(key => {
+          const label = key === 'mornings' ? 'Mornings 7–12' : key === 'midday' ? 'Midday 10–3' : 'Evenings 3–8';
+          return (
+            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox" checked={presets[key]} onChange={() => togglePreset(key)} style={{ cursor: 'pointer' }} />
+              {label}
+            </label>
+          );
+        })}
+        <button onClick={copyMondayToWeekdays} style={presetBtn}>Copy Mon → Tue–Fri</button>
+        <button onClick={clearAll} style={{ ...presetBtn, color: '#dc2626', borderColor: '#fca5a5' }}>Clear all</button>
       </div>
-      <div style={{ display: 'grid', gap: '4px' }}>
-        {DAYS.map(day => {
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {DAYS.map((day, dayIdx) => {
           const windows = availability[day] || [];
           return (
             <div
@@ -614,26 +669,32 @@ function WeeklyAvailability({ availability, onChange, defaultWindow }: WeeklyAva
                 gap: '6px',
                 flexWrap: 'wrap',
                 padding: '6px 8px',
-                borderRadius: '6px',
-                background: 'white',
+                borderRadius: '4px',
+                background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
                 border: '1px solid #e5e7eb',
+                boxSizing: 'border-box',
+                width: '100%',
+                minWidth: 0,
               }}
             >
-              <span style={{
-                fontSize: '13px', fontWeight: 600, color: '#374151',
-                width: '36px', flexShrink: 0,
-              }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151', width: '36px', flexShrink: 0 }}>
                 {day.slice(0, 3)}
               </span>
               {windows.length === 0 && (
-                <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>
-                  Off
-                </span>
+                <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>Off</span>
               )}
               {windows.map((w, idx) => (
-                <span key={idx} style={windowChipStyle}>
+                <span
+                  key={idx}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '3px',
+                    backgroundColor: '#eff6ff', border: '1px solid #bfdbfe',
+                    borderRadius: '4px', padding: '2px 6px',
+                  }}
+                >
                   <input
                     type="time"
+                    step="900"
                     value={w.start}
                     onChange={(e) => updateWindow(day, idx, 'start', e.target.value)}
                     style={chipTimeInput}
@@ -641,6 +702,7 @@ function WeeklyAvailability({ availability, onChange, defaultWindow }: WeeklyAva
                   <span style={{ fontSize: '12px', color: '#6b7280' }}>–</span>
                   <input
                     type="time"
+                    step="900"
                     value={w.end}
                     onChange={(e) => updateWindow(day, idx, 'end', e.target.value)}
                     style={chipTimeInput}
@@ -649,20 +711,14 @@ function WeeklyAvailability({ availability, onChange, defaultWindow }: WeeklyAva
                     onClick={() => removeWindow(day, idx)}
                     style={chipRemoveBtn}
                     title="Remove this window"
-                    aria-label="Remove time window"
                   >×</button>
                 </span>
               ))}
-              <button
-                onClick={() => addWindow(day)}
-                style={addWindowBtn}
-                title={`Add a time window on ${day}`}
-              >+ window</button>
+              <button onClick={() => addWindow(day)} style={addWindowBtn}>+ window</button>
               {windows.length > 0 && (
                 <button
                   onClick={() => clearDay(day)}
-                  style={offBtn}
-                  title={`Clear ${day}`}
+                  style={{ ...presetBtn, fontSize: '11px', padding: '2px 8px', marginLeft: 'auto' }}
                 >Off</button>
               )}
             </div>
@@ -677,29 +733,21 @@ const presetBtn: React.CSSProperties = {
   padding: '4px 10px',
   fontSize: '12px',
   border: '1px solid #d1d5db',
-  borderRadius: '999px',
+  borderRadius: '4px',
   background: 'white',
   cursor: 'pointer',
   color: '#374151',
-};
-
-const windowChipStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '4px',
-  padding: '2px 4px 2px 6px',
-  background: '#eff6ff',
-  border: '1px solid #bfdbfe',
-  borderRadius: '999px',
+  flexShrink: 0,
 };
 
 const chipTimeInput: React.CSSProperties = {
   fontSize: '12px',
-  padding: '2px 4px',
-  border: '1px solid #bfdbfe',
-  borderRadius: '4px',
+  padding: '1px 2px',
+  border: 'none',
+  background: 'transparent',
   fontFamily: 'inherit',
-  background: 'white',
+  width: '70px',
+  minWidth: 0,
 };
 
 const addWindowBtn: React.CSSProperties = {
@@ -708,27 +756,19 @@ const addWindowBtn: React.CSSProperties = {
   border: '1px dashed #3b82f6',
   background: 'white',
   color: '#3b82f6',
-  borderRadius: '999px',
+  borderRadius: '4px',
   cursor: 'pointer',
-};
-
-const offBtn: React.CSSProperties = {
-  padding: '2px 8px',
-  fontSize: '11px',
-  border: '1px solid #d1d5db',
-  borderRadius: '999px',
-  background: 'white',
-  cursor: 'pointer',
-  color: '#374151',
+  flexShrink: 0,
 };
 
 const chipRemoveBtn: React.CSSProperties = {
-  padding: '0 5px',
-  fontSize: '14px',
+  padding: '1px 4px',
+  fontSize: '12px',
   border: 'none',
   background: 'transparent',
-  color: '#6b7280',
-  borderRadius: '999px',
+  color: '#60a5fa',
+  borderRadius: '3px',
   cursor: 'pointer',
   lineHeight: 1,
+  flexShrink: 0,
 };

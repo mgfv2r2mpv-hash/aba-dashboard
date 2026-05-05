@@ -51,8 +51,8 @@ export interface CompanySettings {
   };
   // The supervising clinician's weekly availability. Sessions cannot ethically
   // be scheduled outside these windows because supervision must be available.
-  // Used as the default visible range in the WeeklyAvailability picker; users
-  // can override to show a full 24h range when occasional late work is needed.
+  // Used as the default visible range in the schedule grid; users can
+  // override to show a full 24h range when occasional late work is needed.
   clinicianAvailability?: {
     [key in DayOfWeek]?: TimeWindow[];
   };

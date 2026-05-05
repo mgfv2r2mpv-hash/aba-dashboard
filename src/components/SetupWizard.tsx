@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ScheduleData, Client, Technician, CompanySettings, DayOfWeek, TimeWindow, BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 
 interface SetupWizardProps {
   onComplete: (data: ScheduleData) => void;
@@ -556,21 +557,6 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
   );
 }
 
-function mergeWindows(windows: TimeWindow[]): TimeWindow[] {
-  if (windows.length === 0) return [];
-  const sorted = [...windows].sort((a, b) => a.start.localeCompare(b.start));
-  const result: TimeWindow[] = [{ ...sorted[0] }];
-  for (let i = 1; i < sorted.length; i++) {
-    const last = result[result.length - 1]!;
-    if (sorted[i].start <= last.end) {
-      if (sorted[i].end > last.end) last.end = sorted[i].end;
-    } else {
-      result.push({ ...sorted[i] });
-    }
-  }
-  return result;
-}
-
 interface WeeklyAvailabilityProps {
   availability: { [key in DayOfWeek]?: TimeWindow[] };
   onChange: (availability: { [key in DayOfWeek]?: TimeWindow[] }) => void;
@@ -582,22 +568,10 @@ function WeeklyAvailability({
   onChange,
   defaultWindow = { start: '09:00', end: '17:00' },
 }: WeeklyAvailabilityProps) {
-  const [presets, setPresets] = useState({ mornings: false, midday: false, evenings: false });
-
-  const togglePreset = (key: 'mornings' | 'midday' | 'evenings') => {
-    const next = { ...presets, [key]: !presets[key] };
-    setPresets(next);
-    const windows: TimeWindow[] = [];
-    if (next.mornings) windows.push({ start: '07:00', end: '12:00' });
-    if (next.midday) windows.push({ start: '10:00', end: '15:00' });
-    if (next.evenings) windows.push({ start: '15:00', end: '20:00' });
-    const merged = mergeWindows(windows);
-    const nextAv = { ...availability };
-    (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
-      if (merged.length === 0) delete nextAv[d];
-      else nextAv[d] = merged.map(w => ({ ...w }));
-    });
-    onChange(nextAv);
+  const handleTogglePreset = (key: PresetKey) => {
+    const preset = PRESET_WINDOWS[key];
+    const active = isPresetActive(availability, preset);
+    onChange(togglePreset(availability, preset, !active));
   };
 
   const updateWindow = (day: DayOfWeek, idx: number, field: 'start' | 'end', value: string) => {
@@ -640,20 +614,22 @@ function WeeklyAvailability({
     onChange(next);
   };
 
-  const clearAll = () => { setPresets({ mornings: false, midday: false, evenings: false }); onChange({}); };
+  const clearAll = () => onChange({});
 
   return (
     <div style={{ width: '100%', overflowX: 'hidden' }}>
       <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-        {(['mornings', 'midday', 'evenings'] as const).map(key => {
-          const label = key === 'mornings' ? 'Mornings 7–12' : key === 'midday' ? 'Midday 10–3' : 'Evenings 3–8';
-          return (
-            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer', userSelect: 'none' }}>
-              <input type="checkbox" checked={presets[key]} onChange={() => togglePreset(key)} style={{ cursor: 'pointer' }} />
-              {label}
-            </label>
-          );
-        })}
+        {(Object.keys(PRESET_WINDOWS) as PresetKey[]).map(key => (
+          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer', userSelect: 'none' }}>
+            <input
+              type="checkbox"
+              checked={isPresetActive(availability, PRESET_WINDOWS[key])}
+              onChange={() => handleTogglePreset(key)}
+              style={{ cursor: 'pointer' }}
+            />
+            {PRESET_LABELS[key]}
+          </label>
+        ))}
         <button onClick={copyMondayToWeekdays} style={presetBtn}>Copy Mon → Tue–Fri</button>
         <button onClick={clearAll} style={{ ...presetBtn, color: '#dc2626', borderColor: '#fca5a5' }}>Clear all</button>
       </div>

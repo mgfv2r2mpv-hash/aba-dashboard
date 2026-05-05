@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow } from '../types';
+import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 
 interface AdminPanelProps {
   data: ScheduleData;
@@ -10,21 +11,6 @@ interface AdminPanelProps {
 
 const API_BASE = '/api';
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-function mergeWindows(windows: TimeWindow[]): TimeWindow[] {
-  if (windows.length === 0) return [];
-  const sorted = [...windows].sort((a, b) => a.start.localeCompare(b.start));
-  const result: TimeWindow[] = [{ ...sorted[0] }];
-  for (let i = 1; i < sorted.length; i++) {
-    const last = result[result.length - 1]!;
-    if (sorted[i].start <= last.end) {
-      if (sorted[i].end > last.end) last.end = sorted[i].end;
-    } else {
-      result.push({ ...sorted[i] });
-    }
-  }
-  return result;
-}
 
 export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'settings'>('technicians');
@@ -372,7 +358,6 @@ function AvailabilityEditor({ initial, onSave, onCancel }: {
   onCancel: () => void;
 }) {
   const [draft, setDraft] = useState<{ [key in DayOfWeek]?: TimeWindow[] }>(initial || {});
-  const [presets, setPresets] = useState({ mornings: false, midday: false, evenings: false });
 
   const setDayWindow = (day: DayOfWeek, idx: number, field: 'start' | 'end', value: string) => {
     const next = { ...draft };
@@ -406,36 +391,28 @@ function AvailabilityEditor({ initial, onSave, onCancel }: {
     });
     setDraft(next);
   };
-  const clearAll = () => { setPresets({ mornings: false, midday: false, evenings: false }); setDraft({}); };
+  const clearAll = () => setDraft({});
 
-  const togglePreset = (key: 'mornings' | 'midday' | 'evenings') => {
-    const next = { ...presets, [key]: !presets[key] };
-    setPresets(next);
-    const windows: TimeWindow[] = [];
-    if (next.mornings) windows.push({ start: '07:00', end: '12:00' });
-    if (next.midday) windows.push({ start: '10:00', end: '15:00' });
-    if (next.evenings) windows.push({ start: '15:00', end: '20:00' });
-    const merged = mergeWindows(windows);
-    const nextDraft = { ...draft };
-    (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
-      if (merged.length === 0) delete nextDraft[d];
-      else nextDraft[d] = merged.map(w => ({ ...w }));
-    });
-    setDraft(nextDraft);
+  const handleTogglePreset = (key: PresetKey) => {
+    const preset = PRESET_WINDOWS[key];
+    const active = isPresetActive(draft, preset);
+    setDraft(togglePreset(draft, preset, !active));
   };
 
   return (
     <div style={{ width: '100%', overflowX: 'hidden', marginTop: '8px' }}>
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px', alignItems: 'center' }}>
-        {(['mornings', 'midday', 'evenings'] as const).map(key => {
-          const label = key === 'mornings' ? 'Mornings 7–12' : key === 'midday' ? 'Midday 10–3' : 'Evenings 3–8';
-          return (
-            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer', userSelect: 'none' }}>
-              <input type="checkbox" checked={presets[key]} onChange={() => togglePreset(key)} style={{ cursor: 'pointer' }} />
-              {label}
-            </label>
-          );
-        })}
+        {(Object.keys(PRESET_WINDOWS) as PresetKey[]).map(key => (
+          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer', userSelect: 'none' }}>
+            <input
+              type="checkbox"
+              checked={isPresetActive(draft, PRESET_WINDOWS[key])}
+              onChange={() => handleTogglePreset(key)}
+              style={{ cursor: 'pointer' }}
+            />
+            {PRESET_LABELS[key]}
+          </label>
+        ))}
         <button onClick={copyMondayToWeekdays} style={chipBtn}>Copy Mon → Tue–Fri</button>
         <button onClick={clearAll} style={{ ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }}>Clear all</button>
       </div>

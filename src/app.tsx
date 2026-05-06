@@ -85,18 +85,6 @@ export default function App() {
     return response.blob();
   };
 
-  const handleLoadSample = async () => {
-    try {
-      const blob = await fetchSampleBlob();
-      const file = new File([blob], 'sample_schedule.xlsx', {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-      await handleFileUpload(file);
-    } catch (error: any) {
-      alert('Error loading sample: ' + (error.message || error));
-    }
-  };
-
   // On iOS/Android, drop the bundled sample into the app's Documents folder
   // on first launch so it shows up in the system file picker when the user
   // taps "Upload Schedule". No-op on web. Skips if already present.
@@ -343,7 +331,6 @@ export default function App() {
               <>
                 {headerButton('Setup Wizard', () => setShowWizard(true), '#8b5cf6')}
                 <FileUpload onUpload={handleFileUpload} loading={loading} />
-                {headerButton('Try sample', handleLoadSample, '#10b981')}
               </>
             ) : (
               <>
@@ -434,23 +421,14 @@ export default function App() {
             color: '#9ca3af',
             flexDirection: 'column',
             gap: '16px',
+            padding: '0 24px',
+            textAlign: 'center',
           }}>
             <p>Upload an Excel file or run the Setup Wizard to get started.</p>
-            <button
-              onClick={handleLoadSample}
-              disabled={loading}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: loading ? '#d1d5db' : '#10b981',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                fontSize: '13px',
-              }}
-            >
-              Try sample data
-            </button>
+            <p style={{ fontSize: '12px', maxWidth: '320px' }}>
+              A sample schedule (<code>sample_schedule.xlsx</code>) is in this app's
+              Documents folder — pick it from Files via Upload Schedule.
+            </p>
           </div>
         )}
       </div>

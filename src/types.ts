@@ -61,10 +61,6 @@ export interface CompanySettings {
     minimum: number;
     target: { min: number; max: number };
   };
-  billableRequirements?: {
-    hoursPerCycle: number;
-    cycleWeeks: number;
-  } | undefined;
   // Notice thresholds for cancellation tracking. Defaults are 24 hours
   // (unplanned) and 30 days (planned) but can be overridden per company.
   cancellationNotice?: {

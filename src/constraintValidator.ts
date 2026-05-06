@@ -20,7 +20,6 @@ export class ConstraintValidator {
     conflicts.push(...this.validateSupervisionRequirements());
     conflicts.push(...this.validateParentTraining());
     conflicts.push(...this.validateAvailability());
-    conflicts.push(...this.validateBillableRequirements());
 
     return conflicts;
   }
@@ -198,31 +197,6 @@ export class ConstraintValidator {
     return conflicts;
   }
 
-  private validateBillableRequirements(): ScheduleConflict[] {
-    const conflicts: ScheduleConflict[] = [];
-
-    if (!this.data.settings.billableRequirements) return conflicts;
-
-    this.data.technicians.forEach(technician => {
-      const cycles = this.getBillableCycles();
-      cycles.forEach(cycle => {
-        const billableHours = this.calculateBillableHours(technician.id, cycle.start, cycle.end);
-        const required = this.data.settings.billableRequirements!.hoursPerCycle;
-
-        if (billableHours < required) {
-          conflicts.push({
-            type: 'scheduling-impossible',
-            severity: 'info',
-            message: `Technician ${technician.name} has ${billableHours} billable hours in cycle but needs ${required}`,
-            affectedTechnicians: [technician.id],
-          });
-        }
-      });
-    });
-
-    return conflicts;
-  }
-
   // Helper calculations
   private calculateDirectHours(technicianId: string): number {
     return this.data.appointments
@@ -245,17 +219,6 @@ export class ConstraintValidator {
   private calculateParentTrainingHours(month: string): number {
     return this.data.appointments
       .filter(a => a.type === 'parent-training' && a.startTime.startsWith(month))
-      .reduce((sum, a) => sum + this.getHoursDuration(a.startTime, a.endTime), 0);
-  }
-
-  private calculateBillableHours(technicianId: string, startDate: string, endDate: string): number {
-    return this.data.appointments
-      .filter(a =>
-        (a.technician === technicianId || this.getTechnicianName(technicianId) === a.technician) &&
-        a.isBillable &&
-        a.startTime >= startDate &&
-        a.endTime <= endDate
-      )
       .reduce((sum, a) => sum + this.getHoursDuration(a.startTime, a.endTime), 0);
   }
 
@@ -300,31 +263,4 @@ export class ConstraintValidator {
     return Array.from(months);
   }
 
-  private getBillableCycles(): { start: string; end: string }[] {
-    if (!this.data.settings.billableRequirements) return [];
-
-    const cycles: { start: string; end: string }[] = [];
-    const appointments = this.data.appointments.sort((a, b) =>
-      new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
-    );
-
-    if (appointments.length === 0) return cycles;
-
-    let cycleStart = appointments[0].startTime;
-    const cycleWeeks = this.data.settings.billableRequirements.cycleWeeks;
-
-    for (let i = 0; i < appointments.length; i++) {
-      const cycleEnd = new Date(cycleStart);
-      cycleEnd.setDate(cycleEnd.getDate() + cycleWeeks * 7);
-
-      cycles.push({
-        start: cycleStart,
-        end: cycleEnd.toISOString(),
-      });
-
-      cycleStart = cycleEnd.toISOString();
-    }
-
-    return cycles;
-  }
 }

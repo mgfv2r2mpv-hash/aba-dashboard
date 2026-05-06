@@ -115,10 +115,6 @@ function parseSettings(workbook: XLSX.WorkBook): CompanySettings {
     supervisionRBTHoursPercent: parseFloat(row.supervisionRBTHoursPercent) || 5,
     parentTraining: { minimumHours, targetMinHours, targetMaxHours, periodUnit },
     clinicianAvailability,
-    billableRequirements: row.billableHoursPerCycle ? {
-      hoursPerCycle: parseFloat(row.billableHoursPerCycle),
-      cycleWeeks: parseFloat(row.billableCycleWeeks) || 4,
-    } : undefined,
   };
 }
 
@@ -247,8 +243,6 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
     clinicianAvailability: data.settings.clinicianAvailability
       ? JSON.stringify(data.settings.clinicianAvailability)
       : '',
-    billableHoursPerCycle: data.settings.billableRequirements?.hoursPerCycle,
-    billableCycleWeeks: data.settings.billableRequirements?.cycleWeeks,
   }];
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(settingsData), 'Settings');
 

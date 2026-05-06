@@ -108,8 +108,6 @@ const settingsData = [
     parentTrainingMinimum: 1.5,
     parentTrainingTargetMin: 2,
     parentTrainingTargetMax: 4,
-    billableHoursPerCycle: 80,
-    billableCycleWeeks: 4,
   },
 ];
 XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(settingsData), 'Settings');

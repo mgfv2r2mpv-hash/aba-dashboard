@@ -458,13 +458,23 @@ export default function App() {
                       const statusBg = status === 'canceled' ? '#fee2e2' : status === 'completed' ? '#dcfce7' : '#f3f4f6';
                       return (
                         <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: 8 }}>
                             <h3 style={{ margin: 0 }}>Selected Appointment</h3>
-                            <span style={{
-                              fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
-                              color: statusColor, backgroundColor: statusBg,
-                              padding: '2px 8px', borderRadius: 10,
-                            }}>{status}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{
+                                fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+                                color: statusColor, backgroundColor: statusBg,
+                                padding: '2px 8px', borderRadius: 10,
+                              }}>{status}</span>
+                              <button
+                                onClick={() => setSelectedAppointment(null)}
+                                aria-label="Close"
+                                style={{
+                                  background: 'none', border: 'none', color: '#6b7280',
+                                  fontSize: 20, lineHeight: 1, cursor: 'pointer', padding: 4,
+                                }}
+                              >✕</button>
+                            </div>
                           </div>
                           <p><strong>{a.title}</strong></p>
                           <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>

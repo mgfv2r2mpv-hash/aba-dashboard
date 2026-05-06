@@ -196,9 +196,17 @@ export default function App() {
             alert('Error deleting appointment: ' + (error.response?.data?.error || error.message));
         }
     };
-    const handleWizardComplete = (data) => {
-        setScheduleData(data);
-        setShowWizard(false);
+    const handleWizardComplete = async (data) => {
+        try {
+            const response = await axios.post(`${API_BASE}/schedule`, data);
+            setScheduleData(response.data.data);
+            setConflicts(response.data.conflicts || []);
+            setSolutions([]);
+            setShowWizard(false);
+        }
+        catch (error) {
+            alert('Error saving schedule: ' + (error.response?.data?.error || error.message));
+        }
     };
     const handleDownload = async () => {
         try {

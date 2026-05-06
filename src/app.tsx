@@ -200,9 +200,16 @@ export default function App() {
     }
   };
 
-  const handleWizardComplete = (data: ScheduleData) => {
-    setScheduleData(data);
-    setShowWizard(false);
+  const handleWizardComplete = async (data: ScheduleData) => {
+    try {
+      const response = await axios.post(`${API_BASE}/schedule`, data);
+      setScheduleData(response.data.data);
+      setConflicts(response.data.conflicts || []);
+      setSolutions([]);
+      setShowWizard(false);
+    } catch (error: any) {
+      alert('Error saving schedule: ' + (error.response?.data?.error || error.message));
+    }
   };
 
   const handleDownload = async () => {

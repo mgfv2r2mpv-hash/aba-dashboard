@@ -66,6 +66,23 @@ app.get('/api/schedule', (req, res) => {
     }
     res.json(currentScheduleData);
 });
+// Replace current schedule (used by the Setup Wizard, since it builds
+// schedule data client-side and never goes through the Excel upload path).
+app.post('/api/schedule', express.json({ limit: '10mb' }), (req, res) => {
+    try {
+        const data = req.body;
+        if (!data || !Array.isArray(data.technicians) || !Array.isArray(data.clients) || !Array.isArray(data.appointments)) {
+            return res.status(400).json({ error: 'Invalid schedule payload' });
+        }
+        currentScheduleData = data;
+        const validator = new ConstraintValidator(currentScheduleData);
+        const conflicts = validator.validateSchedule();
+        res.json({ success: true, data: currentScheduleData, conflicts });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
 // Update appointment
 // API key and model are passed via request headers (X-Claude-Api-Key, X-Claude-Model)
 // They are NEVER stored server-side - used only for the duration of the request

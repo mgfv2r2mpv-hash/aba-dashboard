@@ -1,4 +1,4 @@
-import XLSX from 'xlsx';
+import * as XLSX from 'xlsx';
 import { ScheduleData, Appointment, Technician, Client, CompanySettings, DayOfWeek } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -8,8 +8,10 @@ export interface ParsedSchedule {
 }
 
 export function parseExcelFile(filePath: string): ParsedSchedule {
-  const workbook = XLSX.readFile(filePath);
+  return parseWorkbook(XLSX.readFile(filePath));
+}
 
+export function parseWorkbook(workbook: XLSX.WorkBook): ParsedSchedule {
   const clients = parseClients(workbook);
   const technicians = parseTechnicians(workbook);
   const settings = parseSettings(workbook);

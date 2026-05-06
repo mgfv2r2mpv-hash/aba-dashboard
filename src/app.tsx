@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import * as XLSX from 'xlsx';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { parseWorkbook } from './excelHandler';
+import { ConstraintValidator } from './constraintValidator';
 import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution } from './types';
 import Calendar from './components/Calendar';
 import ConflictPanel from './components/ConflictPanel';
@@ -112,36 +115,46 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
+  const promptForEmbeddedKey = async (embeddedConfig: string) => {
+    if (aiSettings.apiKey) return;
+    const password = prompt('This file has an encrypted API key embedded. Enter the embed password to load it (or cancel to skip):');
+    if (!password) return;
+    try {
+      const decrypted = await decryptString(embeddedConfig, password);
+      const parsed = JSON.parse(decrypted) as { apiKey: string; model: ClaudeModel };
+      const restored: AISettings = { apiKey: parsed.apiKey, model: parsed.model || 'claude-sonnet-4-6' };
+      setAiSettings(restored);
+      saveSessionSettings(restored);
+      setPendingEmbedBlob(embeddedConfig);
+    } catch (_e) {
+      alert('Wrong password or corrupted blob - skipping embedded key.');
+    }
+  };
+
   const handleFileUpload = async (file: File) => {
     setLoading(true);
     try {
-      const response = await axios.post(`${API_BASE}/upload`, file, {
-        headers: {
-          'Content-Type': 'application/octet-stream',
-        },
-      });
+      if (Capacitor.isNativePlatform()) {
+        // No server is reachable from inside the iOS/Android WebView, so do
+        // the parse + validate entirely client-side.
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
+        const parsed = parseWorkbook(workbook);
+        const conflicts = new ConstraintValidator(parsed.data).validateSchedule();
+        setScheduleData(parsed.data);
+        setConflicts(conflicts);
+        setSolutions([]);
+        if (parsed.embeddedConfig) await promptForEmbeddedKey(parsed.embeddedConfig);
+        return;
+      }
 
+      const response = await axios.post(`${API_BASE}/upload`, file, {
+        headers: { 'Content-Type': 'application/octet-stream' },
+      });
       setScheduleData(response.data.data);
       setConflicts(response.data.conflicts);
       setSolutions([]);
-
-      // If file has embedded config, prompt user for the embed password
-      if (response.data.embeddedConfig && !aiSettings.apiKey) {
-        const password = prompt('This file has an encrypted API key embedded. Enter the embed password to load it (or cancel to skip):');
-        if (password) {
-          try {
-            const decrypted = await decryptString(response.data.embeddedConfig, password);
-            const parsed = JSON.parse(decrypted) as { apiKey: string; model: ClaudeModel };
-            const restored: AISettings = { apiKey: parsed.apiKey, model: parsed.model || 'claude-sonnet-4-6' };
-            setAiSettings(restored);
-            saveSessionSettings(restored);
-            // Keep blob so a subsequent download re-embeds it (still encrypted with old password)
-            setPendingEmbedBlob(response.data.embeddedConfig);
-          } catch (_e) {
-            alert('Wrong password or corrupted blob - skipping embedded key.');
-          }
-        }
-      }
+      if (response.data.embeddedConfig) await promptForEmbeddedKey(response.data.embeddedConfig);
     } catch (error: any) {
       alert('Error uploading file: ' + (error.response?.data?.error || error.message));
     } finally {

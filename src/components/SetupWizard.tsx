@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ScheduleData, Client, Technician, CompanySettings, DayOfWeek, TimeWindow, BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
+import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, WEEKDAYS, isPresetActive, togglePreset, mergeWindows } from '../availabilityUtils';
 
 interface SetupWizardProps {
   onComplete: (data: ScheduleData) => void;
@@ -49,13 +49,9 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
       targetMaxHours: 4,
       periodUnit: 'month',
     },
-    clinicianAvailability: {
-      Monday: [{ start: '09:00', end: '17:00' }],
-      Tuesday: [{ start: '09:00', end: '17:00' }],
-      Wednesday: [{ start: '09:00', end: '17:00' }],
-      Thursday: [{ start: '09:00', end: '17:00' }],
-      Friday: [{ start: '09:00', end: '17:00' }],
-    },
+    clinicianAvailability: Object.fromEntries(
+      WEEKDAYS.map(d => [d, mergeWindows(Object.values(PRESET_WINDOWS).map(w => ({ ...w })))]),
+    ),
   });
 
   const [supDirectStr, setSupDirectStr] = useState('5');

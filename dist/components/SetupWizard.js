@@ -2,7 +2,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState } from 'react';
 import { BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { PRESET_WINDOWS, PRESET_LABELS, isPresetActive, togglePreset } from '../availabilityUtils';
+import { PRESET_WINDOWS, PRESET_LABELS, WEEKDAYS, isPresetActive, togglePreset, mergeWindows } from '../availabilityUtils';
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const inputStyle = {
     width: '100%',
@@ -37,13 +37,7 @@ export default function SetupWizard({ onComplete, onCancel }) {
             targetMaxHours: 4,
             periodUnit: 'month',
         },
-        clinicianAvailability: {
-            Monday: [{ start: '09:00', end: '17:00' }],
-            Tuesday: [{ start: '09:00', end: '17:00' }],
-            Wednesday: [{ start: '09:00', end: '17:00' }],
-            Thursday: [{ start: '09:00', end: '17:00' }],
-            Friday: [{ start: '09:00', end: '17:00' }],
-        },
+        clinicianAvailability: Object.fromEntries(WEEKDAYS.map(d => [d, mergeWindows(Object.values(PRESET_WINDOWS).map(w => ({ ...w })))])),
     });
     const [supDirectStr, setSupDirectStr] = useState('5');
     const [supRBTStr, setSupRBTStr] = useState(String(BACB_RBT_SUPERVISION_MIN_PERCENT));

@@ -84,14 +84,18 @@ export default function Settings({ settings, onSave, onClose, onEmbedInExcel, on
       alignItems: 'center',
       justifyContent: 'center',
       zIndex: 1000,
+      padding: 'max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))',
+      boxSizing: 'border-box',
     }}>
       <div style={{
         backgroundColor: 'white',
         borderRadius: '8px',
-        padding: '24px',
-        width: '500px',
-        maxHeight: '90vh',
+        padding: '20px',
+        width: '100%',
+        maxWidth: 500,
+        maxHeight: '100%',
         overflowY: 'auto',
+        boxSizing: 'border-box',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2 style={{ fontSize: '20px', fontWeight: 'bold' }}>AI Settings</h2>

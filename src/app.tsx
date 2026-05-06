@@ -385,12 +385,23 @@ export default function App() {
   );
 
   return (
-    <div style={{ display: 'flex', height: '100vh', maxWidth: '100vw', overflowX: 'hidden', flexDirection: 'column' }}>
+    <div style={{
+      display: 'flex', height: '100vh', maxWidth: '100vw',
+      overflowX: 'hidden', flexDirection: 'column',
+      // Side insets matter on landscape iPhones with a notch so chrome
+      // doesn't slip under the camera housing.
+      paddingLeft: 'env(safe-area-inset-left)',
+      paddingRight: 'env(safe-area-inset-right)',
+    }}>
       <header style={{
         backgroundColor: '#1f2937',
         color: 'white',
-        padding: '12px 16px',
+        // Top padding includes the iOS status bar / notch inset so the
+        // title doesn't sit under the time/carrier indicators.
+        padding: 'calc(env(safe-area-inset-top) + 12px) 16px 12px',
         boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+        position: 'sticky', top: 0, zIndex: 10,
+        flexShrink: 0,
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
           <h1 style={{ fontSize: '18px', fontWeight: 'bold' }}>ABA Schedule Assistant</h1>
@@ -421,12 +432,22 @@ export default function App() {
         </div>
       </header>
 
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', flexWrap: 'wrap' }}>
+      <div style={{
+        display: 'flex', flex: 1, flexWrap: 'wrap',
+        // Single scroll region for the whole post-header area.
+        // Each child below reports its natural height instead of carving
+        // out its own scrollbox — fixes the "stuck mid-page" trap on iPhone
+        // where the calendar and issues pane were independent scroll panes
+        // and tapping ✕ on the appointment panel left no way to scroll back up.
+        overflowY: 'auto', overflowX: 'hidden',
+        WebkitOverflowScrolling: 'touch' as any,
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
         {scheduleData ? (
           <>
             {!showAdmin ? (
               <>
-                <div style={{ flex: '1 1 320px', minWidth: 0, overflow: 'auto' }}>
+                <div style={{ flex: '1 1 320px', minWidth: 0 }}>
                   <Calendar
                     appointments={scheduleData.appointments}
                     technicians={scheduleData.technicians}
@@ -442,7 +463,6 @@ export default function App() {
                     borderLeft: '1px solid #e5e7eb',
                     display: 'flex',
                     flexDirection: 'column',
-                    overflowY: 'auto',
                   }}>
                     {conflicts.length > 0 && <ConflictPanel conflicts={conflicts} />}
                     {!aiSettings.apiKey && conflicts.length > 0 && (

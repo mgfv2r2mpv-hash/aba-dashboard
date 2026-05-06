@@ -144,10 +144,13 @@ export default function AppointmentForm({
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
       backgroundColor: 'rgba(0,0,0,0.5)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+      padding: 'max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))',
+      boxSizing: 'border-box',
     }}>
       <div style={{
-        backgroundColor: 'white', borderRadius: '8px', padding: '24px',
-        width: '600px', maxHeight: '90vh', overflowY: 'auto',
+        backgroundColor: 'white', borderRadius: '8px', padding: '20px',
+        width: '100%', maxWidth: 600, maxHeight: '100%', overflowY: 'auto',
+        boxSizing: 'border-box',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
           <h2 style={{ fontSize: '20px', fontWeight: 'bold' }}>
@@ -167,7 +170,7 @@ export default function AppointmentForm({
             <input value={description} onChange={(e) => setDescription(e.target.value)} style={inputStyle} />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
             <div>
               <label style={labelStyle}>Type</label>
               <select value={type} onChange={(e) => setType(e.target.value as any)} style={inputStyle}>
@@ -191,7 +194,7 @@ export default function AppointmentForm({
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
             <div>
               <label style={labelStyle}>Technician</label>
               <select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} style={inputStyle}>
@@ -208,7 +211,7 @@ export default function AppointmentForm({
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
             <div>
               <label style={labelStyle}>Start *</label>
               <input type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={inputStyle} />

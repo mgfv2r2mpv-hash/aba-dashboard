@@ -6,6 +6,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { parseWorkbook } from './excelHandler';
 import { ConstraintValidator } from './constraintValidator';
+import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
 import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution } from './types';
 import Calendar from './components/Calendar';
 import ConflictPanel from './components/ConflictPanel';
@@ -16,6 +17,10 @@ import Settings, { AISettings, ClaudeModel } from './components/Settings';
 import AppointmentForm from './components/AppointmentForm';
 import SetupWizard from './components/SetupWizard';
 import { encryptString, decryptString } from './clientCrypto';
+
+// Route axios /api/* calls through an in-memory store on iOS/Android,
+// since the Express server isn't reachable from inside the WebView.
+if (Capacitor.isNativePlatform()) installNativeAdapter();
 
 const API_BASE = '/api';
 
@@ -136,11 +141,13 @@ export default function App() {
     try {
       if (Capacitor.isNativePlatform()) {
         // No server is reachable from inside the iOS/Android WebView, so do
-        // the parse + validate entirely client-side.
+        // the parse + validate entirely client-side, then prime the in-memory
+        // store that nativeApi serves /api/* requests from.
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
         const parsed = parseWorkbook(workbook);
         const conflicts = new ConstraintValidator(parsed.data).validateSchedule();
+        setNativeStore(parsed.data);
         setScheduleData(parsed.data);
         setConflicts(conflicts);
         setSolutions([]);
@@ -266,7 +273,9 @@ export default function App() {
         { responseType: 'blob' }
       );
       const blob = new Blob([response.data]);
-      const filename = 'schedule.enc.xlsx';
+      // Native /api/download bypasses the AES-CBC step (Node-only crypto), so
+      // mark the file as plain so anyone receiving it doesn't try to decrypt.
+      const filename = Capacitor.isNativePlatform() ? 'schedule.xlsx' : 'schedule.enc.xlsx';
 
       if (Capacitor.isNativePlatform()) {
         // iOS WKWebView ignores <a download>. Write the file to the app's

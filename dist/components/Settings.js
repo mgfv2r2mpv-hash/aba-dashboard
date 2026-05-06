@@ -24,6 +24,7 @@ export default function Settings({ settings, onSave, onClose, onEmbedInExcel, on
     const [embedPassword, setEmbedPassword] = useState('');
     const [embedConfirm, setEmbedConfirm] = useState('');
     const [embedStatus, setEmbedStatus] = useState(null);
+    const [showEmbedHelp, setShowEmbedHelp] = useState(false);
     const handleSave = () => {
         onSave({ apiKey: apiKey.trim(), model });
         onClose();
@@ -100,7 +101,28 @@ export default function Settings({ settings, onSave, onClose, onEmbedInExcel, on
                                 borderRadius: '4px',
                                 cursor: 'pointer',
                                 fontSize: '12px',
-                            }, children: "Clear stored key" }))] }), _jsxs("div", { style: { marginBottom: '24px', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px' }, children: [_jsx("label", { style: { display: 'block', fontWeight: '600', marginBottom: '8px' }, children: "Embed Encrypted Key in Excel (optional)" }), _jsx("p", { style: { fontSize: '12px', color: '#6b7280', marginBottom: '8px' }, children: "On next download, your API key + model will be encrypted with this password and saved into the Excel file. On re-upload, you'll be prompted for this password to decrypt." }), _jsx("input", { type: "password", placeholder: "Embed password (8+ chars)", value: embedPassword, onChange: (e) => setEmbedPassword(e.target.value), style: {
+                            }, children: "Clear stored key" }))] }), _jsxs("div", { style: { marginBottom: '24px', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px' }, children: [_jsxs("div", { style: { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }, children: [_jsx("label", { style: { fontWeight: '600' }, children: "Embed Encrypted Key in Excel (optional)" }), _jsx("button", { type: "button", onClick: () => setShowEmbedHelp(v => !v), "aria-label": "What is this?", "aria-expanded": showEmbedHelp, style: {
+                                        width: '20px',
+                                        height: '20px',
+                                        padding: 0,
+                                        borderRadius: '50%',
+                                        border: '1px solid #9ca3af',
+                                        background: showEmbedHelp ? '#6366f1' : 'white',
+                                        color: showEmbedHelp ? 'white' : '#6b7280',
+                                        cursor: 'pointer',
+                                        fontSize: '12px',
+                                        fontWeight: 600,
+                                        lineHeight: 1,
+                                    }, children: "?" })] }), showEmbedHelp && (_jsx("div", { role: "note", style: {
+                                fontSize: '12px',
+                                color: '#374151',
+                                background: '#eef2ff',
+                                border: '1px solid #c7d2fe',
+                                borderRadius: '6px',
+                                padding: '10px 12px',
+                                marginBottom: '8px',
+                                lineHeight: 1.5,
+                            }, children: "Pick a password you'll remember (8+ characters). It's used only to lock your API key inside this Excel file. Anyone with this file and the password can use your Claude key \u2014 so don't share the file in places you wouldn't share the key. If you forget the password, the embedded key cannot be recovered. Your current session's key still works, and you can paste a new API key above and re-encrypt here with a fresh password." })), _jsx("p", { style: { fontSize: '12px', color: '#6b7280', marginBottom: '8px' }, children: "On next download, your API key + model will be encrypted with this password and saved into the Excel file. On re-upload, you'll be prompted for this password to decrypt." }), _jsx("input", { type: "password", placeholder: "Embed password (8+ chars)", value: embedPassword, onChange: (e) => setEmbedPassword(e.target.value), style: {
                                 width: '100%',
                                 padding: '8px 12px',
                                 border: '1px solid #d1d5db',

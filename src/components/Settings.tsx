@@ -40,6 +40,7 @@ export default function Settings({ settings, onSave, onClose, onEmbedInExcel, on
   const [embedPassword, setEmbedPassword] = useState('');
   const [embedConfirm, setEmbedConfirm] = useState('');
   const [embedStatus, setEmbedStatus] = useState<string | null>(null);
+  const [showEmbedHelp, setShowEmbedHelp] = useState(false);
 
   const handleSave = () => {
     onSave({ apiKey: apiKey.trim(), model });
@@ -193,9 +194,53 @@ export default function Settings({ settings, onSave, onClose, onEmbedInExcel, on
 
         {/* Embed in Excel */}
         <div style={{ marginBottom: '24px', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
-          <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
-            Embed Encrypted Key in Excel (optional)
-          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+            <label style={{ fontWeight: '600' }}>
+              Embed Encrypted Key in Excel (optional)
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowEmbedHelp(v => !v)}
+              aria-label="What is this?"
+              aria-expanded={showEmbedHelp}
+              style={{
+                width: '20px',
+                height: '20px',
+                padding: 0,
+                borderRadius: '50%',
+                border: '1px solid #9ca3af',
+                background: showEmbedHelp ? '#6366f1' : 'white',
+                color: showEmbedHelp ? 'white' : '#6b7280',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 600,
+                lineHeight: 1,
+              }}
+            >?</button>
+          </div>
+          {showEmbedHelp && (
+            <div
+              role="note"
+              style={{
+                fontSize: '12px',
+                color: '#374151',
+                background: '#eef2ff',
+                border: '1px solid #c7d2fe',
+                borderRadius: '6px',
+                padding: '10px 12px',
+                marginBottom: '8px',
+                lineHeight: 1.5,
+              }}
+            >
+              Pick a password you'll remember (8+ characters). It's used only to
+              lock your API key inside this Excel file. Anyone with this file
+              and the password can use your Claude key — so don't share the
+              file in places you wouldn't share the key. If you forget the
+              password, the embedded key cannot be recovered. Your current
+              session's key still works, and you can paste a new API key above
+              and re-encrypt here with a fresh password.
+            </div>
+          )}
           <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
             On next download, your API key + model will be encrypted with this password and saved into the Excel file.
             On re-upload, you'll be prompted for this password to decrypt.

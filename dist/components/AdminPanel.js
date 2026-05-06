@@ -2,6 +2,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
+import { PRESET_WINDOWS, PRESET_LABELS, isPresetActive, togglePreset } from '../availabilityUtils';
 const API_BASE = '/api';
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 export default function AdminPanel({ data, onDataChange }) {
@@ -124,16 +125,52 @@ export default function AdminPanel({ data, onDataChange }) {
         cursor: 'pointer',
         fontWeight: isActive ? '600' : 'normal',
     });
-    return (_jsxs("div", { style: { flex: 1, display: 'flex', flexDirection: 'column' }, children: [_jsxs("div", { style: { display: 'flex', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9f9f9' }, children: [_jsx("button", { onClick: () => setActiveTab('technicians'), style: tabStyle(activeTab === 'technicians'), children: "Technicians" }), _jsx("button", { onClick: () => setActiveTab('clients'), style: tabStyle(activeTab === 'clients'), children: "Clients" }), _jsx("button", { onClick: () => setActiveTab('settings'), style: tabStyle(activeTab === 'settings'), children: "Settings" })] }), error && (_jsx("div", { style: { padding: '8px 16px', backgroundColor: '#fee2e2', color: '#991b1b', fontSize: '13px' }, children: error })), _jsxs("div", { style: { flex: 1, overflow: 'auto', padding: '24px' }, children: [activeTab === 'technicians' && (_jsxs("div", { children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }, children: [_jsxs("h3", { style: { fontSize: '18px', fontWeight: 'bold' }, children: ["Manage Technicians (", data.technicians.length, ")"] }), _jsx("button", { onClick: addTechnician, style: primaryBtn, children: "+ Add Technician" })] }), _jsxs("div", { style: { display: 'grid', gap: '16px' }, children: [data.technicians.map(tech => (_jsx(TechnicianCard, { tech: tech, saving: savingId === tech.id, onChange: (patch) => persistTechnician(tech.id, patch), onRemove: () => removeTechnician(tech.id) }, tech.id))), data.technicians.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: '20px' }, children: "No technicians yet." }))] })] })), activeTab === 'clients' && (_jsxs("div", { children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }, children: [_jsxs("h3", { style: { fontSize: '18px', fontWeight: 'bold' }, children: ["Manage Clients (", data.clients.length, ")"] }), _jsx("button", { onClick: addClient, style: primaryBtn, children: "+ Add Client" })] }), _jsxs("div", { style: { display: 'grid', gap: '16px' }, children: [data.clients.map(client => (_jsx(ClientCard, { client: client, saving: savingId === client.id, onChange: (patch) => persistClient(client.id, patch), onRemove: () => removeClient(client.id) }, client.id))), data.clients.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: '20px' }, children: "No clients yet." }))] })] })), activeTab === 'settings' && (_jsxs("div", { children: [_jsx("h3", { style: { marginBottom: '16px', fontSize: '18px', fontWeight: 'bold' }, children: "Company Settings" }), _jsxs("div", { style: {
+    return (_jsxs("div", { style: { flex: 1, display: 'flex', flexDirection: 'column' }, children: [_jsxs("div", { style: { display: 'flex', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9f9f9' }, children: [_jsx("button", { onClick: () => setActiveTab('technicians'), style: tabStyle(activeTab === 'technicians'), children: "Technicians" }), _jsx("button", { onClick: () => setActiveTab('clients'), style: tabStyle(activeTab === 'clients'), children: "Clients" }), _jsx("button", { onClick: () => setActiveTab('settings'), style: tabStyle(activeTab === 'settings'), children: "Settings" })] }), error && (_jsx("div", { style: { padding: '8px 16px', backgroundColor: '#fee2e2', color: '#991b1b', fontSize: '13px' }, children: error })), _jsxs("div", { style: { flex: 1, overflow: 'auto', padding: '24px' }, children: [activeTab === 'technicians' && (_jsxs("div", { children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }, children: [_jsxs("h3", { style: { fontSize: '18px', fontWeight: 'bold' }, children: ["Manage Technicians (", data.technicians.length, ")"] }), _jsx("button", { onClick: addTechnician, style: primaryBtn, children: "+ Add Technician" })] }), _jsxs("div", { style: { display: 'grid', gap: '16px' }, children: [data.technicians.map(tech => (_jsx(TechnicianCard, { tech: tech, clients: data.clients, saving: savingId === tech.id, onChange: (patch) => persistTechnician(tech.id, patch), onRemove: () => removeTechnician(tech.id) }, tech.id))), data.technicians.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: '20px' }, children: "No technicians yet." }))] })] })), activeTab === 'clients' && (_jsxs("div", { children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }, children: [_jsxs("h3", { style: { fontSize: '18px', fontWeight: 'bold' }, children: ["Manage Clients (", data.clients.length, ")"] }), _jsx("button", { onClick: addClient, style: primaryBtn, children: "+ Add Client" })] }), _jsxs("div", { style: { display: 'grid', gap: '16px' }, children: [data.clients.map(client => (_jsx(ClientCard, { client: client, saving: savingId === client.id, onChange: (patch) => persistClient(client.id, patch), onRemove: () => removeClient(client.id) }, client.id))), data.clients.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: '20px' }, children: "No clients yet." }))] })] })), activeTab === 'settings' && (_jsxs("div", { children: [_jsx("h3", { style: { marginBottom: '16px', fontSize: '18px', fontWeight: 'bold' }, children: "Company Settings" }), _jsxs("div", { style: {
                                     backgroundColor: '#f9f9f9', border: '1px solid #e5e7eb', borderRadius: '8px',
                                     padding: '16px', display: 'grid', gap: '16px',
                                 }, children: [_jsx(SettingRow, { label: "Supervision \u2014 Direct Hours", value: `${data.settings.supervisionDirectHoursPercent}% of direct client hours` }), _jsx(SettingRow, { label: "Supervision \u2014 RBT Hours", value: `${data.settings.supervisionRBTHoursPercent}% of RBT hours` }), _jsx(SettingRow, { label: "Parent Training", value: `Min: ${data.settings.parentTraining.minimumHours}h/${data.settings.parentTraining.periodUnit} · Target: ${data.settings.parentTraining.targetMinHours}–${data.settings.parentTraining.targetMaxHours}h/${data.settings.parentTraining.periodUnit}` }), _jsx("p", { style: { fontSize: '12px', color: '#6b7280' }, children: "Settings are configured in the Setup Wizard. Re-run the wizard to change them." })] })] }))] })] }));
 }
-function TechnicianCard({ tech, saving, onChange, onRemove }) {
+function TechnicianCard({ tech, clients, saving, onChange, onRemove }) {
     const [name, setName] = useState(tech.name);
     const [editing, setEditing] = useState(false);
+    const [hoursDraft, setHoursDraft] = useState({});
+    const assignments = tech.assignments || [];
+    const safeClients = clients || [];
+    const updateAssignment = (idx, patch) => {
+        const next = assignments.map((a, i) => i === idx ? { ...a, ...patch } : a);
+        onChange({ assignments: next });
+    };
+    const addAssignment = () => {
+        onChange({ assignments: [...assignments, { clientId: '', hoursPerWeek: 0, billable: true }] });
+    };
+    const removeAssignment = (idx) => {
+        onChange({ assignments: assignments.filter((_, i) => i !== idx) });
+        setHoursDraft(prev => {
+            const next = { ...prev };
+            delete next[idx];
+            return next;
+        });
+    };
+    const commitHours = (idx, raw) => {
+        const parsed = parseFloat(raw);
+        const hours = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+        if (hours !== assignments[idx]?.hoursPerWeek)
+            updateAssignment(idx, { hoursPerWeek: hours });
+        setHoursDraft(prev => {
+            const next = { ...prev };
+            delete next[idx];
+            return next;
+        });
+    };
     return (_jsxs("div", { style: cardStyle, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px', gap: '8px', flexWrap: 'wrap' }, children: [_jsxs("div", { style: { flex: '1 1 200px', minWidth: 0 }, children: [_jsx("input", { value: name, onChange: (e) => setName(e.target.value), onBlur: () => { if (name !== tech.name)
-                                    onChange({ name }); }, style: { ...inputStyle, fontWeight: 600, fontSize: '15px' } }), _jsxs("p", { style: { fontSize: '12px', color: '#6b7280', marginTop: '4px' }, children: ["ID: ", tech.id] })] }), _jsxs("label", { style: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', whiteSpace: 'nowrap' }, children: [_jsx("input", { type: "checkbox", checked: tech.isRBT, onChange: (e) => onChange({ isRBT: e.target.checked }), style: { cursor: 'pointer', width: '18px', height: '18px' } }), _jsx("span", { children: "RBT" })] }), _jsx("button", { onClick: () => setEditing(!editing), style: chipBtn, children: editing ? 'Done' : 'Edit availability' }), _jsx("button", { onClick: onRemove, style: dangerBtn, children: "Remove" })] }), saving && _jsx("p", { style: { fontSize: '11px', color: '#3b82f6' }, children: "Saving\u2026" }), !editing ? (_jsx(AvailabilitySummary, { windows: tech.availability })) : (_jsx(AvailabilityEditor, { initial: tech.availability, onSave: (av) => { onChange({ availability: av }); setEditing(false); }, onCancel: () => setEditing(false) })), tech.assignments && tech.assignments.length > 0 && (_jsxs("div", { style: { fontSize: '13px', color: '#6b7280', marginTop: '8px' }, children: [_jsx("p", { style: { marginBottom: '4px', fontWeight: '600' }, children: "Assignments:" }), tech.assignments.map((a, idx) => (_jsxs("p", { children: ["\u2022 ", a.clientId || '(unassigned)', ": ", a.hoursPerWeek, "h/week"] }, idx)))] }))] }));
+                                    onChange({ name }); }, style: { ...inputStyle, fontWeight: 600, fontSize: '15px' } }), _jsxs("p", { style: { fontSize: '12px', color: '#6b7280', marginTop: '4px' }, children: ["ID: ", tech.id] })] }), _jsxs("label", { style: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', whiteSpace: 'nowrap' }, children: [_jsx("input", { type: "checkbox", checked: tech.isRBT, onChange: (e) => onChange({ isRBT: e.target.checked }), style: { cursor: 'pointer', width: '18px', height: '18px' } }), _jsx("span", { children: "RBT" })] }), _jsx("button", { onClick: () => setEditing(!editing), style: chipBtn, children: editing ? 'Done' : 'Edit availability' }), _jsx("button", { onClick: onRemove, style: dangerBtn, children: "Remove" })] }), saving && _jsx("p", { style: { fontSize: '11px', color: '#3b82f6' }, children: "Saving\u2026" }), !editing ? (_jsx(AvailabilitySummary, { windows: tech.availability })) : (_jsx(AvailabilityEditor, { initial: tech.availability, onSave: (av) => { onChange({ availability: av }); setEditing(false); }, onCancel: () => setEditing(false) })), _jsxs("div", { style: { marginTop: '12px' }, children: [_jsx("p", { style: { fontWeight: 600, fontSize: '13px', marginBottom: '6px' }, children: "Assignments" }), assignments.length > 0 && (_jsxs("div", { style: { display: 'flex', gap: '6px', marginBottom: '4px' }, children: [_jsx("div", { style: { flex: 2, fontSize: '11px', color: '#6b7280', fontWeight: 600, minWidth: 0 }, children: "Client" }), _jsx("div", { style: { flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600, minWidth: 0 }, children: "Hrs/wk" }), _jsx("div", { style: { width: '32px', flexShrink: 0 } })] })), assignments.map((a, idx) => (_jsxs("div", { style: { display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }, children: [_jsxs("select", { value: a.clientId, onChange: (e) => updateAssignment(idx, { clientId: e.target.value }), style: { ...inputStyle, flex: 2, width: 'auto', minWidth: 0 }, children: [_jsx("option", { value: "", children: "\u2014 Pick client \u2014" }), safeClients.map(c => _jsx("option", { value: c.name, children: c.name }, c.id))] }), _jsx("input", { type: "number", step: "0.5", min: "0", value: hoursDraft[idx] ?? String(a.hoursPerWeek), onChange: (e) => setHoursDraft({ ...hoursDraft, [idx]: e.target.value }), onBlur: (e) => commitHours(idx, e.target.value), style: { ...inputStyle, flex: 1, width: 'auto', minWidth: 0 } }), _jsx("button", { onClick: () => removeAssignment(idx), style: {
+                                    width: '32px', height: '32px', padding: 0, backgroundColor: '#fee2e2', color: '#dc2626',
+                                    border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
+                                    fontSize: '18px', lineHeight: 1,
+                                }, "aria-label": "Remove assignment", children: "\u00D7" })] }, idx))), _jsx("button", { onClick: addAssignment, style: {
+                            padding: '6px 12px', fontSize: '13px', backgroundColor: 'white', color: '#3b82f6',
+                            border: '1px solid #3b82f6', borderRadius: '4px', cursor: 'pointer',
+                        }, children: "+ Assignment" })] })] }));
 }
 function AvailabilitySummary({ windows }) {
     const entries = Object.entries(windows || {}).filter(([, w]) => w && w.length > 0);
@@ -172,24 +209,20 @@ function AvailabilityEditor({ initial, onSave, onCancel }) {
         const monWindows = draft['Monday'] || [];
         const next = { ...draft };
         ['Tuesday', 'Wednesday', 'Thursday', 'Friday'].forEach(d => {
-            if (monWindows.length === 0) {
+            if (monWindows.length === 0)
                 delete next[d];
-            }
-            else {
+            else
                 next[d] = monWindows.map(w => ({ ...w }));
-            }
-        });
-        setDraft(next);
-    };
-    const setStandardWeekdays = () => {
-        const next = { ...draft };
-        ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].forEach(d => {
-            next[d] = [{ start: '09:00', end: '17:00' }];
         });
         setDraft(next);
     };
     const clearAll = () => setDraft({});
-    return (_jsxs("div", { style: { width: '100%', overflowX: 'hidden', marginTop: '8px' }, children: [_jsxs("div", { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }, children: [_jsx("button", { onClick: setStandardWeekdays, style: chipBtn, title: "Set Mon\u2013Fri 9 AM\u20135 PM", children: "Weekdays 9\u20135" }), _jsx("button", { onClick: copyMondayToWeekdays, style: chipBtn, title: "Copy Monday's windows to Tue\u2013Fri", children: "Copy Mon \u2192 Tue\u2013Fri" }), _jsx("button", { onClick: clearAll, style: { ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }, children: "Clear all" })] }), _jsx("div", { style: { display: 'flex', flexDirection: 'column', gap: '4px' }, children: DAYS.map((day, dayIdx) => {
+    const handleTogglePreset = (key) => {
+        const preset = PRESET_WINDOWS[key];
+        const active = isPresetActive(draft, preset);
+        setDraft(togglePreset(draft, preset, !active));
+    };
+    return (_jsxs("div", { style: { width: '100%', overflowX: 'hidden', marginTop: '8px' }, children: [_jsxs("div", { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '8px', alignItems: 'center' }, children: [Object.keys(PRESET_WINDOWS).map(key => (_jsxs("label", { style: { display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer', userSelect: 'none' }, children: [_jsx("input", { type: "checkbox", checked: isPresetActive(draft, PRESET_WINDOWS[key]), onChange: () => handleTogglePreset(key), style: { cursor: 'pointer' } }), PRESET_LABELS[key]] }, key))), _jsx("button", { onClick: copyMondayToWeekdays, style: chipBtn, children: "Copy Mon \u2192 Tue\u2013Fri" }), _jsx("button", { onClick: clearAll, style: { ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }, children: "Clear all" })] }), _jsx("div", { style: { display: 'flex', flexDirection: 'column', gap: '4px' }, children: DAYS.map((day, dayIdx) => {
                     const windows = draft[day] || [];
                     return (_jsxs("div", { style: {
                             display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap',
@@ -263,5 +296,7 @@ const editTimeInput = {
     border: '1px solid #d1d5db',
     borderRadius: '4px',
     fontFamily: 'inherit',
+    width: '75px',
+    minWidth: 0,
 };
 //# sourceMappingURL=AdminPanel.js.map

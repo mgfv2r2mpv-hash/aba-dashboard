@@ -79,6 +79,18 @@ export default function App() {
     setPendingEmbedBlob(blob);
   };
 
+  const handleLoadSample = async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/sample-schedule`, { responseType: 'blob' });
+      const file = new File([response.data], 'sample_schedule.xlsx', {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      await handleFileUpload(file);
+    } catch (error: any) {
+      alert('Error loading sample: ' + (error.response?.data?.error || error.message));
+    }
+  };
+
   const handleFileUpload = async (file: File) => {
     setLoading(true);
     try {
@@ -390,6 +402,21 @@ export default function App() {
             gap: '16px',
           }}>
             <p>Upload an Excel file or run the Setup Wizard to get started.</p>
+            <button
+              onClick={handleLoadSample}
+              disabled={loading}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: loading ? '#d1d5db' : '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                fontSize: '13px',
+              }}
+            >
+              Try sample data
+            </button>
           </div>
         )}
       </div>

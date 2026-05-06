@@ -73,6 +73,18 @@ export default function App() {
         const blob = await encryptString(payload, password);
         setPendingEmbedBlob(blob);
     };
+    const handleLoadSample = async () => {
+        try {
+            const response = await axios.get(`${API_BASE}/sample-schedule`, { responseType: 'blob' });
+            const file = new File([response.data], 'sample_schedule.xlsx', {
+                type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            });
+            await handleFileUpload(file);
+        }
+        catch (error) {
+            alert('Error loading sample: ' + (error.response?.data?.error || error.message));
+        }
+    };
     const handleFileUpload = async (file) => {
         setLoading(true);
         try {
@@ -282,7 +294,7 @@ export default function App() {
                                                         }, children: "Edit" }), _jsx("button", { onClick: () => handleDeleteAppointment(selectedAppointment.id), style: {
                                                             padding: '6px 12px', backgroundColor: '#fee2e2', color: '#dc2626',
                                                             border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                                                        }, children: "Delete" })] })] }))] }))] })) : (_jsx(AdminPanel, { data: scheduleData, onDataChange: setScheduleData })) })) : (_jsx("div", { style: {
+                                                        }, children: "Delete" })] })] }))] }))] })) : (_jsx(AdminPanel, { data: scheduleData, onDataChange: setScheduleData })) })) : (_jsxs("div", { style: {
                         flex: 1,
                         display: 'flex',
                         alignItems: 'center',
@@ -290,6 +302,14 @@ export default function App() {
                         color: '#9ca3af',
                         flexDirection: 'column',
                         gap: '16px',
-                    }, children: _jsx("p", { children: "Upload an Excel file or run the Setup Wizard to get started." }) })) }), showSettings && (_jsx(Settings, { settings: aiSettings, onSave: handleAISettingsSave, onClose: () => setShowSettings(false), onEmbedInExcel: handlePrepareEmbed, onClearKey: handleClearKey })), showWizard && (_jsx(SetupWizard, { onComplete: handleWizardComplete, onCancel: () => setShowWizard(false) })), showAddAppointment && scheduleData && (_jsx(AppointmentForm, { technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleAddAppointment, onCancel: () => setShowAddAppointment(false) })), editingAppointment && scheduleData && (_jsx(AppointmentForm, { appointment: editingAppointment, technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleAddAppointment, onCancel: () => setEditingAppointment(null) }))] }));
+                    }, children: [_jsx("p", { children: "Upload an Excel file or run the Setup Wizard to get started." }), _jsx("button", { onClick: handleLoadSample, disabled: loading, style: {
+                                padding: '8px 16px',
+                                backgroundColor: loading ? '#d1d5db' : '#10b981',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: loading ? 'not-allowed' : 'pointer',
+                                fontSize: '13px',
+                            }, children: "Try sample data" })] })) }), showSettings && (_jsx(Settings, { settings: aiSettings, onSave: handleAISettingsSave, onClose: () => setShowSettings(false), onEmbedInExcel: handlePrepareEmbed, onClearKey: handleClearKey })), showWizard && (_jsx(SetupWizard, { onComplete: handleWizardComplete, onCancel: () => setShowWizard(false) })), showAddAppointment && scheduleData && (_jsx(AppointmentForm, { technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleAddAppointment, onCancel: () => setShowAddAppointment(false) })), editingAppointment && scheduleData && (_jsx(AppointmentForm, { appointment: editingAppointment, technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleAddAppointment, onCancel: () => setEditingAppointment(null) }))] }));
 }
 //# sourceMappingURL=app.js.map

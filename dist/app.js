@@ -1,5 +1,5 @@
 import { jsx as _jsx, Fragment as _Fragment, jsxs as _jsxs } from "react/jsx-runtime";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -73,18 +73,54 @@ export default function App() {
         const blob = await encryptString(payload, password);
         setPendingEmbedBlob(blob);
     };
+    const fetchSampleBlob = async () => {
+        const response = await fetch('sample_schedule.xlsx');
+        if (!response.ok)
+            throw new Error(`Sample fetch failed: ${response.status}`);
+        return response.blob();
+    };
     const handleLoadSample = async () => {
         try {
-            const response = await axios.get(`${API_BASE}/sample-schedule`, { responseType: 'blob' });
-            const file = new File([response.data], 'sample_schedule.xlsx', {
+            const blob = await fetchSampleBlob();
+            const file = new File([blob], 'sample_schedule.xlsx', {
                 type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             });
             await handleFileUpload(file);
         }
         catch (error) {
-            alert('Error loading sample: ' + (error.response?.data?.error || error.message));
+            alert('Error loading sample: ' + (error.message || error));
         }
     };
+    // On iOS/Android, drop the bundled sample into the app's Documents folder
+    // on first launch so it shows up in the system file picker when the user
+    // taps "Upload Schedule". No-op on web. Skips if already present.
+    useEffect(() => {
+        if (!Capacitor.isNativePlatform())
+            return;
+        let cancelled = false;
+        (async () => {
+            try {
+                try {
+                    await Filesystem.stat({ path: 'sample_schedule.xlsx', directory: Directory.Documents });
+                    return; // Already seeded.
+                }
+                catch (_e) { /* not present, fall through */ }
+                const blob = await fetchSampleBlob();
+                const base64 = await blobToBase64(blob);
+                if (cancelled)
+                    return;
+                await Filesystem.writeFile({
+                    path: 'sample_schedule.xlsx',
+                    data: base64,
+                    directory: Directory.Documents,
+                });
+            }
+            catch (e) {
+                console.warn('Could not seed sample schedule:', e);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
     const handleFileUpload = async (file) => {
         setLoading(true);
         try {

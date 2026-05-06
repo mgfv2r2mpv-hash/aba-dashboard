@@ -71,18 +71,6 @@ app.post('/api/upload', express.raw({ type: ['application/vnd.openxmlformats-off
   }
 });
 
-// Sample schedule for quick local testing — serves the bundled sample_schedule.xlsx
-// so the dev environment doesn't require the user to source their own file.
-app.get('/api/sample-schedule', (_req: Request, res: Response) => {
-  const samplePath = path.join(__dirname, '../sample_schedule.xlsx');
-  if (!fs.existsSync(samplePath)) {
-    return res.status(404).json({ error: 'Sample file not found' });
-  }
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename=sample_schedule.xlsx');
-  res.sendFile(samplePath);
-});
-
 // Get current schedule
 app.get('/api/schedule', (req: Request, res: Response) => {
   if (!currentScheduleData) {

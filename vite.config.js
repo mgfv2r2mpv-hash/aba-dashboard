@@ -7,6 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   root: path.resolve(__dirname, 'public'),
+  publicDir: path.resolve(__dirname, 'public-assets'),
   plugins: [react()],
   server: {
     port: 3000,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Appointment, Technician, Client } from '../types';
 import { startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, format, isSameMonth, addMonths, subMonths } from 'date-fns';
 
@@ -19,6 +19,25 @@ export default function Calendar({
 }: CalendarProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+
+  // When a schedule loads with no appointments in the currently-shown month,
+  // jump to the month containing the first appointment so users actually see
+  // their data instead of an empty grid.
+  useEffect(() => {
+    if (appointments.length === 0) return;
+    const hasAppointmentThisMonth = appointments.some(a =>
+      isSameMonth(new Date(a.startTime), currentDate)
+    );
+    if (hasAppointmentThisMonth) return;
+    const earliest = appointments
+      .map(a => new Date(a.startTime))
+      .filter(d => !isNaN(d.getTime()))
+      .sort((a, b) => a.getTime() - b.getTime())[0];
+    if (earliest) setCurrentDate(earliest);
+    // Intentionally only react to appointments identity, not currentDate —
+    // we don't want to fight the user's manual navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointments]);
 
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(monthStart);

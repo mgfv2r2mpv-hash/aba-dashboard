@@ -22,6 +22,11 @@ import { encryptString, decryptString } from './clientCrypto';
 // since the Express server isn't reachable from inside the WebView.
 if (Capacitor.isNativePlatform()) installNativeAdapter();
 
+// Build stamp surfaced in the empty-state diagnostics banner so you can
+// confirm the device is running this bundle and not a stale ios/App/App/public.
+declare const __BUILD_TIME__: string;
+const BUILD_STAMP = typeof __BUILD_TIME__ === 'string' ? __BUILD_TIME__ : 'dev';
+
 const API_BASE = '/api';
 
 const SESSION_KEY = 'aba_ai_settings';
@@ -67,6 +72,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [aiSettings, setAiSettings] = useState<AISettings>(loadSessionSettings);
   const [pendingEmbedBlob, setPendingEmbedBlob] = useState<string | undefined>(undefined);
+  const [debugMsg, setDebugMsg] = useState<string | null>(null);
 
   const handleAISettingsSave = (settings: AISettings) => {
     setAiSettings(settings);
@@ -101,10 +107,9 @@ export default function App() {
     let cancelled = false;
     (async () => {
       try {
-        try {
-          await Filesystem.stat({ path: 'sample_schedule.xlsx', directory: Directory.Documents });
-          return; // Already seeded.
-        } catch (_e) { /* not present, fall through */ }
+        // Always overwrite: the bundled sample's appointment dates are
+        // anchored to the build's current week, so a stale copy from a
+        // previous launch would show as "no events this month".
         const blob = await fetchSampleBlob();
         const base64 = await blobToBase64(blob);
         if (cancelled) return;
@@ -163,7 +168,10 @@ export default function App() {
       setSolutions([]);
       if (response.data.embeddedConfig) await promptForEmbeddedKey(response.data.embeddedConfig);
     } catch (error: any) {
-      alert('Error uploading file: ' + (error.response?.data?.error || error.message));
+      const msg = error.response?.data?.error || error.message || String(error);
+      console.error('[upload] failed', error);
+      setDebugMsg(`Upload failed: ${msg}`);
+      alert('Error uploading file: ' + msg);
     } finally {
       setLoading(false);
     }
@@ -260,8 +268,12 @@ export default function App() {
       setConflicts(response.data.conflicts || []);
       setSolutions([]);
       setShowWizard(false);
+      setDebugMsg(null);
     } catch (error: any) {
-      alert('Error saving schedule: ' + (error.response?.data?.error || error.message));
+      const msg = error.response?.data?.error || error.message || String(error);
+      console.error('[wizard] failed', error);
+      setDebugMsg(`Wizard save failed: ${msg}`);
+      alert('Error saving schedule: ' + msg);
     }
   };
 
@@ -450,6 +462,14 @@ export default function App() {
             <p style={{ fontSize: '12px', maxWidth: '320px' }}>
               A sample schedule (<code>sample_schedule.xlsx</code>) is in this app's
               Documents folder — pick it from Files via Upload Schedule.
+            </p>
+            {debugMsg && (
+              <p style={{ fontSize: '12px', color: '#b91c1c', maxWidth: '320px', backgroundColor: '#fee2e2', padding: '8px', borderRadius: '4px' }}>
+                {debugMsg}
+              </p>
+            )}
+            <p style={{ fontSize: '10px', color: '#d1d5db', fontFamily: 'monospace' }}>
+              build {BUILD_STAMP} · native {String(Capacitor.isNativePlatform())}
             </p>
           </div>
         )}

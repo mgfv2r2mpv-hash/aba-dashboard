@@ -9,6 +9,11 @@ export default defineConfig({
   root: path.resolve(__dirname, 'public'),
   publicDir: path.resolve(__dirname, 'public-assets'),
   plugins: [react()],
+  define: {
+    // Baked at build time so the device can display which bundle it has,
+    // to catch stale ios/App/App/public/ copies that didn't get cap-copied.
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   server: {
     port: 3000,
     proxy: {

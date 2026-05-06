@@ -1,5 +1,23 @@
 const XLSX = require('xlsx');
 
+// Anchor the sample to the current week so the calendar lands on appointments
+// you can actually see, no matter when the file was generated.
+function isoOnDay(weekdayOffset, hour, minute = 0) {
+  const now = new Date();
+  const monday = new Date(now);
+  // getDay(): 0=Sun..6=Sat. Shift to Monday-of-this-week.
+  const shift = (now.getDay() + 6) % 7;
+  monday.setDate(now.getDate() - shift);
+  monday.setHours(0, 0, 0, 0);
+  const d = new Date(monday);
+  d.setDate(monday.getDate() + weekdayOffset);
+  d.setHours(hour, minute, 0, 0);
+  // YYYY-MM-DDTHH:MM:SS in local time, no timezone — matches the existing
+  // Calendar filter that does `startTime.startsWith('YYYY-MM-DD')`.
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+}
+
 const workbook = XLSX.utils.book_new();
 
 // Clients sheet
@@ -104,8 +122,8 @@ const appointmentsData = [
     description: 'Direct service',
     technician: 'Sarah Tech',
     client: 'Client A',
-    startTime: '2025-05-05T09:00:00',
-    endTime: '2025-05-05T12:00:00',
+    startTime: isoOnDay(0, 9),  // Mon 09:00
+    endTime: isoOnDay(0, 12),   // Mon 12:00
     isFixed: 'FALSE',
     isBillable: 'TRUE',
     type: 'client-session',
@@ -118,8 +136,8 @@ const appointmentsData = [
     description: 'Weekly supervision',
     technician: 'Sarah Tech',
     client: '',
-    startTime: '2025-05-06T14:00:00',
-    endTime: '2025-05-06T15:00:00',
+    startTime: isoOnDay(1, 14), // Tue 14:00
+    endTime: isoOnDay(1, 15),   // Tue 15:00
     isFixed: 'FALSE',
     isBillable: 'FALSE',
     type: 'supervision',
@@ -132,8 +150,8 @@ const appointmentsData = [
     description: 'Monthly session',
     technician: 'Sarah Tech',
     client: 'Client A',
-    startTime: '2025-05-09T16:00:00',
-    endTime: '2025-05-09T17:30:00',
+    startTime: isoOnDay(4, 16, 0),  // Fri 16:00
+    endTime: isoOnDay(4, 17, 30),   // Fri 17:30
     isFixed: 'TRUE',
     isBillable: 'FALSE',
     type: 'parent-training',

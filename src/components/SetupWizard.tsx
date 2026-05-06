@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ScheduleData, Client, Technician, CompanySettings, DayOfWeek, TimeWindow, BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
+import { ScheduleData, Client, Technician, CompanySettings, DayOfWeek, TimeWindow, BACB_RBT_SUPERVISION_MIN_PERCENT, DEFAULT_CANCELLATION_NOTICE } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, WEEKDAYS, isPresetActive, togglePreset, mergeWindows } from '../availabilityUtils';
 
@@ -60,6 +60,8 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
   const [minHoursStr, setMinHoursStr] = useState('1.5');
   const [targetMinStr, setTargetMinStr] = useState('2');
   const [targetMaxStr, setTargetMaxStr] = useState('4');
+  const [unplannedHoursStr, setUnplannedHoursStr] = useState(String(DEFAULT_CANCELLATION_NOTICE.unplannedHoursThreshold));
+  const [plannedDaysStr, setPlannedDaysStr] = useState(String(DEFAULT_CANCELLATION_NOTICE.plannedDaysThreshold));
 
   const [clients, setClients] = useState<Client[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
@@ -109,6 +111,10 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
         minimumHours: parseNumericString(minHoursStr, 1.5),
         targetMinHours: parseNumericString(targetMinStr, 2),
         targetMaxHours: parseNumericString(targetMaxStr, 4),
+      },
+      cancellationNotice: {
+        unplannedHoursThreshold: parseNumericString(unplannedHoursStr, DEFAULT_CANCELLATION_NOTICE.unplannedHoursThreshold),
+        plannedDaysThreshold: parseNumericString(plannedDaysStr, DEFAULT_CANCELLATION_NOTICE.plannedDaysThreshold),
       },
     };
   };
@@ -308,6 +314,32 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                       type="number" step="0.5"
                       value={targetMaxStr}
                       onChange={(e) => setTargetMaxStr(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </div>
+                </div>
+
+                <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14, fontWeight: 600 }}>Cancellation notice thresholds</h4>
+                <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+                  Used when logging cancellations. Defaults to 24 hours unplanned / 30 days planned;
+                  some companies use 48 hours or 2 months.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <label style={labelStyle}>Unplanned: hours of notice</label>
+                    <input
+                      type="number" step="1" min="0"
+                      value={unplannedHoursStr}
+                      onChange={(e) => setUnplannedHoursStr(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Planned: days of notice</label>
+                    <input
+                      type="number" step="1" min="0"
+                      value={plannedDaysStr}
+                      onChange={(e) => setPlannedDaysStr(e.target.value)}
                       style={inputStyle}
                     />
                   </div>

@@ -7,7 +7,7 @@ import { Share } from '@capacitor/share';
 import { parseWorkbook } from './excelHandler';
 import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
-import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution } from './types';
+import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, Cancellation } from './types';
 import Calendar from './components/Calendar';
 import ConflictPanel from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
@@ -16,6 +16,7 @@ import FileUpload from './components/FileUpload';
 import Settings, { AISettings, ClaudeModel } from './components/Settings';
 import AppointmentForm from './components/AppointmentForm';
 import SetupWizard from './components/SetupWizard';
+import CancellationDialog from './components/CancellationDialog';
 import { encryptString, decryptString } from './clientCrypto';
 
 // Route axios /api/* calls through an in-memory store on iOS/Android,
@@ -73,6 +74,17 @@ export default function App() {
   const [aiSettings, setAiSettings] = useState<AISettings>(loadSessionSettings);
   const [pendingEmbedBlob, setPendingEmbedBlob] = useState<string | undefined>(undefined);
   const [debugMsg, setDebugMsg] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
+  const detailPanelRef = React.useRef<HTMLDivElement | null>(null);
+
+  // On narrow screens the right-side detail panel wraps below the calendar.
+  // When the user taps an appointment, scroll the detail into view so they
+  // notice it actually opened.
+  useEffect(() => {
+    if (selectedAppointment && detailPanelRef.current) {
+      detailPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [selectedAppointment]);
 
   const handleAISettingsSave = (settings: AISettings) => {
     setAiSettings(settings);
@@ -206,6 +218,38 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const persistAppointment = async (updated: Appointment) => {
+    if (!scheduleData) return;
+    try {
+      await axios.post(`${API_BASE}/admin/appointment`, updated);
+      const next: ScheduleData = {
+        ...scheduleData,
+        appointments: scheduleData.appointments.map(a => a.id === updated.id ? updated : a),
+      };
+      setScheduleData(next);
+      setSelectedAppointment(updated);
+      // Recompute conflicts so the side panel reflects the new lifecycle state
+      // (canceled appointments are now excluded from compliance totals).
+      setConflicts(new ConstraintValidator(next).validateSchedule());
+    } catch (error: any) {
+      const msg = error.response?.data?.error || error.message || String(error);
+      setDebugMsg(`Update failed: ${msg}`);
+      alert('Error updating appointment: ' + msg);
+    }
+  };
+
+  const handleMarkComplete = (a: Appointment) =>
+    persistAppointment({ ...a, status: 'completed', cancellation: undefined });
+
+  const handleReopen = (a: Appointment) =>
+    persistAppointment({ ...a, status: 'scheduled', cancellation: undefined });
+
+  const handleConfirmCancel = (cancellation: Cancellation) => {
+    if (!cancelTarget) return;
+    persistAppointment({ ...cancelTarget, status: 'canceled', cancellation });
+    setCancelTarget(null);
   };
 
   const handleApplySolution = async (solution: ScheduleSolution) => {
@@ -392,7 +436,7 @@ export default function App() {
                   />
                 </div>
                 {(conflicts.length > 0 || solutions.length > 0 || selectedAppointment) && (
-                  <div style={{
+                  <div ref={detailPanelRef} style={{
                     flex: '0 0 auto',
                     width: 'min(350px, 100%)',
                     borderLeft: '1px solid #e5e7eb',
@@ -407,38 +451,85 @@ export default function App() {
                       </div>
                     )}
                     {solutions.length > 0 && <SolutionPanel solutions={solutions} onApply={handleApplySolution} />}
-                    {selectedAppointment && (
-                      <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb' }}>
-                        <h3 style={{ marginBottom: '12px' }}>Selected Appointment</h3>
-                        <p><strong>{selectedAppointment.title}</strong></p>
-                        <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
-                          {new Date(selectedAppointment.startTime).toLocaleString()} →{' '}
-                          {new Date(selectedAppointment.endTime).toLocaleString()}
-                        </p>
-                        {selectedAppointment.technician && (
-                          <p style={{ fontSize: '12px', color: '#374151', marginTop: '4px' }}>
-                            Tech: {selectedAppointment.technician}
+                    {selectedAppointment && (() => {
+                      const a = selectedAppointment;
+                      const status = a.status || 'scheduled';
+                      const statusColor = status === 'canceled' ? '#b91c1c' : status === 'completed' ? '#15803d' : '#374151';
+                      const statusBg = status === 'canceled' ? '#fee2e2' : status === 'completed' ? '#dcfce7' : '#f3f4f6';
+                      return (
+                        <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                            <h3 style={{ margin: 0 }}>Selected Appointment</h3>
+                            <span style={{
+                              fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+                              color: statusColor, backgroundColor: statusBg,
+                              padding: '2px 8px', borderRadius: 10,
+                            }}>{status}</span>
+                          </div>
+                          <p><strong>{a.title}</strong></p>
+                          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                            {new Date(a.startTime).toLocaleString()} → {new Date(a.endTime).toLocaleString()}
                           </p>
-                        )}
-                        {selectedAppointment.isFixed && <p style={{ color: '#dc2626', marginTop: '4px' }}>🔒 Fixed</p>}
-                        <div style={{ display: 'flex', gap: '6px', marginTop: '12px' }}>
-                          <button
-                            onClick={() => setEditingAppointment(selectedAppointment)}
-                            style={{
-                              flex: 1, padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
-                              border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                            }}
-                          >Edit</button>
-                          <button
-                            onClick={() => handleDeleteAppointment(selectedAppointment.id)}
-                            style={{
-                              padding: '6px 12px', backgroundColor: '#fee2e2', color: '#dc2626',
-                              border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                            }}
-                          >Delete</button>
+                          {a.technician && (
+                            <p style={{ fontSize: '12px', color: '#374151', marginTop: '4px' }}>
+                              Tech: {a.technician}
+                            </p>
+                          )}
+                          {a.isFixed && status === 'scheduled' && <p style={{ color: '#dc2626', marginTop: '4px' }}>🔒 Fixed</p>}
+                          {a.cancellation && (
+                            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }}>
+                              <div>Source: <strong>Cancel-{a.cancellation.source.toUpperCase()}</strong></div>
+                              <div>Reason: <strong>{a.cancellation.reason.replace('_', ' ')}</strong></div>
+                              <div>{a.cancellation.unplanned ? 'Unplanned' : 'Planned'} · notice met: <strong>{a.cancellation.noticeMet ? 'yes' : 'no'}</strong></div>
+                              {a.cancellation.notes && <div>Notes: {a.cancellation.notes}</div>}
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
+                            <button
+                              onClick={() => setEditingAppointment(a)}
+                              style={{
+                                flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
+                                border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                              }}
+                            >Edit</button>
+                            {status === 'scheduled' && (
+                              <>
+                                <button
+                                  onClick={() => handleMarkComplete(a)}
+                                  style={{
+                                    flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#dcfce7', color: '#15803d',
+                                    border: '1px solid #86efac', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
+                                  }}
+                                >✓ Complete</button>
+                                <button
+                                  onClick={() => setCancelTarget(a)}
+                                  style={{
+                                    flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#fee2e2', color: '#b91c1c',
+                                    border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
+                                  }}
+                                >✕ Cancel</button>
+                              </>
+                            )}
+                            {(status === 'completed' || status === 'canceled') && (
+                              <button
+                                onClick={() => handleReopen(a)}
+                                style={{
+                                  flex: '1 1 auto', padding: '6px 12px', backgroundColor: 'white', color: '#374151',
+                                  border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                                }}
+                              >Reopen</button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteAppointment(a.id)}
+                              style={{
+                                padding: '6px 12px', backgroundColor: 'white', color: '#6b7280',
+                                border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                              }}
+                            >Delete</button>
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 )}
               </>
@@ -489,6 +580,15 @@ export default function App() {
         <SetupWizard
           onComplete={handleWizardComplete}
           onCancel={() => setShowWizard(false)}
+        />
+      )}
+
+      {cancelTarget && scheduleData && (
+        <CancellationDialog
+          appointment={cancelTarget}
+          settings={scheduleData.settings}
+          onConfirm={handleConfirmCancel}
+          onCancel={() => setCancelTarget(null)}
         />
       )}
 

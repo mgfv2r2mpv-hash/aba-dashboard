@@ -157,30 +157,56 @@ export default function Calendar({
                 {format(day, 'd')}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                {dayAppointments.slice(0, 3).map(apt => (
-                  <div
-                    key={apt.id}
-                    onClick={e => {
-                      e.stopPropagation();
-                      onSelectAppointment(apt);
-                    }}
-                    style={{
-                      backgroundColor: getTypeColor(apt.type, apt.isFixed),
-                      color: 'white',
-                      padding: '3px 4px',
-                      borderRadius: '3px',
-                      fontSize: '10px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      cursor: 'pointer',
-                      border: apt.isFixed ? '2px solid #dc2626' : 'none',
-                    }}
-                    title={apt.title}
-                  >
-                    {apt.title}
-                  </div>
-                ))}
+                {dayAppointments.slice(0, 3).map(apt => {
+                  const baseColor = getTypeColor(apt.type, apt.isFixed);
+                  const canceled = apt.status === 'canceled';
+                  const completed = apt.status === 'completed';
+                  // Diagonal candystripe per the QA spec.
+                  const stripeBg = canceled
+                    ? 'repeating-linear-gradient(45deg, #fca5a5, #fca5a5 6px, #9ca3af 6px, #9ca3af 12px)'
+                    : completed
+                    ? 'repeating-linear-gradient(45deg, #86efac, #86efac 6px, #ffffff 6px, #ffffff 12px)'
+                    : undefined;
+                  return (
+                    <div
+                      key={apt.id}
+                      onClick={e => {
+                        e.stopPropagation();
+                        onSelectAppointment(apt);
+                      }}
+                      style={{
+                        background: stripeBg ?? baseColor,
+                        color: canceled || completed ? '#1f2937' : 'white',
+                        padding: '3px 4px',
+                        borderRadius: '3px',
+                        fontSize: '10px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        cursor: 'pointer',
+                        border: apt.isFixed && !canceled && !completed ? '2px solid #dc2626' : 'none',
+                        position: 'relative',
+                        paddingRight: canceled || completed ? 14 : 4,
+                        textDecoration: canceled ? 'line-through' : 'none',
+                        opacity: canceled ? 0.85 : 1,
+                      }}
+                      title={apt.title + (canceled ? ' (canceled)' : completed ? ' (completed)' : '')}
+                    >
+                      {apt.title}
+                      {(canceled || completed) && (
+                        <span
+                          style={{
+                            position: 'absolute', top: 1, right: 3,
+                            fontSize: 10, fontWeight: 700,
+                            color: canceled ? '#b91c1c' : '#15803d',
+                            lineHeight: 1,
+                          }}
+                          aria-label={canceled ? 'canceled' : 'completed'}
+                        >{canceled ? '✕' : '✓'}</span>
+                      )}
+                    </div>
+                  );
+                })}
                 {dayAppointments.length > 3 && (
                   <div style={{ fontSize: '10px', color: '#9ca3af' }}>
                     +{dayAppointments.length - 3} more

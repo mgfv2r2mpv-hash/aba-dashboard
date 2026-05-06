@@ -65,6 +65,51 @@ export interface CompanySettings {
     hoursPerCycle: number;
     cycleWeeks: number;
   } | undefined;
+  // Notice thresholds for cancellation tracking. Defaults are 24 hours
+  // (unplanned) and 30 days (planned) but can be overridden per company.
+  cancellationNotice?: {
+    unplannedHoursThreshold: number;
+    plannedDaysThreshold: number;
+  };
+}
+
+export const DEFAULT_CANCELLATION_NOTICE = {
+  unplannedHoursThreshold: 24,
+  plannedDaysThreshold: 30,
+};
+
+export type AppointmentStatus = 'scheduled' | 'completed' | 'canceled';
+
+// WHO initiated the cancellation. Source-only; reason is separate.
+export type CancellationSource = 'bt' | 'bcba' | 'admin' | 'family';
+export const CANCELLATION_SOURCES: { value: CancellationSource; label: string }[] = [
+  { value: 'bt', label: 'Cancel-BT' },
+  { value: 'bcba', label: 'Cancel-BCBA' },
+  { value: 'admin', label: 'Cancel-Admin' },
+  { value: 'family', label: 'Cancel-Family' },
+];
+
+export type CancellationReason = 'sick' | 'pto' | 'training' | 'holiday' | 'weather' | 'auth_issues';
+export const CANCELLATION_REASONS: { value: CancellationReason; label: string }[] = [
+  { value: 'sick', label: 'Sick' },
+  { value: 'pto', label: 'PTO/Vacation' },
+  { value: 'training', label: 'Training' },
+  { value: 'holiday', label: 'Holiday' },
+  { value: 'weather', label: 'Weather' },
+  { value: 'auth_issues', label: 'Auth Issues' },
+];
+
+export interface Cancellation {
+  source: CancellationSource;
+  reason: CancellationReason;
+  // Unplanned: callout / sick / weather. Planned: PTO weeks ahead, holiday, etc.
+  unplanned: boolean;
+  // For unplanned: did notice exceed CompanySettings.cancellationNotice.unplannedHoursThreshold?
+  // For planned:   did notice exceed CompanySettings.cancellationNotice.plannedDaysThreshold?
+  // Stored as a single boolean per the QA flow; thresholds are configured per company.
+  noticeMet?: boolean;
+  canceledAt?: string;  // ISO timestamp when this record was logged
+  notes?: string;
 }
 
 export interface Appointment {
@@ -80,6 +125,11 @@ export interface Appointment {
   type: 'supervision' | 'parent-training' | 'internal-task' | 'client-session' | 'other';
   isRecurring?: boolean;
   recurringPattern?: 'weekly' | 'biweekly' | 'monthly';
+  // Lifecycle. Absent / 'scheduled' = active; 'completed' counts toward
+  // compliance totals; 'canceled' is excluded from totals (with cancellation
+  // metadata kept for downstream reporting).
+  status?: AppointmentStatus;
+  cancellation?: Cancellation;
 }
 
 export interface ScheduleData {

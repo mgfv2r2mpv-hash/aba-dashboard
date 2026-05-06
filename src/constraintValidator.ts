@@ -4,7 +4,14 @@ export class ConstraintValidator {
   private data: ScheduleData;
 
   constructor(data: ScheduleData) {
-    this.data = data;
+    // Canceled appointments are excluded from every constraint check by
+    // shadowing the appointments array at the data-source level. Completed
+    // and scheduled appointments are both counted (completed appointments
+    // still consume hours that need to have been supervised, etc.).
+    this.data = {
+      ...data,
+      appointments: data.appointments.filter(a => a.status !== 'canceled'),
+    };
   }
 
   validateSchedule(): ScheduleConflict[] {

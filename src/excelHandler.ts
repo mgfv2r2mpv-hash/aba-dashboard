@@ -127,20 +127,40 @@ function parseAppointments(workbook: XLSX.WorkBook): Appointment[] {
   if (!sheet) return [];
 
   const data = XLSX.utils.sheet_to_json(sheet);
-  return data.map((row: any) => ({
-    id: row.id || uuidv4(),
-    title: row.title,
-    description: row.description,
-    technician: row.technician,
-    client: row.client,
-    startTime: row.startTime,
-    endTime: row.endTime,
-    isFixed: row.isFixed === 'TRUE' || row.isFixed === true,
-    isBillable: row.isBillable === 'TRUE' || row.isBillable === true,
-    type: row.type || 'other',
-    isRecurring: row.isRecurring === 'TRUE' || row.isRecurring === true,
-    recurringPattern: row.recurringPattern,
-  }));
+  return data.map((row: any) => {
+    const appt: Appointment = {
+      id: row.id || uuidv4(),
+      title: row.title,
+      description: row.description,
+      technician: row.technician,
+      client: row.client,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      isFixed: row.isFixed === 'TRUE' || row.isFixed === true,
+      isBillable: row.isBillable === 'TRUE' || row.isBillable === true,
+      type: row.type || 'other',
+      isRecurring: row.isRecurring === 'TRUE' || row.isRecurring === true,
+      recurringPattern: row.recurringPattern,
+    };
+    if (row.status === 'completed' || row.status === 'canceled') {
+      appt.status = row.status;
+    }
+    if (row.cancellationSource && row.cancellationReason) {
+      appt.cancellation = {
+        source: row.cancellationSource,
+        reason: row.cancellationReason,
+        unplanned: row.cancellationUnplanned === 'TRUE' || row.cancellationUnplanned === true,
+        noticeMet: row.cancellationNoticeMet === 'TRUE' || row.cancellationNoticeMet === true
+          ? true
+          : row.cancellationNoticeMet === 'FALSE' || row.cancellationNoticeMet === false
+          ? false
+          : undefined,
+        canceledAt: row.cancellationAt || undefined,
+        notes: row.cancellationNotes || undefined,
+      };
+    }
+    return appt;
+  });
 }
 
 function parseAvailabilityWindows(row: any): { [key: string]: any[] } {
@@ -246,6 +266,15 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
     type: a.type,
     isRecurring: a.isRecurring ? 'TRUE' : 'FALSE',
     recurringPattern: a.recurringPattern,
+    status: a.status || 'scheduled',
+    cancellationSource: a.cancellation?.source || '',
+    cancellationReason: a.cancellation?.reason || '',
+    cancellationUnplanned: a.cancellation ? (a.cancellation.unplanned ? 'TRUE' : 'FALSE') : '',
+    cancellationNoticeMet: a.cancellation?.noticeMet === undefined
+      ? ''
+      : a.cancellation.noticeMet ? 'TRUE' : 'FALSE',
+    cancellationAt: a.cancellation?.canceledAt || '',
+    cancellationNotes: a.cancellation?.notes || '',
   }));
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(appointmentsData), 'Appointments');
 

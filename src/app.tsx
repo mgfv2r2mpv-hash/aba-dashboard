@@ -310,6 +310,7 @@ export default function App() {
               <>
                 {headerButton('Setup Wizard', () => setShowWizard(true), '#8b5cf6')}
                 <FileUpload onUpload={handleFileUpload} loading={loading} />
+                {headerButton('Try sample', handleLoadSample, '#10b981')}
               </>
             ) : (
               <>

@@ -34,7 +34,6 @@ export default function AppointmentForm({
   const [clientId, setClientId] = useState(appointment?.client || '');
   const [startTime, setStartTime] = useState(appointment?.startTime || '');
   const [endTime, setEndTime] = useState(appointment?.endTime || '');
-  const [isFixed, setIsFixed] = useState(appointment?.isFixed || false);
   const [isBillable, setIsBillable] = useState(appointment?.isBillable ?? true);
 
   // Recurrence
@@ -63,7 +62,10 @@ export default function AppointmentForm({
       client: clientId,
       startTime,
       endTime,
-      isFixed,
+      // Locked-ness is derived from status (canceled / completed) and is
+      // never user-set; preserve any pre-existing value verbatim so old
+      // Excel files round-trip unchanged.
+      isFixed: appointment?.isFixed ?? false,
       isBillable,
       isRecurring: recurrence !== 'none',
       recurringPattern: recurrence === 'none' ? undefined : (recurrence as any),
@@ -283,10 +285,6 @@ export default function AppointmentForm({
           )}
 
           <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginTop: '4px' }}>
-            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
-              <input type="checkbox" checked={isFixed} onChange={(e) => setIsFixed(e.target.checked)} />
-              <span>🔒 Fixed (cannot be moved)</span>
-            </label>
             <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
               <input type="checkbox" checked={isBillable} onChange={(e) => setIsBillable(e.target.checked)} />
               <span>Billable</span>

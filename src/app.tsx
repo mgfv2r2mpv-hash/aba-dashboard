@@ -276,14 +276,21 @@ export default function App() {
     try {
       await axios.post(`${API_BASE}/admin/appointment`, appointment);
       if (scheduleData) {
-        const updated = { ...scheduleData };
-        const idx = updated.appointments.findIndex(a => a.id === appointment.id);
+        const next: ScheduleData = { ...scheduleData };
+        const idx = next.appointments.findIndex(a => a.id === appointment.id);
         if (idx >= 0) {
-          updated.appointments[idx] = appointment;
+          next.appointments = [...next.appointments];
+          next.appointments[idx] = appointment;
         } else {
-          updated.appointments = [...updated.appointments, appointment];
+          next.appointments = [...next.appointments, appointment];
         }
-        setScheduleData(updated);
+        setScheduleData(next);
+        // Keep the side panel honest — if this appointment was the
+        // selected one, refresh it so edits don't appear to do nothing.
+        if (selectedAppointment?.id === appointment.id) {
+          setSelectedAppointment(appointment);
+        }
+        setConflicts(new ConstraintValidator(next).validateSchedule());
       }
       setShowAddAppointment(false);
       setEditingAppointment(null);
@@ -516,7 +523,11 @@ export default function App() {
                               Tech: {a.technician}
                             </p>
                           )}
-                          {a.isFixed && status === 'scheduled' && <p style={{ color: '#dc2626', marginTop: '4px' }}>🔒 Fixed</p>}
+                          {(status === 'canceled' || status === 'completed') && (
+                            <p style={{ color: '#6b7280', marginTop: '4px', fontSize: 12 }}>
+                              🔒 Locked — reopen to edit time, status, or assignment
+                            </p>
+                          )}
                           {a.cancellation && (
                             <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }}>
                               <div>Source: <strong>Cancel-{a.cancellation.source.toUpperCase()}</strong></div>

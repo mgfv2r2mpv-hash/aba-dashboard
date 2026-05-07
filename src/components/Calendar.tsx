@@ -247,7 +247,8 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
 
   const beginDrag = (apt: Appointment, e: React.PointerEvent) => {
     if (!dragEnabled) return;
-    if (apt.isFixed || apt.status === 'canceled' || apt.status === 'completed') return;
+    // Locked = canceled or completed. The legacy isFixed field is ignored.
+    if (apt.status === 'canceled' || apt.status === 'completed') return;
     e.preventDefault();
     e.stopPropagation();
     const day = apt.startTime.slice(0, 10);
@@ -323,7 +324,7 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
                     apt={appt}
                     onClick={() => onSelectAppointment(appt)}
                     onPointerDown={dragEnabled ? (e) => beginDrag(appt, e) : undefined}
-                    dragHandle={dragEnabled && !appt.isFixed && appt.status !== 'canceled' && appt.status !== 'completed'}
+                    dragHandle={dragEnabled && appt.status !== 'canceled' && appt.status !== 'completed'}
                     style={{
                       position: 'absolute',
                       top: layout.top,
@@ -396,8 +397,7 @@ function appointmentsOn(appointments: Appointment[], date: Date): Appointment[] 
   return appointments.filter(a => a.startTime.startsWith(dateStr));
 }
 
-function getTypeColor(type: string, isFixed: boolean): string {
-  if (isFixed) return '#ef4444';
+function getTypeColor(type: string): string {
   switch (type) {
     case 'supervision': return '#10b981';
     case 'parent-training': return '#3b82f6';
@@ -411,7 +411,7 @@ function getTypeColor(type: string, isFixed: boolean): string {
 function appointmentLook(apt: Appointment) {
   const canceled = apt.status === 'canceled';
   const completed = apt.status === 'completed';
-  const baseColor = getTypeColor(apt.type, apt.isFixed);
+  const baseColor = getTypeColor(apt.type);
   const stripeBg = canceled
     ? 'repeating-linear-gradient(45deg, #fca5a5, #fca5a5 6px, #9ca3af 6px, #9ca3af 12px)'
     : completed
@@ -439,7 +439,7 @@ function AppointmentChip({ apt, onClick }: { apt: Appointment; onClick: () => vo
         paddingRight: look.statusIcon ? 14 : 4,
         textDecoration: look.canceled ? 'line-through' : 'none',
         opacity: look.canceled ? 0.85 : 1,
-        border: apt.isFixed && !look.canceled && !look.completed ? '2px solid #dc2626' : 'none',
+        border: 'none',
       }}
       title={apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : '')}
     >
@@ -482,7 +482,7 @@ function AppointmentBlock({ apt, onClick, onPointerDown, dragHandle, style }: {
         background: look.background, color: look.color,
         padding: '4px 6px', borderRadius: 4, fontSize: 11,
         overflow: 'hidden', cursor: dragHandle ? 'grab' : 'pointer', boxSizing: 'border-box',
-        border: apt.isFixed && !look.canceled && !look.completed ? '2px solid #dc2626' : '1px solid rgba(0,0,0,0.05)',
+        border: '1px solid rgba(0,0,0,0.05)',
         textDecoration: look.canceled ? 'line-through' : 'none',
         touchAction: dragHandle ? 'none' : 'manipulation',
       }}

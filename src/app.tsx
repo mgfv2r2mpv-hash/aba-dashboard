@@ -368,16 +368,22 @@ export default function App() {
     }
   };
 
-  const headerButton = (label: string, onClick: () => void, color: string) => (
+  const compactBtn = (label: string, ariaLabel: string, onClick: () => void, color = '#374151') => (
     <button
       onClick={onClick}
+      aria-label={ariaLabel}
+      title={ariaLabel}
       style={{
-        padding: '8px 16px',
+        padding: '5px 9px',
         backgroundColor: color,
         color: 'white',
         border: 'none',
-        borderRadius: '6px',
+        borderRadius: 5,
         cursor: 'pointer',
+        fontSize: 13,
+        fontWeight: 600,
+        whiteSpace: 'nowrap',
+        lineHeight: 1.2,
       }}
     >
       {label}
@@ -398,34 +404,32 @@ export default function App() {
         color: 'white',
         // Top padding includes the iOS status bar / notch inset so the
         // title doesn't sit under the time/carrier indicators.
-        padding: 'calc(env(safe-area-inset-top) + 12px) 16px 12px',
+        padding: 'calc(env(safe-area-inset-top) + 6px) 12px 6px',
         boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
         position: 'sticky', top: 0, zIndex: 10,
         flexShrink: 0,
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-          <h1 style={{ fontSize: '18px', fontWeight: 'bold' }}>ABA Schedule Assistant</h1>
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* AI status indicator */}
-            <div style={{
-              padding: '4px 10px',
-              borderRadius: '12px',
-              fontSize: '12px',
-              backgroundColor: aiSettings.apiKey ? '#10b981' : '#6b7280',
-            }}>
-              {aiSettings.apiKey ? `AI: ${aiSettings.model.replace('claude-', '')}` : 'AI: Off'}
-            </div>
-            {headerButton('Settings', () => setShowSettings(true), '#374151')}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+          <h1 style={{ fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>ABA Schedule</h1>
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* AI status: tiny dot only when on, hidden when off (it's not actionable info at a glance). */}
+            {aiSettings.apiKey && (
+              <span title={`AI: ${aiSettings.model}`} style={{
+                width: 8, height: 8, borderRadius: '50%',
+                backgroundColor: '#10b981', display: 'inline-block',
+              }} />
+            )}
+            {compactBtn('⚙', 'Settings', () => setShowSettings(true))}
             {!scheduleData ? (
               <>
-                {headerButton('Setup Wizard', () => setShowWizard(true), '#8b5cf6')}
+                {compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6')}
                 <FileUpload onUpload={handleFileUpload} loading={loading} />
               </>
             ) : (
               <>
-                {headerButton('+ Appointment', () => setShowAddAppointment(true), '#3b82f6')}
-                {headerButton(showAdmin ? 'Schedule' : 'Admin', () => setShowAdmin(!showAdmin), '#6366f1')}
-                {headerButton('Download', handleDownload, '#10b981')}
+                {compactBtn('+', 'Add appointment', () => setShowAddAppointment(true), '#3b82f6')}
+                {compactBtn(showAdmin ? 'Sched' : 'Admin', showAdmin ? 'Schedule' : 'Admin', () => setShowAdmin(!showAdmin), '#6366f1')}
+                {compactBtn('↓', 'Download', handleDownload, '#10b981')}
               </>
             )}
           </div>
@@ -464,7 +468,13 @@ export default function App() {
                     display: 'flex',
                     flexDirection: 'column',
                   }}>
-                    {conflicts.length > 0 && <ConflictPanel conflicts={conflicts} />}
+                    {conflicts.length > 0 && (
+                      <ConflictPanel
+                        conflicts={conflicts}
+                        appointments={scheduleData?.appointments}
+                        onSelectAppointment={setSelectedAppointment}
+                      />
+                    )}
                     {!aiSettings.apiKey && conflicts.length > 0 && (
                       <div style={{ padding: '12px', backgroundColor: '#fef3c7', fontSize: '12px', color: '#92400e' }}>
                         Add a Claude API key in Settings to get AI-powered solutions for these conflicts.

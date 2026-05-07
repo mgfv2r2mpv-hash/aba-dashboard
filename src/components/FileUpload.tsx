@@ -32,15 +32,19 @@ export default function FileUpload({ onUpload, loading }: FileUploadProps) {
         onClick={handleClick}
         disabled={loading}
         style={{
-          padding: '8px 16px',
+          padding: '5px 9px',
           backgroundColor: loading ? '#d1d5db' : '#3b82f6',
           color: 'white',
           border: 'none',
-          borderRadius: '6px',
+          borderRadius: 5,
           cursor: loading ? 'not-allowed' : 'pointer',
+          fontSize: 13,
+          fontWeight: 600,
+          whiteSpace: 'nowrap',
+          lineHeight: 1.2,
         }}
       >
-        {loading ? 'Loading...' : 'Upload Schedule'}
+        {loading ? '…' : 'Upload'}
       </button>
     </>
   );

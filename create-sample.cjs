@@ -130,12 +130,14 @@ const appointmentsData = [
   },
   {
     id: 'APT002',
-    title: 'Supervision',
-    description: 'Weekly supervision',
+    title: 'Supervision (Sarah / Client A)',
+    description: 'Weekly supervision overlapping a direct session',
     technician: 'Sarah Tech',
-    client: '',
-    startTime: isoOnDay(1, 14), // Tue 14:00
-    endTime: isoOnDay(1, 15),   // Tue 15:00
+    client: 'Client A',
+    // Mon 10–11 — overlaps APT001 (Mon 9–12 client-session for Client A
+    // by Sarah), so it counts toward Client A's supervision compliance.
+    startTime: isoOnDay(0, 10),
+    endTime: isoOnDay(0, 11),
     isFixed: 'FALSE',
     isBillable: 'FALSE',
     type: 'supervision',

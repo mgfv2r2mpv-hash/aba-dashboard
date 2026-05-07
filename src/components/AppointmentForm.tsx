@@ -120,6 +120,11 @@ export default function AppointmentForm({
       alert('Title, start, and end time are required.');
       return;
     }
+    // Supervision is always with a client (a tech may or may not be present).
+    if (type === 'supervision' && !clientId) {
+      alert('Supervision sessions must have a client. A technician is optional but a client is required.');
+      return;
+    }
     const appointments = buildAppointments();
     appointments.forEach(a => onSave(a));
   };
@@ -203,11 +208,16 @@ export default function AppointmentForm({
               </select>
             </div>
             <div>
-              <label style={labelStyle}>Client</label>
+              <label style={labelStyle}>Client {type === 'supervision' && '*'}</label>
               <select value={clientId} onChange={(e) => setClientId(e.target.value)} style={inputStyle}>
                 <option value="">— None —</option>
                 {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
               </select>
+              {type === 'supervision' && (
+                <p style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+                  Supervision must be with a client. Tech is optional — leave blank if you're with the client without a BT present (those hours don't count toward compliance).
+                </p>
+              )}
             </div>
           </div>
 

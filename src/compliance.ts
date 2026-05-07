@@ -32,23 +32,26 @@ export function monthPeriod(ref: Date): CompliancePeriod {
 //   actual    = sessions whose startTime <= now and !canceled (presumed happened)
 //   projected = actual + future scheduled sessions (everything !canceled)
 //
-// Compliance counting rule (per client):
-//   A supervision counts toward Client X's supervision compliance iff
-//     1. it is tagged with Client X,
-//     2. it has a technician assigned (any tech — the BCBA is observing
-//        someone delivering service), and
-//     3. it time-overlaps any direct (client-session) appointment for
-//        Client X (any tech, since case supervision is about the case).
+// Data model (BCBA-confirmed):
+//   - Supervision appointments carry CLIENT only — no technician field.
+//   - Who is being supervised is inferred from whichever direct
+//     (client-session) appointments for that client overlap the
+//     supervision's time window.
+//   - "BCBA solo with the client" = supervision with no overlapping direct
+//     for that client. Consumes BCBA hours; counts as 0 toward compliance.
 //
-// A supervision tagged with the client but with no tech ("BCBA solo with
-// the client") consumes BCBA hours but doesn't count toward compliance,
-// because there's no tech-during-session to observe.
+// Per-client (case) compliance — implemented here:
+//   denominator = direct hours for the client in period
+//   numerator   = sum of supervision-vs-direct overlap hours for that
+//                 client, capped at each supervision's own duration so
+//                 multiple overlapping directs can't double-count.
 //
-// (Per-RBT BACB 5% compliance, when added later, applies a different rule:
-// any supervision with THAT specific tech, any client. Deferred.)
-//
-// Overlap is summed in hours and capped at the supervision's own duration
-// so multiple overlapping directs can't push it over 100% of itself.
+// Per-RBT (BACB 5%) compliance — DEFERRED, but the rule is locked in:
+//   denominator = ALL of that RBT's direct hours in period (any client)
+//   numerator   = supervision time overlapping any of THIS RBT's direct
+//                 sessions (the supervision's tagged client may differ
+//                 from the direct's client; that's a data-quality
+//                 question we'll surface separately when we add this).
 export function computeClientCompliance(
   data: ScheduleData,
   period: CompliancePeriod,
@@ -93,11 +96,12 @@ function computeMetrics(
 
   const directHours = direct.reduce((s, a) => s + duration(a), 0);
 
+  // For each supervision tagged with this client, sum overlap with this
+  // client's directs. Cap at the supervision's own length. If the
+  // supervision overlaps no directs (BCBA solo with client), it contributes
+  // nothing — which falls out of the math without an explicit guard since
+  // ov === 0 in that case.
   const supervisionHours = supervision.reduce((s, sup) => {
-    if (!sup.technician) return s; // BCBA solo with client → 0 compliance
-    // For case compliance, any direct session for this client by any tech
-    // counts as the observation target — no need for the supervision's tech
-    // and the direct's tech to match.
     const supDur = duration(sup);
     const ov = direct.reduce((acc, d) => acc + overlapHours(sup, d), 0);
     return s + Math.min(ov, supDur);

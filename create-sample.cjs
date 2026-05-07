@@ -130,9 +130,12 @@ const appointmentsData = [
   },
   {
     id: 'APT002',
-    title: 'Supervision (Sarah / Client A)',
-    description: 'Weekly supervision overlapping a direct session',
-    technician: 'Sarah Tech',
+    title: 'Supervision — Client A',
+    description: 'Weekly case supervision; tech being supervised is whoever is in session',
+    // Supervision carries client only — no technician. The supervised tech
+    // is inferred from whichever direct session(s) for this client overlap
+    // the supervision window.
+    technician: '',
     client: 'Client A',
     // Mon 10–11 — overlaps APT001 (Mon 9–12 client-session for Client A
     // by Sarah), so it counts toward Client A's supervision compliance.

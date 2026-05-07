@@ -57,7 +57,9 @@ export default function AppointmentForm({
       title,
       description,
       type,
-      technician: technicianId,
+      // Supervision carries client only — never persist a tech, even if
+      // one was selected before the user switched the type.
+      technician: type === 'supervision' ? '' : technicianId,
       client: clientId,
       startTime,
       endTime,
@@ -200,13 +202,15 @@ export default function AppointmentForm({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-            <div>
-              <label style={labelStyle}>Technician</label>
-              <select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} style={inputStyle}>
-                <option value="">— None —</option>
-                {technicians.map(t => <option key={t.id} value={t.name}>{t.name}{t.isRBT ? ' (RBT)' : ''}</option>)}
-              </select>
-            </div>
+            {type !== 'supervision' && (
+              <div>
+                <label style={labelStyle}>Technician</label>
+                <select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} style={inputStyle}>
+                  <option value="">— None —</option>
+                  {technicians.map(t => <option key={t.id} value={t.name}>{t.name}{t.isRBT ? ' (RBT)' : ''}</option>)}
+                </select>
+              </div>
+            )}
             <div>
               <label style={labelStyle}>Client {type === 'supervision' && '*'}</label>
               <select value={clientId} onChange={(e) => setClientId(e.target.value)} style={inputStyle}>
@@ -215,7 +219,9 @@ export default function AppointmentForm({
               </select>
               {type === 'supervision' && (
                 <p style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
-                  Supervision must be with a client. Tech is optional — leave blank if you're with the client without a BT present (those hours don't count toward compliance).
+                  Supervision is logged against the client only. The tech being supervised
+                  is whoever has a direct session with this client during this time;
+                  if no one does, this is BCBA-solo time and won't count toward compliance.
                 </p>
               )}
             </div>

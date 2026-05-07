@@ -35,9 +35,10 @@ export default function ComplianceDashboard({ data, onMarkComplete, onRequestCan
 
       <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
         Supervision target: <strong>{targetPct}%</strong> of direct hours per client.
-        Counted only when supervision is tagged with the client AND has a tech AND
-        time-overlaps a direct session by that same tech for that client.
-        Supervision with no tech (BCBA + client only) is excluded.
+        Counted when supervision is tagged with the client, has a tech assigned,
+        and time-overlaps any direct session for that client (the supervision's
+        tech and the direct's tech don't have to match). BCBA-solo-with-client
+        supervision (no tech) is excluded.
       </p>
 
       {pastIncomplete.length > 0 && (

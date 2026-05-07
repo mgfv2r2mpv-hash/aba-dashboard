@@ -32,21 +32,23 @@ export function monthPeriod(ref: Date): CompliancePeriod {
 //   actual    = sessions whose startTime <= now and !canceled (presumed happened)
 //   projected = actual + future scheduled sessions (everything !canceled)
 //
-// Compliance counting rule (clarified by the BCBA — "compliance is based on
-// supervision technicians DURING sessions"):
-//   A supervision counts toward Client X's supervision compliance ONLY IF
-//     1. the supervision is tagged with Client X,
-//     2. the supervision has a technician assigned (a BT being supervised),
-//     3. it time-overlaps a direct (client-session) appointment for Client X
-//        delivered by THAT SAME technician.
+// Compliance counting rule (per client):
+//   A supervision counts toward Client X's supervision compliance iff
+//     1. it is tagged with Client X,
+//     2. it has a technician assigned (any tech — the BCBA is observing
+//        someone delivering service), and
+//     3. it time-overlaps any direct (client-session) appointment for
+//        Client X (any tech, since case supervision is about the case).
 //
-// A supervision tagged with a client but no tech ("BCBA covered, no BT
-// present") consumes the BCBA's hours but doesn't count toward compliance,
+// A supervision tagged with the client but with no tech ("BCBA solo with
+// the client") consumes BCBA hours but doesn't count toward compliance,
 // because there's no tech-during-session to observe.
 //
-// Overlap is summed in hours and capped at the supervision's own duration so
-// multiple overlapping directs for the same client+tech can't push it over
-// 100% of the supervision's length.
+// (Per-RBT BACB 5% compliance, when added later, applies a different rule:
+// any supervision with THAT specific tech, any client. Deferred.)
+//
+// Overlap is summed in hours and capped at the supervision's own duration
+// so multiple overlapping directs can't push it over 100% of itself.
 export function computeClientCompliance(
   data: ScheduleData,
   period: CompliancePeriod,
@@ -92,12 +94,12 @@ function computeMetrics(
   const directHours = direct.reduce((s, a) => s + duration(a), 0);
 
   const supervisionHours = supervision.reduce((s, sup) => {
-    if (!sup.technician) return s; // no BT being supervised → no compliance
-    // Only directs by THIS supervision's tech count, since the BCBA is
-    // observing that specific tech doing the work.
-    const peerDirects = direct.filter(d => d.technician === sup.technician);
+    if (!sup.technician) return s; // BCBA solo with client → 0 compliance
+    // For case compliance, any direct session for this client by any tech
+    // counts as the observation target — no need for the supervision's tech
+    // and the direct's tech to match.
     const supDur = duration(sup);
-    const ov = peerDirects.reduce((acc, d) => acc + overlapHours(sup, d), 0);
+    const ov = direct.reduce((acc, d) => acc + overlapHours(sup, d), 0);
     return s + Math.min(ov, supDur);
   }, 0);
 

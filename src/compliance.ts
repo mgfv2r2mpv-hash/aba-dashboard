@@ -1,4 +1,4 @@
-import { Appointment, Client, ScheduleData } from './types';
+import { Appointment, Client, ScheduleData, Technician, BACB_RBT_SUPERVISION_MIN_PERCENT } from './types';
 
 export interface ClientComplianceMetrics {
   directHours: number;
@@ -12,6 +12,25 @@ export interface ClientCompliance {
   client: Client;
   actual: ClientComplianceMetrics;
   projected: ClientComplianceMetrics;
+}
+
+export interface TechComplianceMetrics {
+  directHours: number;
+  supervisionHours: number;
+  pct: number;
+  // BACB hard floor (5%) for RBTs only; undefined for non-RBT.
+  bacbRequiredHours?: number;
+  bacbHoursToGo?: number;
+  // Company target. Always present.
+  companyRequiredPct: number;
+  companyRequiredHours: number;
+  companyHoursToGo: number;
+}
+
+export interface TechCompliance {
+  tech: Technician;
+  actual: TechComplianceMetrics;
+  projected: TechComplianceMetrics;
 }
 
 export interface CompliancePeriod {
@@ -112,6 +131,91 @@ function computeMetrics(
   const hoursToGo = Math.max(0, requiredHours - supervisionHours);
 
   return { directHours, supervisionHours, requiredHours, pct, hoursToGo };
+}
+
+// Per-tech supervision compliance.
+//
+// Denominator: ALL of this tech's direct hours in the period (any client).
+// Numerator:   sum of supervision-vs-direct overlap hours where the direct
+//              is delivered by THIS tech. The supervision's tagged client
+//              and the tech's session client should typically match (BCBA
+//              physically observing the tech-with-client) but we don't gate
+//              on that — overlap is what determines presence.
+//
+// Two thresholds for RBTs (BACB hard 5% + company target). One for non-RBT
+// techs (company target only). Cards fail if any applicable threshold misses.
+export function computeTechCompliance(
+  data: ScheduleData,
+  period: CompliancePeriod,
+  now: Date = new Date(),
+): TechCompliance[] {
+  return data.technicians.map(tech => ({
+    tech,
+    actual: computeTechMetrics(data, tech, period, 'actual', now),
+    projected: computeTechMetrics(data, tech, period, 'projected', now),
+  }));
+}
+
+function computeTechMetrics(
+  data: ScheduleData,
+  tech: Technician,
+  period: CompliancePeriod,
+  scope: 'actual' | 'projected',
+  now: Date,
+): TechComplianceMetrics {
+  const startMs = period.start.getTime();
+  const endMs = period.end.getTime();
+  const inScope = (a: Appointment) => {
+    if (a.status === 'canceled') return false;
+    if (scope === 'projected') return true;
+    return new Date(a.startTime).getTime() <= now.getTime();
+  };
+  const inPeriod = (a: Appointment) => {
+    const t = new Date(a.startTime).getTime();
+    return t >= startMs && t < endMs;
+  };
+  const matchesTech = (a: Appointment) =>
+    a.technician === tech.id || a.technician === tech.name;
+
+  const direct = data.appointments.filter(a =>
+    matchesTech(a) && a.type === 'client-session' && inPeriod(a) && inScope(a)
+  );
+  const supervisions = data.appointments.filter(a =>
+    a.type === 'supervision' && inPeriod(a) && inScope(a)
+  );
+
+  const directHours = direct.reduce((s, a) => s + duration(a), 0);
+
+  const supervisionHours = supervisions.reduce((s, sup) => {
+    const supDur = duration(sup);
+    const ov = direct.reduce((acc, d) => acc + overlapHours(sup, d), 0);
+    return s + Math.min(ov, supDur);
+  }, 0);
+
+  const pct = directHours > 0 ? (supervisionHours / directHours) * 100 : 0;
+
+  const companyPct = tech.isRBT
+    ? (data.settings.supervisionRBTHoursPercent ?? BACB_RBT_SUPERVISION_MIN_PERCENT)
+    : (data.settings.supervisionTechHoursPercent ?? 0);
+  const companyRequiredHours = (directHours * companyPct) / 100;
+  const companyHoursToGo = Math.max(0, companyRequiredHours - supervisionHours);
+
+  const result: TechComplianceMetrics = {
+    directHours,
+    supervisionHours,
+    pct,
+    companyRequiredPct: companyPct,
+    companyRequiredHours,
+    companyHoursToGo,
+  };
+
+  if (tech.isRBT) {
+    const bacbRequired = (directHours * BACB_RBT_SUPERVISION_MIN_PERCENT) / 100;
+    result.bacbRequiredHours = bacbRequired;
+    result.bacbHoursToGo = Math.max(0, bacbRequired - supervisionHours);
+  }
+
+  return result;
 }
 
 // Past-dated, non-canceled, not-yet-completed appointments. Surfaced in the

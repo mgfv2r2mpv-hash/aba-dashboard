@@ -41,8 +41,14 @@ export const BACB_RBT_SUPERVISION_MIN_PERCENT = 5;
 export type TrainingPeriodUnit = 'week' | 'month' | 'sixMonths' | 'year';
 
 export interface CompanySettings {
-  supervisionDirectHoursPercent: number; // company target, defaults to BACB min
-  supervisionRBTHoursPercent: number;    // fixed at BACB min (5%) but override allowed
+  // Per-client (case) supervision target — % of direct hours per client per period.
+  supervisionDirectHoursPercent: number;
+  // Per-RBT supervision target — % of THAT RBT's direct hours (any client).
+  // BACB enforces a hard floor of 5%; companies can require higher.
+  supervisionRBTHoursPercent: number;
+  // Per-non-RBT-tech supervision target — % of THAT tech's direct hours (any
+  // client). No BACB rule applies; this is purely company policy.
+  supervisionTechHoursPercent?: number;
   parentTraining: {
     minimumHours: number;
     targetMinHours: number;

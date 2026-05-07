@@ -57,6 +57,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
   const [supDirectStr, setSupDirectStr] = useState('5');
   const [supRBTStr, setSupRBTStr] = useState(String(BACB_RBT_SUPERVISION_MIN_PERCENT));
   const [rbtOverride, setRBTOverride] = useState(false);
+  const [supTechStr, setSupTechStr] = useState('0');
   const [minHoursStr, setMinHoursStr] = useState('1.5');
   const [targetMinStr, setTargetMinStr] = useState('2');
   const [targetMaxStr, setTargetMaxStr] = useState('4');
@@ -106,6 +107,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
       ...settings,
       supervisionDirectHoursPercent: parseNumericString(supDirectStr, 5),
       supervisionRBTHoursPercent: rbtValue,
+      supervisionTechHoursPercent: parseNumericString(supTechStr, 0),
       parentTraining: {
         ...settings.parentTraining,
         minimumHours: parseNumericString(minHoursStr, 1.5),
@@ -272,6 +274,19 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                       The BACB requires a minimum of {BACB_RBT_SUPERVISION_MIN_PERCENT}% for RBTs.
                     </p>
                   </div>
+                </div>
+                <div>
+                  <label style={labelStyle}>Supervision: % of non-RBT BT hours (company)</label>
+                  <input
+                    type="number" step="0.1" min="0"
+                    value={supTechStr}
+                    onChange={(e) => setSupTechStr(e.target.value)}
+                    style={inputStyle}
+                  />
+                  <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+                    No BACB rule applies to non-RBT BTs. Set 0 to skip; any positive
+                    value flags non-RBT techs that fall below it.
+                  </p>
                 </div>
                 <div>
                   <label style={labelStyle}>Parent training period</label>

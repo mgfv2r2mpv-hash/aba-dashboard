@@ -1,8 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { Appointment, ScheduleData } from '../types';
 import {
-  ClientCompliance, computeClientCompliance, pastIncompleteAppointments, monthPeriod,
+  ClientCompliance, TechCompliance, TechComplianceMetrics,
+  computeClientCompliance, computeTechCompliance,
+  pastIncompleteAppointments, monthPeriod,
 } from '../compliance';
+import { BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
 
 interface Props {
   data: ScheduleData;
@@ -14,9 +17,11 @@ interface Props {
 export default function ComplianceDashboard({ data, onMarkComplete, onRequestCancel, onSelectAppointment }: Props) {
   const [periodRef, setPeriodRef] = useState(new Date());
   const period = useMemo(() => monthPeriod(periodRef), [periodRef]);
-  const reports = useMemo(() => computeClientCompliance(data, period), [data, period]);
+  const clientReports = useMemo(() => computeClientCompliance(data, period), [data, period]);
+  const techReports = useMemo(() => computeTechCompliance(data, period), [data, period]);
   const pastIncomplete = useMemo(() => pastIncompleteAppointments(data), [data]);
   const targetPct = data.settings.supervisionDirectHoursPercent || 5;
+  const techTargetPct = data.settings.supervisionTechHoursPercent ?? 0;
 
   const goPrev = () => setPeriodRef(new Date(periodRef.getFullYear(), periodRef.getMonth() - 1, 1));
   const goNext = () => setPeriodRef(new Date(periodRef.getFullYear(), periodRef.getMonth() + 1, 1));
@@ -50,15 +55,42 @@ export default function ComplianceDashboard({ data, onMarkComplete, onRequestCan
         />
       )}
 
-      <div style={{ display: 'grid', gap: 12 }}>
-        {reports.length === 0 && (
+      <SectionHeader>Per client</SectionHeader>
+      <div style={{ display: 'grid', gap: 12, marginBottom: 24 }}>
+        {clientReports.length === 0 && (
           <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>
             No clients yet. Add clients in Admin to start tracking compliance.
           </p>
         )}
-        {reports.map(r => <ClientCard key={r.client.id} report={r} targetPct={targetPct} />)}
+        {clientReports.map(r => <ClientCard key={r.client.id} report={r} targetPct={targetPct} />)}
+      </div>
+
+      <SectionHeader>Per technician</SectionHeader>
+      <p style={{ fontSize: 12, color: '#6b7280', marginTop: -8, marginBottom: 8 }}>
+        RBTs must hit BACB <strong>{BACB_RBT_SUPERVISION_MIN_PERCENT}%</strong> AND the
+        company target ({data.settings.supervisionRBTHoursPercent}%).
+        Non-RBT techs follow the company-only target ({techTargetPct}%).
+        Numerator counts supervision time overlapping that tech's direct sessions
+        regardless of which client the supervision was tagged with.
+      </p>
+      <div style={{ display: 'grid', gap: 12 }}>
+        {techReports.length === 0 && (
+          <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>
+            No technicians yet.
+          </p>
+        )}
+        {techReports.map(r => <TechCard key={r.tech.id} report={r} />)}
       </div>
     </div>
+  );
+}
+
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 style={{
+      fontSize: 13, fontWeight: 700, textTransform: 'uppercase',
+      color: '#374151', margin: '0 0 8px',
+    }}>{children}</h3>
   );
 }
 
@@ -139,11 +171,7 @@ function ClientCard({ report, targetPct }: { report: ClientCompliance; targetPct
   else if (projected.pct >= targetPct) status = 'yellow';
   else status = 'red';
 
-  const accentColor =
-    status === 'green' ? '#15803d' :
-    status === 'yellow' ? '#a16207' :
-    status === 'red' ? '#b91c1c' :
-    '#6b7280';
+  const accentColor = statusColor(status);
 
   return (
     <div style={{
@@ -172,6 +200,126 @@ function ClientCard({ report, targetPct }: { report: ClientCompliance; targetPct
       )}
     </div>
   );
+}
+
+function TechCard({ report }: { report: TechCompliance }) {
+  const { tech, actual, projected } = report;
+  const noDirect = actual.directHours === 0 && projected.directHours === 0;
+
+  // A tech misses if they fall short on EITHER applicable threshold (BACB
+  // for RBTs and/or company). Status uses the tighter of actual + projected.
+  const status = techStatus(actual, projected, tech.isRBT, noDirect);
+  const accent = statusColor(status);
+
+  return (
+    <div style={{
+      backgroundColor: 'white',
+      border: `2px solid ${accent}`,
+      borderRadius: 8, padding: 12,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+        <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>
+          {tech.name}
+          <span style={{
+            marginLeft: 6, fontSize: 10, fontWeight: 700,
+            color: '#6b7280', backgroundColor: '#e5e7eb',
+            padding: '2px 6px', borderRadius: 8,
+          }}>{tech.isRBT ? 'RBT' : 'BT'}</span>
+        </h3>
+        <span style={{
+          fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+          color: 'white', backgroundColor: accent,
+          padding: '2px 8px', borderRadius: 10,
+        }}>{statusLabel(status)}</span>
+      </div>
+
+      {noDirect ? (
+        <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
+          No direct sessions this period — nothing to supervise.
+        </p>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+          <TechMetric title="Actual" m={actual} accent={accent} isRBT={tech.isRBT} />
+          <TechMetric title="Projected" m={projected} accent={accent} isRBT={tech.isRBT} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TechMetric({ title, m, accent, isRBT }: {
+  title: string;
+  m: TechComplianceMetrics;
+  accent: string;
+  isRBT: boolean;
+}) {
+  // Bar fills against whichever requirement is HIGHER (the binding one) so the
+  // user sees how far they are from passing both checks.
+  const bindingPct = isRBT
+    ? Math.max(BACB_RBT_SUPERVISION_MIN_PERCENT, m.companyRequiredPct)
+    : m.companyRequiredPct;
+  const fillPct = bindingPct > 0 ? Math.min(100, (m.pct / bindingPct) * 100) : 0;
+
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: '#6b7280', marginBottom: 4 }}>
+        {title}
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: accent }}>
+        {m.pct.toFixed(1)}%
+      </div>
+      <div style={{
+        marginTop: 6, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden',
+      }}>
+        <div style={{
+          height: '100%', width: `${fillPct}%`,
+          backgroundColor: accent, transition: 'width 200ms',
+        }} />
+      </div>
+      <div style={{ fontSize: 11, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }}>
+        Direct: <strong>{m.directHours.toFixed(1)}h</strong> ·
+        Sup: <strong>{m.supervisionHours.toFixed(1)}h</strong>
+        {isRBT && m.bacbRequiredHours !== undefined && (
+          <div>
+            BACB {BACB_RBT_SUPERVISION_MIN_PERCENT}%: need <strong>{m.bacbRequiredHours.toFixed(1)}h</strong>
+            {m.bacbHoursToGo! > 0
+              ? <> · to go <strong style={{ color: accent }}>{m.bacbHoursToGo!.toFixed(1)}h</strong></>
+              : <> · ✓</>}
+          </div>
+        )}
+        <div>
+          Company {m.companyRequiredPct}%: need <strong>{m.companyRequiredHours.toFixed(1)}h</strong>
+          {m.companyHoursToGo > 0
+            ? <> · to go <strong style={{ color: accent }}>{m.companyHoursToGo.toFixed(1)}h</strong></>
+            : <> · ✓</>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function techStatus(
+  actual: TechComplianceMetrics,
+  projected: TechComplianceMetrics,
+  isRBT: boolean,
+  noDirect: boolean,
+): 'green' | 'yellow' | 'red' | 'gray' {
+  if (noDirect) return 'gray';
+  const passes = (m: TechComplianceMetrics) => {
+    const bacbOk = !isRBT || (m.bacbHoursToGo ?? 0) === 0;
+    const companyOk = m.companyHoursToGo === 0;
+    return bacbOk && companyOk;
+  };
+  if (passes(actual)) return 'green';
+  if (passes(projected)) return 'yellow';
+  return 'red';
+}
+
+function statusColor(s: 'green' | 'yellow' | 'red' | 'gray'): string {
+  return s === 'green' ? '#15803d'
+    : s === 'yellow' ? '#a16207'
+    : s === 'red' ? '#b91c1c'
+    : '#6b7280';
 }
 
 function Metric({ title, m, targetPct, accent }: {

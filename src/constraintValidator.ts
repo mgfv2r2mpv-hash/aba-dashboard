@@ -17,37 +17,13 @@ export class ConstraintValidator {
   validateSchedule(): ScheduleConflict[] {
     const conflicts: ScheduleConflict[] = [];
 
-    conflicts.push(...this.validateSupervisionRequirements());
+    // Supervision-compliance is computed per client in src/compliance.ts and
+    // surfaced on the Compliance tab. Removed from the schedule-level validator
+    // because the prior implementation matched supervisors to techs by
+    // String.includes(name) and never checked time overlap with direct
+    // sessions — both fundamentally wrong for BCBA case-supervision rules.
     conflicts.push(...this.validateParentTraining());
     conflicts.push(...this.validateAvailability());
-
-    return conflicts;
-  }
-
-  private validateSupervisionRequirements(): ScheduleConflict[] {
-    const conflicts: ScheduleConflict[] = [];
-
-    // For each technician, check if supervision hours meet requirements
-    this.data.technicians.forEach(technician => {
-      // Calculate direct client hours
-      const directHours = this.calculateDirectHours(technician.id);
-      // Calculate RBT hours (only for RBTs)
-      const rbtHours = technician.isRBT ? this.calculateRBTHours(technician.id) : 0;
-
-      const requiredSupervisionDirect = (directHours * this.data.settings.supervisionDirectHoursPercent) / 100;
-      const requiredSupervisionRBT = technician.isRBT ? (rbtHours * this.data.settings.supervisionRBTHoursPercent) / 100 : 0;
-
-      const actualSupervision = this.calculateSupervisionHours(technician.id);
-
-      if (actualSupervision < requiredSupervisionDirect + requiredSupervisionRBT) {
-        conflicts.push({
-          type: 'supervision-violation',
-          severity: 'error',
-          message: `Technician ${technician.name} needs ${requiredSupervisionDirect + requiredSupervisionRBT} hours of supervision but has ${actualSupervision}`,
-          affectedTechnicians: [technician.id],
-        });
-      }
-    });
 
     return conflicts;
   }
@@ -125,16 +101,6 @@ export class ConstraintValidator {
     return periods;
   }
 
-  private calculateParentTrainingHoursInRange(start: Date, end: Date): number {
-    return this.data.appointments
-      .filter(a => {
-        if (a.type !== 'parent-training') return false;
-        const t = new Date(a.startTime);
-        return t >= start && t < end;
-      })
-      .reduce((sum, a) => sum + this.getHoursDuration(a.startTime, a.endTime), 0);
-  }
-
   private calculateClientParentTrainingHoursInRange(
     client: { id: string; name: string },
     start: Date,
@@ -197,31 +163,6 @@ export class ConstraintValidator {
     return conflicts;
   }
 
-  // Helper calculations
-  private calculateDirectHours(technicianId: string): number {
-    return this.data.appointments
-      .filter(a => (a.technician === technicianId || this.getTechnicianName(technicianId) === a.technician) && a.isBillable && a.type === 'client-session')
-      .reduce((sum, a) => sum + this.getHoursDuration(a.startTime, a.endTime), 0);
-  }
-
-  private calculateRBTHours(technicianId: string): number {
-    return this.data.appointments
-      .filter(a => (a.technician === technicianId || this.getTechnicianName(technicianId) === a.technician) && a.isBillable && a.type === 'client-session')
-      .reduce((sum, a) => sum + this.getHoursDuration(a.startTime, a.endTime), 0);
-  }
-
-  private calculateSupervisionHours(technicianId: string): number {
-    return this.data.appointments
-      .filter(a => a.type === 'supervision' && (a.technician?.includes(this.getTechnicianName(technicianId)) || a.description?.includes(this.getTechnicianName(technicianId))))
-      .reduce((sum, a) => sum + this.getHoursDuration(a.startTime, a.endTime), 0);
-  }
-
-  private calculateParentTrainingHours(month: string): number {
-    return this.data.appointments
-      .filter(a => a.type === 'parent-training' && a.startTime.startsWith(month))
-      .reduce((sum, a) => sum + this.getHoursDuration(a.startTime, a.endTime), 0);
-  }
-
   private getHoursDuration(startISO: string, endISO: string): number {
     const start = new Date(startISO);
     const end = new Date(endISO);
@@ -247,20 +188,6 @@ export class ConstraintValidator {
   private getDayName(date: Date): string {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     return days[date.getDay()];
-  }
-
-  private getTechnicianName(technicianId: string): string {
-    const tech = this.data.technicians.find(t => t.id === technicianId);
-    return tech?.name || technicianId || '';
-  }
-
-  private getMonthsInSchedule(): string[] {
-    const months = new Set<string>();
-    this.data.appointments.forEach(a => {
-      const month = a.startTime.substring(0, 7); // YYYY-MM
-      months.add(month);
-    });
-    return Array.from(months);
   }
 
 }

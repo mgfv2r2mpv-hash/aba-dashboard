@@ -12,6 +12,7 @@ import Calendar from './components/Calendar';
 import ConflictPanel from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
 import AdminPanel from './components/AdminPanel';
+import ComplianceDashboard from './components/ComplianceDashboard';
 import FileUpload from './components/FileUpload';
 import Settings, { AISettings, ClaudeModel } from './components/Settings';
 import AppointmentForm from './components/AppointmentForm';
@@ -65,7 +66,7 @@ export default function App() {
   const [conflicts, setConflicts] = useState<ScheduleConflict[]>([]);
   const [solutions, setSolutions] = useState<ScheduleSolution[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [showAdmin, setShowAdmin] = useState(false);
+  const [view, setView] = useState<'schedule' | 'admin' | 'compliance'>('schedule');
   const [showSettings, setShowSettings] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
@@ -428,7 +429,7 @@ export default function App() {
             ) : (
               <>
                 {compactBtn('+', 'Add appointment', () => setShowAddAppointment(true), '#3b82f6')}
-                {compactBtn(showAdmin ? 'Sched' : 'Admin', showAdmin ? 'Schedule' : 'Admin', () => setShowAdmin(!showAdmin), '#6366f1')}
+                <ViewTabs view={view} onChange={setView} />
                 {compactBtn('↓', 'Download', handleDownload, '#10b981')}
               </>
             )}
@@ -449,7 +450,7 @@ export default function App() {
       }}>
         {scheduleData ? (
           <>
-            {!showAdmin ? (
+            {view === 'schedule' && (
               <>
                 <div style={{ flex: '1 1 320px', minWidth: 0 }}>
                   <Calendar
@@ -573,8 +574,17 @@ export default function App() {
                   </div>
                 )}
               </>
-            ) : (
+            )}
+            {view === 'admin' && (
               <AdminPanel data={scheduleData} onDataChange={setScheduleData} />
+            )}
+            {view === 'compliance' && (
+              <ComplianceDashboard
+                data={scheduleData}
+                onMarkComplete={handleMarkComplete}
+                onRequestCancel={(a) => setCancelTarget(a)}
+                onSelectAppointment={(a) => { setView('schedule'); setSelectedAppointment(a); }}
+              />
             )}
           </>
         ) : (
@@ -650,6 +660,40 @@ export default function App() {
           onCancel={() => setEditingAppointment(null)}
         />
       )}
+    </div>
+  );
+}
+
+// Three-way segmented control for the active view. Sits inline in the header
+// at compact-button size so it doesn't blow up the chrome.
+function ViewTabs({ view, onChange }: {
+  view: 'schedule' | 'admin' | 'compliance';
+  onChange: (v: 'schedule' | 'admin' | 'compliance') => void;
+}) {
+  const tabs: { key: 'schedule' | 'admin' | 'compliance'; label: string; aria: string }[] = [
+    { key: 'schedule', label: 'Sched', aria: 'Schedule' },
+    { key: 'admin', label: 'Admin', aria: 'Admin' },
+    { key: 'compliance', label: 'Comp', aria: 'Compliance' },
+  ];
+  return (
+    <div style={{ display: 'flex', borderRadius: 5, overflow: 'hidden', border: '1px solid #4b5563' }}>
+      {tabs.map(t => {
+        const active = t.key === view;
+        return (
+          <button
+            key={t.key}
+            onClick={() => onChange(t.key)}
+            aria-label={t.aria}
+            title={t.aria}
+            style={{
+              padding: '5px 9px', border: 'none',
+              backgroundColor: active ? '#6366f1' : 'transparent',
+              color: 'white', cursor: 'pointer',
+              fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', lineHeight: 1.2,
+            }}
+          >{t.label}</button>
+        );
+      })}
     </div>
   );
 }

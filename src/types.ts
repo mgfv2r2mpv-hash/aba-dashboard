@@ -49,6 +49,11 @@ export interface CompanySettings {
   // Per-non-RBT-tech supervision target — % of THAT tech's direct hours (any
   // client). No BACB rule applies; this is purely company policy.
   supervisionTechHoursPercent?: number;
+  // Insurer cap on supervision-to-direct ratio (e.g., 20%). Varies by payer
+  // and over time; left undefined = no cap warning. When set, any per-client
+  // or per-tech ratio that exceeds it is flagged in the dashboard so the
+  // BCBA can adjust before the case runs out of authorized supervision hours.
+  supervisionMaxHoursPercent?: number;
   parentTraining: {
     minimumHours: number;
     targetMinHours: number;

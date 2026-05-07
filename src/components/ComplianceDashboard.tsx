@@ -22,6 +22,7 @@ export default function ComplianceDashboard({ data, onMarkComplete, onRequestCan
   const pastIncomplete = useMemo(() => pastIncompleteAppointments(data), [data]);
   const targetPct = data.settings.supervisionDirectHoursPercent || 5;
   const techTargetPct = data.settings.supervisionTechHoursPercent ?? 0;
+  const maxPct = data.settings.supervisionMaxHoursPercent;
 
   const goPrev = () => setPeriodRef(new Date(periodRef.getFullYear(), periodRef.getMonth() - 1, 1));
   const goNext = () => setPeriodRef(new Date(periodRef.getFullYear(), periodRef.getMonth() + 1, 1));
@@ -62,7 +63,7 @@ export default function ComplianceDashboard({ data, onMarkComplete, onRequestCan
             No clients yet. Add clients in Admin to start tracking compliance.
           </p>
         )}
-        {clientReports.map(r => <ClientCard key={r.client.id} report={r} targetPct={targetPct} />)}
+        {clientReports.map(r => <ClientCard key={r.client.id} report={r} targetPct={targetPct} maxPct={maxPct} />)}
       </div>
 
       <SectionHeader>Per technician</SectionHeader>
@@ -79,7 +80,7 @@ export default function ComplianceDashboard({ data, onMarkComplete, onRequestCan
             No technicians yet.
           </p>
         )}
-        {techReports.map(r => <TechCard key={r.tech.id} report={r} />)}
+        {techReports.map(r => <TechCard key={r.tech.id} report={r} maxPct={maxPct} />)}
       </div>
     </div>
   );
@@ -158,7 +159,7 @@ function PastIncomplete({ items, onMarkComplete, onRequestCancel, onSelect }: {
 
 // ---------- Per-client card ----------
 
-function ClientCard({ report, targetPct }: { report: ClientCompliance; targetPct: number }) {
+function ClientCard({ report, targetPct, maxPct }: { report: ClientCompliance; targetPct: number; maxPct?: number }) {
   const { client, actual, projected } = report;
   const noDirect = actual.directHours === 0 && projected.directHours === 0;
 
@@ -194,15 +195,15 @@ function ClientCard({ report, targetPct }: { report: ClientCompliance; targetPct
         </p>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-          <Metric title="Actual" m={actual} targetPct={targetPct} accent={accentColor} />
-          <Metric title="Projected" m={projected} targetPct={targetPct} accent={accentColor} />
+          <Metric title="Actual" m={actual} targetPct={targetPct} accent={accentColor} maxPct={maxPct} />
+          <Metric title="Projected" m={projected} targetPct={targetPct} accent={accentColor} maxPct={maxPct} />
         </div>
       )}
     </div>
   );
 }
 
-function TechCard({ report }: { report: TechCompliance }) {
+function TechCard({ report, maxPct }: { report: TechCompliance; maxPct?: number }) {
   const { tech, actual, projected } = report;
   const noDirect = actual.directHours === 0 && projected.directHours === 0;
 
@@ -239,19 +240,20 @@ function TechCard({ report }: { report: TechCompliance }) {
         </p>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-          <TechMetric title="Actual" m={actual} accent={accent} isRBT={tech.isRBT} />
-          <TechMetric title="Projected" m={projected} accent={accent} isRBT={tech.isRBT} />
+          <TechMetric title="Actual" m={actual} accent={accent} isRBT={tech.isRBT} maxPct={maxPct} />
+          <TechMetric title="Projected" m={projected} accent={accent} isRBT={tech.isRBT} maxPct={maxPct} />
         </div>
       )}
     </div>
   );
 }
 
-function TechMetric({ title, m, accent, isRBT }: {
+function TechMetric({ title, m, accent, isRBT, maxPct }: {
   title: string;
   m: TechComplianceMetrics;
   accent: string;
   isRBT: boolean;
+  maxPct?: number;
 }) {
   // Bar fills against whichever requirement is HIGHER (the binding one) so the
   // user sees how far they are from passing both checks.
@@ -259,14 +261,21 @@ function TechMetric({ title, m, accent, isRBT }: {
     ? Math.max(BACB_RBT_SUPERVISION_MIN_PERCENT, m.companyRequiredPct)
     : m.companyRequiredPct;
   const fillPct = bindingPct > 0 ? Math.min(100, (m.pct / bindingPct) * 100) : 0;
+  const overCap = maxPct !== undefined && m.pct > maxPct;
+  const pctColor = overCap ? CAP_OVER : accent;
 
   return (
     <div>
       <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: '#6b7280', marginBottom: 4 }}>
         {title}
       </div>
-      <div style={{ fontSize: 18, fontWeight: 700, color: accent }}>
+      <div style={{ fontSize: 18, fontWeight: 700, color: pctColor }}>
         {m.pct.toFixed(1)}%
+        {overCap && (
+          <div style={{ fontSize: 11, color: CAP_OVER, fontWeight: 600, marginTop: 2 }}>
+            ⚠ over {maxPct}% insurer cap
+          </div>
+        )}
       </div>
       <div style={{
         marginTop: 6, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden',
@@ -322,23 +331,35 @@ function statusColor(s: 'green' | 'yellow' | 'red' | 'gray'): string {
     : '#6b7280';
 }
 
-function Metric({ title, m, targetPct, accent }: {
+// Distinct from the green/yellow/red status colors so the over-cap warning
+// doesn't get confused with the under-min status pill.
+const CAP_OVER = '#ea580c';
+
+function Metric({ title, m, targetPct, accent, maxPct }: {
   title: string;
   m: { directHours: number; supervisionHours: number; requiredHours: number; pct: number; hoursToGo: number };
   targetPct: number;
   accent: string;
+  maxPct?: number;
 }) {
   const fillPct = Math.min(100, m.pct);
+  const overCap = maxPct !== undefined && m.pct > maxPct;
+  const pctColor = overCap ? CAP_OVER : accent;
   return (
     <div>
       <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: '#6b7280', marginBottom: 4 }}>
         {title}
       </div>
-      <div style={{ fontSize: 18, fontWeight: 700, color: accent }}>
+      <div style={{ fontSize: 18, fontWeight: 700, color: pctColor }}>
         {m.pct.toFixed(1)}%
         <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 400, marginLeft: 6 }}>
           of {targetPct}% target
         </span>
+        {overCap && (
+          <div style={{ fontSize: 11, color: CAP_OVER, fontWeight: 600, marginTop: 2 }}>
+            ⚠ over {maxPct}% insurer cap
+          </div>
+        )}
       </div>
       <div style={{
         marginTop: 6, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden',

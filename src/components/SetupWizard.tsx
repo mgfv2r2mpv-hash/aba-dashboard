@@ -58,6 +58,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
   const [supRBTStr, setSupRBTStr] = useState(String(BACB_RBT_SUPERVISION_MIN_PERCENT));
   const [rbtOverride, setRBTOverride] = useState(false);
   const [supTechStr, setSupTechStr] = useState('0');
+  const [supMaxStr, setSupMaxStr] = useState('20');
   const [minHoursStr, setMinHoursStr] = useState('1.5');
   const [targetMinStr, setTargetMinStr] = useState('2');
   const [targetMaxStr, setTargetMaxStr] = useState('4');
@@ -108,6 +109,7 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
       supervisionDirectHoursPercent: parseNumericString(supDirectStr, 5),
       supervisionRBTHoursPercent: rbtValue,
       supervisionTechHoursPercent: parseNumericString(supTechStr, 0),
+      supervisionMaxHoursPercent: supMaxStr.trim() === '' ? undefined : parseNumericString(supMaxStr, 20),
       parentTraining: {
         ...settings.parentTraining,
         minimumHours: parseNumericString(minHoursStr, 1.5),
@@ -286,6 +288,22 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
                   <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
                     No BACB rule applies to non-RBT BTs. Set 0 to skip; any positive
                     value flags non-RBT techs that fall below it.
+                  </p>
+                </div>
+                <div>
+                  <label style={labelStyle}>Supervision cap (insurer max %)</label>
+                  <input
+                    type="number" step="0.1" min="0"
+                    value={supMaxStr}
+                    onChange={(e) => setSupMaxStr(e.target.value)}
+                    placeholder="e.g. 20"
+                    style={inputStyle}
+                  />
+                  <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+                    Many insurers cap supervision-to-direct ratio (typically 20%).
+                    Per-client and per-tech ratios above this turn orange in the
+                    Compliance dashboard so you don't burn through authorized
+                    supervision hours. Leave blank to disable.
                   </p>
                 </div>
                 <div>

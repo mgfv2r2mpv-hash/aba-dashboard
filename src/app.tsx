@@ -272,26 +272,25 @@ export default function App() {
     }
   };
 
-  const handleAddAppointment = async (appointment: Appointment) => {
+  const handleSaveAppointments = async (apps: Appointment[]) => {
+    if (apps.length === 0 || !scheduleData) return;
     try {
-      await axios.post(`${API_BASE}/admin/appointment`, appointment);
-      if (scheduleData) {
-        const next: ScheduleData = { ...scheduleData };
-        const idx = next.appointments.findIndex(a => a.id === appointment.id);
-        if (idx >= 0) {
-          next.appointments = [...next.appointments];
-          next.appointments[idx] = appointment;
-        } else {
-          next.appointments = [...next.appointments, appointment];
-        }
-        setScheduleData(next);
-        // Keep the side panel honest — if this appointment was the
-        // selected one, refresh it so edits don't appear to do nothing.
-        if (selectedAppointment?.id === appointment.id) {
-          setSelectedAppointment(appointment);
-        }
-        setConflicts(new ConstraintValidator(next).validateSchedule());
+      // POST each in parallel — the local nativeApi adapter handles upserts
+      // by id (insert if new, Object.assign if existing).
+      await Promise.all(apps.map(a => axios.post(`${API_BASE}/admin/appointment`, a)));
+      const byId = new Map(apps.map(a => [a.id, a]));
+      const nextAppts = scheduleData.appointments.map(a => byId.get(a.id) || a);
+      apps.forEach(a => {
+        if (!scheduleData.appointments.some(x => x.id === a.id)) nextAppts.push(a);
+      });
+      const next: ScheduleData = { ...scheduleData, appointments: nextAppts };
+      setScheduleData(next);
+      // Refresh the side panel if the selected appointment was part of the batch.
+      if (selectedAppointment) {
+        const updated = byId.get(selectedAppointment.id);
+        if (updated) setSelectedAppointment(updated);
       }
+      setConflicts(new ConstraintValidator(next).validateSchedule());
       setShowAddAppointment(false);
       setEditingAppointment(null);
     } catch (error: any) {
@@ -299,18 +298,31 @@ export default function App() {
     }
   };
 
-  const handleDeleteAppointment = async (id: string) => {
-    if (!confirm('Delete this appointment?')) return;
+  const handleDeleteAppointments = async (ids: string[]) => {
+    if (ids.length === 0 || !scheduleData) return;
     try {
-      await axios.delete(`${API_BASE}/admin/appointment/${id}`);
-      if (scheduleData) {
-        setScheduleData({ ...scheduleData, appointments: scheduleData.appointments.filter(a => a.id !== id) });
+      await Promise.all(ids.map(id => axios.delete(`${API_BASE}/admin/appointment/${id}`)));
+      const idSet = new Set(ids);
+      const next: ScheduleData = {
+        ...scheduleData,
+        appointments: scheduleData.appointments.filter(a => !idSet.has(a.id)),
+      };
+      setScheduleData(next);
+      if (selectedAppointment && idSet.has(selectedAppointment.id)) {
+        setSelectedAppointment(null);
       }
-      setSelectedAppointment(null);
+      setConflicts(new ConstraintValidator(next).validateSchedule());
       setEditingAppointment(null);
     } catch (error: any) {
       alert('Error deleting appointment: ' + (error.response?.data?.error || error.message));
     }
+  };
+
+  // Side-panel Delete button: always single-instance. The scope-aware delete
+  // lives inside the edit form (where the slider is visible).
+  const handleDeleteAppointment = async (id: string) => {
+    if (!confirm('Delete this appointment?')) return;
+    handleDeleteAppointments([id]);
   };
 
   const handleWizardComplete = async (data: ScheduleData) => {
@@ -657,7 +669,7 @@ export default function App() {
         <AppointmentForm
           technicians={scheduleData.technicians}
           clients={scheduleData.clients}
-          onSave={handleAddAppointment}
+          onSave={handleSaveAppointments}
           onCancel={() => setShowAddAppointment(false)}
         />
       )}
@@ -665,9 +677,11 @@ export default function App() {
       {editingAppointment && scheduleData && (
         <AppointmentForm
           appointment={editingAppointment}
+          allAppointments={scheduleData.appointments}
           technicians={scheduleData.technicians}
           clients={scheduleData.clients}
-          onSave={handleAddAppointment}
+          onSave={handleSaveAppointments}
+          onDelete={handleDeleteAppointments}
           onCancel={() => setEditingAppointment(null)}
         />
       )}

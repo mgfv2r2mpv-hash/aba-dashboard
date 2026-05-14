@@ -137,6 +137,7 @@ function parseAppointments(workbook: XLSX.WorkBook): Appointment[] {
       type: row.type || 'other',
       isRecurring: row.isRecurring === 'TRUE' || row.isRecurring === true,
       recurringPattern: row.recurringPattern,
+      seriesId: row.seriesId || undefined,
     };
     if (row.status === 'completed' || row.status === 'canceled') {
       appt.status = row.status;
@@ -260,6 +261,7 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
     type: a.type,
     isRecurring: a.isRecurring ? 'TRUE' : 'FALSE',
     recurringPattern: a.recurringPattern,
+    seriesId: a.seriesId || '',
     status: a.status || 'scheduled',
     cancellationSource: a.cancellation?.source || '',
     cancellationReason: a.cancellation?.reason || '',

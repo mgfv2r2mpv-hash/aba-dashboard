@@ -4,11 +4,20 @@ import { v4 as uuidv4 } from 'uuid';
 
 interface AppointmentFormProps {
   appointment?: Appointment;
+  // All current appointments, needed to resolve siblings for series-scoped
+  // edit and delete. Optional because the Add flow doesn't have one to edit yet.
+  allAppointments?: Appointment[];
   technicians: Technician[];
   clients: Client[];
-  onSave: (appointment: Appointment) => void;
+  // Save can affect more than one record when editing with scope > instance;
+  // signature returns the full list of upserts to apply.
+  onSave: (appointments: Appointment[]) => void;
+  // Delete is scope-aware too — returns the ids to remove (empty array on cancel).
+  onDelete?: (ids: string[]) => void;
   onCancel: () => void;
 }
+
+type EditScope = 'instance' | 'following' | 'all';
 
 type RecurrencePattern =
   | 'none'
@@ -22,9 +31,11 @@ const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday
 
 export default function AppointmentForm({
   appointment,
+  allAppointments,
   technicians,
   clients,
   onSave,
+  onDelete,
   onCancel,
 }: AppointmentFormProps) {
   const [title, setTitle] = useState(appointment?.title || '');
@@ -43,6 +54,14 @@ export default function AppointmentForm({
   const [selectedDays, setSelectedDays] = useState<Set<DayOfWeek>>(new Set());
   const [customDates, setCustomDates] = useState<string>(''); // newline-separated YYYY-MM-DD
   const [recurrenceEnd, setRecurrenceEnd] = useState<string>('');
+  const [editScope, setEditScope] = useState<EditScope>('instance');
+
+  // All other occurrences sharing this appointment's seriesId. When editing,
+  // the scope picker only matters if there's a real series to act on.
+  const siblings = (appointment?.seriesId && allAppointments)
+    ? allAppointments.filter(a => a.seriesId === appointment.seriesId)
+    : [];
+  const hasSeries = siblings.length > 1;
 
   const toggleDay = (day: DayOfWeek) => {
     const next = new Set(selectedDays);
@@ -56,7 +75,54 @@ export default function AppointmentForm({
   const formatLocalISO = (d: Date) =>
     `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 
+  // Edit on an existing series with scope > instance: take this occurrence's
+  // edits and propagate to the relevant siblings. Title/desc/type/tech/client/
+  // isBillable replace 1:1. Time-of-day is applied as HH:MM to each sibling
+  // while preserving that sibling's date, and the duration becomes the new
+  // (endTime - startTime). Status / cancellation stay per-instance.
+  const buildSeriesEdit = (): Appointment[] => {
+    if (!appointment) return [];
+    const newStart = new Date(startTime);
+    const newEnd = new Date(endTime);
+    if (isNaN(newStart.getTime()) || isNaN(newEnd.getTime())) return [appointment];
+    const newDurationMs = newEnd.getTime() - newStart.getTime();
+    const newHour = newStart.getHours();
+    const newMin = newStart.getMinutes();
+    const newSec = newStart.getSeconds();
+
+    const cutoff = new Date(appointment.startTime).getTime();
+    const targets = siblings.filter(s =>
+      editScope === 'all' || new Date(s.startTime).getTime() >= cutoff
+    );
+
+    return targets.map(sib => {
+      const sibDate = new Date(sib.startTime);
+      const updatedStart = new Date(sibDate);
+      updatedStart.setHours(newHour, newMin, newSec, 0);
+      const updatedEnd = new Date(updatedStart.getTime() + newDurationMs);
+      return {
+        ...sib,
+        title,
+        description,
+        type,
+        technician: type === 'supervision' ? '' : technicianId,
+        client: clientId,
+        isBillable,
+        startTime: formatLocalISO(updatedStart),
+        endTime: formatLocalISO(updatedEnd),
+      };
+    });
+  };
+
   const buildAppointments = (): Appointment[] => {
+    const editing = !!appointment?.id;
+
+    // Scope-aware edit branches before the build-from-scratch logic.
+    if (editing && hasSeries && editScope !== 'instance') {
+      const updates = buildSeriesEdit();
+      return updates.length > 0 ? updates : [];
+    }
+
     const base: Appointment = {
       id: appointment?.id || uuidv4(),
       title,
@@ -70,13 +136,15 @@ export default function AppointmentForm({
       isBillable,
       isRecurring: recurrence !== 'none',
       recurringPattern: recurrence === 'none' ? undefined : (recurrence as any),
+      // Preserve series membership on single-instance edit so the slider
+      // stays meaningful for future opens.
+      seriesId: appointment?.seriesId,
     };
 
     if (recurrence === 'none') return [base];
 
-    // Editing an existing record: save only this occurrence. Series are
-    // stored as independent records; edits to a single one don't propagate.
-    if (appointment?.id) return [base];
+    // Editing an existing record with scope === 'instance': only this one.
+    if (editing) return [base];
 
     const start = new Date(startTime);
     if (isNaN(start.getTime())) return [base];
@@ -85,6 +153,9 @@ export default function AppointmentForm({
     // a reasonable seed without runaway records.
     const defaultEnd = new Date(start.getTime() + 90 * 24 * 60 * 60 * 1000);
     const end = recurrenceEnd ? new Date(`${recurrenceEnd}T23:59:59`) : defaultEnd;
+    // One seriesId for all instances of this new series, so future edits can
+    // target "this and following" or "all in series".
+    const seriesId = uuidv4();
 
     if (recurrence === 'weekly' || recurrence === 'biweekly' || recurrence === 'monthly') {
       const result: Appointment[] = [];
@@ -96,6 +167,7 @@ export default function AppointmentForm({
           id: result.length === 0 ? base.id : uuidv4(),
           startTime: formatLocalISO(occStart),
           endTime: formatLocalISO(occEnd),
+          seriesId,
         });
         if (recurrence === 'monthly') {
           const next = new Date(occStart);
@@ -106,7 +178,7 @@ export default function AppointmentForm({
           occStart = new Date(occStart.getTime() + stepDays * 24 * 60 * 60 * 1000);
         }
       }
-      return result.length > 0 ? result : [base];
+      return result.length > 0 ? result : [{ ...base, seriesId }];
     }
 
     const result: Appointment[] = [];
@@ -125,6 +197,7 @@ export default function AppointmentForm({
             endTime: formatLocalISO(occEnd),
             isRecurring: true,
             recurringPattern: 'custom' as any,
+            seriesId,
           });
         }
       }
@@ -141,11 +214,24 @@ export default function AppointmentForm({
           endTime: formatLocalISO(occEnd),
           isRecurring: true,
           recurringPattern: 'custom' as any,
+          seriesId,
         });
       }
     }
 
-    return result.length > 0 ? result : [base];
+    return result.length > 0 ? result : [{ ...base, seriesId }];
+  };
+
+  // Delete is also scope-aware. Completed and canceled siblings are spared
+  // when deleting a series — they're records of fact, not just future intent.
+  const buildDeleteIds = (): string[] => {
+    if (!appointment) return [];
+    if (editScope === 'instance' || !hasSeries) return [appointment.id];
+    const cutoff = new Date(appointment.startTime).getTime();
+    return siblings
+      .filter(s => editScope === 'all' || new Date(s.startTime).getTime() >= cutoff)
+      .filter(s => s.status !== 'completed' && s.status !== 'canceled')
+      .map(s => s.id);
   };
 
   const handleSubmit = () => {
@@ -159,7 +245,23 @@ export default function AppointmentForm({
       return;
     }
     const appointments = buildAppointments();
-    appointments.forEach(a => onSave(a));
+    if (appointments.length > 0) onSave(appointments);
+  };
+
+  const handleDelete = () => {
+    if (!onDelete || !appointment) return;
+    const ids = buildDeleteIds();
+    if (ids.length === 0) {
+      alert('No matching incomplete appointments to delete.');
+      return;
+    }
+    const noun = ids.length === 1 ? 'appointment' : `${ids.length} appointments`;
+    const scopeLabel =
+      editScope === 'all' ? ' from the series' :
+      editScope === 'following' ? ' from this date forward in the series' :
+      '';
+    if (!confirm(`Delete ${noun}${scopeLabel}? Completed and canceled appointments will be kept.`)) return;
+    onDelete(ids);
   };
 
   const inputStyle: React.CSSProperties = {
@@ -190,12 +292,26 @@ export default function AppointmentForm({
         width: '100%', maxWidth: 600, maxHeight: '100%', overflowY: 'auto',
         boxSizing: 'border-box',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
           <h2 style={{ fontSize: '20px', fontWeight: 'bold' }}>
             {appointment ? 'Edit Appointment' : 'Add Appointment'}
           </h2>
           <button onClick={onCancel} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
         </div>
+
+        {appointment && hasSeries && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Apply changes to
+            </label>
+            <ScopePicker value={editScope} onChange={setEditScope} />
+            <p style={{ fontSize: 11, color: '#6b7280', marginTop: 6 }}>
+              {editScope === 'instance' && 'Only this occurrence will change.'}
+              {editScope === 'following' && `This and ${siblings.filter(s => new Date(s.startTime).getTime() >= new Date(appointment.startTime).getTime()).length - 1} future occurrence(s) in the series will change. Time-of-day edits keep each occurrence's original date.`}
+              {editScope === 'all' && `All ${siblings.length} occurrences in the series will change. Time-of-day edits keep each occurrence's original date.`}
+            </p>
+          </div>
+        )}
 
         <div style={{ display: 'grid', gap: '12px' }}>
           <div>
@@ -338,7 +454,14 @@ export default function AppointmentForm({
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '20px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '20px', flexWrap: 'wrap' }}>
+          {appointment && onDelete && (
+            <button onClick={handleDelete} style={{
+              padding: '8px 14px', border: '1px solid #fca5a5', borderRadius: '6px',
+              background: '#fee2e2', color: '#b91c1c', cursor: 'pointer', fontWeight: 600,
+            }}>Delete</button>
+          )}
+          <div style={{ flex: 1 }} />
           <button onClick={onCancel} style={{
             padding: '8px 16px', border: '1px solid #d1d5db', borderRadius: '6px',
             background: 'white', cursor: 'pointer',
@@ -349,6 +472,35 @@ export default function AppointmentForm({
           }}>Save</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ScopePicker({ value, onChange }: { value: EditScope; onChange: (v: EditScope) => void }) {
+  const opts: { value: EditScope; label: string }[] = [
+    { value: 'instance', label: 'This' },
+    { value: 'following', label: 'This + Following' },
+    { value: 'all', label: 'All in Series' },
+  ];
+  return (
+    <div style={{
+      display: 'flex', borderRadius: 6, overflow: 'hidden',
+      border: '1px solid #d1d5db', maxWidth: '100%',
+    }}>
+      {opts.map(o => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          style={{
+            flex: 1, padding: '6px 8px', fontSize: 12, fontWeight: 600,
+            border: 'none', cursor: 'pointer',
+            backgroundColor: o.value === value ? '#3b82f6' : 'white',
+            color: o.value === value ? 'white' : '#374151',
+            whiteSpace: 'nowrap',
+          }}
+        >{o.label}</button>
+      ))}
     </div>
   );
 }

@@ -132,6 +132,10 @@ export interface Appointment {
   type: 'supervision' | 'parent-training' | 'internal-task' | 'client-session' | 'other';
   isRecurring?: boolean;
   recurringPattern?: 'weekly' | 'biweekly' | 'monthly';
+  // Shared by all occurrences of a recurring series — set when the series is
+  // first expanded. Lets edit/delete operations target "this and following"
+  // or "all in series" without having to match by signature.
+  seriesId?: string;
   // Lifecycle. Absent / 'scheduled' = active; 'completed' counts toward
   // compliance totals; 'canceled' is excluded from totals (with cancellation
   // metadata kept for downstream reporting).

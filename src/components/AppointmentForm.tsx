@@ -50,50 +50,79 @@ export default function AppointmentForm({
     setSelectedDays(next);
   };
 
+  // Same local-no-Z format the seeded sample uses, so the calendar's
+  // `startTime.startsWith('yyyy-MM-dd')` filter doesn't shift across timezones.
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const formatLocalISO = (d: Date) =>
+    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+
   const buildAppointments = (): Appointment[] => {
     const base: Appointment = {
       id: appointment?.id || uuidv4(),
       title,
       description,
       type,
-      // Supervision carries client only — never persist a tech, even if
-      // one was selected before the user switched the type.
       technician: type === 'supervision' ? '' : technicianId,
       client: clientId,
       startTime,
       endTime,
-      // Locked-ness is derived from status (canceled / completed) and is
-      // never user-set; preserve any pre-existing value verbatim so old
-      // Excel files round-trip unchanged.
       isFixed: appointment?.isFixed ?? false,
       isBillable,
       isRecurring: recurrence !== 'none',
       recurringPattern: recurrence === 'none' ? undefined : (recurrence as any),
     };
 
-    // For simple recurrence, return a single record - the schedule renderer expands it.
-    if (recurrence === 'none' || recurrence === 'weekly' || recurrence === 'biweekly' || recurrence === 'monthly') {
-      return [base];
+    if (recurrence === 'none') return [base];
+
+    // Editing an existing record: save only this occurrence. Series are
+    // stored as independent records; edits to a single one don't propagate.
+    if (appointment?.id) return [base];
+
+    const start = new Date(startTime);
+    if (isNaN(start.getTime())) return [base];
+    const duration = new Date(endTime).getTime() - start.getTime();
+    // Fallback window if the user didn't pick an end — 90 days of weekly is
+    // a reasonable seed without runaway records.
+    const defaultEnd = new Date(start.getTime() + 90 * 24 * 60 * 60 * 1000);
+    const end = recurrenceEnd ? new Date(`${recurrenceEnd}T23:59:59`) : defaultEnd;
+
+    if (recurrence === 'weekly' || recurrence === 'biweekly' || recurrence === 'monthly') {
+      const result: Appointment[] = [];
+      let occStart = new Date(start);
+      while (occStart <= end) {
+        const occEnd = new Date(occStart.getTime() + duration);
+        result.push({
+          ...base,
+          id: result.length === 0 ? base.id : uuidv4(),
+          startTime: formatLocalISO(occStart),
+          endTime: formatLocalISO(occEnd),
+        });
+        if (recurrence === 'monthly') {
+          const next = new Date(occStart);
+          next.setMonth(next.getMonth() + 1);
+          occStart = next;
+        } else {
+          const stepDays = recurrence === 'weekly' ? 7 : 14;
+          occStart = new Date(occStart.getTime() + stepDays * 24 * 60 * 60 * 1000);
+        }
+      }
+      return result.length > 0 ? result : [base];
     }
 
-    // For custom-days: generate one appointment per occurrence in window
     const result: Appointment[] = [];
-    const start = new Date(startTime);
-    const end = recurrenceEnd ? new Date(recurrenceEnd) : new Date(start.getTime() + 90 * 24 * 60 * 60 * 1000);
-    const duration = new Date(endTime).getTime() - start.getTime();
 
     if (recurrence === 'custom-days') {
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dayName = DAYS[(d.getDay() + 6) % 7]; // convert Sun=0 to Mon=0
+        const dayName = DAYS[(d.getDay() + 6) % 7];
         if (dayName && selectedDays.has(dayName)) {
           const occStart = new Date(d);
           occStart.setHours(start.getHours(), start.getMinutes(), 0, 0);
           const occEnd = new Date(occStart.getTime() + duration);
           result.push({
             ...base,
-            id: uuidv4(),
-            startTime: occStart.toISOString(),
-            endTime: occEnd.toISOString(),
+            id: result.length === 0 ? base.id : uuidv4(),
+            startTime: formatLocalISO(occStart),
+            endTime: formatLocalISO(occEnd),
             isRecurring: true,
             recurringPattern: 'custom' as any,
           });
@@ -102,14 +131,14 @@ export default function AppointmentForm({
     } else if (recurrence === 'custom-dates') {
       const dates = customDates.split(/\s+/).filter(Boolean);
       for (const dateStr of dates) {
-        const occStart = new Date(`${dateStr}T${start.toTimeString().slice(0, 8)}`);
+        const occStart = new Date(`${dateStr}T${pad2(start.getHours())}:${pad2(start.getMinutes())}:00`);
         if (isNaN(occStart.getTime())) continue;
         const occEnd = new Date(occStart.getTime() + duration);
         result.push({
           ...base,
-          id: uuidv4(),
-          startTime: occStart.toISOString(),
-          endTime: occEnd.toISOString(),
+          id: result.length === 0 ? base.id : uuidv4(),
+          startTime: formatLocalISO(occStart),
+          endTime: formatLocalISO(occEnd),
           isRecurring: true,
           recurringPattern: 'custom' as any,
         });
@@ -263,8 +292,25 @@ export default function AppointmentForm({
                   </button>
                 ))}
               </div>
-              <label style={{ ...labelStyle, marginTop: '12px' }}>Stop recurring on (optional)</label>
-              <input type="date" value={recurrenceEnd} onChange={(e) => setRecurrenceEnd(e.target.value)} style={inputStyle} />
+            </div>
+          )}
+
+          {/* End-of-recurrence input shared across every series-style recurrence. */}
+          {(recurrence === 'weekly' || recurrence === 'biweekly' || recurrence === 'monthly' || recurrence === 'custom-days') && (
+            <div>
+              <label style={labelStyle}>End recurrence on (optional)</label>
+              <input
+                type="date"
+                value={recurrenceEnd}
+                onChange={(e) => setRecurrenceEnd(e.target.value)}
+                style={inputStyle}
+              />
+              <p style={{ fontSize: '11px', color: '#6b7280', marginTop: 4 }}>
+                The series starts at the Start date/time above and repeats until
+                this date (or 90 days out if left blank). When editing an existing
+                appointment, changes apply only to that single occurrence — the
+                rest of the series is independent.
+              </p>
             </div>
           )}
 

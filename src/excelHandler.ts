@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { ScheduleData, Appointment, Technician, Client, CompanySettings, DayOfWeek } from './types';
+import { ScheduleData, Appointment, Technician, Client, CompanySettings, DayOfWeek, Blackout } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface ParsedSchedule {
@@ -16,6 +16,7 @@ export function parseWorkbook(workbook: XLSX.WorkBook): ParsedSchedule {
   const technicians = parseTechnicians(workbook);
   const settings = parseSettings(workbook);
   const appointments = parseAppointments(workbook);
+  const blackouts = parseBlackouts(workbook);
   const embeddedConfig = parseEmbeddedConfig(workbook);
 
   return {
@@ -26,10 +27,45 @@ export function parseWorkbook(workbook: XLSX.WorkBook): ParsedSchedule {
       technicians,
       settings,
       appointments,
+      blackouts,
       lastModified: new Date().toISOString(),
     },
     embeddedConfig,
   };
+}
+
+function parseBlackouts(workbook: XLSX.WorkBook): Blackout[] {
+  const sheet = workbook.Sheets['Blackouts'];
+  if (!sheet) return [];
+
+  const data = XLSX.utils.sheet_to_json(sheet) as any[];
+  return data
+    .filter(row => row && row.entityId && row.date)
+    .map((row: any) => ({
+      id: row.id || uuidv4(),
+      entityType: row.entityType === 'client' ? 'client' : 'technician',
+      entityId: String(row.entityId),
+      entityName: row.entityName || undefined,
+      // Excel may parse a date cell into a number/Date; normalize to YYYY-MM-DD.
+      date: normalizeDateString(row.date),
+      reason: row.reason || undefined,
+      createdAt: row.createdAt || undefined,
+    }));
+}
+
+// Accept an ISO string, a YYYY-MM-DD string, or an Excel-parsed Date and
+// return a YYYY-MM-DD local-day string.
+function normalizeDateString(raw: any): string {
+  if (raw instanceof Date) {
+    const y = raw.getFullYear();
+    const m = String(raw.getMonth() + 1).padStart(2, '0');
+    const d = String(raw.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(raw).trim();
+  // Already YYYY-MM-DD (optionally with a time component) — take the date part.
+  const match = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : s;
 }
 
 function parseEmbeddedConfig(workbook: XLSX.WorkBook): string | undefined {
@@ -273,6 +309,19 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
     cancellationNotes: a.cancellation?.notes || '',
   }));
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(appointmentsData), 'Appointments');
+
+  // Blackouts sheet (single-day "away" markers). Always emitted so a
+  // round-trip preserves them; empty when there are none.
+  const blackoutsData = (data.blackouts || []).map(b => ({
+    id: b.id,
+    entityType: b.entityType,
+    entityId: b.entityId,
+    entityName: b.entityName || '',
+    date: b.date,
+    reason: b.reason || '',
+    createdAt: b.createdAt || '',
+  }));
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(blackoutsData), 'Blackouts');
 
   return XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
 }

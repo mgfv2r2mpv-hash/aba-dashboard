@@ -87,6 +87,16 @@ export default function App() {
     }
   }, [selectedAppointment]);
 
+  // Keep conflicts in sync with the schedule. Admin edits (availability,
+  // blackouts, add/remove people) flow through setScheduleData without their
+  // own revalidation; recomputing here means a newly-added blackout flags any
+  // session that day the moment you switch back to the Schedule view.
+  useEffect(() => {
+    if (scheduleData) {
+      setConflicts(new ConstraintValidator(scheduleData).validateSchedule());
+    }
+  }, [scheduleData]);
+
   const handleAISettingsSave = (settings: AISettings) => {
     setAiSettings(settings);
     saveSessionSettings(settings);

@@ -382,6 +382,37 @@ app.post('/api/admin/appointment', express.json(), (req: Request, res: Response)
   }
 });
 
+// Admin: Create/update blackout (single-day "away" marker)
+app.post('/api/admin/blackout', express.json(), (req: Request, res: Response) => {
+  try {
+    if (!currentScheduleData) {
+      return res.status(400).json({ error: 'No schedule loaded' });
+    }
+    const blackout = req.body;
+    if (!blackout.id || !blackout.entityId || !blackout.date) {
+      return res.status(400).json({ error: 'Blackout must have id, entityId and date' });
+    }
+    if (!currentScheduleData.blackouts) currentScheduleData.blackouts = [];
+    const existing = currentScheduleData.blackouts.find(b => b.id === blackout.id);
+    if (existing) {
+      Object.assign(existing, blackout);
+    } else {
+      currentScheduleData.blackouts.push(blackout);
+    }
+    res.json({ success: true, blackout: existing || blackout });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: Delete blackout
+app.delete('/api/admin/blackout/:id', (req: Request, res: Response) => {
+  if (!currentScheduleData) return res.status(400).json({ error: 'No schedule loaded' });
+  const before = (currentScheduleData.blackouts || []).length;
+  currentScheduleData.blackouts = (currentScheduleData.blackouts || []).filter(b => b.id !== req.params.id);
+  res.json({ success: true, removed: before - currentScheduleData.blackouts.length });
+});
+
 app.listen(PORT, () => {
   console.log(`ABA Schedule Assistant API running on port ${PORT}`);
 });

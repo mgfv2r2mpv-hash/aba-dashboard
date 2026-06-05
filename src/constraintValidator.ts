@@ -1,4 +1,13 @@
-import { ScheduleData, ScheduleConflict, Appointment } from './types';
+import {
+  ScheduleData,
+  ScheduleConflict,
+  Appointment,
+  Blackout,
+  TimeWindow,
+  DayOfWeek,
+  PartyAvailability,
+  PartyAvailabilityStatus,
+} from './types';
 
 export class ConstraintValidator {
   private data: ScheduleData;
@@ -118,49 +127,129 @@ export class ConstraintValidator {
 
   private validateAvailability(): ScheduleConflict[] {
     const conflicts: ScheduleConflict[] = [];
+    const blackouts = this.data.blackouts || [];
 
     this.data.appointments.forEach(appointment => {
-      if (!appointment.technician) return;
+      const technician = appointment.technician
+        ? this.data.technicians.find(t => t.id === appointment.technician || t.name === appointment.technician)
+        : undefined;
+      const client = appointment.client
+        ? this.data.clients.find(c => c.id === appointment.client || c.name === appointment.client)
+        : undefined;
 
-      const technician = this.data.technicians.find(t => t.id === appointment.technician || t.name === appointment.technician);
-      if (!technician) return;
+      // Nothing to check against — appointment has no resolvable parties.
+      if (!technician && !client) return;
 
       const appointmentDate = new Date(appointment.startTime);
-      const dayName = this.getDayName(appointmentDate);
-      const timeWindow = (technician.availability as any)[dayName];
-
-      if (!timeWindow || !Array.isArray(timeWindow)) {
-        conflicts.push({
-          type: 'availability-conflict',
-          severity: 'error',
-          message: `Technician ${technician.name} has no availability on ${dayName}`,
-          affectedAppointments: [appointment.id],
-          affectedTechnicians: [technician.id],
-        });
-        return;
-      }
-
+      const dayName = this.getDayName(appointmentDate) as DayOfWeek;
+      const dateStr = this.toDateString(appointmentDate);
       const [appStart, appEnd] = this.getTimeFromISO(appointment.startTime, appointment.endTime);
-      const available = timeWindow.some(window => {
-        const [windowStart, windowEnd] = [
-          this.timeToMinutes(window.start),
-          this.timeToMinutes(window.end),
-        ];
-        return appStart >= windowStart && appEnd <= windowEnd;
-      });
 
-      if (!available) {
-        conflicts.push({
-          type: 'availability-conflict',
-          severity: 'error',
-          message: `Appointment overlaps with technician ${technician.name}'s unavailable time`,
-          affectedAppointments: [appointment.id],
-          affectedTechnicians: [technician.id],
-        });
+      const parties: PartyAvailability[] = [];
+      const blockingMessages: string[] = [];
+      const affectedTechnicians: string[] = [];
+
+      if (technician) {
+        const windows: TimeWindow[] = ((technician.availability as any)[dayName] as TimeWindow[]) || [];
+        const blackout = this.findBlackout(blackouts, 'technician', technician.id, dateStr);
+        const status = this.partyStatus(windows, appStart, appEnd, blackout);
+        parties.push({ role: 'Technician', name: technician.name, status, windows, blackoutReason: blackout?.reason });
+        // Techs are expected to have availability defined, so an empty day
+        // ('none') is a real conflict for a tech (preserves prior behavior).
+        if (status !== 'ok') {
+          affectedTechnicians.push(technician.id);
+          blockingMessages.push(this.partyMessage(technician.name, dayName, status, windows, blackout));
+        }
       }
+
+      if (client) {
+        const windows: TimeWindow[] = ((client.availabilityWindows as any)[dayName] as TimeWindow[]) || [];
+        const blackout = this.findBlackout(blackouts, 'client', client.id, dateStr);
+        const status = this.partyStatus(windows, appStart, appEnd, blackout);
+        parties.push({ role: 'Client', name: client.name, status, windows, blackoutReason: blackout?.reason });
+        // Clients frequently have no availability configured, so we only fault
+        // a client when there ARE windows that don't cover the slot, or an
+        // explicit blackout — never for an unconfigured day ('none').
+        if (status === 'outside' || status === 'blackout') {
+          blockingMessages.push(this.partyMessage(client.name, dayName, status, windows, blackout));
+        }
+      }
+
+      if (blockingMessages.length === 0) return;
+
+      conflicts.push({
+        type: 'availability-conflict',
+        severity: 'error',
+        message: blockingMessages.join('; '),
+        affectedAppointments: [appointment.id],
+        affectedTechnicians: affectedTechnicians.length ? affectedTechnicians : undefined,
+        availabilityDetail: {
+          day: dayName,
+          date: dateStr,
+          start: this.minutesToTime(appStart),
+          end: this.minutesToTime(appEnd),
+          parties,
+        },
+      });
     });
 
     return conflicts;
+  }
+
+  private findBlackout(
+    blackouts: Blackout[],
+    entityType: 'technician' | 'client',
+    entityId: string,
+    dateStr: string,
+  ): Blackout | undefined {
+    return blackouts.find(b => b.entityType === entityType && b.entityId === entityId && b.date === dateStr);
+  }
+
+  private partyStatus(
+    windows: TimeWindow[],
+    appStart: number,
+    appEnd: number,
+    blackout: Blackout | undefined,
+  ): PartyAvailabilityStatus {
+    if (blackout) return 'blackout';
+    if (!Array.isArray(windows) || windows.length === 0) return 'none';
+    const covered = windows.some(w => appStart >= this.timeToMinutes(w.start) && appEnd <= this.timeToMinutes(w.end));
+    return covered ? 'ok' : 'outside';
+  }
+
+  private partyMessage(
+    name: string,
+    day: DayOfWeek,
+    status: PartyAvailabilityStatus,
+    windows: TimeWindow[],
+    blackout: Blackout | undefined,
+  ): string {
+    switch (status) {
+      case 'blackout':
+        return `${name} is marked away on this day${blackout?.reason ? ` (${blackout.reason})` : ''}`;
+      case 'none':
+        return `${name} has no availability on ${day}`;
+      case 'outside': {
+        const ranges = windows.map(w => `${w.start}–${w.end}`).join(', ');
+        return `${name} is only available ${ranges} on ${day}`;
+      }
+      default:
+        return `${name} is available`;
+    }
+  }
+
+  private toDateString(date: Date): string {
+    // Local calendar day (matches how a user picks a date), not UTC.
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  private minutesToTime(mins: number): string {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   }
 
   private getHoursDuration(startISO: string, endISO: string): number {

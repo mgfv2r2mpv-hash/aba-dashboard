@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout } from '../types';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 
 interface AdminPanelProps {
@@ -13,7 +13,7 @@ const API_BASE = '/api';
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'settings'>('technicians');
+  const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'blackouts' | 'settings'>('technicians');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,6 +115,33 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
     }
   };
 
+  const addBlackout = async (blackout: Blackout) => {
+    setSavingId(blackout.id);
+    setError(null);
+    try {
+      const res = await axios.post(`${API_BASE}/admin/blackout`, blackout);
+      const saved: Blackout = res.data.blackout || blackout;
+      onDataChange({ ...data, blackouts: [...(data.blackouts || []), saved] });
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const removeBlackout = async (id: string) => {
+    setSavingId(id);
+    setError(null);
+    try {
+      await axios.delete(`${API_BASE}/admin/blackout/${id}`);
+      onDataChange({ ...data, blackouts: (data.blackouts || []).filter(b => b.id !== id) });
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   const tabStyle = (isActive: boolean) => ({
     padding: '12px 16px',
     backgroundColor: isActive ? '#ffffff' : '#f3f4f6',
@@ -130,6 +157,7 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
       <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9f9f9' }}>
         <button onClick={() => setActiveTab('technicians')} style={tabStyle(activeTab === 'technicians')}>Technicians</button>
         <button onClick={() => setActiveTab('clients')} style={tabStyle(activeTab === 'clients')}>Clients</button>
+        <button onClick={() => setActiveTab('blackouts')} style={tabStyle(activeTab === 'blackouts')}>Blackouts</button>
         <button onClick={() => setActiveTab('settings')} style={tabStyle(activeTab === 'settings')}>Settings</button>
       </div>
 
@@ -186,6 +214,17 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
               )}
             </div>
           </div>
+        )}
+
+        {activeTab === 'blackouts' && (
+          <BlackoutsTab
+            blackouts={data.blackouts || []}
+            technicians={data.technicians}
+            clients={data.clients}
+            savingId={savingId}
+            onAdd={addBlackout}
+            onRemove={removeBlackout}
+          />
         )}
 
         {activeTab === 'settings' && (
@@ -538,6 +577,166 @@ function ClientCard({ client, saving, onChange, onRemove }: {
           onSave={(av) => { onChange({ availabilityWindows: av }); setEditing(false); }}
           onCancel={() => setEditing(false)}
         />
+      )}
+    </div>
+  );
+}
+
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// "2026-05-08" → "Thu, May 8, 2026" (parsed as a local day, no TZ shift).
+function formatBlackoutDate(date: string): string {
+  const [y, m, d] = date.split('-').map(Number);
+  if (!y || !m || !d) return date;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+  });
+}
+
+function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemove }: {
+  blackouts: Blackout[];
+  technicians: Technician[];
+  clients: Client[];
+  savingId: string | null;
+  onAdd: (b: Blackout) => void;
+  onRemove: (id: string) => void;
+}) {
+  // entity picker value is "technician:<id>" / "client:<id>" so the two
+  // namespaces can share one <select> without id collisions.
+  const [entityKey, setEntityKey] = useState('');
+  const [date, setDate] = useState(todayStr());
+  const [reason, setReason] = useState('');
+
+  const submit = () => {
+    if (!entityKey || !date) return;
+    const [entityType, entityId] = entityKey.split(':') as ['technician' | 'client', string];
+    const entityName = entityType === 'technician'
+      ? technicians.find(t => t.id === entityId)?.name
+      : clients.find(c => c.id === entityId)?.name;
+    onAdd({
+      id: uuidv4(),
+      entityType,
+      entityId,
+      entityName,
+      date,
+      reason: reason.trim() || undefined,
+      createdAt: new Date().toISOString(),
+    });
+    setReason('');
+  };
+
+  const today = todayStr();
+  const sorted = [...blackouts].sort((a, b) => a.date.localeCompare(b.date));
+  const upcoming = sorted.filter(b => b.date >= today);
+  const past = sorted.filter(b => b.date < today).reverse();
+
+  const nameFor = (b: Blackout): string => {
+    const live = b.entityType === 'technician'
+      ? technicians.find(t => t.id === b.entityId)?.name
+      : clients.find(c => c.id === b.entityId)?.name;
+    return live || b.entityName || b.entityId;
+  };
+
+  const renderRow = (b: Blackout, dim: boolean) => (
+    <div key={b.id} style={{
+      display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
+      border: '1px solid #e5e7eb', borderRadius: '6px', backgroundColor: dim ? '#f9fafb' : 'white',
+      opacity: dim ? 0.75 : 1, flexWrap: 'wrap',
+    }}>
+      <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: '14px', color: '#111827' }}>
+          {formatBlackoutDate(b.date)}
+        </div>
+        <div style={{ fontSize: '13px', color: '#374151', marginTop: '2px' }}>
+          <span style={{
+            fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', padding: '1px 6px',
+            borderRadius: '8px', marginRight: '6px',
+            backgroundColor: b.entityType === 'technician' ? '#dbeafe' : '#fef3c7',
+            color: b.entityType === 'technician' ? '#1e40af' : '#92400e',
+          }}>{b.entityType === 'technician' ? 'Staff' : 'Client'}</span>
+          {nameFor(b)}
+        </div>
+        {b.reason && (
+          <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px', fontStyle: 'italic' }}>
+            {b.reason}
+          </div>
+        )}
+      </div>
+      <button onClick={() => onRemove(b.id)} style={dangerBtn} disabled={savingId === b.id}>
+        {savingId === b.id ? '…' : 'Remove'}
+      </button>
+    </div>
+  );
+
+  return (
+    <div>
+      <h3 style={{ marginBottom: '8px', fontSize: '18px', fontWeight: 'bold' }}>Blackout Days</h3>
+      <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '16px' }}>
+        Mark a staff member or client as away on a specific day (e.g. an appointment, PTO, travel).
+        Sessions scheduled on a blackout day are flagged as conflicts, and the reason is kept here for review.
+      </p>
+
+      {/* Add form */}
+      <div style={{ ...cardStyle, marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'flex-end' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 180px', minWidth: 0 }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Who</span>
+          <select value={entityKey} onChange={e => setEntityKey(e.target.value)} style={inputStyle}>
+            <option value="">— Pick staff or client —</option>
+            {technicians.length > 0 && (
+              <optgroup label="Staff">
+                {technicians.map(t => <option key={t.id} value={`technician:${t.id}`}>{t.name}</option>)}
+              </optgroup>
+            )}
+            {clients.length > 0 && (
+              <optgroup label="Clients">
+                {clients.map(c => <option key={c.id} value={`client:${c.id}`}>{c.name}</option>)}
+              </optgroup>
+            )}
+          </select>
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 150px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Date</span>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 180px', minWidth: 0 }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Reason (optional)</span>
+          <input
+            type="text" value={reason} onChange={e => setReason(e.target.value)}
+            placeholder="e.g. dentist appointment" style={inputStyle}
+            onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+          />
+        </label>
+        <button onClick={submit} style={primaryBtn} disabled={!entityKey || !date}>+ Add blackout</button>
+      </div>
+
+      {blackouts.length === 0 ? (
+        <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>No blackout days recorded.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {upcoming.length > 0 && (
+            <div>
+              <p style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '8px' }}>
+                Upcoming ({upcoming.length})
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {upcoming.map(b => renderRow(b, false))}
+              </div>
+            </div>
+          )}
+          {past.length > 0 && (
+            <div>
+              <p style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '8px' }}>
+                Past ({past.length})
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {past.map(b => renderRow(b, true))}
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

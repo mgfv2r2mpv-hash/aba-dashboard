@@ -382,6 +382,23 @@ app.post('/api/admin/appointment', express.json(), (req: Request, res: Response)
   }
 });
 
+// Admin: Update company settings
+app.post('/api/admin/settings', express.json(), (req: Request, res: Response) => {
+  try {
+    if (!currentScheduleData) {
+      return res.status(400).json({ error: 'No schedule loaded' });
+    }
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ error: 'Invalid settings payload' });
+    }
+    // Merge so wizard-only fields (clinicianAvailability, legacy mirrors) survive.
+    currentScheduleData.settings = { ...currentScheduleData.settings, ...req.body };
+    res.json({ success: true, settings: currentScheduleData.settings });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Admin: Create/update blackout (single-day "away" marker)
 app.post('/api/admin/blackout', express.json(), (req: Request, res: Response) => {
   try {

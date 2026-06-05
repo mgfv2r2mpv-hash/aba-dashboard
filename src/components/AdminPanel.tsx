@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit } from '../types';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 
 interface AdminPanelProps {
@@ -142,6 +142,19 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
     }
   };
 
+  const persistSettings = async (next: CompanySettings) => {
+    setSavingId('settings');
+    setError(null);
+    try {
+      const res = await axios.post(`${API_BASE}/admin/settings`, next);
+      onDataChange({ ...data, settings: res.data.settings });
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   const tabStyle = (isActive: boolean) => ({
     padding: '12px 16px',
     backgroundColor: isActive ? '#ffffff' : '#f3f4f6',
@@ -228,22 +241,11 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
         )}
 
         {activeTab === 'settings' && (
-          <div>
-            <h3 style={{ marginBottom: '16px', fontSize: '18px', fontWeight: 'bold' }}>Company Settings</h3>
-            <div style={{
-              backgroundColor: '#f9f9f9', border: '1px solid #e5e7eb', borderRadius: '8px',
-              padding: '16px', display: 'grid', gap: '16px',
-            }}>
-              <SettingRow label="Supervision — Direct Hours" value={`${data.settings.supervisionDirectHoursPercent}% of direct client hours`} />
-              <SettingRow label="Supervision — RBT Hours" value={`${data.settings.supervisionRBTHoursPercent}% of RBT hours`} />
-              <SettingRow label="Parent Training" value={
-                `Min: ${data.settings.parentTraining.minimumHours}h/${data.settings.parentTraining.periodUnit} · Target: ${data.settings.parentTraining.targetMinHours}–${data.settings.parentTraining.targetMaxHours}h/${data.settings.parentTraining.periodUnit}`
-              } />
-              <p style={{ fontSize: '12px', color: '#6b7280' }}>
-                Settings are configured in the Setup Wizard. Re-run the wizard to change them.
-              </p>
-            </div>
-          </div>
+          <SettingsEditor
+            settings={data.settings}
+            saving={savingId === 'settings'}
+            onSave={persistSettings}
+          />
         )}
       </div>
     </div>
@@ -259,6 +261,7 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
 }) {
   const [name, setName] = useState(tech.name);
   const [editing, setEditing] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [hoursDraft, setHoursDraft] = useState<{ [idx: number]: string }>({});
 
   const assignments = tech.assignments || [];
@@ -288,9 +291,20 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
       return next;
     });
   };
+  const availDays = Object.values(tech.availability || {}).filter(w => w && (w as TimeWindow[]).length > 0).length;
+
   return (
     <div style={cardStyle}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px', gap: '8px', flexWrap: 'wrap' }}>
+      <CardHeader
+        collapsed={collapsed}
+        onToggle={() => setCollapsed(c => !c)}
+        name={tech.name}
+        badges={tech.isRBT ? ['RBT'] : []}
+        summary={`${availDays} day${availDays === 1 ? '' : 's'} avail · ${assignments.length} assignment${assignments.length === 1 ? '' : 's'}`}
+      />
+
+      {!collapsed && (<>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', margin: '12px 0', gap: '8px', flexWrap: 'wrap' }}>
         <div style={{ flex: '1 1 200px', minWidth: 0 }}>
           <input
             value={name}
@@ -373,6 +387,38 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
           }}
         >+ Assignment</button>
       </div>
+      </>)}
+    </div>
+  );
+}
+
+function CardHeader({ collapsed, onToggle, name, badges, summary }: {
+  collapsed: boolean;
+  onToggle: () => void;
+  name: string;
+  badges: string[];
+  summary: string;
+}) {
+  return (
+    <div
+      onClick={onToggle}
+      style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', minWidth: 0 }}
+    >
+      <span style={{ fontSize: '12px', color: '#6b7280', width: '12px', flexShrink: 0 }}>{collapsed ? '▸' : '▾'}</span>
+      <span style={{ fontWeight: 600, fontSize: '15px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {name || 'Unnamed'}
+      </span>
+      {badges.map(b => (
+        <span key={b} style={{
+          fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', padding: '1px 6px',
+          borderRadius: '8px', backgroundColor: '#dbeafe', color: '#1e40af', flexShrink: 0,
+        }}>{b}</span>
+      ))}
+      {collapsed && (
+        <span style={{ fontSize: '12px', color: '#6b7280', marginLeft: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>
+          {summary}
+        </span>
+      )}
     </div>
   );
 }
@@ -530,6 +576,7 @@ function ClientCard({ client, saving, onChange, onRemove }: {
   const [name, setName] = useState(client.name);
   const [maxStr, setMaxStr] = useState(client.parentTrainingMaxHours !== undefined ? String(client.parentTrainingMaxHours) : '');
   const [editing, setEditing] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   const commitMax = () => {
     const next = maxStr === '' ? undefined : parseFloat(maxStr);
@@ -538,9 +585,21 @@ function ClientCard({ client, saving, onChange, onRemove }: {
     }
   };
 
+  const availDays = Object.values(client.availabilityWindows || {}).filter(w => w && (w as TimeWindow[]).length > 0).length;
+  const ptMax = client.parentTrainingMaxHours;
+
   return (
     <div style={cardStyle}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '12px', gap: '8px', flexWrap: 'wrap' }}>
+      <CardHeader
+        collapsed={collapsed}
+        onToggle={() => setCollapsed(c => !c)}
+        name={client.name}
+        badges={[]}
+        summary={`${availDays} day${availDays === 1 ? '' : 's'} avail${ptMax !== undefined ? ` · PT max ${ptMax}h` : ''}`}
+      />
+
+      {!collapsed && (<>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', margin: '12px 0', gap: '8px', flexWrap: 'wrap' }}>
         <div style={{ flex: '1 1 200px', minWidth: 0 }}>
           <input
             value={name}
@@ -578,6 +637,7 @@ function ClientCard({ client, saving, onChange, onRemove }: {
           onCancel={() => setEditing(false)}
         />
       )}
+      </>)}
     </div>
   );
 }
@@ -742,11 +802,124 @@ function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemo
   );
 }
 
-function SettingRow({ label, value }: { label: string; value: string }) {
+function SettingsEditor({ settings, saving, onSave }: {
+  settings: CompanySettings;
+  saving: boolean;
+  onSave: (next: CompanySettings) => void;
+}) {
+  const s = (n: number | undefined) => (n === undefined ? '' : String(n));
+  const [directPct, setDirectPct] = useState(s(settings.supervisionDirectHoursPercent));
+  const [rbtPct, setRbtPct] = useState(s(settings.supervisionRBTHoursPercent));
+  const [techPct, setTechPct] = useState(s(settings.supervisionTechHoursPercent));
+  const [maxPct, setMaxPct] = useState(s(settings.supervisionMaxHoursPercent));
+  const [ptMin, setPtMin] = useState(s(settings.parentTraining.minimumHours));
+  const [ptTargetMin, setPtTargetMin] = useState(s(settings.parentTraining.targetMinHours));
+  const [ptTargetMax, setPtTargetMax] = useState(s(settings.parentTraining.targetMaxHours));
+  const [periodUnit, setPeriodUnit] = useState<TrainingPeriodUnit>(settings.parentTraining.periodUnit);
+  const [unplannedHrs, setUnplannedHrs] = useState(s(settings.cancellationNotice?.unplannedHoursThreshold ?? 24));
+  const [plannedDays, setPlannedDays] = useState(s(settings.cancellationNotice?.plannedDaysThreshold ?? 30));
+
+  const num = (str: string, fallback: number) => {
+    const n = parseFloat(str);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const optNum = (str: string) => {
+    if (str.trim() === '') return undefined;
+    const n = parseFloat(str);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
+  const save = () => {
+    const next: CompanySettings = {
+      ...settings, // preserve clinicianAvailability + any legacy fields
+      supervisionDirectHoursPercent: num(directPct, settings.supervisionDirectHoursPercent),
+      supervisionRBTHoursPercent: num(rbtPct, settings.supervisionRBTHoursPercent),
+      supervisionTechHoursPercent: optNum(techPct),
+      supervisionMaxHoursPercent: optNum(maxPct),
+      parentTraining: {
+        minimumHours: num(ptMin, settings.parentTraining.minimumHours),
+        targetMinHours: num(ptTargetMin, settings.parentTraining.targetMinHours),
+        targetMaxHours: num(ptTargetMax, settings.parentTraining.targetMaxHours),
+        periodUnit,
+      },
+      cancellationNotice: {
+        unplannedHoursThreshold: num(unplannedHrs, 24),
+        plannedDaysThreshold: num(plannedDays, 30),
+      },
+    };
+    onSave(next);
+  };
+
   return (
-    <div>
-      <p style={{ fontSize: '13px', fontWeight: '600', marginBottom: '4px' }}>{label}</p>
-      <p style={{ color: '#6b7280' }}>{value}</p>
+    <div style={{ maxWidth: 640 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: 8, flexWrap: 'wrap' }}>
+        <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Company Settings</h3>
+        <button onClick={save} style={primaryBtn} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
+      </div>
+
+      <SettingsSection title="Supervision targets">
+        <NumField label="Per-case — % of direct client hours" value={directPct} onChange={setDirectPct} suffix="%" />
+        <NumField label="Per-RBT — % of that RBT's direct hours" value={rbtPct} onChange={setRbtPct} suffix="%" hint="BACB floor is 5%." />
+        <NumField label="Per non-RBT tech — % of hours (optional)" value={techPct} onChange={setTechPct} suffix="%" placeholder="—" />
+        <NumField label="Insurer cap — max supervision:direct ratio (optional)" value={maxPct} onChange={setMaxPct} suffix="%" placeholder="—" hint="Over-cap ratios show as a warning; they don't change green/yellow/red status." />
+      </SettingsSection>
+
+      <SettingsSection title="Parent training">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Period</span>
+          <select value={periodUnit} onChange={e => setPeriodUnit(e.target.value as TrainingPeriodUnit)} style={inputStyle}>
+            <option value="week">Per week</option>
+            <option value="month">Per month</option>
+            <option value="sixMonths">Per 6 months</option>
+            <option value="year">Per year</option>
+          </select>
+        </div>
+        <NumField label={`Minimum hours / ${periodUnit}`} value={ptMin} onChange={setPtMin} suffix="h" />
+        <NumField label={`Target min hours / ${periodUnit}`} value={ptTargetMin} onChange={setPtTargetMin} suffix="h" />
+        <NumField label={`Target max hours / ${periodUnit}`} value={ptTargetMax} onChange={setPtTargetMax} suffix="h" />
+      </SettingsSection>
+
+      <SettingsSection title="Cancellation notice thresholds">
+        <NumField label="Unplanned: adequate notice if more than" value={unplannedHrs} onChange={setUnplannedHrs} suffix="hours" />
+        <NumField label="Planned: adequate notice if more than" value={plannedDays} onChange={setPlannedDays} suffix="days" />
+      </SettingsSection>
+
+      <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+        Clinician availability is still configured in the Setup Wizard.
+      </p>
+    </div>
+  );
+}
+
+function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ ...cardStyle, marginBottom: '16px' }}>
+      <p style={{ fontSize: '13px', fontWeight: 700, color: '#111827', marginBottom: '12px' }}>{title}</p>
+      <div style={{ display: 'grid', gap: '12px' }}>{children}</div>
+    </div>
+  );
+}
+
+function NumField({ label, value, onChange, suffix, hint, placeholder }: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  suffix?: string;
+  hint?: string;
+  placeholder?: string;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <input
+          type="number" step="0.5" min="0" inputMode="decimal"
+          value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+          style={{ ...inputStyle, width: '120px' }}
+        />
+        {suffix && <span style={{ fontSize: '12px', color: '#6b7280' }}>{suffix}</span>}
+      </div>
+      {hint && <span style={{ fontSize: '11px', color: '#9ca3af' }}>{hint}</span>}
     </div>
   );
 }

@@ -171,6 +171,14 @@ async function route(method: string, path: string, body: any): Promise<any> {
     return { success: true, removed: before - data.appointments.length };
   }
 
+  if (m === 'POST' && path === '/api/admin/settings') {
+    const data = requireData();
+    if (!body || typeof body !== 'object') throw new HttpError('Invalid settings payload');
+    // Merge so wizard-only fields (clinicianAvailability, legacy mirrors) survive.
+    data.settings = { ...data.settings, ...body };
+    return { success: true, settings: data.settings };
+  }
+
   if (m === 'POST' && path === '/api/admin/blackout') {
     const data = requireData();
     if (!body?.id || !body?.entityId || !body?.date) {

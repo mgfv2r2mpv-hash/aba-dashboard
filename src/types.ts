@@ -143,6 +143,20 @@ export interface Appointment {
   cancellation?: Cancellation;
 }
 
+// A single-day "no session" marker for a technician or client. Unlike the
+// weekly availability map (an ongoing schedule), a blackout knocks out one
+// specific calendar date — "they're away that Thursday." Recorded with an
+// optional reason so it's auditable later ("why was there no session?").
+export interface Blackout {
+  id: string;
+  entityType: 'technician' | 'client';
+  entityId: string;            // the tech/client id this blackout belongs to
+  entityName?: string;         // snapshot of the name at creation, for review/audit
+  date: string;                // YYYY-MM-DD (local calendar day)
+  reason?: string;
+  createdAt?: string;          // ISO timestamp when logged
+}
+
 export interface ScheduleData {
   id: string;
   version: number;
@@ -150,7 +164,35 @@ export interface ScheduleData {
   technicians: Technician[];
   settings: CompanySettings;
   appointments: Appointment[];
+  // Per-day "away" markers. Optional for backward compatibility with schedules
+  // (and Excel files) created before blackouts existed; treat absent as [].
+  blackouts?: Blackout[];
   lastModified: string; // ISO 8601
+}
+
+// How a single party's availability lines up with an appointment on its day.
+//   ok       — has windows that fully cover the appointment time
+//   outside  — has windows that day, but none cover the appointment
+//   none     — no availability configured for that day
+//   blackout — explicitly marked away that calendar date
+export type PartyAvailabilityStatus = 'ok' | 'outside' | 'none' | 'blackout';
+
+export interface PartyAvailability {
+  role: 'Technician' | 'Client';
+  name: string;
+  status: PartyAvailabilityStatus;
+  windows: TimeWindow[];       // that party's windows for the appointment's day
+  blackoutReason?: string;
+}
+
+// Everything needed to understand an availability conflict without navigating
+// away: the appointment slot plus each involved party's windows for that day.
+export interface AvailabilityConflictDetail {
+  day: DayOfWeek;
+  date: string;                // YYYY-MM-DD
+  start: string;               // HH:MM (appointment start)
+  end: string;                 // HH:MM (appointment end)
+  parties: PartyAvailability[];
 }
 
 export interface ScheduleConflict {
@@ -159,6 +201,9 @@ export interface ScheduleConflict {
   message: string;
   affectedAppointments?: string[];
   affectedTechnicians?: string[];
+  // Present on availability-conflict: the structured slot + party windows the
+  // ConflictPanel renders inline so the fix is visible in place.
+  availabilityDetail?: AvailabilityConflictDetail;
 }
 
 export interface ScheduleSolution {

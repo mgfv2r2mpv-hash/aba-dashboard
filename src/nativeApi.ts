@@ -171,6 +171,26 @@ async function route(method: string, path: string, body: any): Promise<any> {
     return { success: true, removed: before - data.appointments.length };
   }
 
+  if (m === 'POST' && path === '/api/admin/blackout') {
+    const data = requireData();
+    if (!body?.id || !body?.entityId || !body?.date) {
+      throw new HttpError('Blackout must have id, entityId and date');
+    }
+    if (!data.blackouts) data.blackouts = [];
+    const existing = data.blackouts.find(b => b.id === body.id);
+    if (existing) Object.assign(existing, body);
+    else data.blackouts.push(body);
+    return { success: true, blackout: existing || body };
+  }
+
+  const blackoutIdMatch = path.match(/^\/api\/admin\/blackout\/([^/]+)$/);
+  if (m === 'DELETE' && blackoutIdMatch) {
+    const data = requireData();
+    const before = (data.blackouts || []).length;
+    data.blackouts = (data.blackouts || []).filter(b => b.id !== blackoutIdMatch[1]);
+    return { success: true, removed: before - data.blackouts.length };
+  }
+
   throw new HttpError(`Native API: no handler for ${m} ${path}`, 404);
 }
 

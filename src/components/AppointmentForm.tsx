@@ -43,8 +43,15 @@ export default function AppointmentForm({
   const [type, setType] = useState<Appointment['type']>(appointment?.type || 'client-session');
   const [technicianId, setTechnicianId] = useState(appointment?.technician || '');
   const [clientId, setClientId] = useState(appointment?.client || '');
-  const [startTime, setStartTime] = useState(appointment?.startTime || '');
-  const [endTime, setEndTime] = useState(appointment?.endTime || '');
+  // An appointment is a single calendar day plus a start and end clock time —
+  // sessions never cross midnight (insurance is billed per-day). We keep the
+  // canonical model as full local-ISO startTime/endTime strings (the rest of
+  // the app depends on them) but compose them from one date + two times.
+  const [date, setDate] = useState(appointment?.startTime ? appointment.startTime.slice(0, 10) : '');
+  const [startClock, setStartClock] = useState(appointment?.startTime ? appointment.startTime.slice(11, 16) : '');
+  const [endClock, setEndClock] = useState(appointment?.endTime ? appointment.endTime.slice(11, 16) : '');
+  const startTime = date && startClock ? `${date}T${startClock}:00` : '';
+  const endTime = date && endClock ? `${date}T${endClock}:00` : '';
   const [isBillable, setIsBillable] = useState(appointment?.isBillable ?? true);
 
   // Recurrence
@@ -235,8 +242,12 @@ export default function AppointmentForm({
   };
 
   const handleSubmit = () => {
-    if (!title || !startTime || !endTime) {
-      alert('Title, start, and end time are required.');
+    if (!title || !date || !startClock || !endClock) {
+      alert('Title, date, start time, and end time are required.');
+      return;
+    }
+    if (endTime <= startTime) {
+      alert('End time must be after the start time (an appointment stays within one day).');
       return;
     }
     // Supervision is always with a client (a tech may or may not be present).
@@ -374,14 +385,19 @@ export default function AppointmentForm({
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+          <div>
+            <label style={labelStyle}>Date *</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
             <div>
-              <label style={labelStyle}>Start *</label>
-              <input type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={inputStyle} />
+              <label style={labelStyle}>Start time *</label>
+              <input type="time" step="900" value={startClock} onChange={(e) => setStartClock(e.target.value)} style={inputStyle} />
             </div>
             <div>
-              <label style={labelStyle}>End *</label>
-              <input type="datetime-local" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={inputStyle} />
+              <label style={labelStyle}>End time *</label>
+              <input type="time" step="900" value={endClock} onChange={(e) => setEndClock(e.target.value)} style={inputStyle} />
             </div>
           </div>
 
@@ -422,7 +438,7 @@ export default function AppointmentForm({
                 style={inputStyle}
               />
               <p style={{ fontSize: '11px', color: '#6b7280', marginTop: 4 }}>
-                The series starts at the Start date/time above and repeats until
+                The series starts on the Date at the Start time above and repeats until
                 this date (or 90 days out if left blank). When editing an existing
                 appointment, changes apply only to that single occurrence — the
                 rest of the series is independent.
@@ -441,7 +457,7 @@ export default function AppointmentForm({
                 style={{ ...inputStyle, fontFamily: 'monospace', resize: 'vertical' }}
               />
               <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
-                Time of day comes from the Start field above. Useful for awkward / variable schedules.
+                Time of day comes from the Start time above. Useful for awkward / variable schedules.
               </p>
             </div>
           )}

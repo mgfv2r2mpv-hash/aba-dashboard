@@ -16,6 +16,10 @@ interface CalendarProps {
 }
 
 type View = 'month' | 'week';
+// Which slice of the schedule the calendar shows. BT = appointments assigned to
+// a technician (direct service); BCBA = appointments with no technician (the
+// clinician's own: supervision, BCBA-run parent training, etc.).
+type Lens = 'bcba' | 'bt';
 
 const VISIBLE_START_HOUR = 6;
 const VISIBLE_END_HOUR = 22;
@@ -47,8 +51,13 @@ export default function Calendar({
   onSelectAppointment,
 }: CalendarProps) {
   const [view, setView] = useState<View>('month');
+  const [lens, setLens] = useState<Lens>('bcba');
   const [currentDate, setCurrentDate] = useState(new Date());
   const isLandscape = useIsLandscape();
+
+  // The lens hides the other party's appointments: BT = has a technician,
+  // BCBA = none. Totals are computed from these filtered appointments too.
+  const lensAppts = appointments.filter(a => (lens === 'bt' ? !!a.technician : !a.technician));
 
   // When a schedule loads with no appointments in the currently-shown range,
   // jump to the earliest appointment so users see their data.
@@ -90,9 +99,15 @@ export default function Calendar({
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         marginBottom: 16, gap: 8, flexWrap: 'wrap',
       }}>
-        <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
-          <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
-          <ViewBtn active={view === 'week'} onClick={() => setView('week')}>Week</ViewBtn>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
+            <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
+            <ViewBtn active={view === 'week'} onClick={() => setView('week')}>Week</ViewBtn>
+          </div>
+          <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
+            <ViewBtn active={lens === 'bcba'} onClick={() => setLens('bcba')}>BCBA</ViewBtn>
+            <ViewBtn active={lens === 'bt'} onClick={() => setLens('bt')}>BT</ViewBtn>
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <NavBtn onClick={goPrev}>←</NavBtn>
@@ -105,10 +120,10 @@ export default function Calendar({
       </div>
 
       {view === 'month'
-        ? <MonthView currentDate={currentDate} appointments={appointments} settings={settings} onSelectAppointment={onSelectAppointment} />
+        ? <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} onSelectAppointment={onSelectAppointment} />
         : <WeekView
             currentDate={currentDate}
-            appointments={appointments}
+            appointments={lensAppts}
             onSelectAppointment={onSelectAppointment}
             onAppointmentChange={onAppointmentChange}
             dragEnabled={isLandscape}
@@ -125,9 +140,10 @@ export default function Calendar({
 
 // ---------- Month View ----------
 
-function MonthView({ currentDate, appointments, settings, onSelectAppointment }: {
+function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment }: {
   currentDate: Date;
   appointments: Appointment[];
+  lens: Lens;
   settings?: CompanySettings;
   onSelectAppointment: (a: Appointment) => void;
 }) {
@@ -138,6 +154,7 @@ function MonthView({ currentDate, appointments, settings, onSelectAppointment }:
   const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
 
   const util = resolveUtilization(settings?.utilization);
+  const weeklyTarget = lens === 'bt' ? util.btWeeklyDirectHours : util.bcbaWeeklyBillableHours;
 
   // Number of week rows that include a day of this month; 5+ rows = treat as a
   // "5-week month" for the BCBA monthly goal.
@@ -147,68 +164,80 @@ function MonthView({ currentDate, appointments, settings, onSelectAppointment }:
     if (days.slice(r * 7, r * 7 + 7).some(d => isSameMonth(d, monthStart))) inMonthWeeks++;
   }
   const monthlyGoal = inMonthWeeks >= 5 ? util.bcbaMonthlyBillableHours5Week : util.bcbaMonthlyBillableHours;
-  const monthBcba = rollupHours(appointments, monthStart.getTime(), monthEnd.getTime() + 1, 'bcba');
+
+  // One rollup per grid week, for the side ribbon.
+  const weekSummaries = Array.from({ length: weekRows }, (_, r) => {
+    const weekStart = days[r * 7];
+    return {
+      weekStart,
+      inMonth: days.slice(r * 7, r * 7 + 7).some(d => isSameMonth(d, monthStart)),
+      hours: rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens),
+    };
+  });
+  const monthHours = rollupHours(appointments, monthStart.getTime(), monthEnd.getTime() + 1, lens);
 
   return (
-    <>
-      <MonthlySummaryBar bcba={monthBcba} goal={monthlyGoal} weeks={inMonthWeeks} />
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1,
-        backgroundColor: '#e5e7eb', marginBottom: 1,
-      }}>
-        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-          <div key={d} style={{
-            padding: '10px 8px', backgroundColor: '#f9f9f9',
-            fontWeight: 600, textAlign: 'center', fontSize: 13,
-          }}>{d}</div>
-        ))}
-      </div>
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, backgroundColor: '#e5e7eb',
-      }}>
-        {days.map(day => {
-          const dayAppts = appointmentsOn(appointments, day);
-          const inCurrentMonth = isSameMonth(day, monthStart);
-          const isToday = isSameDay(day, new Date());
-          const dow = getDay(day); // 0 = Sun, 6 = Sat
-          const weekStart = startOfWeek(day);
-          const weekEndExclusive = addDays(weekStart, 7);
-          return (
-            <div key={format(day, 'yyyy-MM-dd')} style={{
-              backgroundColor: inCurrentMonth ? '#ffffff' : '#f3f4f6',
-              minHeight: 110, padding: 6, opacity: inCurrentMonth ? 1 : 0.5,
-            }}>
-              <div style={{
-                fontWeight: isToday ? 700 : 400,
-                marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: 12,
-              }}>{format(day, 'd')}</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {dayAppts.slice(0, 3).map(apt => (
-                  <AppointmentChip key={apt.id} apt={apt} onClick={() => onSelectAppointment(apt)} />
-                ))}
-                {dayAppts.length > 3 && (
-                  <div style={{ fontSize: 10, color: '#9ca3af' }}>+{dayAppts.length - 3} more</div>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+      <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1,
+          backgroundColor: '#e5e7eb', marginBottom: 1,
+        }}>
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+            <div key={d} style={{
+              padding: '10px 8px', backgroundColor: '#f9f9f9',
+              fontWeight: 600, textAlign: 'center', fontSize: 13,
+            }}>{d}</div>
+          ))}
+        </div>
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, backgroundColor: '#e5e7eb',
+        }}>
+          {days.map(day => {
+            const dayAppts = appointmentsOn(appointments, day);
+            const inCurrentMonth = isSameMonth(day, monthStart);
+            const isToday = isSameDay(day, new Date());
+            const dow = getDay(day); // 0 = Sun
+            const weekStart = startOfWeek(day);
+            return (
+              <div key={format(day, 'yyyy-MM-dd')} style={{
+                backgroundColor: inCurrentMonth ? '#ffffff' : '#f3f4f6',
+                minHeight: 110, padding: 6, opacity: inCurrentMonth ? 1 : 0.5,
+              }}>
+                <div style={{
+                  fontWeight: isToday ? 700 : 400,
+                  marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: 12,
+                }}>{format(day, 'd')}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {dayAppts.slice(0, 3).map(apt => (
+                    <AppointmentChip key={apt.id} apt={apt} onClick={() => onSelectAppointment(apt)} />
+                  ))}
+                  {dayAppts.length > 3 && (
+                    <div style={{ fontSize: 10, color: '#9ca3af' }}>+{dayAppts.length - 3} more</div>
+                  )}
+                </div>
+                {inCurrentMonth && dow === 0 && (
+                  <SundayTotal
+                    lens={lens}
+                    hours={rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens)}
+                    target={weeklyTarget}
+                  />
                 )}
               </div>
-              {inCurrentMonth && dow === 6 && (
-                <UtilBadge
-                  label="BT direct (wk)"
-                  hours={rollupHours(appointments, weekStart.getTime(), weekEndExclusive.getTime(), 'bt')}
-                  target={util.btWeeklyDirectHours}
-                />
-              )}
-              {inCurrentMonth && dow === 0 && (
-                <UtilBadge
-                  label="BCBA bill (wk)"
-                  hours={rollupHours(appointments, weekStart.getTime(), weekEndExclusive.getTime(), 'bcba')}
-                  target={util.bcbaWeeklyBillableHours}
-                />
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
-    </>
+
+      <WeekRibbon
+        lens={lens}
+        weeks={weekSummaries}
+        weeklyTarget={weeklyTarget}
+        monthHours={monthHours}
+        monthlyGoal={lens === 'bcba' ? monthlyGoal : undefined}
+        monthWeeks={inMonthWeeks}
+      />
+    </div>
   );
 }
 
@@ -218,55 +247,128 @@ function fmtH(n: number): string {
   return Number.isInteger(r) ? String(r) : r.toFixed(1);
 }
 
-// Per-week utilization badge shown in weekend month cells: completed vs target,
-// with the completed / scheduled / canceled breakdown. Color reflects whether
-// completed already meets target (green), is on pace once scheduled lands
-// (amber), or falls short even projected (red).
-function UtilBadge({ label, hours, target }: { label: string; hours: HoursByStatus; target: number }) {
+// On-track color from completed-vs-target, allowing scheduled to "rescue" it.
+function trackColor(hours: HoursByStatus, target: number): string {
   const projected = hours.completed + hours.scheduled;
-  const status = hours.completed >= target ? 'met' : projected >= target ? 'pace' : 'behind';
-  const palette = {
-    met: { bg: '#dcfce7', border: '#86efac', text: '#15803d' },
-    pace: { bg: '#fef3c7', border: '#fcd34d', text: '#92400e' },
-    behind: { bg: '#fee2e2', border: '#fca5a5', text: '#b91c1c' },
-  }[status];
+  if (hours.completed >= target) return '#15803d'; // met
+  if (projected >= target) return '#b45309';        // on pace
+  return '#b91c1c';                                 // behind
+}
+
+// Compact weekly total printed inside the Sunday cell.
+function SundayTotal({ lens, hours, target }: { lens: Lens; hours: HoursByStatus; target: number }) {
+  const color = trackColor(hours, target);
   return (
     <div
-      style={{
-        marginTop: 4, padding: '3px 4px', borderRadius: 4,
-        background: palette.bg, border: `1px solid ${palette.border}`,
-        fontSize: 9, lineHeight: 1.25,
-      }}
-      title={`${label}: ${fmtH(hours.completed)}h completed, ${fmtH(hours.scheduled)}h scheduled, ${fmtH(hours.canceled)}h canceled — target ${fmtH(target)}h`}
+      style={{ marginTop: 4, fontSize: 9, lineHeight: 1.2 }}
+      title={`${lens === 'bt' ? 'BT direct' : 'BCBA billable'} this week: ${fmtH(hours.completed)}h completed, ${fmtH(hours.scheduled)}h scheduled, ${fmtH(hours.canceled)}h canceled — target ${fmtH(target)}h`}
     >
-      <div style={{ fontWeight: 700, color: palette.text }}>{label}</div>
-      <div style={{ color: palette.text, fontWeight: 600 }}>{fmtH(hours.completed)}/{fmtH(target)}h</div>
-      <div style={{ color: '#374151' }}>
-        ✓{fmtH(hours.completed)} · ◻{fmtH(hours.scheduled)}{hours.canceled > 0 ? ` · ✕${fmtH(hours.canceled)}` : ''}
+      <div style={{ fontWeight: 700, color: '#374151' }}>{lens === 'bt' ? 'BT wk' : 'BCBA wk'}</div>
+      <div style={{ fontWeight: 600, color }}>{fmtH(hours.completed)}/{fmtH(target)}h</div>
+      {hours.canceled > 0 && <div style={{ color: '#b91c1c' }}>✕{fmtH(hours.canceled)}h</div>}
+    </div>
+  );
+}
+
+// A thin horizontal bar: completed (green) then scheduled (gray), each as a
+// fraction of target, so a column of these reads as a usage trend.
+function MiniBar({ hours, target }: { hours: HoursByStatus; target: number }) {
+  const denom = target > 0 ? target : Math.max(hours.completed + hours.scheduled, 1);
+  const cPct = Math.min(100, (hours.completed / denom) * 100);
+  const sPct = Math.min(100 - cPct, (hours.scheduled / denom) * 100);
+  return (
+    <div style={{ height: 6, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden', display: 'flex', marginTop: 4 }}>
+      <div style={{ width: `${cPct}%`, background: '#16a34a' }} />
+      <div style={{ width: `${sPct}%`, background: '#9ca3af' }} />
+    </div>
+  );
+}
+
+type WeekSummary = { weekStart: Date; inMonth: boolean; hours: HoursByStatus };
+
+// Vertical ribbon beside the grid: one row per in-month week + a month total.
+function WeekRibbon({ lens, weeks, weeklyTarget, monthHours, monthlyGoal, monthWeeks }: {
+  lens: Lens;
+  weeks: WeekSummary[];
+  weeklyTarget: number;
+  monthHours: HoursByStatus;
+  monthlyGoal?: number;       // BCBA only
+  monthWeeks: number;
+}) {
+  return (
+    <div style={{ flex: '1 1 150px', minWidth: 140, maxWidth: 240, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: '#111827' }}>
+        {lens === 'bt' ? 'BT direct hours' : 'BCBA billable hours'}
+      </div>
+      {weeks.filter(w => w.inMonth).map((w, i) => {
+        const color = trackColor(w.hours, weeklyTarget);
+        return (
+          <div key={i} style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 8px', background: '#fff' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>Wk {format(w.weekStart, 'M/d')}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color }}>{fmtH(w.hours.completed)}/{fmtH(weeklyTarget)}h</span>
+            </div>
+            <MiniBar hours={w.hours} target={weeklyTarget} />
+            <div style={{ fontSize: 10, color: '#6b7280', marginTop: 3 }}>
+              ✓{fmtH(w.hours.completed)} · ◻{fmtH(w.hours.scheduled)}{w.hours.canceled > 0 ? ` · ✕${fmtH(w.hours.canceled)}` : ''}
+            </div>
+          </div>
+        );
+      })}
+
+      <MonthTotalRow lens={lens} hours={monthHours} goal={monthlyGoal} weeklyTarget={weeklyTarget} monthWeeks={monthWeeks} />
+      <Legend />
+    </div>
+  );
+}
+
+function MonthTotalRow({ lens, hours, goal, weeklyTarget, monthWeeks }: {
+  lens: Lens;
+  hours: HoursByStatus;
+  goal?: number;
+  weeklyTarget: number;
+  monthWeeks: number;
+}) {
+  const projected = hours.completed + hours.scheduled;
+  // BCBA has an explicit monthly goal; BT rolls up against weeks × weekly target.
+  const denom = goal ?? weeklyTarget * monthWeeks;
+  const color = goal !== undefined
+    ? (hours.completed >= goal ? '#15803d' : projected >= goal ? '#b45309' : '#b91c1c')
+    : trackColor({ ...hours }, denom);
+  const pct = denom > 0 ? Math.min(100, (hours.completed / denom) * 100) : 0;
+  return (
+    <div style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '8px', background: '#f9fafb' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#111827' }}>
+        Month total{goal !== undefined ? ` (${monthWeeks}-wk goal)` : ''}
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 700, color, marginTop: 2 }}>
+        {fmtH(hours.completed)}/{fmtH(denom)}h
+      </div>
+      <div style={{ height: 6, background: '#e5e7eb', borderRadius: 3, marginTop: 5, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color }} />
+      </div>
+      <div style={{ fontSize: 10, color: '#6b7280', marginTop: 4 }}>
+        projected {fmtH(projected)}h · sched {fmtH(hours.scheduled)}h{hours.canceled > 0 ? ` · canc ${fmtH(hours.canceled)}h` : ''}
       </div>
     </div>
   );
 }
 
-function MonthlySummaryBar({ bcba, goal, weeks }: { bcba: HoursByStatus; goal: number; weeks: number }) {
-  const projected = bcba.completed + bcba.scheduled;
-  const pct = goal > 0 ? Math.min(100, (bcba.completed / goal) * 100) : 0;
-  const status = bcba.completed >= goal ? '#15803d' : projected >= goal ? '#b45309' : '#b91c1c';
+function Legend() {
+  const items: { c: string; label: string }[] = [
+    { c: '#9ca3af', label: 'Pending' },
+    { c: '#16a34a', label: 'Completed' },
+    { c: '#f97316', label: 'Family cancel' },
+    { c: '#dc2626', label: 'Staff cancel' },
+  ];
   return (
-    <div style={{ marginBottom: 8, padding: '8px 10px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-        <span style={{ fontWeight: 700, color: '#111827' }}>BCBA billable — this month</span>
-        <span style={{ fontWeight: 600, color: status }}>
-          {fmtH(bcba.completed)}/{fmtH(goal)}h done · {fmtH(projected)}h projected
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', fontSize: 10, color: '#6b7280', marginTop: 2 }}>
+      {items.map(it => (
+        <span key={it.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ width: 9, height: 9, borderRadius: 2, background: it.c, display: 'inline-block' }} />
+          {it.label}
         </span>
-      </div>
-      <div style={{ height: 6, background: '#e5e7eb', borderRadius: 3, marginTop: 6, overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: status }} />
-      </div>
-      <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
-        {weeks}-week month → goal {fmtH(goal)}h · scheduled {fmtH(bcba.scheduled)}h · canceled {fmtH(bcba.canceled)}h.
-        Weekly totals show on each Sun (BCBA) and Sat (BT).
-      </div>
+      ))}
     </div>
   );
 }
@@ -490,32 +592,22 @@ function appointmentsOn(appointments: Appointment[], date: Date): Appointment[] 
   return appointments.filter(a => a.startTime.startsWith(dateStr));
 }
 
-function getTypeColor(type: string): string {
-  switch (type) {
-    case 'supervision': return '#10b981';
-    case 'parent-training': return '#3b82f6';
-    case 'client-session': return '#8b5cf6';
-    case 'internal-task': return '#6b7280';
-    default: return '#9ca3af';
-  }
-}
-
-// Returns background, color, status icon, etc., consistent across views.
+// Status-based coloring so cancellation trends are visible at a glance across a
+// week: gray = pending, green = completed, and canceled splits by who canceled —
+// orange-red for family, bright red for staff (BT/BCBA/admin). Appointment type
+// is conveyed by the title text rather than color in this view.
 function appointmentLook(apt: Appointment) {
   const canceled = apt.status === 'canceled';
   const completed = apt.status === 'completed';
-  const baseColor = getTypeColor(apt.type);
-  const stripeBg = canceled
-    ? 'repeating-linear-gradient(45deg, #fca5a5, #fca5a5 6px, #9ca3af 6px, #9ca3af 12px)'
-    : completed
-    ? 'repeating-linear-gradient(45deg, #86efac, #86efac 6px, #ffffff 6px, #ffffff 12px)'
-    : undefined;
+  let background = '#9ca3af'; // pending
+  if (completed) background = '#16a34a';
+  else if (canceled) background = apt.cancellation?.source === 'family' ? '#f97316' : '#dc2626';
   return {
     canceled, completed,
-    background: stripeBg ?? baseColor,
-    color: canceled || completed ? '#1f2937' : 'white',
+    background,
+    color: 'white',
     statusIcon: canceled ? '✕' : completed ? '✓' : null,
-    statusColor: canceled ? '#b91c1c' : '#15803d',
+    statusColor: 'rgba(255,255,255,0.95)',
   };
 }
 

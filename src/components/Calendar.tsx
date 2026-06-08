@@ -255,31 +255,50 @@ function trackColor(hours: HoursByStatus, target: number): string {
   return '#b91c1c';                                 // behind
 }
 
-// Compact weekly total printed inside the Sunday cell.
+// Compact weekly total printed inside the Sunday cell. Headlines the live total
+// (completed + scheduled) so booked-but-not-yet-done hours are visible, with the
+// ✓completed / ◻scheduled / ✕canceled breakdown and a cap gauge.
 function SundayTotal({ lens, hours, target }: { lens: Lens; hours: HoursByStatus; target: number }) {
+  const live = hours.completed + hours.scheduled;
   const color = trackColor(hours, target);
   return (
     <div
-      style={{ marginTop: 4, fontSize: 9, lineHeight: 1.2 }}
+      style={{ marginTop: 4, fontSize: 9, lineHeight: 1.25 }}
       title={`${lens === 'bt' ? 'BT direct' : 'BCBA billable'} this week: ${fmtH(hours.completed)}h completed, ${fmtH(hours.scheduled)}h scheduled, ${fmtH(hours.canceled)}h canceled — target ${fmtH(target)}h`}
     >
       <div style={{ fontWeight: 700, color: '#374151' }}>{lens === 'bt' ? 'BT wk' : 'BCBA wk'}</div>
-      <div style={{ fontWeight: 600, color }}>{fmtH(hours.completed)}/{fmtH(target)}h</div>
-      {hours.canceled > 0 && <div style={{ color: '#b91c1c' }}>✕{fmtH(hours.canceled)}h</div>}
+      <div style={{ fontWeight: 600, color }}>{fmtH(live)}/{fmtH(target)}h</div>
+      <div style={{ color: '#6b7280' }}>
+        ✓{fmtH(hours.completed)} ◻{fmtH(hours.scheduled)}{hours.canceled > 0 ? ` ✕${fmtH(hours.canceled)}` : ''}
+      </div>
+      <CapBar hours={hours} target={target} />
     </div>
   );
 }
 
-// A thin horizontal bar: completed (green) then scheduled (gray), each as a
-// fraction of target, so a column of these reads as a usage trend.
-function MiniBar({ hours, target }: { hours: HoursByStatus; target: number }) {
-  const denom = target > 0 ? target : Math.max(hours.completed + hours.scheduled, 1);
-  const cPct = Math.min(100, (hours.completed / denom) * 100);
-  const sPct = Math.min(100 - cPct, (hours.scheduled / denom) * 100);
+// Usage gauge. Full width = target (e.g., 165h goal). Segments left→right:
+// completed (green), scheduled (gray), then canceled — family (orange) and
+// staff (red) — to the RIGHT of a black "cap" line drawn at the live total
+// (completed + scheduled). As sessions cancel, the live total drops, the black
+// cap line shifts left, and the canceled hours show the lost ceiling.
+function CapBar({ hours, target }: { hours: HoursByStatus; target: number }) {
+  const denom = target > 0
+    ? target
+    : Math.max(hours.completed + hours.scheduled + hours.canceled, 1);
+  const pct = (h: number) => Math.max(0, Math.min(100, (h / denom) * 100));
+  const capPct = Math.max(0, Math.min(100, ((hours.completed + hours.scheduled) / denom) * 100));
   return (
-    <div style={{ height: 6, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden', display: 'flex', marginTop: 4 }}>
-      <div style={{ width: `${cPct}%`, background: '#16a34a' }} />
-      <div style={{ width: `${sPct}%`, background: '#9ca3af' }} />
+    <div style={{ position: 'relative', marginTop: 4 }}>
+      <div style={{ height: 8, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden', display: 'flex' }}>
+        <div style={{ width: `${pct(hours.completed)}%`, background: '#16a34a' }} />
+        <div style={{ width: `${pct(hours.scheduled)}%`, background: '#9ca3af' }} />
+        <div style={{ width: `${pct(hours.canceledFamily)}%`, background: '#f97316' }} />
+        <div style={{ width: `${pct(hours.canceledStaff)}%`, background: '#dc2626' }} />
+      </div>
+      <div
+        style={{ position: 'absolute', top: -1, bottom: -1, left: `${capPct}%`, width: 2, background: '#111827', transform: 'translateX(-1px)' }}
+        title="Scheduled cap (completed + scheduled)"
+      />
     </div>
   );
 }
@@ -302,13 +321,14 @@ function WeekRibbon({ lens, weeks, weeklyTarget, monthHours, monthlyGoal, monthW
       </div>
       {weeks.filter(w => w.inMonth).map((w, i) => {
         const color = trackColor(w.hours, weeklyTarget);
+        const live = w.hours.completed + w.hours.scheduled;
         return (
           <div key={i} style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 8px', background: '#fff' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>Wk {format(w.weekStart, 'M/d')}</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color }}>{fmtH(w.hours.completed)}/{fmtH(weeklyTarget)}h</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color }}>{fmtH(live)}/{fmtH(weeklyTarget)}h</span>
             </div>
-            <MiniBar hours={w.hours} target={weeklyTarget} />
+            <CapBar hours={w.hours} target={weeklyTarget} />
             <div style={{ fontSize: 10, color: '#6b7280', marginTop: 3 }}>
               ✓{fmtH(w.hours.completed)} · ◻{fmtH(w.hours.scheduled)}{w.hours.canceled > 0 ? ` · ✕${fmtH(w.hours.canceled)}` : ''}
             </div>
@@ -329,26 +349,23 @@ function MonthTotalRow({ lens, hours, goal, weeklyTarget, monthWeeks }: {
   weeklyTarget: number;
   monthWeeks: number;
 }) {
-  const projected = hours.completed + hours.scheduled;
+  const live = hours.completed + hours.scheduled;
   // BCBA has an explicit monthly goal; BT rolls up against weeks × weekly target.
   const denom = goal ?? weeklyTarget * monthWeeks;
   const color = goal !== undefined
-    ? (hours.completed >= goal ? '#15803d' : projected >= goal ? '#b45309' : '#b91c1c')
-    : trackColor({ ...hours }, denom);
-  const pct = denom > 0 ? Math.min(100, (hours.completed / denom) * 100) : 0;
+    ? (hours.completed >= goal ? '#15803d' : live >= goal ? '#b45309' : '#b91c1c')
+    : trackColor(hours, denom);
   return (
     <div style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '8px', background: '#f9fafb' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: '#111827' }}>
         Month total{goal !== undefined ? ` (${monthWeeks}-wk goal)` : ''}
       </div>
       <div style={{ fontSize: 13, fontWeight: 700, color, marginTop: 2 }}>
-        {fmtH(hours.completed)}/{fmtH(denom)}h
+        {fmtH(live)}/{fmtH(denom)}h
       </div>
-      <div style={{ height: 6, background: '#e5e7eb', borderRadius: 3, marginTop: 5, overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: color }} />
-      </div>
+      <CapBar hours={hours} target={denom} />
       <div style={{ fontSize: 10, color: '#6b7280', marginTop: 4 }}>
-        projected {fmtH(projected)}h · sched {fmtH(hours.scheduled)}h{hours.canceled > 0 ? ` · canc ${fmtH(hours.canceled)}h` : ''}
+        ✓{fmtH(hours.completed)}h done · ◻{fmtH(hours.scheduled)}h sched{hours.canceled > 0 ? ` · ✕${fmtH(hours.canceled)}h canc` : ''}
       </div>
     </div>
   );
@@ -369,6 +386,10 @@ function Legend() {
           {it.label}
         </span>
       ))}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ width: 2, height: 11, background: '#111827', display: 'inline-block' }} />
+        Scheduled cap
+      </span>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit } from '../types';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
+import { resolveUtilization } from '../utilization';
 
 interface AdminPanelProps {
   data: ScheduleData;
@@ -818,6 +819,11 @@ function SettingsEditor({ settings, saving, onSave }: {
   const [periodUnit, setPeriodUnit] = useState<TrainingPeriodUnit>(settings.parentTraining.periodUnit);
   const [unplannedHrs, setUnplannedHrs] = useState(s(settings.cancellationNotice?.unplannedHoursThreshold ?? 24));
   const [plannedDays, setPlannedDays] = useState(s(settings.cancellationNotice?.plannedDaysThreshold ?? 30));
+  const u = resolveUtilization(settings.utilization);
+  const [bcbaWeekly, setBcbaWeekly] = useState(s(u.bcbaWeeklyBillableHours));
+  const [btWeekly, setBtWeekly] = useState(s(u.btWeeklyDirectHours));
+  const [bcbaMonthly, setBcbaMonthly] = useState(s(u.bcbaMonthlyBillableHours));
+  const [bcbaMonthly5, setBcbaMonthly5] = useState(s(u.bcbaMonthlyBillableHours5Week));
 
   const num = (str: string, fallback: number) => {
     const n = parseFloat(str);
@@ -845,6 +851,12 @@ function SettingsEditor({ settings, saving, onSave }: {
       cancellationNotice: {
         unplannedHoursThreshold: num(unplannedHrs, 24),
         plannedDaysThreshold: num(plannedDays, 30),
+      },
+      utilization: {
+        bcbaWeeklyBillableHours: num(bcbaWeekly, u.bcbaWeeklyBillableHours),
+        btWeeklyDirectHours: num(btWeekly, u.btWeeklyDirectHours),
+        bcbaMonthlyBillableHours: num(bcbaMonthly, u.bcbaMonthlyBillableHours),
+        bcbaMonthlyBillableHours5Week: num(bcbaMonthly5, u.bcbaMonthlyBillableHours5Week),
       },
     };
     onSave(next);
@@ -882,6 +894,13 @@ function SettingsEditor({ settings, saving, onSave }: {
       <SettingsSection title="Cancellation notice thresholds">
         <NumField label="Unplanned: adequate notice if more than" value={unplannedHrs} onChange={setUnplannedHrs} suffix="hours" />
         <NumField label="Planned: adequate notice if more than" value={plannedDays} onChange={setPlannedDays} suffix="days" />
+      </SettingsSection>
+
+      <SettingsSection title="Billable / utilization targets">
+        <NumField label="BCBA — fully-utilized weekly billables" value={bcbaWeekly} onChange={setBcbaWeekly} suffix="h/wk" />
+        <NumField label="BT — fully-utilized weekly direct hours" value={btWeekly} onChange={setBtWeekly} suffix="h/wk" hint="Aggregate BT direct hours your caseload generates." />
+        <NumField label="BCBA — monthly goal (4-week month)" value={bcbaMonthly} onChange={setBcbaMonthly} suffix="h/mo" />
+        <NumField label="BCBA — monthly goal (5-week month)" value={bcbaMonthly5} onChange={setBcbaMonthly5} suffix="h/mo" hint="Used when the month spans 5+ weeks." />
       </SettingsSection>
 
       <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>

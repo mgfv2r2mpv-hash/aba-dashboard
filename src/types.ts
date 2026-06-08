@@ -40,6 +40,17 @@ export const BACB_RBT_SUPERVISION_MIN_PERCENT = 5;
 
 export type TrainingPeriodUnit = 'week' | 'month' | 'sixMonths' | 'year';
 
+// Billable / utilization targets. A BCBA tracks their own weekly billable hours
+// and the aggregate BT direct hours their caseload generates; both have
+// "fully-utilized" thresholds. The BCBA also carries a monthly billable goal
+// that differs for 4- vs 5-week months (a light week can be made up by month end).
+export interface UtilizationSettings {
+  bcbaWeeklyBillableHours?: number;       // BCBA fully-utilized weekly billables
+  btWeeklyDirectHours?: number;           // BT (aggregate) fully-utilized weekly direct hours
+  bcbaMonthlyBillableHours?: number;      // BCBA monthly goal in a 4-week month
+  bcbaMonthlyBillableHours5Week?: number; // BCBA monthly goal in a 5-week month
+}
+
 export interface CompanySettings {
   // Per-client (case) supervision target — % of direct hours per client per period.
   supervisionDirectHoursPercent: number;
@@ -78,6 +89,8 @@ export interface CompanySettings {
     unplannedHoursThreshold: number;
     plannedDaysThreshold: number;
   };
+  // Billable / utilization targets (BCBA weekly+monthly, BT weekly).
+  utilization?: UtilizationSettings;
 }
 
 export const DEFAULT_CANCELLATION_NOTICE = {

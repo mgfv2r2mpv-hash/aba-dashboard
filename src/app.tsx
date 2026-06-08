@@ -76,6 +76,9 @@ export default function App() {
   const [pendingEmbedBlob, setPendingEmbedBlob] = useState<string | undefined>(undefined);
   const [debugMsg, setDebugMsg] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
+  // The month/week the calendar is showing. Conflicts are scoped to this so the
+  // Issues panel reflects what you're looking at, not just today.
+  const [viewDate, setViewDate] = useState<Date>(new Date());
   const detailPanelRef = React.useRef<HTMLDivElement | null>(null);
 
   // On narrow screens the right-side detail panel wraps below the calendar.
@@ -87,15 +90,17 @@ export default function App() {
     }
   }, [selectedAppointment]);
 
-  // Keep conflicts in sync with the schedule. Admin edits (availability,
-  // blackouts, add/remove people) flow through setScheduleData without their
-  // own revalidation; recomputing here means a newly-added blackout flags any
-  // session that day the moment you switch back to the Schedule view.
+  // Keep conflicts in sync with the schedule AND the viewed month. Admin edits
+  // (availability, blackouts, add/remove people) flow through setScheduleData
+  // without their own revalidation; recomputing here means a newly-added
+  // blackout flags any session that day the moment you switch back to the
+  // Schedule view. Scoping to viewDate means navigating months re-scopes the
+  // Issues panel to whatever's on screen.
   useEffect(() => {
     if (scheduleData) {
-      setConflicts(new ConstraintValidator(scheduleData).validateSchedule());
+      setConflicts(new ConstraintValidator(scheduleData, viewDate).validateSchedule());
     }
-  }, [scheduleData]);
+  }, [scheduleData, viewDate]);
 
   const handleAISettingsSave = (settings: AISettings) => {
     setAiSettings(settings);
@@ -489,6 +494,7 @@ export default function App() {
                     settings={scheduleData.settings}
                     onAppointmentChange={handleAppointmentChange}
                     onSelectAppointment={setSelectedAppointment}
+                    onViewDateChange={setViewDate}
                   />
                 </div>
                 {(conflicts.length > 0 || solutions.length > 0 || selectedAppointment) && (

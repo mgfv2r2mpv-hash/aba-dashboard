@@ -13,6 +13,9 @@ interface CalendarProps {
   settings?: CompanySettings;
   onAppointmentChange: (appointment: Appointment) => void;
   onSelectAppointment: (appointment: Appointment | null) => void;
+  // Reports the currently-viewed date (month/week anchor) so the parent can
+  // scope month-bound concerns (e.g. conflict checks) to what's on screen.
+  onViewDateChange?: (date: Date) => void;
 }
 
 type View = 'month' | 'week';
@@ -49,11 +52,18 @@ export default function Calendar({
   settings,
   onAppointmentChange,
   onSelectAppointment,
+  onViewDateChange,
 }: CalendarProps) {
   const [view, setView] = useState<View>('month');
   const [lens, setLens] = useState<Lens>('bcba');
   const [currentDate, setCurrentDate] = useState(new Date());
   const isLandscape = useIsLandscape();
+
+  // Surface the viewed anchor date to the parent whenever it changes.
+  useEffect(() => {
+    onViewDateChange?.(currentDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDate]);
 
   // The lens hides the other party's appointments: BT = has a technician,
   // BCBA = none. Totals are computed from these filtered appointments too.

@@ -7,12 +7,14 @@ import {
   DayOfWeek,
   PartyAvailability,
   PartyAvailabilityStatus,
+  TrainingPeriodUnit,
 } from './types';
 
 export class ConstraintValidator {
   private data: ScheduleData;
+  private now: Date;
 
-  constructor(data: ScheduleData) {
+  constructor(data: ScheduleData, now: Date = new Date()) {
     // Canceled appointments are excluded from every constraint check by
     // shadowing the appointments array at the data-source level. Completed
     // and scheduled appointments are both counted (completed appointments
@@ -21,6 +23,7 @@ export class ConstraintValidator {
       ...data,
       appointments: data.appointments.filter(a => a.status !== 'canceled'),
     };
+    this.now = now;
   }
 
   validateSchedule(): ScheduleConflict[] {
@@ -42,7 +45,10 @@ export class ConstraintValidator {
     const pt = this.data.settings.parentTraining;
     if (!pt) return conflicts;
 
-    const periods = this.getPeriodsForUnit(pt.periodUnit);
+    // Only flag the current (calendar-aligned) period. Future-period
+    // projections ("light on parent training in 3 months") are noise, not
+    // actionable now.
+    const periods = [this.currentPeriod(pt.periodUnit)];
 
     // Per-client validation: minimum/target are company-wide defaults, but the
     // per-case max (Client.parentTrainingMaxHours) overrides them when lower.
@@ -79,35 +85,32 @@ export class ConstraintValidator {
     return conflicts;
   }
 
-  private getPeriodsForUnit(unit: 'week' | 'month' | 'sixMonths' | 'year'): { start: Date; end: Date; label: string }[] {
-    if (this.data.appointments.length === 0) return [];
-    const dates = this.data.appointments.map(a => new Date(a.startTime));
-    const min = new Date(Math.min(...dates.map(d => d.getTime())));
-    const max = new Date(Math.max(...dates.map(d => d.getTime())));
-    const periods: { start: Date; end: Date; label: string }[] = [];
-    let cursor = new Date(min);
-    cursor.setHours(0, 0, 0, 0);
-    while (cursor <= max) {
-      const start = new Date(cursor);
-      const end = new Date(cursor);
-      let label: string;
-      if (unit === 'week') {
-        end.setDate(end.getDate() + 7);
-        label = `Week of ${start.toISOString().slice(0, 10)}`;
-      } else if (unit === 'month') {
-        end.setMonth(end.getMonth() + 1);
-        label = start.toISOString().slice(0, 7);
-      } else if (unit === 'sixMonths') {
-        end.setMonth(end.getMonth() + 6);
-        label = `${start.toISOString().slice(0, 7)} (6mo)`;
-      } else {
-        end.setFullYear(end.getFullYear() + 1);
-        label = String(start.getFullYear());
-      }
-      periods.push({ start, end, label });
-      cursor = end;
+  // The calendar-aligned period (for the configured unit) that contains today.
+  private currentPeriod(unit: TrainingPeriodUnit): { start: Date; end: Date; label: string } {
+    const n = this.now;
+    const y = n.getFullYear();
+    const m = n.getMonth();
+    if (unit === 'week') {
+      const start = new Date(y, m, n.getDate() - n.getDay()); // Sunday 00:00
+      const end = new Date(start);
+      end.setDate(end.getDate() + 7);
+      return { start, end, label: `Week of ${start.toISOString().slice(0, 10)}` };
     }
-    return periods;
+    if (unit === 'sixMonths') {
+      const half = m < 6 ? 0 : 6;
+      const start = new Date(y, half, 1);
+      const end = new Date(y, half + 6, 1);
+      return { start, end, label: `${start.toISOString().slice(0, 7)} (6mo)` };
+    }
+    if (unit === 'year') {
+      return { start: new Date(y, 0, 1), end: new Date(y + 1, 0, 1), label: String(y) };
+    }
+    // month (default)
+    return {
+      start: new Date(y, m, 1),
+      end: new Date(y, m + 1, 1),
+      label: `${y}-${String(m + 1).padStart(2, '0')}`,
+    };
   }
 
   private calculateClientParentTrainingHoursInRange(
@@ -130,6 +133,11 @@ export class ConstraintValidator {
     const blackouts = this.data.blackouts || [];
 
     this.data.appointments.forEach(appointment => {
+      const appointmentDate = new Date(appointment.startTime);
+      // Only the current calendar month — keeps the Issues panel about now, and
+      // stops a year of recurring appointments from flooding it.
+      if (appointmentDate.getFullYear() !== this.now.getFullYear() || appointmentDate.getMonth() !== this.now.getMonth()) return;
+
       const technician = appointment.technician
         ? this.data.technicians.find(t => t.id === appointment.technician || t.name === appointment.technician)
         : undefined;
@@ -140,7 +148,6 @@ export class ConstraintValidator {
       // Nothing to check against — appointment has no resolvable parties.
       if (!technician && !client) return;
 
-      const appointmentDate = new Date(appointment.startTime);
       const dayName = this.getDayName(appointmentDate) as DayOfWeek;
       const dateStr = this.toDateString(appointmentDate);
       const [appStart, appEnd] = this.getTimeFromISO(appointment.startTime, appointment.endTime);

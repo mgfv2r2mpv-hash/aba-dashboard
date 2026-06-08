@@ -156,14 +156,21 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
   const util = resolveUtilization(settings?.utilization);
   const weeklyTarget = lens === 'bt' ? util.btWeeklyDirectHours : util.bcbaWeeklyBillableHours;
 
-  // Number of week rows that include a day of this month; 5+ rows = treat as a
-  // "5-week month" for the BCBA monthly goal.
   const weekRows = days.length / 7;
+  // Week rows that touch the month at all — drives the ribbon and the BT
+  // monthly denominator (weeks present × weekly target).
   let inMonthWeeks = 0;
+  // "Work weeks" for the BCBA monthly goal: a row only counts as a full work
+  // week if it has 3+ of this month's weekdays. June 2026's trailing Mon/Tue
+  // (Jun 29–30) is a 2-weekday stub, so June is a 4-week month, not 5.
+  let workWeeks = 0;
   for (let r = 0; r < weekRows; r++) {
-    if (days.slice(r * 7, r * 7 + 7).some(d => isSameMonth(d, monthStart))) inMonthWeeks++;
+    const row = days.slice(r * 7, r * 7 + 7);
+    if (row.some(d => isSameMonth(d, monthStart))) inMonthWeeks++;
+    const weekdaysInMonth = row.filter(d => isSameMonth(d, monthStart) && getDay(d) >= 1 && getDay(d) <= 5).length;
+    if (weekdaysInMonth >= 3) workWeeks++;
   }
-  const monthlyGoal = inMonthWeeks >= 5 ? util.bcbaMonthlyBillableHours5Week : util.bcbaMonthlyBillableHours;
+  const monthlyGoal = workWeeks >= 5 ? util.bcbaMonthlyBillableHours5Week : util.bcbaMonthlyBillableHours;
 
   // One rollup per grid week, for the side ribbon.
   const weekSummaries = Array.from({ length: weekRows }, (_, r) => {
@@ -235,7 +242,7 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
         weeklyTarget={weeklyTarget}
         monthHours={monthHours}
         monthlyGoal={lens === 'bcba' ? monthlyGoal : undefined}
-        monthWeeks={inMonthWeeks}
+        monthWeeks={lens === 'bcba' ? workWeeks : inMonthWeeks}
       />
     </div>
   );

@@ -18,14 +18,17 @@ export function resolveUtilization(u?: UtilizationSettings): Required<Utilizatio
 }
 
 // completed = finalized; canceled = struck; scheduled = everything still on the
-// books (future, or past-but-not-yet-finalized).
+// books (future, or past-but-not-yet-finalized). Canceled is further split by
+// who canceled so the gauge can color family vs staff losses.
 export interface HoursByStatus {
   completed: number;
   scheduled: number;
-  canceled: number;
+  canceled: number;        // total (family + staff/other)
+  canceledFamily: number;
+  canceledStaff: number;   // BT/BCBA/admin or unspecified source
 }
 
-const EMPTY: HoursByStatus = { completed: 0, scheduled: 0, canceled: 0 };
+const EMPTY: HoursByStatus = { completed: 0, scheduled: 0, canceled: 0, canceledFamily: 0, canceledStaff: 0 };
 
 function durationHours(a: Appointment): number {
   const ms = new Date(a.endTime).getTime() - new Date(a.startTime).getTime();
@@ -66,7 +69,15 @@ export function rollupHours(
     const t = new Date(a.startTime).getTime();
     if (isNaN(t) || t < startMs || t >= endMs) continue;
     if (bucketOf(a) !== bucket) continue;
-    out[statusOf(a)] += durationHours(a);
+    const h = durationHours(a);
+    const s = statusOf(a);
+    if (s === 'canceled') {
+      out.canceled += h;
+      if (a.cancellation?.source === 'family') out.canceledFamily += h;
+      else out.canceledStaff += h;
+    } else {
+      out[s] += h;
+    }
   }
   return out;
 }

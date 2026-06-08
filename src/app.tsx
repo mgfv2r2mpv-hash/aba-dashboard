@@ -486,6 +486,7 @@ export default function App() {
                     appointments={scheduleData.appointments}
                     technicians={scheduleData.technicians}
                     clients={scheduleData.clients}
+                    settings={scheduleData.settings}
                     onAppointmentChange={handleAppointmentChange}
                     onSelectAppointment={setSelectedAppointment}
                   />

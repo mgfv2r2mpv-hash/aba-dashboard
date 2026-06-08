@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit } from '../types';
@@ -17,6 +17,7 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'blackouts' | 'settings'>('technicians');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reordering, setReordering] = useState<null | 'clients' | 'technicians'>(null);
 
   const persistTechnician = async (id: string, patch: Partial<Technician>) => {
     setSavingId(id);
@@ -156,6 +157,27 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
     }
   };
 
+  const reorderEntity = async (entity: 'clients' | 'technicians', orderedIds: string[]) => {
+    setError(null);
+    try {
+      await axios.post(`${API_BASE}/admin/reorder`, { entity, order: orderedIds });
+      const list = entity === 'clients' ? data.clients : data.technicians;
+      const byId = new Map(list.map(x => [x.id, x]));
+      const reordered = orderedIds.map(id => byId.get(id)).filter(Boolean);
+      onDataChange({ ...data, [entity]: reordered } as ScheduleData);
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message);
+    }
+  };
+
+  const sortEntityByName = (entity: 'clients' | 'technicians', dir: 'asc' | 'desc') => {
+    const list = entity === 'clients' ? data.clients : data.technicians;
+    const ordered = [...list].sort((a, b) =>
+      dir === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name)
+    );
+    reorderEntity(entity, ordered.map(x => x.id));
+  };
+
   const tabStyle = (isActive: boolean) => ({
     padding: '12px 16px',
     backgroundColor: isActive ? '#ffffff' : '#f3f4f6',
@@ -185,48 +207,82 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
       <div style={{ flex: 1, overflow: 'auto', padding: '24px' }}>
         {activeTab === 'technicians' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: 8 }}>
               <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Manage Technicians ({data.technicians.length})</h3>
-              <button onClick={addTechnician} style={primaryBtn}>+ Add Technician</button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {data.technicians.length > 1 && (
+                  <SortMenu
+                    onSortAsc={() => sortEntityByName('technicians', 'asc')}
+                    onSortDesc={() => sortEntityByName('technicians', 'desc')}
+                    onReorder={() => setReordering('technicians')}
+                  />
+                )}
+                <button onClick={addTechnician} style={primaryBtn}>+ Add Technician</button>
+              </div>
             </div>
-            <div style={{ display: 'grid', gap: '16px' }}>
-              {data.technicians.map(tech => (
-                <TechnicianCard
-                  key={tech.id}
-                  tech={tech}
-                  clients={data.clients}
-                  saving={savingId === tech.id}
-                  onChange={(patch) => persistTechnician(tech.id, patch)}
-                  onRemove={() => removeTechnician(tech.id)}
-                />
-              ))}
-              {data.technicians.length === 0 && (
-                <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>No technicians yet.</p>
-              )}
-            </div>
+            {reordering === 'technicians' ? (
+              <ReorderList
+                items={data.technicians.map(t => ({ id: t.id, name: t.name, meta: t.isRBT ? 'RBT' : undefined }))}
+                onCommit={(ids) => { reorderEntity('technicians', ids); setReordering(null); }}
+                onCancel={() => setReordering(null)}
+              />
+            ) : (
+              <div style={{ display: 'grid', gap: '16px' }}>
+                {data.technicians.map(tech => (
+                  <TechnicianCard
+                    key={tech.id}
+                    tech={tech}
+                    clients={data.clients}
+                    saving={savingId === tech.id}
+                    onChange={(patch) => persistTechnician(tech.id, patch)}
+                    onRemove={() => removeTechnician(tech.id)}
+                  />
+                ))}
+                {data.technicians.length === 0 && (
+                  <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>No technicians yet.</p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
         {activeTab === 'clients' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: 8 }}>
               <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Manage Clients ({data.clients.length})</h3>
-              <button onClick={addClient} style={primaryBtn}>+ Add Client</button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {data.clients.length > 1 && (
+                  <SortMenu
+                    onSortAsc={() => sortEntityByName('clients', 'asc')}
+                    onSortDesc={() => sortEntityByName('clients', 'desc')}
+                    onReorder={() => setReordering('clients')}
+                  />
+                )}
+                <button onClick={addClient} style={primaryBtn}>+ Add Client</button>
+              </div>
             </div>
-            <div style={{ display: 'grid', gap: '16px' }}>
-              {data.clients.map(client => (
-                <ClientCard
-                  key={client.id}
-                  client={client}
-                  saving={savingId === client.id}
-                  onChange={(patch) => persistClient(client.id, patch)}
-                  onRemove={() => removeClient(client.id)}
-                />
-              ))}
-              {data.clients.length === 0 && (
-                <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>No clients yet.</p>
-              )}
-            </div>
+            {reordering === 'clients' ? (
+              <ReorderList
+                items={data.clients.map(c => ({ id: c.id, name: c.name }))}
+                onCommit={(ids) => { reorderEntity('clients', ids); setReordering(null); }}
+                onCancel={() => setReordering(null)}
+              />
+            ) : (
+              <div style={{ display: 'grid', gap: '16px' }}>
+                {data.clients.map(client => (
+                  <ClientCard
+                    key={client.id}
+                    client={client}
+                    saving={savingId === client.id}
+                    onChange={(patch) => persistClient(client.id, patch)}
+                    onRemove={() => removeClient(client.id)}
+                  />
+                ))}
+                {data.clients.length === 0 && (
+                  <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>No clients yet.</p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -420,6 +476,130 @@ function CardHeader({ collapsed, onToggle, name, badges, summary }: {
           {summary}
         </span>
       )}
+    </div>
+  );
+}
+
+function SortMenu({ onSortAsc, onSortDesc, onReorder }: {
+  onSortAsc: () => void;
+  onSortDesc: () => void;
+  onReorder: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        aria-label="Sort and reorder"
+        title="Sort / reorder"
+        style={{ ...chipBtn, fontSize: '15px', lineHeight: 1, padding: '5px 9px' }}
+      >⚙</button>
+      {open && (
+        <>
+          {/* Click-away backdrop */}
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 19 }} />
+          <div style={{
+            position: 'absolute', right: 0, top: '110%', zIndex: 20, background: 'white',
+            border: '1px solid #e5e7eb', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+            minWidth: 170, overflow: 'hidden',
+          }}>
+            <MenuItem onClick={() => { setOpen(false); onSortAsc(); }}>Sort name A → Z</MenuItem>
+            <MenuItem onClick={() => { setOpen(false); onSortDesc(); }}>Sort name Z → A</MenuItem>
+            <MenuItem onClick={() => { setOpen(false); onReorder(); }}>Drag to reorder…</MenuItem>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px',
+        border: 'none', borderBottom: '1px solid #f3f4f6', background: 'white',
+        cursor: 'pointer', fontSize: '13px', color: '#374151',
+      }}
+    >{children}</button>
+  );
+}
+
+// Touch-friendly drag-to-reorder list (pointer events, works on iOS). Renders a
+// compact row per item with a ≡ handle; commits the final id order on Done.
+function ReorderList({ items, onCommit, onCancel }: {
+  items: { id: string; name: string; meta?: string }[];
+  onCommit: (orderedIds: string[]) => void;
+  onCancel: () => void;
+}) {
+  const [order, setOrder] = useState(items);
+  const [dragId, setDragId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!dragId) return;
+    const onMove = (e: PointerEvent) => {
+      const el = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest('[data-rid]') as HTMLElement | null;
+      const overId = el?.dataset.rid;
+      if (!overId || overId === dragId) return;
+      setOrder(prev => {
+        const from = prev.findIndex(i => i.id === dragId);
+        const to = prev.findIndex(i => i.id === overId);
+        if (from < 0 || to < 0 || from === to) return prev;
+        const next = [...prev];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return next;
+      });
+    };
+    const onUp = () => setDragId(null);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }, [dragId]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+        <button onClick={() => onCommit(order.map(i => i.id))} style={primaryBtn}>Done</button>
+        <button onClick={onCancel} style={chipBtn}>Cancel</button>
+        <span style={{ fontSize: 12, color: '#6b7280' }}>Drag the ≡ handle to reorder</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {order.map(it => (
+          <div
+            key={it.id}
+            data-rid={it.id}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+              border: '1px solid #e5e7eb', borderRadius: 6,
+              background: dragId === it.id ? '#eff6ff' : 'white',
+              boxShadow: dragId === it.id ? '0 2px 8px rgba(0,0,0,0.12)' : 'none',
+              touchAction: 'none',
+            }}
+          >
+            <span
+              onPointerDown={(e) => { e.preventDefault(); setDragId(it.id); }}
+              aria-label="Drag to reorder"
+              style={{ cursor: 'grab', fontSize: 20, color: '#9ca3af', touchAction: 'none', userSelect: 'none', lineHeight: 1 }}
+            >≡</span>
+            <span style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {it.name || 'Unnamed'}
+            </span>
+            {it.meta && (
+              <span style={{
+                fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '1px 6px',
+                borderRadius: 8, backgroundColor: '#dbeafe', color: '#1e40af',
+              }}>{it.meta}</span>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

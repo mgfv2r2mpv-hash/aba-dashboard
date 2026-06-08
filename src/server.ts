@@ -382,6 +382,28 @@ app.post('/api/admin/appointment', express.json(), (req: Request, res: Response)
   }
 });
 
+// Admin: Reorder clients or technicians
+app.post('/api/admin/reorder', express.json(), (req: Request, res: Response) => {
+  try {
+    if (!currentScheduleData) {
+      return res.status(400).json({ error: 'No schedule loaded' });
+    }
+    const { entity, order } = req.body as { entity?: string; order?: string[] };
+    if (entity !== 'clients' && entity !== 'technicians') {
+      return res.status(400).json({ error: 'reorder: entity must be clients or technicians' });
+    }
+    const orderIds: string[] = Array.isArray(order) ? order : [];
+    const list = (currentScheduleData as any)[entity] as { id: string }[];
+    const byId = new Map(list.map(x => [x.id, x]));
+    const reordered = orderIds.map(id => byId.get(id)).filter(Boolean) as { id: string }[];
+    for (const x of list) if (!orderIds.includes(x.id)) reordered.push(x);
+    (currentScheduleData as any)[entity] = reordered;
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Admin: Update company settings
 app.post('/api/admin/settings', express.json(), (req: Request, res: Response) => {
   try {

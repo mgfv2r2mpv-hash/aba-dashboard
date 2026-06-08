@@ -171,6 +171,22 @@ async function route(method: string, path: string, body: any): Promise<any> {
     return { success: true, removed: before - data.appointments.length };
   }
 
+  if (m === 'POST' && path === '/api/admin/reorder') {
+    const data = requireData();
+    const entity = body?.entity;
+    if (entity !== 'clients' && entity !== 'technicians') {
+      throw new HttpError('reorder: entity must be clients or technicians');
+    }
+    const orderIds: string[] = Array.isArray(body?.order) ? body.order : [];
+    const list = (data as any)[entity] as { id: string }[];
+    const byId = new Map(list.map(x => [x.id, x]));
+    const reordered = orderIds.map(id => byId.get(id)).filter(Boolean) as { id: string }[];
+    // Safety: append anything not named in the order list, preserving order.
+    for (const x of list) if (!orderIds.includes(x.id)) reordered.push(x);
+    (data as any)[entity] = reordered;
+    return { success: true };
+  }
+
   if (m === 'POST' && path === '/api/admin/settings') {
     const data = requireData();
     if (!body || typeof body !== 'object') throw new HttpError('Invalid settings payload');

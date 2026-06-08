@@ -580,7 +580,8 @@ function ReorderList({ items, onCommit, onCancel }: {
               border: '1px solid #e5e7eb', borderRadius: 6,
               background: dragId === it.id ? '#eff6ff' : 'white',
               boxShadow: dragId === it.id ? '0 2px 8px rgba(0,0,0,0.12)' : 'none',
-              touchAction: 'none',
+              // Row stays scrollable on touch; only the ≡ handle suppresses
+              // scrolling so vertical drags reorder instead of pan.
             }}
           >
             <span

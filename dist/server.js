@@ -344,6 +344,140 @@ app.post('/api/admin/appointment', express.json(), (req, res) => {
         });
     }
 });
+// Admin: Create/update authorization
+app.post('/api/admin/authorization', express.json(), (req, res) => {
+    try {
+        if (!currentScheduleData)
+            return res.status(400).json({ error: 'No schedule loaded' });
+        const auth = req.body;
+        if (!auth.id || !auth.clientId || !auth.startDate || !auth.endDate) {
+            return res.status(400).json({ error: 'Authorization must have id, clientId, startDate, endDate' });
+        }
+        if (!currentScheduleData.authorizations)
+            currentScheduleData.authorizations = [];
+        const existing = currentScheduleData.authorizations.find(a => a.id === auth.id);
+        if (existing)
+            Object.assign(existing, auth);
+        else
+            currentScheduleData.authorizations.push(auth);
+        res.json({ success: true, authorization: existing || auth });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// Admin: Delete authorization
+app.delete('/api/admin/authorization/:id', (req, res) => {
+    if (!currentScheduleData)
+        return res.status(400).json({ error: 'No schedule loaded' });
+    const before = (currentScheduleData.authorizations || []).length;
+    currentScheduleData.authorizations = (currentScheduleData.authorizations || []).filter(a => a.id !== req.params.id);
+    res.json({ success: true, removed: before - currentScheduleData.authorizations.length });
+});
+// Admin: Create/update manual usage entry
+app.post('/api/admin/manual-usage', express.json(), (req, res) => {
+    try {
+        if (!currentScheduleData)
+            return res.status(400).json({ error: 'No schedule loaded' });
+        const usage = req.body;
+        if (!usage.id || !usage.clientId || !usage.bucket || !usage.date) {
+            return res.status(400).json({ error: 'Manual usage must have id, clientId, bucket, date' });
+        }
+        if (!currentScheduleData.manualUsage)
+            currentScheduleData.manualUsage = [];
+        const existing = currentScheduleData.manualUsage.find(u => u.id === usage.id);
+        if (existing)
+            Object.assign(existing, usage);
+        else
+            currentScheduleData.manualUsage.push(usage);
+        res.json({ success: true, usage: existing || usage });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// Admin: Delete manual usage entry
+app.delete('/api/admin/manual-usage/:id', (req, res) => {
+    if (!currentScheduleData)
+        return res.status(400).json({ error: 'No schedule loaded' });
+    const before = (currentScheduleData.manualUsage || []).length;
+    currentScheduleData.manualUsage = (currentScheduleData.manualUsage || []).filter(u => u.id !== req.params.id);
+    res.json({ success: true, removed: before - currentScheduleData.manualUsage.length });
+});
+// Admin: Reorder clients or technicians
+app.post('/api/admin/reorder', express.json(), (req, res) => {
+    try {
+        if (!currentScheduleData) {
+            return res.status(400).json({ error: 'No schedule loaded' });
+        }
+        const { entity, order } = req.body;
+        if (entity !== 'clients' && entity !== 'technicians') {
+            return res.status(400).json({ error: 'reorder: entity must be clients or technicians' });
+        }
+        const orderIds = Array.isArray(order) ? order : [];
+        const list = currentScheduleData[entity];
+        const byId = new Map(list.map(x => [x.id, x]));
+        const reordered = orderIds.map(id => byId.get(id)).filter(Boolean);
+        for (const x of list)
+            if (!orderIds.includes(x.id))
+                reordered.push(x);
+        currentScheduleData[entity] = reordered;
+        res.json({ success: true });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// Admin: Update company settings
+app.post('/api/admin/settings', express.json(), (req, res) => {
+    try {
+        if (!currentScheduleData) {
+            return res.status(400).json({ error: 'No schedule loaded' });
+        }
+        if (!req.body || typeof req.body !== 'object') {
+            return res.status(400).json({ error: 'Invalid settings payload' });
+        }
+        // Merge so wizard-only fields (clinicianAvailability, legacy mirrors) survive.
+        currentScheduleData.settings = { ...currentScheduleData.settings, ...req.body };
+        res.json({ success: true, settings: currentScheduleData.settings });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// Admin: Create/update blackout (single-day "away" marker)
+app.post('/api/admin/blackout', express.json(), (req, res) => {
+    try {
+        if (!currentScheduleData) {
+            return res.status(400).json({ error: 'No schedule loaded' });
+        }
+        const blackout = req.body;
+        if (!blackout.id || !blackout.entityId || !blackout.date) {
+            return res.status(400).json({ error: 'Blackout must have id, entityId and date' });
+        }
+        if (!currentScheduleData.blackouts)
+            currentScheduleData.blackouts = [];
+        const existing = currentScheduleData.blackouts.find(b => b.id === blackout.id);
+        if (existing) {
+            Object.assign(existing, blackout);
+        }
+        else {
+            currentScheduleData.blackouts.push(blackout);
+        }
+        res.json({ success: true, blackout: existing || blackout });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// Admin: Delete blackout
+app.delete('/api/admin/blackout/:id', (req, res) => {
+    if (!currentScheduleData)
+        return res.status(400).json({ error: 'No schedule loaded' });
+    const before = (currentScheduleData.blackouts || []).length;
+    currentScheduleData.blackouts = (currentScheduleData.blackouts || []).filter(b => b.id !== req.params.id);
+    res.json({ success: true, removed: before - currentScheduleData.blackouts.length });
+});
 app.listen(PORT, () => {
     console.log(`ABA Schedule Assistant API running on port ${PORT}`);
 });

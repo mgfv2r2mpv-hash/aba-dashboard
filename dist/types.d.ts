@@ -3,6 +3,12 @@ export interface TimeWindow {
     start: string;
     end: string;
 }
+export type SupervisionCadence = 'W' | 'EOW' | '3o4';
+export declare const SUPERVISION_CADENCES: {
+    value: SupervisionCadence;
+    label: string;
+    contactsPerMonth: number;
+}[];
 export interface Client {
     id: string;
     name: string;
@@ -10,6 +16,12 @@ export interface Client {
         [key in DayOfWeek]?: TimeWindow[];
     };
     parentTrainingMaxHours?: number;
+    cadenceGoal?: SupervisionCadence;
+    isEI?: boolean;
+    eiDate?: string;
+    partialStaffAllowed?: boolean;
+    parentAvailableOutsideSessions?: boolean;
+    anticipatedDischarge?: string;
     notes?: string;
 }
 export interface Technician {
@@ -28,9 +40,22 @@ export interface Technician {
 }
 export declare const BACB_RBT_SUPERVISION_MIN_PERCENT = 5;
 export type TrainingPeriodUnit = 'week' | 'month' | 'sixMonths' | 'year';
+export interface UtilizationSettings {
+    bcbaWeeklyBillableHours?: number;
+    btWeeklyDirectHours?: number;
+    bcbaMonthlyBillableHours?: number;
+    bcbaMonthlyBillableHours5Week?: number;
+}
 export interface CompanySettings {
     supervisionDirectHoursPercent: number;
     supervisionRBTHoursPercent: number;
+    supervisionTechHoursPercent?: number;
+    supervisionMaxHoursPercent?: number;
+    supervisionFloorPercent?: number;
+    supervisionPreferredMinPercent?: number;
+    supervisionPreferredMaxPercent?: number;
+    reportLeadWeeksBackOffice?: number;
+    reportLeadWeeksClinicalDirector?: number;
     parentTraining: {
         minimumHours: number;
         targetMinHours: number;
@@ -47,10 +72,65 @@ export interface CompanySettings {
             max: number;
         };
     };
-    billableRequirements?: {
-        hoursPerCycle: number;
-        cycleWeeks: number;
-    } | undefined;
+    cancellationNotice?: {
+        unplannedHoursThreshold: number;
+        plannedDaysThreshold: number;
+    };
+    utilization?: UtilizationSettings;
+    rbtMinContactsPerMonth?: number;
+}
+export declare const DEFAULT_CANCELLATION_NOTICE: {
+    unplannedHoursThreshold: number;
+    plannedDaysThreshold: number;
+};
+export type AppointmentStatus = 'scheduled' | 'completed' | 'canceled';
+export type AuthBucketKey = 'supervision' | 'direct' | 'parentTraining' | 'reassessment' | 'casePlanning';
+export declare const AUTH_BUCKETS: {
+    key: AuthBucketKey;
+    label: string;
+}[];
+export interface AuthWeeklyRates {
+    direct?: number;
+    supervision?: number;
+    parentTraining?: number;
+    casePlanning?: number;
+}
+export interface Authorization {
+    id: string;
+    clientId: string;
+    label?: string;
+    startDate: string;
+    endDate: string;
+    buckets: Partial<Record<AuthBucketKey, number>>;
+    weekly?: AuthWeeklyRates;
+    reportFinalDue?: string;
+    reportDraftDue?: string;
+}
+export interface ManualUsage {
+    id: string;
+    clientId: string;
+    bucket: AuthBucketKey;
+    hours: number;
+    date: string;
+    note?: string;
+}
+export type CancellationSource = 'bt' | 'bcba' | 'admin' | 'family';
+export declare const CANCELLATION_SOURCES: {
+    value: CancellationSource;
+    label: string;
+}[];
+export type CancellationReason = 'sick' | 'pto' | 'training' | 'holiday' | 'weather' | 'auth_issues';
+export declare const CANCELLATION_REASONS: {
+    value: CancellationReason;
+    label: string;
+}[];
+export interface Cancellation {
+    source: CancellationSource;
+    reason: CancellationReason;
+    unplanned: boolean;
+    noticeMet?: boolean;
+    canceledAt?: string;
+    notes?: string;
 }
 export interface Appointment {
     id: string;
@@ -62,9 +142,23 @@ export interface Appointment {
     endTime: string;
     isFixed: boolean;
     isBillable: boolean;
-    type: 'supervision' | 'parent-training' | 'internal-task' | 'client-session' | 'other';
+    type: 'supervision' | 'parent-training' | 'internal-task' | 'client-session' | 'reassessment' | 'case-planning' | 'other';
+    isMakeUp?: boolean;
+    makeupForId?: string;
     isRecurring?: boolean;
     recurringPattern?: 'weekly' | 'biweekly' | 'monthly';
+    seriesId?: string;
+    status?: AppointmentStatus;
+    cancellation?: Cancellation;
+}
+export interface Blackout {
+    id: string;
+    entityType: 'technician' | 'client';
+    entityId: string;
+    entityName?: string;
+    date: string;
+    reason?: string;
+    createdAt?: string;
 }
 export interface ScheduleData {
     id: string;
@@ -73,7 +167,25 @@ export interface ScheduleData {
     technicians: Technician[];
     settings: CompanySettings;
     appointments: Appointment[];
+    blackouts?: Blackout[];
+    authorizations?: Authorization[];
+    manualUsage?: ManualUsage[];
     lastModified: string;
+}
+export type PartyAvailabilityStatus = 'ok' | 'outside' | 'none' | 'blackout';
+export interface PartyAvailability {
+    role: 'Technician' | 'Client';
+    name: string;
+    status: PartyAvailabilityStatus;
+    windows: TimeWindow[];
+    blackoutReason?: string;
+}
+export interface AvailabilityConflictDetail {
+    day: DayOfWeek;
+    date: string;
+    start: string;
+    end: string;
+    parties: PartyAvailability[];
 }
 export interface ScheduleConflict {
     type: 'supervision-violation' | 'training-violation' | 'availability-conflict' | 'scheduling-impossible';
@@ -81,6 +193,7 @@ export interface ScheduleConflict {
     message: string;
     affectedAppointments?: string[];
     affectedTechnicians?: string[];
+    availabilityDetail?: AvailabilityConflictDetail;
 }
 export interface ScheduleSolution {
     id: string;

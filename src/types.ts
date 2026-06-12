@@ -5,6 +5,20 @@ export interface TimeWindow {
   end: string;   // HH:MM format
 }
 
+// BCBA supervision pacing goal for a case. Soft guidance (drives "are we
+// seeing them enough" warnings), NOT a service-stopping rule — the BACB
+// observed-contacts floor and the supervision % floor are the hard lines.
+//   W   — weekly (typically ~15+ direct h/wk cases)
+//   EOW — every other week (~10–15 h/wk)
+//   3o4 — three of every four weeks (focused-model / lower-hours cases)
+export type SupervisionCadence = 'W' | 'EOW' | '3o4';
+
+export const SUPERVISION_CADENCES: { value: SupervisionCadence; label: string; contactsPerMonth: number }[] = [
+  { value: 'W', label: 'Weekly', contactsPerMonth: 4 },
+  { value: 'EOW', label: 'Every other week', contactsPerMonth: 2 },
+  { value: '3o4', label: '3 of every 4 weeks', contactsPerMonth: 3 },
+];
+
 export interface Client {
   id: string;
   name: string; // anonymized
@@ -16,6 +30,23 @@ export interface Client {
   // the per-case max takes precedence — i.e. the client is capped below
   // the company target floor and is not flagged for being below target.
   parentTrainingMaxHours?: number;
+  // --- Per-case clinical / scheduling metadata (drives the correction engine) ---
+  // Soft supervision pacing goal (see SupervisionCadence).
+  cadenceGoal?: SupervisionCadence;
+  // Early-Intervention case + the relevant EI date (eligibility / transition).
+  isEI?: boolean;
+  eiDate?: string;
+  // Whether the family permits a session to be covered by only part of the
+  // usual staffing (e.g. one of two assigned BTs). Default true; when false,
+  // the engine will not propose partial coverage. (Sheet: "Partial Staff Allowed?")
+  partialStaffAllowed?: boolean;
+  // Whether the parent is available for parent-training OUTSIDE a direct
+  // session. Default false: when false, parent-training must coincide with the
+  // parent's availability / an active direct session — a HARD boundary for the
+  // engine, not a soft preference.
+  parentAvailableOutsideSessions?: boolean;
+  // Free-text anticipated discharge note/date (e.g. EI transition at age 3).
+  anticipatedDischarge?: string;
   notes?: string;
 }
 
@@ -65,6 +96,23 @@ export interface CompanySettings {
   // or per-tech ratio that exceeds it is flagged in the dashboard so the
   // BCBA can adjust before the case runs out of authorized supervision hours.
   supervisionMaxHoursPercent?: number;
+  // Supervision percentage band used by the correction engine (all % of a
+  // case's / tech's direct hours):
+  //   floor    — the company-mandated minimum that must always be met (default 10).
+  //   preferredMin/Max — the band the BCBA aims for when capacity allows
+  //                      (defaults 15 / 20). preferredMax doubles as the cap when
+  //                      supervisionMaxHoursPercent is unset.
+  // These are orthogonal to supervisionDirectHoursPercent (the legacy per-case
+  // dashboard target) — the engine reads these; the dashboard keeps the legacy field.
+  supervisionFloorPercent?: number;
+  supervisionPreferredMinPercent?: number;
+  supervisionPreferredMaxPercent?: number;
+  // Internal reassessment-report pacing lead times (weeks before the insurer
+  // due date): the final draft goes to the back office `reportLeadWeeksBackOffice`
+  // weeks out, and to the clinical director `reportLeadWeeksClinicalDirector`
+  // weeks before THAT. Defaults 4 and 1. Used only to pace the reassessment block.
+  reportLeadWeeksBackOffice?: number;
+  reportLeadWeeksClinicalDirector?: number;
   parentTraining: {
     minimumHours: number;
     targetMinHours: number;
@@ -118,13 +166,33 @@ export const AUTH_BUCKETS: { key: AuthBucketKey; label: string }[] = [
   { key: 'casePlanning', label: 'Case Planning' },
 ];
 
+// Per-week authorized service rates. The insurer authorizes a weekly MAX for
+// each ongoing service; supervision is conventionally 20% of authorized direct
+// (and that 20% IS the insurer cap). Reassessment is handled as a per-auth
+// block via `buckets.reassessment`, not a weekly rate.
+export interface AuthWeeklyRates {
+  direct?: number;          // authorized direct h/week
+  supervision?: number;     // authorized supervision h/week (≈ 20% of direct)
+  parentTraining?: number;  // authorized parent-training h/week
+  casePlanning?: number;    // authorized case-planning h/week
+}
+
 export interface Authorization {
   id: string;
   clientId: string;
   label?: string;            // payer / auth number, free text
   startDate: string;         // YYYY-MM-DD inclusive
-  endDate: string;           // YYYY-MM-DD inclusive — the "makeup cliff"
-  buckets: Partial<Record<AuthBucketKey, number>>; // authorized hours per bucket
+  endDate: string;           // YYYY-MM-DD inclusive — the service / "makeup cliff"
+  // Authorized hours per bucket, totalled over the auth span. Retained for the
+  // existing span-usage tracking + adopt-forward manual hours.
+  buckets: Partial<Record<AuthBucketKey, number>>;
+  // Per-WEEK authorized rates — what the correction engine reasons over. The
+  // weekly direct rate also feeds the 75%-staffing rule. Optional for backward
+  // compatibility with auths entered before weekly rates existed.
+  weekly?: AuthWeeklyRates;
+  // Internal reassessment-report pacing deadlines (NOT the service cliff).
+  reportFinalDue?: string;   // YYYY-MM-DD the report is due to the insurer
+  reportDraftDue?: string;   // YYYY-MM-DD an earlier internal draft milestone
 }
 
 // Hours consumed outside the system (sessions held before adopting the app,

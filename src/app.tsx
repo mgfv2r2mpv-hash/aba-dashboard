@@ -13,6 +13,7 @@ import ConflictPanel from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
 import AdminPanel from './components/AdminPanel';
 import ComplianceDashboard from './components/ComplianceDashboard';
+import CaseloadView from './components/CaseloadView';
 import FileUpload from './components/FileUpload';
 import Settings, { AISettings, ClaudeModel } from './components/Settings';
 import AppointmentForm from './components/AppointmentForm';
@@ -68,7 +69,7 @@ export default function App() {
   const [conflicts, setConflicts] = useState<ScheduleConflict[]>([]);
   const [solutions, setSolutions] = useState<ScheduleSolution[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [view, setView] = useState<'schedule' | 'admin' | 'compliance'>('schedule');
+  const [view, setView] = useState<'schedule' | 'admin' | 'compliance' | 'caseload'>('schedule');
   const [showSettings, setShowSettings] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
@@ -645,6 +646,9 @@ export default function App() {
                 onSelectAppointment={(a) => { setView('schedule'); setSelectedAppointment(a); }}
               />
             )}
+            {view === 'caseload' && (
+              <CaseloadView data={scheduleData} now={viewDate} />
+            )}
           </>
         ) : (
           <div style={{
@@ -740,13 +744,14 @@ export default function App() {
 // Three-way segmented control for the active view. Sits inline in the header
 // at compact-button size so it doesn't blow up the chrome.
 function ViewTabs({ view, onChange }: {
-  view: 'schedule' | 'admin' | 'compliance';
-  onChange: (v: 'schedule' | 'admin' | 'compliance') => void;
+  view: 'schedule' | 'admin' | 'compliance' | 'caseload';
+  onChange: (v: 'schedule' | 'admin' | 'compliance' | 'caseload') => void;
 }) {
-  const tabs: { key: 'schedule' | 'admin' | 'compliance'; label: string; aria: string }[] = [
+  const tabs: { key: 'schedule' | 'admin' | 'compliance' | 'caseload'; label: string; aria: string }[] = [
     { key: 'schedule', label: 'Sched', aria: 'Schedule' },
     { key: 'admin', label: 'Admin', aria: 'Admin' },
     { key: 'compliance', label: 'Comp', aria: 'Compliance' },
+    { key: 'caseload', label: 'Cases', aria: 'Caseload' },
   ];
   return (
     <div style={{ display: 'flex', borderRadius: 5, overflow: 'hidden', border: '1px solid #4b5563' }}>

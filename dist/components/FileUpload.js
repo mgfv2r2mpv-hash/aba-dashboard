@@ -12,12 +12,16 @@ export default function FileUpload({ onUpload, loading }) {
         }
     };
     return (_jsxs(_Fragment, { children: [_jsx("input", { ref: fileInputRef, type: "file", accept: ".xlsx", onChange: handleChange, style: { display: 'none' } }), _jsx("button", { onClick: handleClick, disabled: loading, style: {
-                    padding: '8px 16px',
+                    padding: '5px 9px',
                     backgroundColor: loading ? '#d1d5db' : '#3b82f6',
                     color: 'white',
                     border: 'none',
-                    borderRadius: '6px',
+                    borderRadius: 5,
                     cursor: loading ? 'not-allowed' : 'pointer',
-                }, children: loading ? 'Loading...' : 'Upload Schedule' })] }));
+                    fontSize: 13,
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                    lineHeight: 1.2,
+                }, children: loading ? '…' : 'Upload' })] }));
 }
 //# sourceMappingURL=FileUpload.js.map

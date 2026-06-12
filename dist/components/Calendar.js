@@ -1,101 +1,486 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useState } from 'react';
-import { startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, format, isSameMonth, addMonths, subMonths } from 'date-fns';
-export default function Calendar({ appointments, technicians, clients, onAppointmentChange, onSelectAppointment, }) {
+import React, { useState, useEffect } from 'react';
+import { rollupHours, resolveUtilization } from '../utilization';
+import { startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay, } from 'date-fns';
+const VISIBLE_START_HOUR = 6;
+const VISIBLE_END_HOUR = 22;
+const HOUR_HEIGHT = 40;
+const TIME_AXIS_WIDTH = 52;
+// Snap drag movements to 15-minute slots — matches typical scheduling resolution.
+const SNAP_MINUTES = 15;
+function useIsLandscape() {
+    const [landscape, setLandscape] = useState(() => typeof window === 'undefined' ? false : window.matchMedia('(orientation: landscape)').matches);
+    useEffect(() => {
+        if (typeof window === 'undefined')
+            return;
+        const mq = window.matchMedia('(orientation: landscape)');
+        const handler = (e) => setLandscape(e.matches);
+        mq.addEventListener('change', handler);
+        return () => mq.removeEventListener('change', handler);
+    }, []);
+    return landscape;
+}
+export default function Calendar({ appointments, technicians: _technicians, clients: _clients, settings, onAppointmentChange, onSelectAppointment, onViewDateChange, }) {
+    const [view, setView] = useState('month');
+    const [lens, setLens] = useState('bcba');
     const [currentDate, setCurrentDate] = useState(new Date());
-    const [selectedDate, setSelectedDate] = useState(null);
+    const isLandscape = useIsLandscape();
+    // Surface the viewed anchor date to the parent whenever it changes.
+    useEffect(() => {
+        onViewDateChange?.(currentDate);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentDate]);
+    // The lens hides the other party's appointments: BT = has a technician,
+    // BCBA = none. Totals are computed from these filtered appointments too.
+    const lensAppts = appointments.filter(a => (lens === 'bt' ? !!a.technician : !a.technician));
+    // When a schedule loads with no appointments in the currently-shown range,
+    // jump to the earliest appointment so users see their data.
+    useEffect(() => {
+        if (appointments.length === 0)
+            return;
+        const inRange = appointments.some(a => {
+            const d = new Date(a.startTime);
+            return view === 'month'
+                ? isSameMonth(d, currentDate)
+                : d >= startOfWeek(currentDate) && d <= endOfWeek(currentDate);
+        });
+        if (inRange)
+            return;
+        const earliest = appointments
+            .map(a => new Date(a.startTime))
+            .filter(d => !isNaN(d.getTime()))
+            .sort((a, b) => a.getTime() - b.getTime())[0];
+        if (earliest)
+            setCurrentDate(earliest);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [appointments, view]);
+    const goPrev = () => setCurrentDate(view === 'month' ? subMonths(currentDate, 1) : subWeeks(currentDate, 1));
+    const goNext = () => setCurrentDate(view === 'month' ? addMonths(currentDate, 1) : addWeeks(currentDate, 1));
+    const goToday = () => setCurrentDate(new Date());
+    const headerLabel = view === 'month'
+        ? format(currentDate, 'MMMM yyyy')
+        : (() => {
+            const ws = startOfWeek(currentDate);
+            const we = endOfWeek(currentDate);
+            const sameMonth = isSameMonth(ws, we);
+            return sameMonth
+                ? `${format(ws, 'MMM d')}–${format(we, 'd, yyyy')}`
+                : `${format(ws, 'MMM d')} – ${format(we, 'MMM d, yyyy')}`;
+        })();
+    return (_jsxs("div", { style: { padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: {
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    marginBottom: 16, gap: 8, flexWrap: 'wrap',
+                }, children: [_jsxs("div", { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }, children: [_jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: view === 'month', onClick: () => setView('month'), children: "Month" }), _jsx(ViewBtn, { active: view === 'week', onClick: () => setView('week'), children: "Week" })] }), _jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: lens === 'bcba', onClick: () => setLens('bcba'), children: "BCBA" }), _jsx(ViewBtn, { active: lens === 'bt', onClick: () => setLens('bt'), children: "BT" })] })] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] }), _jsx("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }, children: headerLabel })] }), view === 'month'
+                ? _jsx(MonthView, { currentDate: currentDate, appointments: lensAppts, lens: lens, settings: settings, onSelectAppointment: onSelectAppointment })
+                : _jsx(WeekView, { currentDate: currentDate, appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape }), view === 'week' && !isLandscape && (_jsx("p", { style: { fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }, children: "Rotate to landscape to drag appointments to a new time." }))] }));
+}
+// ---------- Month View ----------
+function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment }) {
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(monthStart);
     const calendarStart = startOfWeek(monthStart);
     const calendarEnd = endOfWeek(monthEnd);
-    const calendarDays = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
-    const getAppointmentsForDate = (date) => {
-        const dateStr = format(date, 'yyyy-MM-dd');
-        return appointments.filter(a => a.startTime.startsWith(dateStr));
+    const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
+    const util = resolveUtilization(settings?.utilization);
+    const weeklyTarget = lens === 'bt' ? util.btWeeklyDirectHours : util.bcbaWeeklyBillableHours;
+    const weekRows = days.length / 7;
+    // Week rows that touch the month at all — drives the ribbon and the BT
+    // monthly denominator (weeks present × weekly target).
+    let inMonthWeeks = 0;
+    // "Work weeks" for the BCBA monthly goal: a row only counts as a full work
+    // week if it has 3+ of this month's weekdays. June 2026's trailing Mon/Tue
+    // (Jun 29–30) is a 2-weekday stub, so June is a 4-week month, not 5.
+    let workWeeks = 0;
+    for (let r = 0; r < weekRows; r++) {
+        const row = days.slice(r * 7, r * 7 + 7);
+        if (row.some(d => isSameMonth(d, monthStart)))
+            inMonthWeeks++;
+        const weekdaysInMonth = row.filter(d => isSameMonth(d, monthStart) && getDay(d) >= 1 && getDay(d) <= 5).length;
+        if (weekdaysInMonth >= 3)
+            workWeeks++;
+    }
+    const monthlyGoal = workWeeks >= 5 ? util.bcbaMonthlyBillableHours5Week : util.bcbaMonthlyBillableHours;
+    // One rollup per grid week, for the side ribbon.
+    const weekSummaries = Array.from({ length: weekRows }, (_, r) => {
+        const weekStart = days[r * 7];
+        return {
+            weekStart,
+            inMonth: days.slice(r * 7, r * 7 + 7).some(d => isSameMonth(d, monthStart)),
+            hours: rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens),
+        };
+    });
+    const monthHours = rollupHours(appointments, monthStart.getTime(), monthEnd.getTime() + 1, lens);
+    return (_jsxs("div", { style: { display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }, children: [_jsxs("div", { style: { flex: '1 1 260px', minWidth: 0 }, children: [_jsx("div", { style: {
+                            display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1,
+                            backgroundColor: '#e5e7eb', marginBottom: 1,
+                        }, children: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (_jsx("div", { style: {
+                                padding: '10px 8px', backgroundColor: '#f9f9f9',
+                                fontWeight: 600, textAlign: 'center', fontSize: 13,
+                            }, children: d }, d))) }), _jsx("div", { style: {
+                            display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, backgroundColor: '#e5e7eb',
+                        }, children: days.map(day => {
+                            const dayAppts = appointmentsOn(appointments, day);
+                            const inCurrentMonth = isSameMonth(day, monthStart);
+                            const isToday = isSameDay(day, new Date());
+                            const dow = getDay(day); // 0 = Sun
+                            const weekStart = startOfWeek(day);
+                            return (_jsxs("div", { style: {
+                                    backgroundColor: inCurrentMonth ? '#ffffff' : '#f3f4f6',
+                                    minHeight: 110, padding: 6, opacity: inCurrentMonth ? 1 : 0.5,
+                                }, children: [_jsx("div", { style: {
+                                            fontWeight: isToday ? 700 : 400,
+                                            marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: 12,
+                                        }, children: format(day, 'd') }), _jsxs("div", { style: { display: 'flex', flexDirection: 'column', gap: 2 }, children: [dayAppts.slice(0, 3).map(apt => (_jsx(AppointmentChip, { apt: apt, onClick: () => onSelectAppointment(apt) }, apt.id))), dayAppts.length > 3 && (_jsxs("div", { style: { fontSize: 10, color: '#9ca3af' }, children: ["+", dayAppts.length - 3, " more"] }))] }), inCurrentMonth && dow === 0 && (_jsx(SundayTotal, { lens: lens, hours: rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens), target: weeklyTarget }))] }, format(day, 'yyyy-MM-dd')));
+                        }) })] }), _jsx(WeekRibbon, { lens: lens, weeks: weekSummaries, weeklyTarget: weeklyTarget, monthHours: monthHours, monthlyGoal: lens === 'bcba' ? monthlyGoal : undefined, monthWeeks: lens === 'bcba' ? workWeeks : inMonthWeeks })] }));
+}
+// Round to ≤1 decimal, dropping a trailing .0.
+function fmtH(n) {
+    const r = Math.round(n * 10) / 10;
+    return Number.isInteger(r) ? String(r) : r.toFixed(1);
+}
+// On-track color from completed-vs-target, allowing scheduled to "rescue" it.
+function trackColor(hours, target) {
+    const projected = hours.completed + hours.scheduled;
+    if (hours.completed >= target)
+        return '#15803d'; // met
+    if (projected >= target)
+        return '#b45309'; // on pace
+    return '#b91c1c'; // behind
+}
+// Compact weekly total printed inside the Sunday cell. Headlines the live total
+// (completed + scheduled) so booked-but-not-yet-done hours are visible, with the
+// ✓completed / ◻scheduled / ✕canceled breakdown and a cap gauge.
+function SundayTotal({ lens, hours, target }) {
+    const live = hours.completed + hours.scheduled;
+    const color = trackColor(hours, target);
+    return (_jsxs("div", { style: { marginTop: 4, fontSize: 9, lineHeight: 1.25 }, title: `${lens === 'bt' ? 'BT direct' : 'BCBA billable'} this week: ${fmtH(hours.completed)}h completed, ${fmtH(hours.scheduled)}h scheduled, ${fmtH(hours.canceled)}h canceled — target ${fmtH(target)}h`, children: [_jsx("div", { style: { fontWeight: 700, color: '#374151' }, children: lens === 'bt' ? 'BT wk' : 'BCBA wk' }), _jsxs("div", { style: { fontWeight: 600, color }, children: [fmtH(live), "/", fmtH(target), "h"] }), _jsxs("div", { style: { color: '#6b7280' }, children: ["\u2713", fmtH(hours.completed), " \u25FB", fmtH(hours.scheduled), hours.canceled > 0 ? ` ✕${fmtH(hours.canceled)}` : ''] }), _jsx(CapBar, { hours: hours, target: target })] }));
+}
+// Usage gauge. Full width = target (e.g., 165h goal). Segments left→right:
+// completed (green), scheduled (gray), then canceled — family (orange) and
+// staff (red) — to the RIGHT of a black "cap" line drawn at the live total
+// (completed + scheduled). As sessions cancel, the live total drops, the black
+// cap line shifts left, and the canceled hours show the lost ceiling.
+function CapBar({ hours, target }) {
+    const denom = target > 0
+        ? target
+        : Math.max(hours.completed + hours.scheduled + hours.canceled, 1);
+    const pct = (h) => Math.max(0, Math.min(100, (h / denom) * 100));
+    const capPct = Math.max(0, Math.min(100, ((hours.completed + hours.scheduled) / denom) * 100));
+    return (_jsxs("div", { style: { position: 'relative', marginTop: 4 }, children: [_jsxs("div", { style: { height: 8, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden', display: 'flex' }, children: [_jsx("div", { style: { width: `${pct(hours.completed)}%`, background: '#16a34a' } }), _jsx("div", { style: { width: `${pct(hours.scheduled)}%`, background: '#9ca3af' } }), _jsx("div", { style: { width: `${pct(hours.canceledFamily)}%`, background: '#f97316' } }), _jsx("div", { style: { width: `${pct(hours.canceledStaff)}%`, background: '#dc2626' } })] }), _jsx("div", { style: { position: 'absolute', top: -1, bottom: -1, left: `${capPct}%`, width: 2, background: '#111827', transform: 'translateX(-1px)' }, title: "Scheduled cap (completed + scheduled)" })] }));
+}
+// Vertical ribbon beside the grid: one row per in-month week + a month total.
+function WeekRibbon({ lens, weeks, weeklyTarget, monthHours, monthlyGoal, monthWeeks }) {
+    return (_jsxs("div", { style: { flex: '1 1 150px', minWidth: 140, maxWidth: 240, display: 'flex', flexDirection: 'column', gap: 6 }, children: [_jsx("div", { style: { fontSize: 12, fontWeight: 700, color: '#111827' }, children: lens === 'bt' ? 'BT direct hours' : 'BCBA billable hours' }), weeks.filter(w => w.inMonth).map((w, i) => {
+                const color = trackColor(w.hours, weeklyTarget);
+                const live = w.hours.completed + w.hours.scheduled;
+                return (_jsxs("div", { style: { border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 8px', background: '#fff' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 }, children: [_jsxs("span", { style: { fontSize: 11, fontWeight: 600, color: '#374151' }, children: ["Wk ", format(w.weekStart, 'M/d')] }), _jsxs("span", { style: { fontSize: 11, fontWeight: 700, color }, children: [fmtH(live), "/", fmtH(weeklyTarget), "h"] })] }), _jsx(CapBar, { hours: w.hours, target: weeklyTarget }), _jsxs("div", { style: { fontSize: 10, color: '#6b7280', marginTop: 3 }, children: ["\u2713", fmtH(w.hours.completed), " \u00B7 \u25FB", fmtH(w.hours.scheduled), w.hours.canceled > 0 ? ` · ✕${fmtH(w.hours.canceled)}` : ''] })] }, i));
+            }), _jsx(MonthTotalRow, { lens: lens, hours: monthHours, goal: monthlyGoal, weeklyTarget: weeklyTarget, monthWeeks: monthWeeks }), _jsx(Legend, {})] }));
+}
+function MonthTotalRow({ lens, hours, goal, weeklyTarget, monthWeeks }) {
+    const live = hours.completed + hours.scheduled;
+    // BCBA has an explicit monthly goal; BT rolls up against weeks × weekly target.
+    const denom = goal ?? weeklyTarget * monthWeeks;
+    const color = goal !== undefined
+        ? (hours.completed >= goal ? '#15803d' : live >= goal ? '#b45309' : '#b91c1c')
+        : trackColor(hours, denom);
+    return (_jsxs("div", { style: { border: '1px solid #d1d5db', borderRadius: 6, padding: '8px', background: '#f9fafb' }, children: [_jsxs("div", { style: { fontSize: 11, fontWeight: 700, color: '#111827' }, children: ["Month total", goal !== undefined ? ` (${monthWeeks}-wk goal)` : ''] }), _jsxs("div", { style: { fontSize: 13, fontWeight: 700, color, marginTop: 2 }, children: [fmtH(live), "/", fmtH(denom), "h"] }), _jsx(CapBar, { hours: hours, target: denom }), _jsxs("div", { style: { fontSize: 10, color: '#6b7280', marginTop: 4 }, children: ["\u2713", fmtH(hours.completed), "h done \u00B7 \u25FB", fmtH(hours.scheduled), "h sched", hours.canceled > 0 ? ` · ✕${fmtH(hours.canceled)}h canc` : ''] })] }));
+}
+function Legend() {
+    const items = [
+        { c: '#9ca3af', label: 'Pending' },
+        { c: '#16a34a', label: 'Completed' },
+        { c: '#f97316', label: 'Family cancel' },
+        { c: '#dc2626', label: 'Staff cancel' },
+    ];
+    return (_jsxs("div", { style: { display: 'flex', flexWrap: 'wrap', gap: '4px 10px', fontSize: 10, color: '#6b7280', marginTop: 2 }, children: [items.map(it => (_jsxs("span", { style: { display: 'inline-flex', alignItems: 'center', gap: 4 }, children: [_jsx("span", { style: { width: 9, height: 9, borderRadius: 2, background: it.c, display: 'inline-block' } }), it.label] }, it.label))), _jsxs("span", { style: { display: 'inline-flex', alignItems: 'center', gap: 4 }, children: [_jsx("span", { style: { width: 2, height: 11, background: '#111827', display: 'inline-block' } }), "Scheduled cap"] })] }));
+}
+// ---------- Week View ----------
+function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmentChange, dragEnabled }) {
+    const weekStart = startOfWeek(currentDate);
+    const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+    const hours = Array.from({ length: VISIBLE_END_HOUR - VISIBLE_START_HOUR }, (_, i) => VISIBLE_START_HOUR + i);
+    const totalHeight = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * HOUR_HEIGHT;
+    const today = new Date();
+    // Active drag — only one appointment moves at a time. dragState tracks
+    // the snapped delta so we can show a floating preview tooltip and apply
+    // the change on pointer release.
+    const [dragState, setDragState] = useState(null);
+    // Window-level pointer listeners so the drag survives when the cursor
+    // leaves the original block.
+    useEffect(() => {
+        if (!dragState)
+            return;
+        const onMove = (e) => {
+            const deltaY = e.clientY - dragState.startY;
+            const rawMin = (deltaY / HOUR_HEIGHT) * 60;
+            const snappedMin = Math.round(rawMin / SNAP_MINUTES) * SNAP_MINUTES;
+            // Use elementFromPoint to detect which day column the cursor is over.
+            // Each day column carries a data-day-iso attribute.
+            const el = document.elementFromPoint(e.clientX, e.clientY);
+            const dayEl = el?.closest('[data-day-iso]');
+            const targetDayISO = dayEl?.dataset.dayIso || dragState.targetDayISO;
+            setDragState(prev => prev && {
+                ...prev,
+                deltaMin: snappedMin,
+                targetDayISO,
+                cursorX: e.clientX,
+                cursorY: e.clientY,
+            });
+        };
+        const onUp = () => {
+            const ds = dragState;
+            setDragState(null);
+            if (!ds)
+                return;
+            const newStart = computeDraggedStart(ds.apt, ds.deltaMin, ds.targetDayISO);
+            const newEnd = computeDraggedEnd(ds.apt, ds.deltaMin, ds.targetDayISO);
+            if (newStart === ds.apt.startTime && newEnd === ds.apt.endTime)
+                return;
+            onAppointmentChange({ ...ds.apt, startTime: newStart, endTime: newEnd });
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
+        return () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onUp);
+        };
+    }, [dragState, onAppointmentChange]);
+    const beginDrag = (apt, e) => {
+        if (!dragEnabled)
+            return;
+        // Locked = canceled or completed. The legacy isFixed field is ignored.
+        if (apt.status === 'canceled' || apt.status === 'completed')
+            return;
+        e.preventDefault();
+        e.stopPropagation();
+        const day = apt.startTime.slice(0, 10);
+        setDragState({
+            apt, startY: e.clientY, deltaMin: 0,
+            targetDayISO: day, cursorX: e.clientX, cursorY: e.clientY,
+        });
     };
-    const getTechnicianName = (id) => {
-        if (!id)
-            return 'Unknown';
-        const tech = technicians.find(t => t.id === id || t.name === id);
-        return tech?.name || id;
+    return (_jsxs("div", { style: { overflowX: 'auto' }, children: [_jsxs("div", { style: { display: 'flex', minWidth: 560, borderBottom: '1px solid #e5e7eb' }, children: [_jsx("div", { style: { width: TIME_AXIS_WIDTH, flexShrink: 0 } }), days.map(day => {
+                        const isToday = isSameDay(day, today);
+                        return (_jsxs("div", { style: {
+                                flex: 1, textAlign: 'center', padding: '8px 4px',
+                                fontSize: 12, fontWeight: 600,
+                                color: isToday ? '#3b82f6' : '#374151',
+                                backgroundColor: isToday ? '#eff6ff' : 'transparent',
+                                borderLeft: '1px solid #f3f4f6',
+                            }, children: [_jsx("div", { children: format(day, 'EEE') }), _jsx("div", { style: { fontSize: 16 }, children: format(day, 'd') })] }, day.toISOString()));
+                    })] }), _jsxs("div", { style: { display: 'flex', minWidth: 560, height: totalHeight, position: 'relative' }, children: [_jsx("div", { style: { width: TIME_AXIS_WIDTH, flexShrink: 0, position: 'relative', borderRight: '1px solid #e5e7eb' }, children: hours.map(h => (_jsx("div", { style: {
+                                position: 'absolute', top: (h - VISIBLE_START_HOUR) * HOUR_HEIGHT,
+                                fontSize: 10, color: '#6b7280', padding: '2px 4px', right: 4,
+                            }, children: formatHourLabel(h) }, h))) }), days.map(day => {
+                        const dayISO = format(day, 'yyyy-MM-dd');
+                        const dayAppts = appointmentsOn(appointments, day);
+                        const laid = layoutAppointments(dayAppts);
+                        const isToday = isSameDay(day, today);
+                        return (_jsxs("div", { "data-day-iso": dayISO, style: {
+                                flex: 1, position: 'relative', borderLeft: '1px solid #f3f4f6',
+                                backgroundColor: isToday ? '#fafbff' : 'transparent',
+                            }, children: [hours.map(h => (_jsx("div", { style: {
+                                        position: 'absolute', top: (h - VISIBLE_START_HOUR) * HOUR_HEIGHT,
+                                        left: 0, right: 0, borderTop: '1px solid #f3f4f6',
+                                    } }, h))), laid.map(({ appt, lane, lanes }) => {
+                                    const layout = appointmentLayout(appt);
+                                    if (!layout)
+                                        return null;
+                                    const widthPct = 100 / lanes;
+                                    const beingDragged = dragState?.apt.id === appt.id;
+                                    return (_jsx(AppointmentBlock, { apt: appt, onClick: () => onSelectAppointment(appt), onPointerDown: dragEnabled ? (e) => beginDrag(appt, e) : undefined, dragHandle: dragEnabled && appt.status !== 'canceled' && appt.status !== 'completed', style: {
+                                            position: 'absolute',
+                                            top: layout.top,
+                                            height: layout.height,
+                                            left: `calc(${lane * widthPct}% + 2px)`,
+                                            width: `calc(${widthPct}% - 4px)`,
+                                            opacity: beingDragged ? 0.4 : 1,
+                                        } }, appt.id));
+                                })] }, dayISO));
+                    })] }), dragState && (() => {
+                const newStart = computeDraggedStart(dragState.apt, dragState.deltaMin, dragState.targetDayISO);
+                const d = new Date(newStart);
+                return (_jsx("div", { style: {
+                        position: 'fixed',
+                        top: dragState.cursorY + 14,
+                        left: dragState.cursorX + 14,
+                        background: '#1f2937', color: 'white',
+                        padding: '6px 10px', borderRadius: 4, fontSize: 12,
+                        pointerEvents: 'none', zIndex: 1500, boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+                        whiteSpace: 'nowrap',
+                    }, children: format(d, 'EEE M/d, h:mm a') }));
+            })()] }));
+}
+// Returns the new ISO startTime if we apply the snapped time delta and the
+// targeted day column. Preserves the original time-of-day baseline + applies
+// the minute offset, then changes the date to the target day.
+function computeDraggedStart(apt, deltaMin, targetDayISO) {
+    const original = new Date(apt.startTime);
+    const target = new Date(`${targetDayISO}T00:00:00`);
+    // Use the original's hours/minutes as the baseline, shifted by deltaMin.
+    const newDate = new Date(target);
+    newDate.setHours(original.getHours(), original.getMinutes() + deltaMin, 0, 0);
+    return formatLocalISO(newDate);
+}
+function computeDraggedEnd(apt, deltaMin, targetDayISO) {
+    const original = new Date(apt.startTime);
+    const originalEnd = new Date(apt.endTime);
+    const durationMs = originalEnd.getTime() - original.getTime();
+    const start = new Date(computeDraggedStart(apt, deltaMin, targetDayISO));
+    return formatLocalISO(new Date(start.getTime() + durationMs));
+}
+// Match the `YYYY-MM-DDTHH:MM:SS` format used by the seeder so calendar
+// `startTime.startsWith('YYYY-MM-DD')` filters keep working.
+function formatLocalISO(d) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+// ---------- Shared chip / block / helpers ----------
+function appointmentsOn(appointments, date) {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    return appointments.filter(a => a.startTime.startsWith(dateStr));
+}
+// Status-based coloring so cancellation trends are visible at a glance across a
+// week: gray = pending, green = completed, and canceled splits by who canceled —
+// orange-red for family, bright red for staff (BT/BCBA/admin). Appointment type
+// is conveyed by the title text rather than color in this view.
+function appointmentLook(apt) {
+    const canceled = apt.status === 'canceled';
+    const completed = apt.status === 'completed';
+    let background = '#9ca3af'; // pending
+    if (completed)
+        background = '#16a34a';
+    else if (canceled)
+        background = apt.cancellation?.source === 'family' ? '#f97316' : '#dc2626';
+    return {
+        canceled, completed,
+        background,
+        color: 'white',
+        statusIcon: canceled ? '✕' : completed ? '✓' : null,
+        statusColor: 'rgba(255,255,255,0.95)',
     };
-    const getTypeColor = (type, isFixed) => {
-        if (isFixed)
-            return '#ef4444';
-        switch (type) {
-            case 'supervision':
-                return '#10b981';
-            case 'parent-training':
-                return '#3b82f6';
-            case 'client-session':
-                return '#8b5cf6';
-            case 'internal-task':
-                return '#6b7280';
-            default:
-                return '#9ca3af';
+}
+function AppointmentChip({ apt, onClick }) {
+    const look = appointmentLook(apt);
+    return (_jsxs("div", { onClick: e => { e.stopPropagation(); onClick(); }, style: {
+            background: look.background, color: look.color,
+            padding: '3px 4px', borderRadius: 3, fontSize: 10,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            cursor: 'pointer', position: 'relative',
+            paddingRight: look.statusIcon ? 14 : 4,
+            textDecoration: look.canceled ? 'line-through' : 'none',
+            opacity: look.canceled ? 0.85 : 1,
+            border: 'none',
+        }, title: apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), children: [apt.title, look.statusIcon && (_jsx("span", { style: { position: 'absolute', top: 1, right: 3, fontSize: 10, fontWeight: 700, color: look.statusColor, lineHeight: 1 }, children: look.statusIcon }))] }));
+}
+function AppointmentBlock({ apt, onClick, onPointerDown, dragHandle, style }) {
+    const look = appointmentLook(apt);
+    // When drag is enabled, suppress the click (click fires after pointerup
+    // and would re-open the detail panel after a drag). Track whether the
+    // pointer moved meaningfully between down and up to distinguish tap vs drag.
+    const movedRef = React.useRef(false);
+    return (_jsxs("div", { onPointerDown: (e) => {
+            movedRef.current = false;
+            if (onPointerDown)
+                onPointerDown(e);
+        }, onPointerMove: () => { movedRef.current = true; }, onClick: e => {
+            e.stopPropagation();
+            if (movedRef.current && dragHandle)
+                return; // it was a drag, not a tap
+            onClick();
+        }, style: {
+            ...style,
+            background: look.background, color: look.color,
+            padding: '4px 6px', borderRadius: 4, fontSize: 11,
+            overflow: 'hidden', cursor: dragHandle ? 'grab' : 'pointer', boxSizing: 'border-box',
+            border: '1px solid rgba(0,0,0,0.05)',
+            textDecoration: look.canceled ? 'line-through' : 'none',
+            touchAction: dragHandle ? 'none' : 'manipulation',
+        }, title: apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }, children: [_jsx("span", { style: { fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }, children: apt.title }), look.statusIcon && (_jsx("span", { style: { fontSize: 11, fontWeight: 700, color: look.statusColor, lineHeight: 1, flexShrink: 0 }, children: look.statusIcon }))] }), _jsxs("div", { style: { fontSize: 10, opacity: 0.85, marginTop: 2 }, children: [format(new Date(apt.startTime), 'h:mm'), "\u2013", format(new Date(apt.endTime), 'h:mm a')] })] }));
+}
+// Returns the {top, height} of an appointment in pixels within the week-view
+// time grid, or null if it falls entirely outside the visible hour range.
+function appointmentLayout(apt) {
+    const start = new Date(apt.startTime);
+    const end = new Date(apt.endTime);
+    if (isNaN(start.getTime()) || isNaN(end.getTime()))
+        return null;
+    const startHrs = start.getHours() + start.getMinutes() / 60;
+    const endHrs = end.getHours() + end.getMinutes() / 60;
+    if (endHrs <= VISIBLE_START_HOUR || startHrs >= VISIBLE_END_HOUR)
+        return null;
+    const clampedStart = Math.max(startHrs, VISIBLE_START_HOUR);
+    const clampedEnd = Math.min(endHrs, VISIBLE_END_HOUR);
+    const top = (clampedStart - VISIBLE_START_HOUR) * HOUR_HEIGHT;
+    const height = Math.max(20, (clampedEnd - clampedStart) * HOUR_HEIGHT);
+    return { top, height };
+}
+// Greedy lane assignment for overlapping appointments. Within each cluster of
+// overlapping events, every event gets a lane index 0..N-1 and N is recorded
+// so the renderer can size each event to (1/N) of the column width.
+function layoutAppointments(appts) {
+    const sorted = [...appts].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    const result = [];
+    let cluster = [];
+    let clusterEnd = -Infinity;
+    const flush = () => {
+        if (!cluster.length)
+            return;
+        const laneEnds = [];
+        const assigned = [];
+        for (const a of cluster) {
+            const start = new Date(a.startTime).getTime();
+            let lane = laneEnds.findIndex(e => e <= start);
+            if (lane === -1) {
+                lane = laneEnds.length;
+                laneEnds.push(0);
+            }
+            laneEnds[lane] = new Date(a.endTime).getTime();
+            assigned.push(lane);
         }
+        const lanes = laneEnds.length;
+        cluster.forEach((a, i) => result.push({ appt: a, lane: assigned[i], lanes }));
+        cluster = [];
     };
-    const goToPreviousMonth = () => setCurrentDate(subMonths(currentDate, 1));
-    const goToNextMonth = () => setCurrentDate(addMonths(currentDate, 1));
-    return (_jsxs("div", { style: { padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }, children: [_jsx("button", { onClick: goToPreviousMonth, style: {
-                            padding: '8px 12px',
-                            backgroundColor: '#e5e7eb',
-                            border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                        }, children: "\u2190 Previous" }), _jsx("h2", { style: { fontSize: '20px', fontWeight: 'bold' }, children: format(currentDate, 'MMMM yyyy') }), _jsx("button", { onClick: goToNextMonth, style: {
-                            padding: '8px 12px',
-                            backgroundColor: '#e5e7eb',
-                            border: 'none',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                        }, children: "Next \u2192" })] }), _jsx("div", { style: {
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(7, 1fr)',
-                    gap: '1px',
-                    backgroundColor: '#e5e7eb',
-                    marginBottom: '1px',
-                }, children: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (_jsx("div", { style: {
-                        padding: '12px 8px',
-                        backgroundColor: '#f9f9f9',
-                        fontWeight: '600',
-                        textAlign: 'center',
-                        fontSize: '13px',
-                    }, children: day }, day))) }), _jsx("div", { style: {
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(7, 1fr)',
-                    gap: '1px',
-                    backgroundColor: '#e5e7eb',
-                }, children: calendarDays.map(day => {
-                    const dayAppointments = getAppointmentsForDate(day);
-                    const isCurrentMonth = isSameMonth(day, monthStart);
-                    const isToday = format(day, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
-                    return (_jsxs("div", { style: {
-                            backgroundColor: isCurrentMonth ? '#ffffff' : '#f3f4f6',
-                            minHeight: '120px',
-                            padding: '8px',
-                            cursor: 'pointer',
-                            opacity: isCurrentMonth ? 1 : 0.5,
-                        }, onClick: () => setSelectedDate(day), children: [_jsx("div", { style: {
-                                    fontWeight: isToday ? 'bold' : 'normal',
-                                    marginBottom: '4px',
-                                    color: isToday ? '#3b82f6' : '#374151',
-                                    fontSize: '13px',
-                                }, children: format(day, 'd') }), _jsxs("div", { style: { display: 'flex', flexDirection: 'column', gap: '2px' }, children: [dayAppointments.slice(0, 3).map(apt => (_jsx("div", { onClick: e => {
-                                            e.stopPropagation();
-                                            onSelectAppointment(apt);
-                                        }, style: {
-                                            backgroundColor: getTypeColor(apt.type, apt.isFixed),
-                                            color: 'white',
-                                            padding: '3px 4px',
-                                            borderRadius: '3px',
-                                            fontSize: '10px',
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis',
-                                            whiteSpace: 'nowrap',
-                                            cursor: 'pointer',
-                                            border: apt.isFixed ? '2px solid #dc2626' : 'none',
-                                        }, title: apt.title, children: apt.title }, apt.id))), dayAppointments.length > 3 && (_jsxs("div", { style: { fontSize: '10px', color: '#9ca3af' }, children: ["+", dayAppointments.length - 3, " more"] }))] })] }, format(day, 'yyyy-MM-dd')));
-                }) })] }));
+    for (const a of sorted) {
+        const start = new Date(a.startTime).getTime();
+        const end = new Date(a.endTime).getTime();
+        if (start >= clusterEnd) {
+            flush();
+            clusterEnd = end;
+        }
+        else {
+            clusterEnd = Math.max(clusterEnd, end);
+        }
+        cluster.push(a);
+    }
+    flush();
+    return result;
+}
+function formatHourLabel(h) {
+    if (h === 0)
+        return '12a';
+    if (h === 12)
+        return '12p';
+    if (h < 12)
+        return `${h}a`;
+    return `${h - 12}p`;
+}
+// ---------- Toolbar buttons ----------
+function ViewBtn({ active, onClick, children }) {
+    return (_jsx("button", { onClick: onClick, style: {
+            padding: '6px 14px', border: 'none',
+            backgroundColor: active ? '#3b82f6' : 'white',
+            color: active ? 'white' : '#374151',
+            cursor: 'pointer', fontSize: 13, fontWeight: 600,
+        }, children: children }));
+}
+function NavBtn({ onClick, children }) {
+    return (_jsx("button", { onClick: onClick, style: {
+            padding: '6px 12px', backgroundColor: '#e5e7eb', border: 'none',
+            borderRadius: 4, cursor: 'pointer', fontSize: 13,
+        }, children: children }));
 }
 //# sourceMappingURL=Calendar.js.map

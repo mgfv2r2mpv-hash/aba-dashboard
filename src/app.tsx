@@ -18,6 +18,8 @@ import Settings, { AISettings, ClaudeModel } from './components/Settings';
 import AppointmentForm from './components/AppointmentForm';
 import SetupWizard from './components/SetupWizard';
 import CancellationDialog from './components/CancellationDialog';
+import DayReview from './components/DayReview';
+import { pastIncompleteAppointments } from './compliance';
 import { encryptString, decryptString } from './clientCrypto';
 
 // Route axios /api/* calls through an in-memory store on iOS/Android,
@@ -79,7 +81,11 @@ export default function App() {
   // The month/week the calendar is showing. Conflicts are scoped to this so the
   // Issues panel reflects what you're looking at, not just today.
   const [viewDate, setViewDate] = useState<Date>(new Date());
+  const [showDayReview, setShowDayReview] = useState(false);
   const detailPanelRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Past-dated sessions still marked scheduled — the day-review queue.
+  const pendingReview = scheduleData ? pastIncompleteAppointments(scheduleData) : [];
 
   // On narrow screens the right-side detail panel wraps below the calendar.
   // When the user taps an appointment, scroll the detail into view so they
@@ -487,6 +493,19 @@ export default function App() {
             {view === 'schedule' && (
               <>
                 <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+                  {pendingReview.length > 0 && (
+                    <button
+                      onClick={() => setShowDayReview(true)}
+                      style={{
+                        display: 'block', width: 'calc(100% - 16px)', margin: '8px',
+                        padding: '8px 12px', backgroundColor: '#fef3c7',
+                        border: '1px solid #fcd34d', borderRadius: 6, cursor: 'pointer',
+                        fontSize: 13, fontWeight: 600, color: '#92400e', textAlign: 'left',
+                      }}
+                    >
+                      📋 {pendingReview.length} past session{pendingReview.length === 1 ? '' : 's'} awaiting review — complete or cancel them
+                    </button>
+                  )}
                   <Calendar
                     appointments={scheduleData.appointments}
                     technicians={scheduleData.technicians}
@@ -684,6 +703,8 @@ export default function App() {
 
       {showAddAppointment && scheduleData && (
         <AppointmentForm
+          allAppointments={scheduleData.appointments}
+          authorizations={scheduleData.authorizations}
           technicians={scheduleData.technicians}
           clients={scheduleData.clients}
           onSave={handleSaveAppointments}
@@ -695,11 +716,21 @@ export default function App() {
         <AppointmentForm
           appointment={editingAppointment}
           allAppointments={scheduleData.appointments}
+          authorizations={scheduleData.authorizations}
           technicians={scheduleData.technicians}
           clients={scheduleData.clients}
           onSave={handleSaveAppointments}
           onDelete={handleDeleteAppointments}
           onCancel={() => setEditingAppointment(null)}
+        />
+      )}
+
+      {showDayReview && scheduleData && (
+        <DayReview
+          appointments={pendingReview}
+          onComplete={handleMarkComplete}
+          onRequestCancel={(a) => setCancelTarget(a)}
+          onClose={() => setShowDayReview(false)}
         />
       )}
     </div>

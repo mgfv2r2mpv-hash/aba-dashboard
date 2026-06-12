@@ -218,6 +218,47 @@ function computeTechMetrics(
   return result;
 }
 
+// BACB cadence: distinct calendar days in the period where a supervision
+// appointment overlaps one of this tech's direct sessions. Every counted
+// contact is an observed overlap, satisfying the "at least one observation"
+// requirement inherently.
+export function computeTechContactDays(
+  data: ScheduleData,
+  tech: Technician,
+  period: CompliancePeriod,
+  scope: 'actual' | 'projected',
+  now: Date = new Date(),
+): number {
+  const startMs = period.start.getTime();
+  const endMs = period.end.getTime();
+  const inScope = (a: Appointment) => {
+    if (a.status === 'canceled') return false;
+    if (scope === 'projected') return true;
+    return new Date(a.startTime).getTime() <= now.getTime();
+  };
+  const inPeriod = (a: Appointment) => {
+    const t = new Date(a.startTime).getTime();
+    return t >= startMs && t < endMs;
+  };
+  const matchesTech = (a: Appointment) =>
+    a.technician === tech.id || a.technician === tech.name;
+
+  const direct = data.appointments.filter(a =>
+    matchesTech(a) && a.type === 'client-session' && inPeriod(a) && inScope(a)
+  );
+  const supervisions = data.appointments.filter(a =>
+    a.type === 'supervision' && inPeriod(a) && inScope(a)
+  );
+
+  const days = new Set<string>();
+  for (const sup of supervisions) {
+    if (direct.some(d => overlapHours(sup, d) > 0)) {
+      days.add(sup.startTime.slice(0, 10));
+    }
+  }
+  return days.size;
+}
+
 // Past-dated, non-canceled, not-yet-completed appointments. Surfaced in the
 // dashboard so the BCBA can finalize them into the actual roll.
 export function pastIncompleteAppointments(

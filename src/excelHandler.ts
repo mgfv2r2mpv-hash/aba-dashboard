@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { ScheduleData, Appointment, Technician, Client, CompanySettings, DayOfWeek, Blackout } from './types';
+import { ScheduleData, Appointment, Technician, Client, CompanySettings, DayOfWeek, Blackout, Authorization, ManualUsage, AUTH_BUCKETS } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface ParsedSchedule {
@@ -17,6 +17,8 @@ export function parseWorkbook(workbook: XLSX.WorkBook): ParsedSchedule {
   const settings = parseSettings(workbook);
   const appointments = parseAppointments(workbook);
   const blackouts = parseBlackouts(workbook);
+  const authorizations = parseAuthorizations(workbook);
+  const manualUsage = parseManualUsage(workbook);
   const embeddedConfig = parseEmbeddedConfig(workbook);
 
   return {
@@ -28,10 +30,51 @@ export function parseWorkbook(workbook: XLSX.WorkBook): ParsedSchedule {
       settings,
       appointments,
       blackouts,
+      authorizations,
+      manualUsage,
       lastModified: new Date().toISOString(),
     },
     embeddedConfig,
   };
+}
+
+function parseAuthorizations(workbook: XLSX.WorkBook): Authorization[] {
+  const sheet = workbook.Sheets['Authorizations'];
+  if (!sheet) return [];
+  const data = XLSX.utils.sheet_to_json(sheet) as any[];
+  return data
+    .filter(row => row && row.clientId && row.startDate && row.endDate)
+    .map((row: any) => {
+      const buckets: Authorization['buckets'] = {};
+      for (const { key } of AUTH_BUCKETS) {
+        const v = parseFloat(row[key]);
+        if (Number.isFinite(v) && v > 0) buckets[key] = v;
+      }
+      return {
+        id: row.id || uuidv4(),
+        clientId: String(row.clientId),
+        label: row.label || undefined,
+        startDate: normalizeDateString(row.startDate),
+        endDate: normalizeDateString(row.endDate),
+        buckets,
+      };
+    });
+}
+
+function parseManualUsage(workbook: XLSX.WorkBook): ManualUsage[] {
+  const sheet = workbook.Sheets['ManualUsage'];
+  if (!sheet) return [];
+  const data = XLSX.utils.sheet_to_json(sheet) as any[];
+  return data
+    .filter(row => row && row.clientId && row.bucket && row.date)
+    .map((row: any) => ({
+      id: row.id || uuidv4(),
+      clientId: String(row.clientId),
+      bucket: row.bucket,
+      hours: parseFloat(row.hours) || 0,
+      date: normalizeDateString(row.date),
+      note: row.note || undefined,
+    }));
 }
 
 function parseBlackouts(workbook: XLSX.WorkBook): Blackout[] {
@@ -146,12 +189,31 @@ function parseSettings(workbook: XLSX.WorkBook): CompanySettings {
     } catch (_e) { /* ignore malformed clinician availability */ }
   }
 
-  return {
+  const settings: CompanySettings = {
     supervisionDirectHoursPercent: parseFloat(row.supervisionDirectHoursPercent) || 5,
     supervisionRBTHoursPercent: parseFloat(row.supervisionRBTHoursPercent) || 5,
     parentTraining: { minimumHours, targetMinHours, targetMaxHours, periodUnit },
     clinicianAvailability,
   };
+
+  const techPct = parseFloat(row.supervisionTechHoursPercent);
+  if (Number.isFinite(techPct)) settings.supervisionTechHoursPercent = techPct;
+  const maxPct = parseFloat(row.supervisionMaxHoursPercent);
+  if (Number.isFinite(maxPct)) settings.supervisionMaxHoursPercent = maxPct;
+  const minContacts = parseFloat(row.rbtMinContactsPerMonth);
+  if (Number.isFinite(minContacts)) settings.rbtMinContactsPerMonth = minContacts;
+  // JSON-packed compound settings (utilization targets, cancellation notice).
+  for (const [col, key] of [['utilization', 'utilization'], ['cancellationNotice', 'cancellationNotice']] as const) {
+    const raw = row[col];
+    if (typeof raw === 'string' && raw.trim()) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') (settings as any)[key] = parsed;
+      } catch (_e) { /* ignore malformed */ }
+    }
+  }
+
+  return settings;
 }
 
 function parseAppointments(workbook: XLSX.WorkBook): Appointment[] {
@@ -174,6 +236,8 @@ function parseAppointments(workbook: XLSX.WorkBook): Appointment[] {
       isRecurring: row.isRecurring === 'TRUE' || row.isRecurring === true,
       recurringPattern: row.recurringPattern,
       seriesId: row.seriesId || undefined,
+      isMakeUp: row.isMakeUp === 'TRUE' || row.isMakeUp === true || undefined,
+      makeupForId: row.makeupForId || undefined,
     };
     if (row.status === 'completed' || row.status === 'canceled') {
       appt.status = row.status;
@@ -280,6 +344,11 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
     clinicianAvailability: data.settings.clinicianAvailability
       ? JSON.stringify(data.settings.clinicianAvailability)
       : '',
+    supervisionTechHoursPercent: data.settings.supervisionTechHoursPercent ?? '',
+    supervisionMaxHoursPercent: data.settings.supervisionMaxHoursPercent ?? '',
+    rbtMinContactsPerMonth: data.settings.rbtMinContactsPerMonth ?? '',
+    utilization: data.settings.utilization ? JSON.stringify(data.settings.utilization) : '',
+    cancellationNotice: data.settings.cancellationNotice ? JSON.stringify(data.settings.cancellationNotice) : '',
   }];
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(settingsData), 'Settings');
 
@@ -298,6 +367,8 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
     isRecurring: a.isRecurring ? 'TRUE' : 'FALSE',
     recurringPattern: a.recurringPattern,
     seriesId: a.seriesId || '',
+    isMakeUp: a.isMakeUp ? 'TRUE' : '',
+    makeupForId: a.makeupForId || '',
     status: a.status || 'scheduled',
     cancellationSource: a.cancellation?.source || '',
     cancellationReason: a.cancellation?.reason || '',
@@ -322,6 +393,23 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
     createdAt: b.createdAt || '',
   }));
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(blackoutsData), 'Blackouts');
+
+  // Authorizations sheet — bucket hours as columns keyed by AuthBucketKey.
+  const authData = (data.authorizations || []).map(a => {
+    const row: any = {
+      id: a.id, clientId: a.clientId, label: a.label || '',
+      startDate: a.startDate, endDate: a.endDate,
+    };
+    for (const { key } of AUTH_BUCKETS) row[key] = a.buckets[key] ?? '';
+    return row;
+  });
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(authData), 'Authorizations');
+
+  const usageData = (data.manualUsage || []).map(u => ({
+    id: u.id, clientId: u.clientId, bucket: u.bucket,
+    hours: u.hours, date: u.date, note: u.note || '',
+  }));
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(usageData), 'ManualUsage');
 
   return XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
 }

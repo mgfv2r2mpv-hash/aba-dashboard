@@ -16,6 +16,7 @@ import {
   computeTechContactDays,
 } from './compliance';
 import { computeAuthUsage } from './authorization';
+import { computeCaseState } from './caseModel';
 
 export class ConstraintValidator {
   private data: ScheduleData;
@@ -45,6 +46,61 @@ export class ConstraintValidator {
     conflicts.push(...this.validateAvailability());
     conflicts.push(...this.validateSupervision());
     conflicts.push(...this.validateAuthorizations());
+    conflicts.push(...this.validateCaseModel());
+
+    return conflicts;
+  }
+
+  // Weekly-rate + pacing checks layered on the per-case decision model. These
+  // are intentionally distinct from validateAuthorizations (span-bucket totals)
+  // and validateSupervision (monthly floors): they cover the WEEKLY authorized
+  // direct rate (75% staffing, over-authorized = unbillable) and the soft
+  // pacing goals (cadence, reassessment-report deadlines). Current month only.
+  private validateCaseModel(): ScheduleConflict[] {
+    const conflicts: ScheduleConflict[] = [];
+    const fmt = (n: number) => (Math.round(n * 10) / 10).toString();
+
+    for (const client of this.data.clients) {
+      const cs = computeCaseState(this.data, client, this.now);
+      if (!cs.auth) continue;
+
+      // Over the authorized WEEKLY direct rate is unbillable.
+      if (cs.direct.authPerWk > 0 && cs.direct.actualThisWk > cs.direct.authPerWk + 0.01) {
+        conflicts.push({
+          type: 'scheduling-impossible',
+          severity: 'warning',
+          message: `${client.name}: ${fmt(cs.direct.actualThisWk)}h direct scheduled this week vs ${fmt(cs.direct.authPerWk)}h authorized/week — overage is unbillable`,
+        });
+      } else if (cs.direct.below75) {
+        // 75% staffing is a soft target.
+        conflicts.push({
+          type: 'scheduling-impossible',
+          severity: 'info',
+          message: `${client.name}: direct ${fmt(cs.direct.actualThisWk)}h is ${Math.round(cs.direct.pctOfAuth)}% of the ${fmt(cs.direct.authPerWk)}h/wk authorization (below the 75% staffing target)`,
+        });
+      }
+
+      // Supervision pacing cadence (soft).
+      if (cs.supervision.contactsRequiredByCadence !== undefined &&
+          cs.supervision.contactsThisMonth < cs.supervision.contactsRequiredByCadence &&
+          cs.supervision.directHoursMonth > 0) {
+        conflicts.push({
+          type: 'supervision-violation',
+          severity: 'info',
+          message: `${client.name}: ${cs.supervision.contactsThisMonth} supervision contact(s) projected vs the ${cs.supervision.cadenceGoal} pacing goal (${cs.supervision.contactsRequiredByCadence}) for ${cs.monthLabel}`,
+        });
+      }
+
+      // Reassessment-report pacing (soft → warning when behind a near deadline).
+      if (!cs.reassessment.paceOk) {
+        const due = cs.reassessment.internalClinicalDirectorDue || cs.reassessment.reportDraftDue;
+        conflicts.push({
+          type: 'scheduling-impossible',
+          severity: 'warning',
+          message: `${client.name}: reassessment ${fmt(cs.reassessment.usedH)}/${fmt(cs.reassessment.blockH)}h with internal report due ${due || '?'} (${cs.reassessment.daysToInternalDue ?? '?'} day(s)) — pace the block`,
+        });
+      }
+    }
 
     return conflicts;
   }

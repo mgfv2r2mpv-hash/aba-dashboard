@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES } from '../types';
 import { computeAuthUsage } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 import { resolveUtilization } from '../utilization';
@@ -886,6 +886,51 @@ function ClientCard({ client, saving, onChange, onRemove }: {
         />
         <span style={{ fontSize: '11px', color: '#6b7280' }}>h per case-period</span>
       </div>
+
+      {/* Per-case clinical / scheduling metadata (feeds the correction engine) */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10, fontSize: 12, color: '#374151' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span>Supervision cadence:</span>
+          <select
+            value={client.cadenceGoal || ''}
+            onChange={e => onChange({ cadenceGoal: (e.target.value || undefined) as SupervisionCadence | undefined })}
+            style={{ ...inputStyle, width: 'auto' }}
+          >
+            <option value="">—</option>
+            {SUPERVISION_CADENCES.map(c => <option key={c.value} value={c.value}>{c.value} · {c.label}</option>)}
+          </select>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="When OFF, parent training must coincide with a direct session.">
+          <input type="checkbox" checked={client.parentAvailableOutsideSessions === true}
+            onChange={e => onChange({ parentAvailableOutsideSessions: e.target.checked || undefined })} />
+          <span>Parent available outside sessions</span>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="When OFF, the engine won't propose partial-staff coverage.">
+          <input type="checkbox" checked={client.partialStaffAllowed !== false}
+            onChange={e => onChange({ partialStaffAllowed: e.target.checked ? undefined : false })} />
+          <span>Partial staff allowed</span>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input type="checkbox" checked={client.isEI === true}
+            onChange={e => onChange({ isEI: e.target.checked || undefined })} />
+          <span>EI case</span>
+        </label>
+        {client.isEI && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span>EI date:</span>
+            <input type="date" value={client.eiDate || ''}
+              onChange={e => onChange({ eiDate: e.target.value || undefined })} style={{ ...inputStyle, width: 140 }} />
+          </label>
+        )}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 180px' }}>
+          <span style={{ whiteSpace: 'nowrap' }}>Anticipated discharge:</span>
+          <input value={client.anticipatedDischarge || ''}
+            onBlur={e => { if ((e.target.value || undefined) !== client.anticipatedDischarge) onChange({ anticipatedDischarge: e.target.value || undefined }); }}
+            defaultValue={client.anticipatedDischarge || ''}
+            placeholder="date / note" style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
+        </label>
+      </div>
+
       {!editing ? (
         <AvailabilitySummary windows={client.availabilityWindows} />
       ) : (
@@ -926,9 +971,10 @@ function AuthsTab({ data, savingId, onUpsertAuth, onRemoveAuth, onUpsertUsage, o
     <div>
       <h3 style={{ marginBottom: '8px', fontSize: '18px', fontWeight: 'bold' }}>Authorizations</h3>
       <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '16px' }}>
-        Authorized hours per bucket for each client's auth period. Appointments consume buckets by type;
-        use manual entries for hours delivered before adopting this system (adopt-forward — no history needed).
-        The end date is the makeup cliff.
+        Set the authorized <strong>weekly rates</strong> (direct / supervision / parent-training / case-planning) —
+        what the correction engine paces against; supervision ≈ 20% of direct is the insurer cap. Span-total
+        buckets below remain for tracking + the per-auth reassessment block. Use manual entries for hours
+        delivered before adopting this system (adopt-forward). The end date is the service / makeup cliff.
       </p>
       <div style={{ display: 'grid', gap: '16px' }}>
         {data.clients.map(client => {
@@ -1031,6 +1077,43 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
         {usage.daysLeft < 0 ? `Expired ${-usage.daysLeft} day(s) ago` : `${usage.daysLeft} day(s) until auth ends`}
       </p>
       {saving && <p style={{ fontSize: 11, color: '#3b82f6' }}>Saving…</p>}
+
+      {/* Per-week authorized rates — what the correction engine reasons over. */}
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #e5e7eb' }}>
+        <p style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>
+          Authorized weekly rates <span style={{ fontWeight: 400, color: '#9ca3af' }}>(supervision ≈ 20% of direct = the cap)</span>
+        </p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {([['direct', 'Direct'], ['supervision', 'Supervision'], ['parentTraining', 'Parent trng'], ['casePlanning', 'Case plan']] as const).map(([key, lbl]) => (
+            <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 10, color: '#6b7280' }}>{lbl} h/wk</span>
+              <input
+                type="number" step="0.5" min="0" inputMode="decimal"
+                defaultValue={auth.weekly?.[key] !== undefined ? String(auth.weekly[key]) : ''}
+                onBlur={e => {
+                  const v = parseFloat(e.target.value);
+                  const next = { ...(auth.weekly || {}) };
+                  if (Number.isFinite(v) && v > 0) next[key] = v; else delete next[key];
+                  onChange({ weekly: Object.keys(next).length ? next : undefined });
+                }}
+                placeholder="—" style={{ ...inputStyle, width: 64 }}
+              />
+            </label>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 10, color: '#6b7280' }}>Report final due (insurer)</span>
+            <input type="date" value={auth.reportFinalDue || ''}
+              onChange={e => onChange({ reportFinalDue: e.target.value || undefined })} style={{ ...inputStyle, width: 150 }} />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 10, color: '#6b7280' }}>Report draft due (internal)</span>
+            <input type="date" value={auth.reportDraftDue || ''}
+              onChange={e => onChange({ reportDraftDue: e.target.value || undefined })} style={{ ...inputStyle, width: 150 }} />
+          </label>
+        </div>
+      </div>
 
       {/* Bucket table: authorized input + usage readout */}
       <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1267,6 +1350,11 @@ function SettingsEditor({ settings, saving, onSave }: {
   const [bcbaMonthly, setBcbaMonthly] = useState(s(u.bcbaMonthlyBillableHours));
   const [bcbaMonthly5, setBcbaMonthly5] = useState(s(u.bcbaMonthlyBillableHours5Week));
   const [minContacts, setMinContacts] = useState(s(settings.rbtMinContactsPerMonth ?? 2));
+  const [floorPct, setFloorPct] = useState(s(settings.supervisionFloorPercent ?? 10));
+  const [prefMinPct, setPrefMinPct] = useState(s(settings.supervisionPreferredMinPercent ?? 15));
+  const [prefMaxPct, setPrefMaxPct] = useState(s(settings.supervisionPreferredMaxPercent ?? 20));
+  const [leadBO, setLeadBO] = useState(s(settings.reportLeadWeeksBackOffice ?? 4));
+  const [leadCD, setLeadCD] = useState(s(settings.reportLeadWeeksClinicalDirector ?? 1));
 
   const num = (str: string, fallback: number) => {
     const n = parseFloat(str);
@@ -1302,6 +1390,11 @@ function SettingsEditor({ settings, saving, onSave }: {
         bcbaMonthlyBillableHours5Week: num(bcbaMonthly5, u.bcbaMonthlyBillableHours5Week),
       },
       rbtMinContactsPerMonth: num(minContacts, 2),
+      supervisionFloorPercent: num(floorPct, 10),
+      supervisionPreferredMinPercent: num(prefMinPct, 15),
+      supervisionPreferredMaxPercent: num(prefMaxPct, 20),
+      reportLeadWeeksBackOffice: num(leadBO, 4),
+      reportLeadWeeksClinicalDirector: num(leadCD, 1),
     };
     onSave(next);
   };
@@ -1319,6 +1412,17 @@ function SettingsEditor({ settings, saving, onSave }: {
         <NumField label="Per non-RBT tech — % of hours (optional)" value={techPct} onChange={setTechPct} suffix="%" placeholder="—" />
         <NumField label="RBT — min supervision contact days per month" value={minContacts} onChange={setMinContacts} suffix="days" hint="BACB cadence: distinct days with observed supervision. Default 2." />
         <NumField label="Insurer cap — max supervision:direct ratio (optional)" value={maxPct} onChange={setMaxPct} suffix="%" placeholder="—" hint="Over-cap ratios show as a warning; they don't change green/yellow/red status." />
+      </SettingsSection>
+
+      <SettingsSection title="Correction engine — supervision band">
+        <NumField label="Floor — minimum % that must always be met" value={floorPct} onChange={setFloorPct} suffix="%" hint="The engine never proposes shaving a case/BT below this. Default 10." />
+        <NumField label="Preferred min — % the BCBA aims for" value={prefMinPct} onChange={setPrefMinPct} suffix="%" hint="Default 15." />
+        <NumField label="Preferred max / cap — % ceiling" value={prefMaxPct} onChange={setPrefMaxPct} suffix="%" hint="Doubles as the cap when no insurer cap is set. Default 20." />
+      </SettingsSection>
+
+      <SettingsSection title="Reassessment report pacing">
+        <NumField label="Final draft to back office — weeks before insurer due" value={leadBO} onChange={setLeadBO} suffix="wks" hint="Default 4." />
+        <NumField label="To clinical director — weeks before that" value={leadCD} onChange={setLeadCD} suffix="wks" hint="Default 1 (so 5 weeks before the insurer due date)." />
       </SettingsSection>
 
       <SettingsSection title="Parent training">

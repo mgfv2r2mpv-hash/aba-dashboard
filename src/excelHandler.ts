@@ -50,7 +50,12 @@ function parseAuthorizations(workbook: XLSX.WorkBook): Authorization[] {
         const v = parseFloat(row[key]);
         if (Number.isFinite(v) && v > 0) buckets[key] = v;
       }
-      return {
+      const weekly: NonNullable<Authorization['weekly']> = {};
+      for (const wk of ['direct', 'supervision', 'parentTraining', 'casePlanning'] as const) {
+        const v = parseFloat(row[`weekly${wk.charAt(0).toUpperCase()}${wk.slice(1)}`]);
+        if (Number.isFinite(v) && v > 0) weekly[wk] = v;
+      }
+      const auth: Authorization = {
         id: row.id || uuidv4(),
         clientId: String(row.clientId),
         label: row.label || undefined,
@@ -58,6 +63,10 @@ function parseAuthorizations(workbook: XLSX.WorkBook): Authorization[] {
         endDate: normalizeDateString(row.endDate),
         buckets,
       };
+      if (Object.keys(weekly).length > 0) auth.weekly = weekly;
+      if (row.reportFinalDue) auth.reportFinalDue = normalizeDateString(row.reportFinalDue);
+      if (row.reportDraftDue) auth.reportDraftDue = normalizeDateString(row.reportDraftDue);
+      return auth;
     });
 }
 
@@ -139,6 +148,18 @@ function parseClients(workbook: XLSX.WorkBook): Client[] {
     if (ptMax !== undefined && Number.isFinite(ptMax)) {
       client.parentTrainingMaxHours = ptMax;
     }
+    if (row.cadenceGoal === 'W' || row.cadenceGoal === 'EOW' || row.cadenceGoal === '3o4') {
+      client.cadenceGoal = row.cadenceGoal;
+    }
+    if (row.isEI === 'TRUE' || row.isEI === true) client.isEI = true;
+    if (row.eiDate) client.eiDate = normalizeDateString(row.eiDate);
+    // Default true; only store false explicitly when the sheet says N.
+    if (row.partialStaffAllowed === 'FALSE' || row.partialStaffAllowed === false) client.partialStaffAllowed = false;
+    else if (row.partialStaffAllowed === 'TRUE' || row.partialStaffAllowed === true) client.partialStaffAllowed = true;
+    if (row.parentAvailableOutsideSessions === 'TRUE' || row.parentAvailableOutsideSessions === true) {
+      client.parentAvailableOutsideSessions = true;
+    }
+    if (row.anticipatedDischarge) client.anticipatedDischarge = String(row.anticipatedDischarge);
     return client;
   });
 }
@@ -202,6 +223,16 @@ function parseSettings(workbook: XLSX.WorkBook): CompanySettings {
   if (Number.isFinite(maxPct)) settings.supervisionMaxHoursPercent = maxPct;
   const minContacts = parseFloat(row.rbtMinContactsPerMonth);
   if (Number.isFinite(minContacts)) settings.rbtMinContactsPerMonth = minContacts;
+  for (const [col, key] of [
+    ['supervisionFloorPercent', 'supervisionFloorPercent'],
+    ['supervisionPreferredMinPercent', 'supervisionPreferredMinPercent'],
+    ['supervisionPreferredMaxPercent', 'supervisionPreferredMaxPercent'],
+    ['reportLeadWeeksBackOffice', 'reportLeadWeeksBackOffice'],
+    ['reportLeadWeeksClinicalDirector', 'reportLeadWeeksClinicalDirector'],
+  ] as const) {
+    const v = parseFloat(row[col]);
+    if (Number.isFinite(v)) (settings as any)[key] = v;
+  }
   // JSON-packed compound settings (utilization targets, cancellation notice).
   for (const [col, key] of [['utilization', 'utilization'], ['cancellationNotice', 'cancellationNotice']] as const) {
     const raw = row[col];
@@ -317,6 +348,12 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
     id: c.id,
     name: c.name,
     parentTrainingMaxHours: c.parentTrainingMaxHours ?? '',
+    cadenceGoal: c.cadenceGoal ?? '',
+    isEI: c.isEI ? 'TRUE' : '',
+    eiDate: c.eiDate ?? '',
+    partialStaffAllowed: c.partialStaffAllowed === false ? 'FALSE' : c.partialStaffAllowed === true ? 'TRUE' : '',
+    parentAvailableOutsideSessions: c.parentAvailableOutsideSessions ? 'TRUE' : '',
+    anticipatedDischarge: c.anticipatedDischarge ?? '',
     ...flattenAvailability(c.availabilityWindows),
     notes: c.notes,
   }));
@@ -346,6 +383,11 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
       : '',
     supervisionTechHoursPercent: data.settings.supervisionTechHoursPercent ?? '',
     supervisionMaxHoursPercent: data.settings.supervisionMaxHoursPercent ?? '',
+    supervisionFloorPercent: data.settings.supervisionFloorPercent ?? '',
+    supervisionPreferredMinPercent: data.settings.supervisionPreferredMinPercent ?? '',
+    supervisionPreferredMaxPercent: data.settings.supervisionPreferredMaxPercent ?? '',
+    reportLeadWeeksBackOffice: data.settings.reportLeadWeeksBackOffice ?? '',
+    reportLeadWeeksClinicalDirector: data.settings.reportLeadWeeksClinicalDirector ?? '',
     rbtMinContactsPerMonth: data.settings.rbtMinContactsPerMonth ?? '',
     utilization: data.settings.utilization ? JSON.stringify(data.settings.utilization) : '',
     cancellationNotice: data.settings.cancellationNotice ? JSON.stringify(data.settings.cancellationNotice) : '',
@@ -401,6 +443,12 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
       startDate: a.startDate, endDate: a.endDate,
     };
     for (const { key } of AUTH_BUCKETS) row[key] = a.buckets[key] ?? '';
+    row.weeklyDirect = a.weekly?.direct ?? '';
+    row.weeklySupervision = a.weekly?.supervision ?? '';
+    row.weeklyParentTraining = a.weekly?.parentTraining ?? '';
+    row.weeklyCasePlanning = a.weekly?.casePlanning ?? '';
+    row.reportFinalDue = a.reportFinalDue ?? '';
+    row.reportDraftDue = a.reportDraftDue ?? '';
     return row;
   });
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(authData), 'Authorizations');

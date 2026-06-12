@@ -9,6 +9,13 @@ import {
   PartyAvailabilityStatus,
   TrainingPeriodUnit,
 } from './types';
+import {
+  monthPeriod,
+  computeClientCompliance,
+  computeTechCompliance,
+  computeTechContactDays,
+} from './compliance';
+import { computeAuthUsage } from './authorization';
 
 export class ConstraintValidator {
   private data: ScheduleData;
@@ -36,6 +43,112 @@ export class ConstraintValidator {
     // sessions — both fundamentally wrong for BCBA case-supervision rules.
     conflicts.push(...this.validateParentTraining());
     conflicts.push(...this.validateAvailability());
+    conflicts.push(...this.validateSupervision());
+    conflicts.push(...this.validateAuthorizations());
+
+    return conflicts;
+  }
+
+  // Supervision compliance for the viewed month, with urgency that escalates as
+  // the month closes out:
+  //   - projected (everything scheduled) still short  -> error, always — waiting
+  //     can't fix it; sessions must be added.
+  //   - actual behind pace but scheduled would cover  -> warning past mid-month,
+  //     info before that.
+  // RBT cadence: distinct supervision contact-days vs the BACB monthly minimum.
+  private validateSupervision(): ScheduleConflict[] {
+    const conflicts: ScheduleConflict[] = [];
+    const period = monthPeriod(this.now);
+    const elapsed = Math.min(1, Math.max(0,
+      (this.now.getTime() - period.start.getTime()) / (period.end.getTime() - period.start.getTime())
+    ));
+    const pctOfMonth = Math.round(elapsed * 100);
+    const fmt = (n: number) => (Math.round(n * 10) / 10).toString();
+
+    for (const cc of computeClientCompliance(this.data, period, this.now)) {
+      if (cc.projected.directHours === 0 && cc.actual.directHours === 0) continue;
+      if (cc.projected.hoursToGo > 0.01) {
+        conflicts.push({
+          type: 'supervision-violation',
+          severity: 'error',
+          message: `${cc.client.name}: supervision short ${fmt(cc.projected.hoursToGo)}h for ${period.label} even if every scheduled session happens — add supervision overlapping a direct session`,
+        });
+      } else if (cc.actual.hoursToGo > 0.01 && elapsed >= 0.25) {
+        conflicts.push({
+          type: 'supervision-violation',
+          severity: elapsed >= 0.5 ? 'warning' : 'info',
+          message: `${cc.client.name}: supervision ${fmt(cc.actual.hoursToGo)}h behind pace with ${pctOfMonth}% of the month gone — scheduled sessions cover it only if they hold`,
+        });
+      }
+    }
+
+    const minContacts = this.data.settings.rbtMinContactsPerMonth ?? 2;
+    for (const tc of computeTechCompliance(this.data, period, this.now)) {
+      if (tc.projected.directHours === 0 && tc.actual.directHours === 0) continue;
+      const projGap = Math.max(tc.projected.companyHoursToGo, tc.projected.bacbHoursToGo ?? 0);
+      const actGap = Math.max(tc.actual.companyHoursToGo, tc.actual.bacbHoursToGo ?? 0);
+      if (projGap > 0.01) {
+        conflicts.push({
+          type: 'supervision-violation',
+          severity: 'error',
+          message: `${tc.tech.name}${tc.tech.isRBT ? ' (RBT)' : ''}: supervision short ${fmt(projGap)}h for ${period.label} even with everything scheduled`,
+          affectedTechnicians: [tc.tech.id],
+        });
+      } else if (actGap > 0.01 && elapsed >= 0.25) {
+        conflicts.push({
+          type: 'supervision-violation',
+          severity: elapsed >= 0.5 ? 'warning' : 'info',
+          message: `${tc.tech.name}${tc.tech.isRBT ? ' (RBT)' : ''}: supervision ${fmt(actGap)}h behind pace (${pctOfMonth}% of month gone)`,
+          affectedTechnicians: [tc.tech.id],
+        });
+      }
+
+      // Cadence applies to RBTs only; BTs are month-percentage only.
+      if (tc.tech.isRBT) {
+        const projContacts = computeTechContactDays(this.data, tc.tech, period, 'projected', this.now);
+        if (projContacts < minContacts) {
+          conflicts.push({
+            type: 'supervision-violation',
+            severity: elapsed >= 0.75 ? 'error' : 'warning',
+            message: `${tc.tech.name} (RBT): only ${projContacts} supervision contact day(s) projected for ${period.label}; BACB cadence needs ${minContacts} — spread supervision across separate days`,
+            affectedTechnicians: [tc.tech.id],
+          });
+        }
+      }
+    }
+
+    return conflicts;
+  }
+
+  // Authorization health: over-booking a bucket is an error; unused hours with
+  // the auth end (makeup cliff) approaching is a warning.
+  private validateAuthorizations(): ScheduleConflict[] {
+    const conflicts: ScheduleConflict[] = [];
+    const fmt = (n: number) => (Math.round(n * 10) / 10).toString();
+
+    for (const auth of this.data.authorizations || []) {
+      const usage = computeAuthUsage(this.data, auth, this.now);
+      if (usage.daysLeft < 0) continue; // expired — dead for compliance
+      const name = usage.client?.name || auth.clientId;
+      const tag = auth.label ? ` (${auth.label})` : '';
+
+      for (const b of usage.buckets) {
+        if (b.usage.authorized <= 0) continue;
+        if (b.usage.remaining < -0.01) {
+          conflicts.push({
+            type: 'scheduling-impossible',
+            severity: 'error',
+            message: `${name}${tag}: ${b.label} over-authorized — ${fmt(b.usage.projected)}h projected vs ${fmt(b.usage.authorized)}h authorized`,
+          });
+        } else if (b.usage.remaining > 0.01 && usage.daysLeft <= 21) {
+          conflicts.push({
+            type: 'scheduling-impossible',
+            severity: 'warning',
+            message: `${name}${tag}: ${fmt(b.usage.remaining)}h of ${b.label} unused with ${usage.daysLeft} day(s) until the auth ends ${auth.endDate} — makeup cliff`,
+          });
+        }
+      }
+    }
 
     return conflicts;
   }

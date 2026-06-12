@@ -91,6 +91,10 @@ export interface CompanySettings {
   };
   // Billable / utilization targets (BCBA weekly+monthly, BT weekly).
   utilization?: UtilizationSettings;
+  // BACB cadence: minimum distinct supervision contact-days per month for an
+  // RBT (at least one must observe service delivery — in this data model every
+  // counted contact is an observed overlap, so that's inherent). Default 2.
+  rbtMinContactsPerMonth?: number;
 }
 
 export const DEFAULT_CANCELLATION_NOTICE = {
@@ -99,6 +103,40 @@ export const DEFAULT_CANCELLATION_NOTICE = {
 };
 
 export type AppointmentStatus = 'scheduled' | 'completed' | 'canceled';
+
+// Insurance-authorization buckets. Hours are authorized per bucket for the
+// span of an Authorization, and consumed by appointments (mapped by type)
+// plus manual entries (hours delivered outside this system — adopt-forward,
+// no historical import).
+export type AuthBucketKey = 'supervision' | 'direct' | 'parentTraining' | 'reassessment' | 'casePlanning';
+
+export const AUTH_BUCKETS: { key: AuthBucketKey; label: string }[] = [
+  { key: 'supervision', label: 'Supervision / Protocol Revision' },
+  { key: 'direct', label: 'Direct Service' },
+  { key: 'parentTraining', label: 'Parent Training / Coord. of Care' },
+  { key: 'reassessment', label: 'Reassessment' },
+  { key: 'casePlanning', label: 'Case Planning' },
+];
+
+export interface Authorization {
+  id: string;
+  clientId: string;
+  label?: string;            // payer / auth number, free text
+  startDate: string;         // YYYY-MM-DD inclusive
+  endDate: string;           // YYYY-MM-DD inclusive — the "makeup cliff"
+  buckets: Partial<Record<AuthBucketKey, number>>; // authorized hours per bucket
+}
+
+// Hours consumed outside the system (sessions held before adopting the app,
+// or anything not entered as an appointment). Counts as used.
+export interface ManualUsage {
+  id: string;
+  clientId: string;
+  bucket: AuthBucketKey;
+  hours: number;
+  date: string;              // YYYY-MM-DD
+  note?: string;
+}
 
 // WHO initiated the cancellation. Source-only; reason is separate.
 export type CancellationSource = 'bt' | 'bcba' | 'admin' | 'family';
@@ -142,7 +180,12 @@ export interface Appointment {
   endTime: string;     // ISO 8601 format
   isFixed: boolean;    // cannot be moved
   isBillable: boolean;
-  type: 'supervision' | 'parent-training' | 'internal-task' | 'client-session' | 'other';
+  type: 'supervision' | 'parent-training' | 'internal-task' | 'client-session' | 'reassessment' | 'case-planning' | 'other';
+  // Make-up session: replaces hours lost to a cancellation. makeupForId points
+  // at the canceled appointment being made up (optional — a make-up can be
+  // "general" when the canceled session isn't tracked in the system).
+  isMakeUp?: boolean;
+  makeupForId?: string;
   isRecurring?: boolean;
   recurringPattern?: 'weekly' | 'biweekly' | 'monthly';
   // Shared by all occurrences of a recurring series — set when the series is
@@ -180,6 +223,10 @@ export interface ScheduleData {
   // Per-day "away" markers. Optional for backward compatibility with schedules
   // (and Excel files) created before blackouts existed; treat absent as [].
   blackouts?: Blackout[];
+  // Insurance authorizations + manually-entered consumed hours. Optional for
+  // backward compatibility; treat absent as [].
+  authorizations?: Authorization[];
+  manualUsage?: ManualUsage[];
   lastModified: string; // ISO 8601
 }
 

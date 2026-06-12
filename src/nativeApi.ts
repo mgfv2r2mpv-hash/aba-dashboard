@@ -171,6 +171,46 @@ async function route(method: string, path: string, body: any): Promise<any> {
     return { success: true, removed: before - data.appointments.length };
   }
 
+  if (m === 'POST' && path === '/api/admin/authorization') {
+    const data = requireData();
+    if (!body?.id || !body?.clientId || !body?.startDate || !body?.endDate) {
+      throw new HttpError('Authorization must have id, clientId, startDate, endDate');
+    }
+    if (!data.authorizations) data.authorizations = [];
+    const existing = data.authorizations.find(a => a.id === body.id);
+    if (existing) Object.assign(existing, body);
+    else data.authorizations.push(body);
+    return { success: true, authorization: existing || body };
+  }
+
+  const authIdMatch = path.match(/^\/api\/admin\/authorization\/([^/]+)$/);
+  if (m === 'DELETE' && authIdMatch) {
+    const data = requireData();
+    const before = (data.authorizations || []).length;
+    data.authorizations = (data.authorizations || []).filter(a => a.id !== authIdMatch[1]);
+    return { success: true, removed: before - data.authorizations.length };
+  }
+
+  if (m === 'POST' && path === '/api/admin/manual-usage') {
+    const data = requireData();
+    if (!body?.id || !body?.clientId || !body?.bucket || !body?.date) {
+      throw new HttpError('Manual usage must have id, clientId, bucket, date');
+    }
+    if (!data.manualUsage) data.manualUsage = [];
+    const existing = data.manualUsage.find(u => u.id === body.id);
+    if (existing) Object.assign(existing, body);
+    else data.manualUsage.push(body);
+    return { success: true, usage: existing || body };
+  }
+
+  const usageIdMatch = path.match(/^\/api\/admin\/manual-usage\/([^/]+)$/);
+  if (m === 'DELETE' && usageIdMatch) {
+    const data = requireData();
+    const before = (data.manualUsage || []).length;
+    data.manualUsage = (data.manualUsage || []).filter(u => u.id !== usageIdMatch[1]);
+    return { success: true, removed: before - data.manualUsage.length };
+  }
+
   if (m === 'POST' && path === '/api/admin/reorder') {
     const data = requireData();
     const entity = body?.entity;

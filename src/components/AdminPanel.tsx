@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS } from '../types';
+import { computeAuthUsage } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 import { resolveUtilization } from '../utilization';
 
@@ -14,7 +15,7 @@ const API_BASE = '/api';
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'blackouts' | 'settings'>('technicians');
+  const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'auths' | 'blackouts' | 'settings'>('technicians');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reordering, setReordering] = useState<null | 'clients' | 'technicians'>(null);
@@ -157,6 +158,69 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
     }
   };
 
+  const upsertAuth = async (auth: Authorization) => {
+    setSavingId(auth.id);
+    setError(null);
+    try {
+      const res = await axios.post(`${API_BASE}/admin/authorization`, auth);
+      const saved: Authorization = res.data.authorization || auth;
+      const list = data.authorizations || [];
+      const next = list.some(a => a.id === saved.id)
+        ? list.map(a => a.id === saved.id ? saved : a)
+        : [...list, saved];
+      onDataChange({ ...data, authorizations: next });
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const removeAuth = async (id: string) => {
+    if (!confirm('Remove this authorization? Manual hour entries are kept.')) return;
+    setSavingId(id);
+    setError(null);
+    try {
+      await axios.delete(`${API_BASE}/admin/authorization/${id}`);
+      onDataChange({ ...data, authorizations: (data.authorizations || []).filter(a => a.id !== id) });
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const upsertUsage = async (usage: ManualUsage) => {
+    setSavingId(usage.id);
+    setError(null);
+    try {
+      const res = await axios.post(`${API_BASE}/admin/manual-usage`, usage);
+      const saved: ManualUsage = res.data.usage || usage;
+      const list = data.manualUsage || [];
+      const next = list.some(u => u.id === saved.id)
+        ? list.map(u => u.id === saved.id ? saved : u)
+        : [...list, saved];
+      onDataChange({ ...data, manualUsage: next });
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const removeUsage = async (id: string) => {
+    setSavingId(id);
+    setError(null);
+    try {
+      await axios.delete(`${API_BASE}/admin/manual-usage/${id}`);
+      onDataChange({ ...data, manualUsage: (data.manualUsage || []).filter(u => u.id !== id) });
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   const reorderEntity = async (entity: 'clients' | 'technicians', orderedIds: string[]) => {
     setError(null);
     try {
@@ -193,6 +257,7 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
       <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9f9f9' }}>
         <button onClick={() => setActiveTab('technicians')} style={tabStyle(activeTab === 'technicians')}>Technicians</button>
         <button onClick={() => setActiveTab('clients')} style={tabStyle(activeTab === 'clients')}>Clients</button>
+        <button onClick={() => setActiveTab('auths')} style={tabStyle(activeTab === 'auths')}>Auths</button>
         <button onClick={() => setActiveTab('blackouts')} style={tabStyle(activeTab === 'blackouts')}>Blackouts</button>
         <button onClick={() => setActiveTab('settings')} style={tabStyle(activeTab === 'settings')}>Settings</button>
       </div>
@@ -284,6 +349,17 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'auths' && (
+          <AuthsTab
+            data={data}
+            savingId={savingId}
+            onUpsertAuth={upsertAuth}
+            onRemoveAuth={removeAuth}
+            onUpsertUsage={upsertUsage}
+            onRemoveUsage={removeUsage}
+          />
         )}
 
         {activeTab === 'blackouts' && (
@@ -824,6 +900,191 @@ function ClientCard({ client, saving, onChange, onRemove }: {
   );
 }
 
+function AuthsTab({ data, savingId, onUpsertAuth, onRemoveAuth, onUpsertUsage, onRemoveUsage }: {
+  data: ScheduleData;
+  savingId: string | null;
+  onUpsertAuth: (a: Authorization) => void;
+  onRemoveAuth: (id: string) => void;
+  onUpsertUsage: (u: ManualUsage) => void;
+  onRemoveUsage: (id: string) => void;
+}) {
+  const auths = data.authorizations || [];
+  const addAuthFor = (clientId: string) => {
+    const start = todayStr();
+    const end = new Date();
+    end.setMonth(end.getMonth() + 6);
+    onUpsertAuth({
+      id: uuidv4(),
+      clientId,
+      startDate: start,
+      endDate: `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`,
+      buckets: {},
+    });
+  };
+
+  return (
+    <div>
+      <h3 style={{ marginBottom: '8px', fontSize: '18px', fontWeight: 'bold' }}>Authorizations</h3>
+      <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '16px' }}>
+        Authorized hours per bucket for each client's auth period. Appointments consume buckets by type;
+        use manual entries for hours delivered before adopting this system (adopt-forward — no history needed).
+        The end date is the makeup cliff.
+      </p>
+      <div style={{ display: 'grid', gap: '16px' }}>
+        {data.clients.map(client => {
+          const clientAuths = auths.filter(a => a.clientId === client.id);
+          return (
+            <div key={client.id} style={cardStyle}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 600, fontSize: '15px' }}>{client.name}</span>
+                <button onClick={() => addAuthFor(client.id)} style={chipBtn}>+ Add authorization</button>
+              </div>
+              {clientAuths.length === 0 ? (
+                <p style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic', marginTop: 8 }}>No authorization on file.</p>
+              ) : clientAuths.map(auth => (
+                <AuthCard
+                  key={auth.id}
+                  data={data}
+                  auth={auth}
+                  saving={savingId === auth.id}
+                  onChange={(patch) => onUpsertAuth({ ...auth, ...patch })}
+                  onRemove={() => onRemoveAuth(auth.id)}
+                  onUpsertUsage={onUpsertUsage}
+                  onRemoveUsage={onRemoveUsage}
+                />
+              ))}
+            </div>
+          );
+        })}
+        {data.clients.length === 0 && (
+          <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>No clients yet.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRemoveUsage }: {
+  data: ScheduleData;
+  auth: Authorization;
+  saving: boolean;
+  onChange: (patch: Partial<Authorization>) => void;
+  onRemove: () => void;
+  onUpsertUsage: (u: ManualUsage) => void;
+  onRemoveUsage: (id: string) => void;
+}) {
+  const [label, setLabel] = useState(auth.label || '');
+  const [bucketDrafts, setBucketDrafts] = useState<{ [k in AuthBucketKey]?: string }>({});
+  // Manual entry add form
+  const [mBucket, setMBucket] = useState<AuthBucketKey>('direct');
+  const [mHours, setMHours] = useState('');
+  const [mDate, setMDate] = useState(todayStr());
+  const [mNote, setMNote] = useState('');
+
+  const usage = computeAuthUsage(data, auth, new Date());
+  const fmt = (n: number) => (Math.round(n * 10) / 10).toString();
+  const cliffColor = usage.daysLeft < 0 ? '#9ca3af' : usage.daysLeft <= 21 ? '#b91c1c' : usage.daysLeft <= 45 ? '#b45309' : '#15803d';
+
+  const commitBucket = (key: AuthBucketKey, raw: string) => {
+    const v = parseFloat(raw);
+    const next = { ...auth.buckets };
+    if (Number.isFinite(v) && v > 0) next[key] = v;
+    else delete next[key];
+    onChange({ buckets: next });
+    setBucketDrafts(prev => ({ ...prev, [key]: undefined }));
+  };
+
+  const manualInSpan = (data.manualUsage || []).filter(
+    u => u.clientId === auth.clientId && u.date >= auth.startDate && u.date <= auth.endDate
+  );
+
+  const addManual = () => {
+    const h = parseFloat(mHours);
+    if (!Number.isFinite(h) || h <= 0 || !mDate) return;
+    onUpsertUsage({
+      id: uuidv4(), clientId: auth.clientId, bucket: mBucket,
+      hours: h, date: mDate, note: mNote.trim() || undefined,
+    });
+    setMHours(''); setMNote('');
+  };
+
+  return (
+    <div style={{ marginTop: 10, padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: 6, background: 'white' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 140px', minWidth: 0 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>Auth label / number</span>
+          <input value={label} onChange={e => setLabel(e.target.value)}
+            onBlur={() => { if (label !== (auth.label || '')) onChange({ label: label || undefined }); }}
+            placeholder="optional" style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>Start</span>
+          <input type="date" value={auth.startDate} onChange={e => onChange({ startDate: e.target.value })} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>End (cliff)</span>
+          <input type="date" value={auth.endDate} onChange={e => onChange({ endDate: e.target.value })} style={inputStyle} />
+        </label>
+        <button onClick={onRemove} style={dangerBtn}>Remove</button>
+      </div>
+      <p style={{ fontSize: 12, fontWeight: 600, color: cliffColor, marginTop: 6 }}>
+        {usage.daysLeft < 0 ? `Expired ${-usage.daysLeft} day(s) ago` : `${usage.daysLeft} day(s) until auth ends`}
+      </p>
+      {saving && <p style={{ fontSize: 11, color: '#3b82f6' }}>Saving…</p>}
+
+      {/* Bucket table: authorized input + usage readout */}
+      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {AUTH_BUCKETS.map(({ key, label: bLabel }) => {
+          const b = usage.buckets.find(x => x.key === key)!.usage;
+          const over = b.authorized > 0 && b.remaining < -0.01;
+          const rowColor = over ? '#b91c1c' : '#374151';
+          return (
+            <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
+              <span style={{ flex: '1 1 150px', minWidth: 0, color: '#374151' }}>{bLabel}</span>
+              <input
+                type="number" step="0.5" min="0" inputMode="decimal"
+                value={bucketDrafts[key] ?? (auth.buckets[key] !== undefined ? String(auth.buckets[key]) : '')}
+                onChange={e => setBucketDrafts(prev => ({ ...prev, [key]: e.target.value }))}
+                onBlur={e => commitBucket(key, e.target.value)}
+                placeholder="—" style={{ ...inputStyle, width: 70 }}
+              />
+              <span style={{ color: rowColor, whiteSpace: 'nowrap' }}>
+                {b.authorized > 0
+                  ? <>used {fmt(b.used)} · sched {fmt(b.scheduled)} · <strong>{over ? `${fmt(-b.remaining)}h OVER` : `${fmt(b.remaining)}h left`}</strong></>
+                  : <span style={{ color: '#9ca3af' }}>not authorized</span>}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Manual (outside-system) hours */}
+      <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #e5e7eb' }}>
+        <p style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Manual hours (delivered outside this system)</p>
+        {manualInSpan.map(u => (
+          <div key={u.id} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, marginBottom: 4, flexWrap: 'wrap' }}>
+            <span style={{ color: '#6b7280', whiteSpace: 'nowrap' }}>{u.date}</span>
+            <span style={{ flex: '1 1 120px', minWidth: 0 }}>
+              {AUTH_BUCKETS.find(b => b.key === u.bucket)?.label || u.bucket} — <strong>{u.hours}h</strong>
+              {u.note ? <span style={{ color: '#9ca3af' }}> · {u.note}</span> : null}
+            </span>
+            <button onClick={() => onRemoveUsage(u.id)} style={{ ...dangerBtn, padding: '2px 8px', fontSize: 11 }}>×</button>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 6 }}>
+          <select value={mBucket} onChange={e => setMBucket(e.target.value as AuthBucketKey)} style={{ ...inputStyle, width: 'auto', flex: '1 1 130px', minWidth: 0 }}>
+            {AUTH_BUCKETS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
+          </select>
+          <input type="number" step="0.25" min="0" placeholder="hrs" value={mHours} onChange={e => setMHours(e.target.value)} style={{ ...inputStyle, width: 60 }} />
+          <input type="date" value={mDate} onChange={e => setMDate(e.target.value)} style={{ ...inputStyle, width: 130 }} />
+          <input placeholder="note (optional)" value={mNote} onChange={e => setMNote(e.target.value)} style={{ ...inputStyle, flex: '1 1 120px', minWidth: 0 }} />
+          <button onClick={addManual} style={chipBtn} disabled={!mHours || !mDate}>+ Add</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -1005,6 +1266,7 @@ function SettingsEditor({ settings, saving, onSave }: {
   const [btWeekly, setBtWeekly] = useState(s(u.btWeeklyDirectHours));
   const [bcbaMonthly, setBcbaMonthly] = useState(s(u.bcbaMonthlyBillableHours));
   const [bcbaMonthly5, setBcbaMonthly5] = useState(s(u.bcbaMonthlyBillableHours5Week));
+  const [minContacts, setMinContacts] = useState(s(settings.rbtMinContactsPerMonth ?? 2));
 
   const num = (str: string, fallback: number) => {
     const n = parseFloat(str);
@@ -1039,6 +1301,7 @@ function SettingsEditor({ settings, saving, onSave }: {
         bcbaMonthlyBillableHours: num(bcbaMonthly, u.bcbaMonthlyBillableHours),
         bcbaMonthlyBillableHours5Week: num(bcbaMonthly5, u.bcbaMonthlyBillableHours5Week),
       },
+      rbtMinContactsPerMonth: num(minContacts, 2),
     };
     onSave(next);
   };
@@ -1054,6 +1317,7 @@ function SettingsEditor({ settings, saving, onSave }: {
         <NumField label="Per-case — % of direct client hours" value={directPct} onChange={setDirectPct} suffix="%" />
         <NumField label="Per-RBT — % of that RBT's direct hours" value={rbtPct} onChange={setRbtPct} suffix="%" hint="BACB floor is 5%." />
         <NumField label="Per non-RBT tech — % of hours (optional)" value={techPct} onChange={setTechPct} suffix="%" placeholder="—" />
+        <NumField label="RBT — min supervision contact days per month" value={minContacts} onChange={setMinContacts} suffix="days" hint="BACB cadence: distinct days with observed supervision. Default 2." />
         <NumField label="Insurer cap — max supervision:direct ratio (optional)" value={maxPct} onChange={setMaxPct} suffix="%" placeholder="—" hint="Over-cap ratios show as a warning; they don't change green/yellow/red status." />
       </SettingsSection>
 

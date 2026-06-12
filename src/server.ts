@@ -382,6 +382,58 @@ app.post('/api/admin/appointment', express.json(), (req: Request, res: Response)
   }
 });
 
+// Admin: Create/update authorization
+app.post('/api/admin/authorization', express.json(), (req: Request, res: Response) => {
+  try {
+    if (!currentScheduleData) return res.status(400).json({ error: 'No schedule loaded' });
+    const auth = req.body;
+    if (!auth.id || !auth.clientId || !auth.startDate || !auth.endDate) {
+      return res.status(400).json({ error: 'Authorization must have id, clientId, startDate, endDate' });
+    }
+    if (!currentScheduleData.authorizations) currentScheduleData.authorizations = [];
+    const existing = currentScheduleData.authorizations.find(a => a.id === auth.id);
+    if (existing) Object.assign(existing, auth);
+    else currentScheduleData.authorizations.push(auth);
+    res.json({ success: true, authorization: existing || auth });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: Delete authorization
+app.delete('/api/admin/authorization/:id', (req: Request, res: Response) => {
+  if (!currentScheduleData) return res.status(400).json({ error: 'No schedule loaded' });
+  const before = (currentScheduleData.authorizations || []).length;
+  currentScheduleData.authorizations = (currentScheduleData.authorizations || []).filter(a => a.id !== req.params.id);
+  res.json({ success: true, removed: before - currentScheduleData.authorizations.length });
+});
+
+// Admin: Create/update manual usage entry
+app.post('/api/admin/manual-usage', express.json(), (req: Request, res: Response) => {
+  try {
+    if (!currentScheduleData) return res.status(400).json({ error: 'No schedule loaded' });
+    const usage = req.body;
+    if (!usage.id || !usage.clientId || !usage.bucket || !usage.date) {
+      return res.status(400).json({ error: 'Manual usage must have id, clientId, bucket, date' });
+    }
+    if (!currentScheduleData.manualUsage) currentScheduleData.manualUsage = [];
+    const existing = currentScheduleData.manualUsage.find(u => u.id === usage.id);
+    if (existing) Object.assign(existing, usage);
+    else currentScheduleData.manualUsage.push(usage);
+    res.json({ success: true, usage: existing || usage });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin: Delete manual usage entry
+app.delete('/api/admin/manual-usage/:id', (req: Request, res: Response) => {
+  if (!currentScheduleData) return res.status(400).json({ error: 'No schedule loaded' });
+  const before = (currentScheduleData.manualUsage || []).length;
+  currentScheduleData.manualUsage = (currentScheduleData.manualUsage || []).filter(u => u.id !== req.params.id);
+  res.json({ success: true, removed: before - currentScheduleData.manualUsage.length });
+});
+
 // Admin: Reorder clients or technicians
 app.post('/api/admin/reorder', express.json(), (req: Request, res: Response) => {
   try {

@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
-import { Appointment, Technician, Client, DayOfWeek } from '../types';
+import { Appointment, Technician, Client, DayOfWeek, Authorization, ScheduleData } from '../types';
+import { makeupCandidates } from '../authorization';
 import { v4 as uuidv4 } from 'uuid';
 
 interface AppointmentFormProps {
   appointment?: Appointment;
-  // All current appointments, needed to resolve siblings for series-scoped
-  // edit and delete. Optional because the Add flow doesn't have one to edit yet.
+  // All current appointments: resolves siblings for series-scoped edit/delete
+  // and canceled sessions for the make-up picker.
   allAppointments?: Appointment[];
+  // Authorizations scope the make-up picker to "same auth period".
+  authorizations?: Authorization[];
   technicians: Technician[];
   clients: Client[];
   // Save can affect more than one record when editing with scope > instance;
@@ -32,6 +35,7 @@ const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday
 export default function AppointmentForm({
   appointment,
   allAppointments,
+  authorizations,
   technicians,
   clients,
   onSave,
@@ -53,6 +57,17 @@ export default function AppointmentForm({
   const startTime = date && startClock ? `${date}T${startClock}:00` : '';
   const endTime = date && endClock ? `${date}T${endClock}:00` : '';
   const [isBillable, setIsBillable] = useState(appointment?.isBillable ?? true);
+  const [isMakeUp, setIsMakeUp] = useState(appointment?.isMakeUp ?? false);
+  const [makeupForId, setMakeupForId] = useState(appointment?.makeupForId || '');
+
+  // Canceled, not-fully-made-up sessions for this client within the auth
+  // covering the chosen date (same calendar month when no auth covers it).
+  const makeupOptions = (isMakeUp && clientId && date)
+    ? makeupCandidates(
+        { appointments: allAppointments || [], authorizations: authorizations || [], clients } as unknown as ScheduleData,
+        clientId, date, appointment?.id,
+      )
+    : [];
 
   // Recurrence
   const [recurrence, setRecurrence] = useState<RecurrencePattern>(
@@ -141,6 +156,8 @@ export default function AppointmentForm({
       endTime,
       isFixed: appointment?.isFixed ?? false,
       isBillable,
+      isMakeUp: isMakeUp || undefined,
+      makeupForId: isMakeUp && makeupForId ? makeupForId : undefined,
       isRecurring: recurrence !== 'none',
       recurringPattern: recurrence === 'none' ? undefined : (recurrence as any),
       // Preserve series membership on single-instance edit so the slider
@@ -341,7 +358,9 @@ export default function AppointmentForm({
               <select value={type} onChange={(e) => setType(e.target.value as any)} style={inputStyle}>
                 <option value="client-session">Client Session</option>
                 <option value="supervision">Supervision</option>
-                <option value="parent-training">Parent Training</option>
+                <option value="parent-training">Parent Training / Coord. of Care</option>
+                <option value="reassessment">Reassessment</option>
+                <option value="case-planning">Case Planning</option>
                 <option value="internal-task">Internal Task</option>
                 <option value="other">Other</option>
               </select>
@@ -462,12 +481,50 @@ export default function AppointmentForm({
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginTop: '4px' }}>
+          <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginTop: '4px', flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
               <input type="checkbox" checked={isBillable} onChange={(e) => setIsBillable(e.target.checked)} />
               <span>Billable</span>
             </label>
+            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
+              <input type="checkbox" checked={isMakeUp} onChange={(e) => { setIsMakeUp(e.target.checked); if (!e.target.checked) setMakeupForId(''); }} />
+              <span>Make-up session</span>
+            </label>
           </div>
+
+          {isMakeUp && (
+            <div style={{ padding: '10px 12px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                Making up which canceled session?
+              </p>
+              {!clientId || !date ? (
+                <p style={{ fontSize: 12, color: '#9ca3af' }}>Pick a client and date first.</p>
+              ) : makeupOptions.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#9ca3af' }}>
+                  No canceled, not-yet-made-up sessions for this client in this auth period. Saving as a general make-up.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, cursor: 'pointer' }}>
+                    <input type="radio" name="makeupFor" checked={makeupForId === ''} onChange={() => setMakeupForId('')} />
+                    <span style={{ color: '#6b7280' }}>General make-up (not tied to one cancellation)</span>
+                  </label>
+                  {makeupOptions.map(opt => (
+                    <label key={opt.appointment.id} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, cursor: 'pointer' }}>
+                      <input type="radio" name="makeupFor" checked={makeupForId === opt.appointment.id} onChange={() => setMakeupForId(opt.appointment.id)} />
+                      <span>
+                        {opt.appointment.title} — {new Date(opt.appointment.startTime).toLocaleDateString()}{' '}
+                        <span style={{ color: '#b91c1c', fontWeight: 600 }}>
+                          {Math.round(opt.remainingHours * 10) / 10}h not made up
+                        </span>
+                        {opt.madeUpHours > 0 && <span style={{ color: '#6b7280' }}> (of {Math.round(opt.hours * 10) / 10}h)</span>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '20px', flexWrap: 'wrap' }}>

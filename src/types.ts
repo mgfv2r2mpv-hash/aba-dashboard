@@ -40,10 +40,12 @@ export interface Client {
   // usual staffing (e.g. one of two assigned BTs). Default true; when false,
   // the engine will not propose partial coverage. (Sheet: "Partial Staff Allowed?")
   partialStaffAllowed?: boolean;
-  // Whether the parent is available for parent-training OUTSIDE a direct
-  // session. Default false: when false, parent-training must coincide with the
-  // parent's availability / an active direct session — a HARD boundary for the
-  // engine, not a soft preference.
+  // Whether the parent can be asked to do parent-training OUTSIDE the client's
+  // scheduled availability windows AND outside a direct session. Default false:
+  // when false, parent-training must fall inside the set availability and
+  // coincide with an active direct session — a HARD boundary for the engine.
+  // When true, an out-of-window parent-training slot is allowed but TENTATIVE
+  // (graded yellow / flagged for BCBA confirmation), not a hard conflict.
   parentAvailableOutsideSessions?: boolean;
   // Free-text anticipated discharge note/date (e.g. EI transition at age 3).
   anticipatedDischarge?: string;

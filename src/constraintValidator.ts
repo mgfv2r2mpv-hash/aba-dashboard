@@ -325,6 +325,7 @@ export class ConstraintValidator {
       const parties: PartyAvailability[] = [];
       const blockingMessages: string[] = [];
       const affectedTechnicians: string[] = [];
+      let tentativeNote: string | undefined;
 
       if (technician) {
         const windows: TimeWindow[] = ((technician.availability as any)[dayName] as TimeWindow[]) || [];
@@ -346,13 +347,37 @@ export class ConstraintValidator {
         parties.push({ role: 'Client', name: client.name, status, windows, blackoutReason: blackout?.reason });
         // Clients frequently have no availability configured, so we only fault
         // a client when there ARE windows that don't cover the slot, or an
-        // explicit blackout — never for an unconfigured day ('none').
-        if (status === 'outside' || status === 'blackout') {
+        // explicit blackout — never for an unconfigured day ('none'). When the
+        // parent can meet outside their scheduled availability, an out-of-window
+        // parent-training slot is allowed-but-tentative rather than blocking.
+        const ptOutsideOk = appointment.type === 'parent-training'
+          && client.parentAvailableOutsideSessions === true
+          && status === 'outside';
+        if ((status === 'outside' && !ptOutsideOk) || status === 'blackout') {
           blockingMessages.push(this.partyMessage(client.name, dayName, status, windows, blackout));
+        } else if (ptOutsideOk) {
+          tentativeNote = `${client.name}: parent training ${this.minutesToTime(appStart)}–${this.minutesToTime(appEnd)} is outside set availability on ${dayName} — allowed, pending confirmation`;
         }
       }
 
-      if (blockingMessages.length === 0) return;
+      if (blockingMessages.length === 0) {
+        if (tentativeNote) {
+          conflicts.push({
+            type: 'availability-conflict',
+            severity: 'warning',
+            message: tentativeNote,
+            affectedAppointments: [appointment.id],
+            availabilityDetail: {
+              day: dayName,
+              date: dateStr,
+              start: this.minutesToTime(appStart),
+              end: this.minutesToTime(appEnd),
+              parties,
+            },
+          });
+        }
+        return;
+      }
 
       conflicts.push({
         type: 'availability-conflict',

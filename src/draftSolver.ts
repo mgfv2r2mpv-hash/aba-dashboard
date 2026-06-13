@@ -123,12 +123,42 @@ function focusedConflicts(data: ScheduleData, weekStartMs: number[]): Conflict[]
     }
     const techBad = tech && !windowsCover((tech.availability as any)[day], s, e);
     // Clients are only faulted when they HAVE windows that don't cover the slot.
+    // A parent who can meet outside their scheduled availability makes an
+    // out-of-window parent-training slot tentative (BCBA-confirm), not a hard
+    // conflict — so the engine doesn't call it "no in-week solution".
+    const ptOutsideOk = a.type === 'parent-training' && client?.parentAvailableOutsideSessions === true;
     const clientWindows = client ? (client.availabilityWindows as any)[day] as TimeWindow[] : undefined;
-    const clientBad = clientWindows && clientWindows.length > 0 && !windowsCover(clientWindows, s, e);
+    const clientBad = !ptOutsideOk && clientWindows && clientWindows.length > 0 && !windowsCover(clientWindows, s, e);
     if (techBad || clientBad) conflicts.push({ ids: [a.id], kind: 'availability' });
   }
 
   return conflicts;
+}
+
+// Parent-training slots that land outside the client's set availability for a
+// client flagged "parent available outside scheduled availability". Allowed,
+// but tentative until the BCBA confirms — used to nudge an otherwise-clean
+// draft from green to yellow. Blackout days are excluded (still a hard block).
+function tentativePtOutside(data: ScheduleData, weekStartMs: number[]): string[] {
+  const inAffectedWeek = (a: Appointment) =>
+    weekStartMs.some(w => { const t = ms(a.startTime); return t >= w && t < w + 7 * 86400000; });
+  const clientById = new Map(data.clients.map(c => [c.id, c]));
+  const clientByName = new Map(data.clients.map(c => [c.name, c]));
+  const blackouts = data.blackouts || [];
+  const ids: string[] = [];
+  for (const a of data.appointments) {
+    if (a.type !== 'parent-training' || !isActive(a) || !inAffectedWeek(a)) continue;
+    const client = a.client ? (clientById.get(a.client) || clientByName.get(a.client)) : undefined;
+    if (!client || client.parentAvailableOutsideSessions !== true) continue;
+    const date = dateStrOf(a.startTime);
+    if (blackouts.some(b => b.date === date && b.entityType === 'client' && b.entityId === client.id)) continue;
+    const day = DAY_NAMES[new Date(a.startTime).getDay()];
+    const windows = (client.availabilityWindows as any)[day] as TimeWindow[];
+    if (windows && windows.length > 0 && !windowsCover(windows, minutesOfDay(a.startTime), minutesOfDay(a.endTime))) {
+      ids.push(a.id);
+    }
+  }
+  return ids;
 }
 
 // Relocate `appt` to its first feasible in-week slot (for its client+tech) that
@@ -283,9 +313,17 @@ export function solveDraft(
   // starting schedule already was.
   const aboveTarget = previewBillable > target + 0.01 && previewBillable > baseBillable + 0.01;
 
+  // Out-of-window parent-training slots a flagged parent can still make — allowed
+  // but tentative, so a clean draft surfaces as yellow (BCBA confirms) not green.
+  const tentative = tentativePtOutside(resolved, weeks);
+
   if (clean && !belowFloor) {
     if (aboveTarget) {
       return { grade: 'yellow', label: 'confirmation needed; above hours', resolved,
+        movedIds: [...movedIds], choices: [], needsChoice: false, aiEligible: false };
+    }
+    if (tentative.length > 0) {
+      return { grade: 'yellow', label: 'confirmation needed; outside set availability', resolved,
         movedIds: [...movedIds], choices: [], needsChoice: false, aiEligible: false };
     }
     return { grade: 'green', label: 'no conflict; within hours', resolved,

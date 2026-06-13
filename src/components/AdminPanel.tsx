@@ -905,10 +905,10 @@ function ClientCard({ client, saving, onChange, onRemove }: {
             {SUPERVISION_CADENCES.map(c => <option key={c.value} value={c.value}>{c.value} · {c.label}</option>)}
           </select>
         </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="When OFF, parent training must coincide with a direct session.">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="When ON, parent training can be scheduled outside the client's set availability and need not coincide with a direct session (tentative, pending BCBA confirmation).">
           <input type="checkbox" checked={client.parentAvailableOutsideSessions === true}
             onChange={e => onChange({ parentAvailableOutsideSessions: e.target.checked || undefined })} />
-          <span>Parent available outside sessions</span>
+          <span>Parent available outside scheduled availability</span>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="When OFF, the engine won't propose partial-staff coverage.">
           <input type="checkbox" checked={client.partialStaffAllowed !== false}

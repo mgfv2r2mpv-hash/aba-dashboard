@@ -246,6 +246,16 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
   onPickDay: (day: Date) => void;
   draftMarks?: Map<string, DraftMark>;
 }) {
+  // Which grid week-rows are expanded to reveal every appointment. Tapping a
+  // cell's "+N more" expands the whole row downward (the CSS grid stretches
+  // sibling cells to match), and a "Show less" control collapses it again.
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(() => new Set());
+  const toggleRow = (r: number) => setExpandedRows(prev => {
+    const next = new Set(prev);
+    next.has(r) ? next.delete(r) : next.add(r);
+    return next;
+  });
+
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(monthStart);
   const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
@@ -282,6 +292,10 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
   });
   const monthHours = rollupHours(appointments, monthStart.getTime(), monthEnd.getTime() + 1, lens);
 
+  // Collapse all rows when navigating to a different month.
+  const monthKey = format(monthStart, 'yyyy-MM');
+  useEffect(() => { setExpandedRows(new Set()); }, [monthKey]);
+
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
       <div style={{ flex: '1 1 260px', minWidth: 0 }}>
@@ -299,12 +313,14 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, backgroundColor: '#e5e7eb',
         }}>
-          {days.map(day => {
+          {days.map((day, idx) => {
             const dayAppts = appointmentsOn(appointments, day);
             const inCurrentMonth = isSameMonth(day, monthStart);
             const isToday = isSameDay(day, new Date());
             const dow = getDay(day); // 0 = Sun (now the rightmost column)
             const weekStart = startOfWeek(day, { weekStartsOn: 1 });
+            const rowIdx = Math.floor(idx / 7);
+            const expanded = expandedRows.has(rowIdx);
             return (
               <div
                 key={format(day, 'yyyy-MM-dd')}
@@ -321,11 +337,20 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
                   marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: 12,
                 }}>{format(day, 'd')}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {dayAppts.slice(0, 3).map(apt => (
+                  {(expanded ? dayAppts : dayAppts.slice(0, 3)).map(apt => (
                     <AppointmentChip key={apt.id} apt={apt} mark={draftMarks?.get(apt.id)} onClick={() => onSelectAppointment(apt)} />
                   ))}
-                  {dayAppts.length > 3 && (
-                    <div style={{ fontSize: 10, color: '#9ca3af' }}>+{dayAppts.length - 3} more</div>
+                  {dayAppts.length > 3 && !expanded && (
+                    <div
+                      onClick={e => { e.stopPropagation(); toggleRow(rowIdx); }}
+                      style={{ fontSize: 10, color: '#3b82f6', fontWeight: 600, cursor: 'pointer' }}
+                    >+{dayAppts.length - 3} more ▾</div>
+                  )}
+                  {dayAppts.length > 3 && expanded && (
+                    <div
+                      onClick={e => { e.stopPropagation(); toggleRow(rowIdx); }}
+                      style={{ fontSize: 10, color: '#3b82f6', fontWeight: 600, cursor: 'pointer' }}
+                    >Show less ▴</div>
                   )}
                 </div>
                 {/* Sunday is the end-of-week (rightmost) cell. Show the full

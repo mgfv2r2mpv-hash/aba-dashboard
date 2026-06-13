@@ -267,6 +267,7 @@ function parseAppointments(workbook) {
             seriesId: row.seriesId || undefined,
             isMakeUp: row.isMakeUp === 'TRUE' || row.isMakeUp === true || undefined,
             makeupForId: row.makeupForId || undefined,
+            isGhost: row.isGhost === 'TRUE' || row.isGhost === true || undefined,
         };
         if (row.status === 'completed' || row.status === 'canceled') {
             appt.status = row.status;
@@ -400,6 +401,7 @@ export function generateExcelFile(data, embeddedConfig) {
         seriesId: a.seriesId || '',
         isMakeUp: a.isMakeUp ? 'TRUE' : '',
         makeupForId: a.makeupForId || '',
+        isGhost: a.isGhost ? 'TRUE' : '',
         status: a.status || 'scheduled',
         cancellationSource: a.cancellation?.source || '',
         cancellationReason: a.cancellation?.reason || '',

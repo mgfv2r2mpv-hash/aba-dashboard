@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Appointment, Technician, Client, CompanySettings } from '../types';
+import { DraftMark } from '../draft';
 import { rollupHours, resolveUtilization, HoursByStatus } from '../utilization';
 import {
   startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek,
@@ -16,6 +17,9 @@ interface CalendarProps {
   // Reports the currently-viewed date (month/week anchor) so the parent can
   // scope month-bound concerns (e.g. conflict checks) to what's on screen.
   onViewDateChange?: (date: Date) => void;
+  // When a draft is open, marks staged appointments (add/move/shorten/remove)
+  // so they render as "proposed"/tombstoned rather than committed sessions.
+  draftMarks?: Map<string, DraftMark>;
 }
 
 type View = 'month' | 'week';
@@ -53,6 +57,7 @@ export default function Calendar({
   onAppointmentChange,
   onSelectAppointment,
   onViewDateChange,
+  draftMarks,
 }: CalendarProps) {
   const [view, setView] = useState<View>('month');
   const [lens, setLens] = useState<Lens>('bcba');
@@ -130,13 +135,14 @@ export default function Calendar({
       </div>
 
       {view === 'month'
-        ? <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} onSelectAppointment={onSelectAppointment} />
+        ? <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} onSelectAppointment={onSelectAppointment} draftMarks={draftMarks} />
         : <WeekView
             currentDate={currentDate}
             appointments={lensAppts}
             onSelectAppointment={onSelectAppointment}
             onAppointmentChange={onAppointmentChange}
             dragEnabled={isLandscape}
+            draftMarks={draftMarks}
           />
       }
       {view === 'week' && !isLandscape && (
@@ -150,12 +156,13 @@ export default function Calendar({
 
 // ---------- Month View ----------
 
-function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment }: {
+function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment, draftMarks }: {
   currentDate: Date;
   appointments: Appointment[];
   lens: Lens;
   settings?: CompanySettings;
   onSelectAppointment: (a: Appointment) => void;
+  draftMarks?: Map<string, DraftMark>;
 }) {
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(monthStart);
@@ -227,7 +234,7 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
                 }}>{format(day, 'd')}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {dayAppts.slice(0, 3).map(apt => (
-                    <AppointmentChip key={apt.id} apt={apt} onClick={() => onSelectAppointment(apt)} />
+                    <AppointmentChip key={apt.id} apt={apt} mark={draftMarks?.get(apt.id)} onClick={() => onSelectAppointment(apt)} />
                   ))}
                   {dayAppts.length > 3 && (
                     <div style={{ fontSize: 10, color: '#9ca3af' }}>+{dayAppts.length - 3} more</div>
@@ -413,12 +420,13 @@ function Legend() {
 
 // ---------- Week View ----------
 
-function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmentChange, dragEnabled }: {
+function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks }: {
   currentDate: Date;
   appointments: Appointment[];
   onSelectAppointment: (a: Appointment) => void;
   onAppointmentChange: (a: Appointment) => void;
   dragEnabled: boolean;
+  draftMarks?: Map<string, DraftMark>;
 }) {
   const weekStart = startOfWeek(currentDate);
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -551,13 +559,17 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
                 if (!layout) return null;
                 const widthPct = 100 / lanes;
                 const beingDragged = dragState?.apt.id === appt.id;
+                const mark = draftMarks?.get(appt.id);
+                const draggable = dragEnabled && appt.status !== 'canceled' && appt.status !== 'completed'
+                  && !appt.isGhost && mark !== 'remove';
                 return (
                   <AppointmentBlock
                     key={appt.id}
                     apt={appt}
+                    mark={mark}
                     onClick={() => onSelectAppointment(appt)}
-                    onPointerDown={dragEnabled ? (e) => beginDrag(appt, e) : undefined}
-                    dragHandle={dragEnabled && appt.status !== 'canceled' && appt.status !== 'completed'}
+                    onPointerDown={draggable ? (e) => beginDrag(appt, e) : undefined}
+                    dragHandle={draggable}
                     style={{
                       position: 'absolute',
                       top: layout.top,
@@ -634,23 +646,45 @@ function appointmentsOn(appointments: Appointment[], date: Date): Appointment[] 
 // week: gray = pending, green = completed, and canceled splits by who canceled —
 // orange-red for family, bright red for staff (BT/BCBA/admin). Appointment type
 // is conveyed by the title text rather than color in this view.
-function appointmentLook(apt: Appointment) {
+function appointmentLook(apt: Appointment, mark?: DraftMark) {
   const canceled = apt.status === 'canceled';
   const completed = apt.status === 'completed';
   let background = '#9ca3af'; // pending
   if (completed) background = '#16a34a';
   else if (canceled) background = apt.cancellation?.source === 'family' ? '#f97316' : '#dc2626';
+
+  let color = 'white';
+  let border = '1px solid rgba(0,0,0,0.05)';
+  let opacity = canceled ? 0.85 : 1;
+  let strike = canceled;
+  let prefix = '';
+
+  // Ghost = wished-for, never placed: a faint dashed reminder.
+  if (apt.isGhost) {
+    background = '#f3f4f6'; color = '#6b7280'; border = '1px dashed #9ca3af';
+    opacity = 0.9; prefix = '👻 ';
+  } else if (mark) {
+    // Draft (uncommitted) styling. Removes are tombstoned; the rest are
+    // "proposed" with a dashed blue outline so they read as not-yet-saved.
+    if (mark === 'remove') {
+      background = '#fee2e2'; color = '#b91c1c'; border = '1px dashed #fca5a5';
+      opacity = 0.7; strike = true; prefix = '🗑 ';
+    } else {
+      background = '#dbeafe'; color = '#1e3a8a'; border = '1px dashed #2563eb';
+      opacity = 0.95; prefix = mark === 'add' ? '＋ ' : mark === 'shorten' ? '✂ ' : '✎ ';
+    }
+  }
+
   return {
     canceled, completed,
-    background,
-    color: 'white',
+    background, color, border, opacity, strike, prefix,
     statusIcon: canceled ? '✕' : completed ? '✓' : null,
-    statusColor: 'rgba(255,255,255,0.95)',
+    statusColor: apt.isGhost || mark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.95)',
   };
 }
 
-function AppointmentChip({ apt, onClick }: { apt: Appointment; onClick: () => void }) {
-  const look = appointmentLook(apt);
+function AppointmentChip({ apt, mark, onClick }: { apt: Appointment; mark?: DraftMark; onClick: () => void }) {
+  const look = appointmentLook(apt, mark);
   return (
     <div
       onClick={e => { e.stopPropagation(); onClick(); }}
@@ -660,13 +694,14 @@ function AppointmentChip({ apt, onClick }: { apt: Appointment; onClick: () => vo
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         cursor: 'pointer', position: 'relative',
         paddingRight: look.statusIcon ? 14 : 4,
-        textDecoration: look.canceled ? 'line-through' : 'none',
-        opacity: look.canceled ? 0.85 : 1,
-        border: 'none',
+        textDecoration: look.strike ? 'line-through' : 'none',
+        opacity: look.opacity,
+        border: look.border,
+        boxSizing: 'border-box',
       }}
       title={apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : '')}
     >
-      {apt.title}
+      {look.prefix}{apt.title}
       {look.statusIcon && (
         <span style={{ position: 'absolute', top: 1, right: 3, fontSize: 10, fontWeight: 700, color: look.statusColor, lineHeight: 1 }}>
           {look.statusIcon}
@@ -676,14 +711,15 @@ function AppointmentChip({ apt, onClick }: { apt: Appointment; onClick: () => vo
   );
 }
 
-function AppointmentBlock({ apt, onClick, onPointerDown, dragHandle, style }: {
+function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style }: {
   apt: Appointment;
+  mark?: DraftMark;
   onClick: () => void;
   onPointerDown?: (e: React.PointerEvent) => void;
   dragHandle?: boolean;
   style: React.CSSProperties;
 }) {
-  const look = appointmentLook(apt);
+  const look = appointmentLook(apt, mark);
   // When drag is enabled, suppress the click (click fires after pointerup
   // and would re-open the detail panel after a drag). Track whether the
   // pointer moved meaningfully between down and up to distinguish tap vs drag.
@@ -705,14 +741,15 @@ function AppointmentBlock({ apt, onClick, onPointerDown, dragHandle, style }: {
         background: look.background, color: look.color,
         padding: '4px 6px', borderRadius: 4, fontSize: 11,
         overflow: 'hidden', cursor: dragHandle ? 'grab' : 'pointer', boxSizing: 'border-box',
-        border: '1px solid rgba(0,0,0,0.05)',
-        textDecoration: look.canceled ? 'line-through' : 'none',
+        border: look.border,
+        opacity: look.opacity,
+        textDecoration: look.strike ? 'line-through' : 'none',
         touchAction: dragHandle ? 'none' : 'manipulation',
       }}
       title={apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : '')}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }}>
-        <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{apt.title}</span>
+        <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{look.prefix}{apt.title}</span>
         {look.statusIcon && (
           <span style={{ fontSize: 11, fontWeight: 700, color: look.statusColor, lineHeight: 1, flexShrink: 0 }}>
             {look.statusIcon}

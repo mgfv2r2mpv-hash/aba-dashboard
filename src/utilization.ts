@@ -6,14 +6,18 @@ export const DEFAULT_UTILIZATION: Required<UtilizationSettings> = {
   btWeeklyDirectHours: 165,
   bcbaMonthlyBillableHours: 100,
   bcbaMonthlyBillableHours5Week: 125,
+  bcbaWeeklyBillableMin: 25,
 };
 
 export function resolveUtilization(u?: UtilizationSettings): Required<UtilizationSettings> {
+  const weekly = u?.bcbaWeeklyBillableHours ?? DEFAULT_UTILIZATION.bcbaWeeklyBillableHours;
   return {
-    bcbaWeeklyBillableHours: u?.bcbaWeeklyBillableHours ?? DEFAULT_UTILIZATION.bcbaWeeklyBillableHours,
+    bcbaWeeklyBillableHours: weekly,
     btWeeklyDirectHours: u?.btWeeklyDirectHours ?? DEFAULT_UTILIZATION.btWeeklyDirectHours,
     bcbaMonthlyBillableHours: u?.bcbaMonthlyBillableHours ?? DEFAULT_UTILIZATION.bcbaMonthlyBillableHours,
     bcbaMonthlyBillableHours5Week: u?.bcbaMonthlyBillableHours5Week ?? DEFAULT_UTILIZATION.bcbaMonthlyBillableHours5Week,
+    // Floor defaults to the weekly target when unset.
+    bcbaWeeklyBillableMin: u?.bcbaWeeklyBillableMin ?? weekly,
   };
 }
 
@@ -66,6 +70,7 @@ export function rollupHours(
 ): HoursByStatus {
   const out: HoursByStatus = { ...EMPTY };
   for (const a of appointments) {
+    if (a.isGhost) continue; // ghosts are wished-for, never delivered — no hours
     const t = new Date(a.startTime).getTime();
     if (isNaN(t) || t < startMs || t >= endMs) continue;
     if (bucketOf(a) !== bucket) continue;

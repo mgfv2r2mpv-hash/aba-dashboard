@@ -45,6 +45,7 @@ export interface UtilizationSettings {
     btWeeklyDirectHours?: number;
     bcbaMonthlyBillableHours?: number;
     bcbaMonthlyBillableHours5Week?: number;
+    bcbaWeeklyBillableMin?: number;
 }
 export interface CompanySettings {
     supervisionDirectHoursPercent: number;
@@ -150,6 +151,7 @@ export interface Appointment {
     seriesId?: string;
     status?: AppointmentStatus;
     cancellation?: Cancellation;
+    isGhost?: boolean;
 }
 export interface Blackout {
     id: string;

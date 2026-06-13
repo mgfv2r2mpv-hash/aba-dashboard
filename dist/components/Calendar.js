@@ -20,7 +20,7 @@ function useIsLandscape() {
     }, []);
     return landscape;
 }
-export default function Calendar({ appointments, technicians: _technicians, clients: _clients, settings, onAppointmentChange, onSelectAppointment, onViewDateChange, }) {
+export default function Calendar({ appointments, technicians: _technicians, clients: _clients, settings, onAppointmentChange, onSelectAppointment, onViewDateChange, draftMarks, }) {
     const [view, setView] = useState('month');
     const [lens, setLens] = useState('bcba');
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -71,11 +71,11 @@ export default function Calendar({ appointments, technicians: _technicians, clie
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     marginBottom: 16, gap: 8, flexWrap: 'wrap',
                 }, children: [_jsxs("div", { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }, children: [_jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: view === 'month', onClick: () => setView('month'), children: "Month" }), _jsx(ViewBtn, { active: view === 'week', onClick: () => setView('week'), children: "Week" })] }), _jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: lens === 'bcba', onClick: () => setLens('bcba'), children: "BCBA" }), _jsx(ViewBtn, { active: lens === 'bt', onClick: () => setLens('bt'), children: "BT" })] })] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] }), _jsx("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }, children: headerLabel })] }), view === 'month'
-                ? _jsx(MonthView, { currentDate: currentDate, appointments: lensAppts, lens: lens, settings: settings, onSelectAppointment: onSelectAppointment })
-                : _jsx(WeekView, { currentDate: currentDate, appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape }), view === 'week' && !isLandscape && (_jsx("p", { style: { fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }, children: "Rotate to landscape to drag appointments to a new time." }))] }));
+                ? _jsx(MonthView, { currentDate: currentDate, appointments: lensAppts, lens: lens, settings: settings, onSelectAppointment: onSelectAppointment, draftMarks: draftMarks })
+                : _jsx(WeekView, { currentDate: currentDate, appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks }), view === 'week' && !isLandscape && (_jsx("p", { style: { fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }, children: "Rotate to landscape to drag appointments to a new time." }))] }));
 }
 // ---------- Month View ----------
-function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment }) {
+function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment, draftMarks }) {
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(monthStart);
     const calendarStart = startOfWeek(monthStart);
@@ -130,7 +130,7 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
                                 }, children: [_jsx("div", { style: {
                                             fontWeight: isToday ? 700 : 400,
                                             marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: 12,
-                                        }, children: format(day, 'd') }), _jsxs("div", { style: { display: 'flex', flexDirection: 'column', gap: 2 }, children: [dayAppts.slice(0, 3).map(apt => (_jsx(AppointmentChip, { apt: apt, onClick: () => onSelectAppointment(apt) }, apt.id))), dayAppts.length > 3 && (_jsxs("div", { style: { fontSize: 10, color: '#9ca3af' }, children: ["+", dayAppts.length - 3, " more"] }))] }), inCurrentMonth && dow === 0 && (_jsx(SundayTotal, { lens: lens, hours: rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens), target: weeklyTarget }))] }, format(day, 'yyyy-MM-dd')));
+                                        }, children: format(day, 'd') }), _jsxs("div", { style: { display: 'flex', flexDirection: 'column', gap: 2 }, children: [dayAppts.slice(0, 3).map(apt => (_jsx(AppointmentChip, { apt: apt, mark: draftMarks?.get(apt.id), onClick: () => onSelectAppointment(apt) }, apt.id))), dayAppts.length > 3 && (_jsxs("div", { style: { fontSize: 10, color: '#9ca3af' }, children: ["+", dayAppts.length - 3, " more"] }))] }), inCurrentMonth && dow === 0 && (_jsx(SundayTotal, { lens: lens, hours: rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens), target: weeklyTarget }))] }, format(day, 'yyyy-MM-dd')));
                         }) })] }), _jsx(WeekRibbon, { lens: lens, weeks: weekSummaries, weeklyTarget: weeklyTarget, monthHours: monthHours, monthlyGoal: lens === 'bcba' ? monthlyGoal : undefined, monthWeeks: lens === 'bcba' ? workWeeks : inMonthWeeks })] }));
 }
 // Round to ≤1 decimal, dropping a trailing .0.
@@ -195,7 +195,7 @@ function Legend() {
     return (_jsxs("div", { style: { display: 'flex', flexWrap: 'wrap', gap: '4px 10px', fontSize: 10, color: '#6b7280', marginTop: 2 }, children: [items.map(it => (_jsxs("span", { style: { display: 'inline-flex', alignItems: 'center', gap: 4 }, children: [_jsx("span", { style: { width: 9, height: 9, borderRadius: 2, background: it.c, display: 'inline-block' } }), it.label] }, it.label))), _jsxs("span", { style: { display: 'inline-flex', alignItems: 'center', gap: 4 }, children: [_jsx("span", { style: { width: 2, height: 11, background: '#111827', display: 'inline-block' } }), "Scheduled cap"] })] }));
 }
 // ---------- Week View ----------
-function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmentChange, dragEnabled }) {
+function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks }) {
     const weekStart = startOfWeek(currentDate);
     const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
     const hours = Array.from({ length: VISIBLE_END_HOUR - VISIBLE_START_HOUR }, (_, i) => VISIBLE_START_HOUR + i);
@@ -290,7 +290,10 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
                                         return null;
                                     const widthPct = 100 / lanes;
                                     const beingDragged = dragState?.apt.id === appt.id;
-                                    return (_jsx(AppointmentBlock, { apt: appt, onClick: () => onSelectAppointment(appt), onPointerDown: dragEnabled ? (e) => beginDrag(appt, e) : undefined, dragHandle: dragEnabled && appt.status !== 'canceled' && appt.status !== 'completed', style: {
+                                    const mark = draftMarks?.get(appt.id);
+                                    const draggable = dragEnabled && appt.status !== 'canceled' && appt.status !== 'completed'
+                                        && !appt.isGhost && mark !== 'remove';
+                                    return (_jsx(AppointmentBlock, { apt: appt, mark: mark, onClick: () => onSelectAppointment(appt), onPointerDown: draggable ? (e) => beginDrag(appt, e) : undefined, dragHandle: draggable, style: {
                                             position: 'absolute',
                                             top: layout.top,
                                             height: layout.height,
@@ -346,7 +349,7 @@ function appointmentsOn(appointments, date) {
 // week: gray = pending, green = completed, and canceled splits by who canceled —
 // orange-red for family, bright red for staff (BT/BCBA/admin). Appointment type
 // is conveyed by the title text rather than color in this view.
-function appointmentLook(apt) {
+function appointmentLook(apt, mark) {
     const canceled = apt.status === 'canceled';
     const completed = apt.status === 'completed';
     let background = '#9ca3af'; // pending
@@ -354,29 +357,61 @@ function appointmentLook(apt) {
         background = '#16a34a';
     else if (canceled)
         background = apt.cancellation?.source === 'family' ? '#f97316' : '#dc2626';
+    let color = 'white';
+    let border = '1px solid rgba(0,0,0,0.05)';
+    let opacity = canceled ? 0.85 : 1;
+    let strike = canceled;
+    let prefix = '';
+    // Ghost = wished-for, never placed: a faint dashed reminder.
+    if (apt.isGhost) {
+        background = '#f3f4f6';
+        color = '#6b7280';
+        border = '1px dashed #9ca3af';
+        opacity = 0.9;
+        prefix = '👻 ';
+    }
+    else if (mark) {
+        // Draft (uncommitted) styling. Removes are tombstoned; the rest are
+        // "proposed" with a dashed blue outline so they read as not-yet-saved.
+        if (mark === 'remove') {
+            background = '#fee2e2';
+            color = '#b91c1c';
+            border = '1px dashed #fca5a5';
+            opacity = 0.7;
+            strike = true;
+            prefix = '🗑 ';
+        }
+        else {
+            background = '#dbeafe';
+            color = '#1e3a8a';
+            border = '1px dashed #2563eb';
+            opacity = 0.95;
+            prefix = mark === 'add' ? '＋ ' : mark === 'shorten' ? '✂ ' : '✎ ';
+        }
+    }
     return {
         canceled, completed,
-        background,
-        color: 'white',
+        background, color, border, opacity, strike, prefix,
         statusIcon: canceled ? '✕' : completed ? '✓' : null,
-        statusColor: 'rgba(255,255,255,0.95)',
+        statusColor: apt.isGhost || mark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.95)',
     };
 }
-function AppointmentChip({ apt, onClick }) {
-    const look = appointmentLook(apt);
+function AppointmentChip({ apt, mark, onClick }) {
+    const look = appointmentLook(apt, mark);
     return (_jsxs("div", { onClick: e => { e.stopPropagation(); onClick(); }, style: {
             background: look.background, color: look.color,
             padding: '3px 4px', borderRadius: 3, fontSize: 10,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             cursor: 'pointer', position: 'relative',
             paddingRight: look.statusIcon ? 14 : 4,
-            textDecoration: look.canceled ? 'line-through' : 'none',
-            opacity: look.canceled ? 0.85 : 1,
-            border: 'none',
-        }, title: apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), children: [apt.title, look.statusIcon && (_jsx("span", { style: { position: 'absolute', top: 1, right: 3, fontSize: 10, fontWeight: 700, color: look.statusColor, lineHeight: 1 }, children: look.statusIcon }))] }));
+            textDecoration: look.strike ? 'line-through' : 'none',
+            opacity: look.opacity,
+            border: look.border,
+            boxSizing: 'border-box',
+        }, title: apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), children: [look.prefix, apt.title, look.statusIcon && (_jsx("span", { style: { position: 'absolute', top: 1, right: 3, fontSize: 10, fontWeight: 700, color: look.statusColor, lineHeight: 1 }, children: look.statusIcon }))] }));
 }
-function AppointmentBlock({ apt, onClick, onPointerDown, dragHandle, style }) {
-    const look = appointmentLook(apt);
+function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style }) {
+    const look = appointmentLook(apt, mark);
     // When drag is enabled, suppress the click (click fires after pointerup
     // and would re-open the detail panel after a drag). Track whether the
     // pointer moved meaningfully between down and up to distinguish tap vs drag.
@@ -395,10 +430,11 @@ function AppointmentBlock({ apt, onClick, onPointerDown, dragHandle, style }) {
             background: look.background, color: look.color,
             padding: '4px 6px', borderRadius: 4, fontSize: 11,
             overflow: 'hidden', cursor: dragHandle ? 'grab' : 'pointer', boxSizing: 'border-box',
-            border: '1px solid rgba(0,0,0,0.05)',
-            textDecoration: look.canceled ? 'line-through' : 'none',
+            border: look.border,
+            opacity: look.opacity,
+            textDecoration: look.strike ? 'line-through' : 'none',
             touchAction: dragHandle ? 'none' : 'manipulation',
-        }, title: apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }, children: [_jsx("span", { style: { fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }, children: apt.title }), look.statusIcon && (_jsx("span", { style: { fontSize: 11, fontWeight: 700, color: look.statusColor, lineHeight: 1, flexShrink: 0 }, children: look.statusIcon }))] }), _jsxs("div", { style: { fontSize: 10, opacity: 0.85, marginTop: 2 }, children: [format(new Date(apt.startTime), 'h:mm'), "\u2013", format(new Date(apt.endTime), 'h:mm a')] })] }));
+        }, title: apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }, children: [_jsxs("span", { style: { fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }, children: [look.prefix, apt.title] }), look.statusIcon && (_jsx("span", { style: { fontSize: 11, fontWeight: 700, color: look.statusColor, lineHeight: 1, flexShrink: 0 }, children: look.statusIcon }))] }), _jsxs("div", { style: { fontSize: 10, opacity: 0.85, marginTop: 2 }, children: [format(new Date(apt.startTime), 'h:mm'), "\u2013", format(new Date(apt.endTime), 'h:mm a')] })] }));
 }
 // Returns the {top, height} of an appointment in pixels within the week-view
 // time grid, or null if it falls entirely outside the visible hour range.

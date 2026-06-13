@@ -76,10 +76,14 @@ export type TrainingPeriodUnit = 'week' | 'month' | 'sixMonths' | 'year';
 // "fully-utilized" thresholds. The BCBA also carries a monthly billable goal
 // that differs for 4- vs 5-week months (a light week can be made up by month end).
 export interface UtilizationSettings {
-  bcbaWeeklyBillableHours?: number;       // BCBA fully-utilized weekly billables
+  bcbaWeeklyBillableHours?: number;       // BCBA fully-utilized weekly billables (target)
   btWeeklyDirectHours?: number;           // BT (aggregate) fully-utilized weekly direct hours
   bcbaMonthlyBillableHours?: number;      // BCBA monthly goal in a 4-week month
   bcbaMonthlyBillableHours5Week?: number; // BCBA monthly goal in a 5-week month
+  // BCBA weekly billable FLOOR. A draft that would drop the BCBA's weekly
+  // billable hours below this is graded red ("billable below minimum"). When
+  // unset, the weekly target above doubles as the floor.
+  bcbaWeeklyBillableMin?: number;
 }
 
 export interface CompanySettings {
@@ -265,6 +269,11 @@ export interface Appointment {
   // metadata kept for downstream reporting).
   status?: AppointmentStatus;
   cancellation?: Cancellation;
+  // Ghost = a wished-for session that couldn't be placed (the BCBA chose to log
+  // it rather than fit it). Kept at its requested time as a visible reminder but
+  // EXCLUDED from every computation — compliance, conflicts, utilization, and
+  // slot search all treat a ghost as if it weren't there.
+  isGhost?: boolean;
 }
 
 // A single-day "no session" marker for a technician or client. Unlike the

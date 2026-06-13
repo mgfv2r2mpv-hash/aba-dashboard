@@ -212,7 +212,7 @@ function computeShaveRoom(data: ScheduleData, now: Date): ShaveEntry[] {
   for (const c of data.clients) caseStates.set(c.id, computeCaseState(data, c, now));
 
   return data.appointments
-    .filter(a => a.type === 'supervision' && a.status !== 'canceled' &&
+    .filter(a => a.type === 'supervision' && a.status !== 'canceled' && !a.isGhost &&
       new Date(a.startTime).getTime() >= period.start.getTime() &&
       new Date(a.startTime).getTime() < period.end.getTime())
     .map(sup => {
@@ -330,7 +330,7 @@ function busyIntervals(
   allowOverlapClientDirect = false,
 ): Interval[] {
   return data.appointments
-    .filter(a => a.status !== 'canceled' && a.startTime.slice(0, 10) === dateStr && (
+    .filter(a => a.status !== 'canceled' && !a.isGhost && a.startTime.slice(0, 10) === dateStr && (
       (client && (a.client === client.id || a.client === client.name)) ||
       (tech && (a.technician === tech.id || a.technician === tech.name))
     ))
@@ -345,7 +345,7 @@ function busyIntervals(
 function directIntervalsFor(data: ScheduleData, dateStr: string, client: Client | undefined): Interval[] {
   if (!client) return [];
   return data.appointments
-    .filter(a => a.type === 'client-session' && a.status !== 'canceled' && a.startTime.slice(0, 10) === dateStr &&
+    .filter(a => a.type === 'client-session' && a.status !== 'canceled' && !a.isGhost && a.startTime.slice(0, 10) === dateStr &&
       (a.client === client.id || a.client === client.name))
     .map(a => ({ start: minutesOfDay(a.startTime), end: minutesOfDay(a.endTime) }));
 }

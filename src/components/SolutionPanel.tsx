@@ -3,15 +3,32 @@ import { ScheduleSolution } from '../types';
 
 interface SolutionPanelProps {
   solutions: ScheduleSolution[];
-  onApply: (solution: ScheduleSolution) => void;
+  onAccept: (solution: ScheduleSolution) => void;
+  // Load this option into the editable draft so the user can tweak before
+  // accepting. Optional — omit to hide the Customize button.
+  onCustomize?: (solution: ScheduleSolution) => void;
+  // Reject the whole proposal set (clears the options, keeps the draft).
+  onReject?: () => void;
+  heading?: string;
 }
 
-export default function SolutionPanel({ solutions, onApply }: SolutionPanelProps) {
+export default function SolutionPanel({ solutions, onAccept, onCustomize, onReject, heading }: SolutionPanelProps) {
   const [expanded, setExpanded] = useState<number>(0);
 
   return (
     <div style={{ padding: '16px', overflow: 'auto', flex: 1 }}>
-      <h3 style={{ marginBottom: '12px' }}>💡 Suggested Solutions</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: 8 }}>
+        <h3 style={{ margin: 0 }}>💡 {heading || 'AI options'}</h3>
+        {onReject && (
+          <button
+            onClick={onReject}
+            style={{
+              padding: '4px 10px', fontSize: 12, background: 'white', color: '#6b7280',
+              border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer',
+            }}
+          >Reject set</button>
+        )}
+      </div>
       {solutions.map((solution, idx) => (
         <div
           key={solution.id}
@@ -38,7 +55,7 @@ export default function SolutionPanel({ solutions, onApply }: SolutionPanelProps
               fontWeight: '600',
             }}
           >
-            <span>Solution {idx + 1}: {solution.affectedWeeks === 1 ? '1 week' : `${solution.affectedWeeks} weeks`}</span>
+            <span>Option {idx + 1}: {solution.affectedWeeks === 1 ? '1 week' : `${solution.affectedWeeks} weeks`}</span>
             <span>{expanded === idx ? '▼' : '▶'}</span>
           </button>
 
@@ -54,17 +71,13 @@ export default function SolutionPanel({ solutions, onApply }: SolutionPanelProps
                   fontSize: '12px',
                   color: '#92400e',
                 }}>
-                  ⚠️ This solution spans {solution.affectedWeeks} weeks
+                  ⚠️ Spans {solution.affectedWeeks} weeks
                   {solution.weekSpan && (
                     <> ({solution.weekSpan.startDate} to {solution.weekSpan.endDate})</>
                   )}.
-                  Review changes carefully before applying.
                 </div>
               )}
               <div style={{ marginBottom: '12px' }}>
-                <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>
-                  <strong>Reasoning:</strong>
-                </p>
                 <p style={{ fontSize: '13px', lineHeight: '1.5', color: '#374151' }}>
                   {solution.reasoning}
                 </p>
@@ -86,22 +99,24 @@ export default function SolutionPanel({ solutions, onApply }: SolutionPanelProps
                 </div>
               )}
 
-              <button
-                onClick={() => onApply(solution)}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  backgroundColor: '#10b981',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '13px',
-                }}
-              >
-                Apply This Solution
-              </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => onAccept(solution)}
+                  style={{
+                    flex: '1 1 auto', padding: '10px', backgroundColor: '#10b981', color: 'white',
+                    border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: '600', fontSize: '13px',
+                  }}
+                >Accept</button>
+                {onCustomize && (
+                  <button
+                    onClick={() => onCustomize(solution)}
+                    style={{
+                      flex: '1 1 auto', padding: '10px', backgroundColor: 'white', color: '#374151',
+                      border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', fontWeight: '600', fontSize: '13px',
+                    }}
+                  >Customize</button>
+                )}
+              </div>
             </div>
           )}
         </div>

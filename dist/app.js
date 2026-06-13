@@ -23,7 +23,11 @@ import DayReview from './components/DayReview';
 import ImportPreview from './components/ImportPreview';
 import { pastIncompleteAppointments } from './compliance';
 import { buildCache, recomputeCache, summarize, } from './complianceCache';
-import { encryptString, decryptString } from './clientCrypto';
+import { obfuscateKey, deobfuscateKey, encryptBytes, decryptBytes, isEncryptedSchedule, } from './clientCrypto';
+import { applyOps, renderList, newAddOp, newMoveOp, newShortenOp, newRemoveOp, } from './draft';
+import { solveDraft } from './draftSolver';
+import DraftTray from './components/DraftTray';
+import { ClaudeScheduler } from './claudeScheduler';
 // Route axios /api/* calls through an in-memory store on iOS/Android,
 // since the Express server isn't reachable from inside the WebView.
 if (Capacitor.isNativePlatform())
@@ -45,6 +49,20 @@ function saveSessionSettings(settings) {
         sessionStorage.setItem(SESSION_KEY, JSON.stringify(settings));
     }
     catch (_e) { /* ignore */ }
+}
+// Local-day ISO without timezone suffix — matches the seeder/Calendar format so
+// `startTime.startsWith('YYYY-MM-DD')` filters keep working.
+function formatLocalISO(d) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+// Apply an AI solution's time-move changes onto a schedule (pure).
+function applySolutionChanges(data, sol) {
+    const appointments = data.appointments.map(a => {
+        const ch = sol.changes.find(c => c.appointmentId === a.id);
+        return ch ? { ...a, startTime: ch.newTime.start, endTime: ch.newTime.end } : a;
+    });
+    return { ...data, appointments };
 }
 function blobToBase64(blob) {
     return new Promise((resolve, reject) => {
@@ -71,8 +89,11 @@ export default function App() {
     const [editingAppointment, setEditingAppointment] = useState(null);
     const [loading, setLoading] = useState(false);
     const [aiSettings, setAiSettings] = useState(loadSessionSettings);
-    const [pendingEmbedBlob, setPendingEmbedBlob] = useState(undefined);
     const [debugMsg, setDebugMsg] = useState(null);
+    // Staged, uncommitted schedule edits (the draft sandbox). Nothing here touches
+    // the live schedule until the user Accepts or overrides (Save anyway).
+    const [draftOps, setDraftOps] = useState([]);
+    const [aiLoading, setAiLoading] = useState(false);
     const [cancelTarget, setCancelTarget] = useState(null);
     // The month/week the calendar is showing. Conflicts are scoped to this so the
     // Issues panel reflects what you're looking at, not just today.
@@ -84,12 +105,20 @@ export default function App() {
     const [compCache, setCompCache] = useState(null);
     // A file picked from Admin → "Upload schedule", parsed but not yet applied:
     // the user reviews the delta and confirms before it replaces current data.
+    // `bytes` are the DECRYPTED workbook bytes (so the web upload re-POSTs plain).
     const [pendingImport, setPendingImport] = useState(null);
     const detailPanelRef = React.useRef(null);
     const importInputRef = React.useRef(null);
     const compSummary = scheduleData && compCache ? summarize(compCache, scheduleData) : null;
     // Past-dated sessions still marked scheduled — the day-review queue.
     const pendingReview = scheduleData ? pastIncompleteAppointments(scheduleData) : [];
+    // Draft sandbox derivations. The Sched view renders the PREVIEW (staged ops
+    // applied) with per-appointment marks; the status badge grades it.
+    const draftActive = !!scheduleData && draftOps.length > 0;
+    const draftRender = React.useMemo(() => (scheduleData && draftActive ? renderList(scheduleData, draftOps) : null), [scheduleData, draftOps, draftActive]);
+    const draftStatus = React.useMemo(() => (scheduleData && draftActive ? solveDraft(scheduleData, draftOps, new Date(), scheduleData.settings) : null), [scheduleData, draftOps, draftActive]);
+    const calendarAppointments = draftRender ? draftRender.appointments : (scheduleData?.appointments || []);
+    const calendarMarks = draftRender ? draftRender.marks : undefined;
     // On narrow screens the right-side detail panel wraps below the calendar.
     // When the user taps an appointment, scroll the detail into view so they
     // notice it actually opened.
@@ -117,14 +146,6 @@ export default function App() {
         const cleared = { ...aiSettings, apiKey: '' };
         setAiSettings(cleared);
         saveSessionSettings(cleared);
-        setPendingEmbedBlob(undefined);
-    };
-    const handlePrepareEmbed = async (password) => {
-        if (!aiSettings.apiKey)
-            throw new Error('No API key set');
-        const payload = JSON.stringify({ apiKey: aiSettings.apiKey, model: aiSettings.model });
-        const blob = await encryptString(payload, password);
-        setPendingEmbedBlob(blob);
     };
     const fetchSampleBlob = async () => {
         const response = await fetch('sample_schedule.xlsx');
@@ -160,22 +181,25 @@ export default function App() {
         })();
         return () => { cancelled = true; };
     }, []);
-    const promptForEmbeddedKey = async (embeddedConfig) => {
+    // The API key rides inside the workbook only lightly obfuscated (app key, no
+    // user password), so it loads automatically with no prompt. Real protection
+    // is the whole-file schedule password.
+    const loadEmbeddedKey = async (embeddedConfig) => {
         if (aiSettings.apiKey)
             return;
-        const password = prompt('This file has an encrypted API key embedded. Enter the embed password to load it (or cancel to skip):');
-        if (!password)
-            return;
         try {
-            const decrypted = await decryptString(embeddedConfig, password);
+            const decrypted = await deobfuscateKey(embeddedConfig);
             const parsed = JSON.parse(decrypted);
-            const restored = { apiKey: parsed.apiKey, model: parsed.model || 'claude-sonnet-4-6' };
+            const restored = {
+                ...aiSettings,
+                apiKey: parsed.apiKey,
+                model: parsed.model || aiSettings.model || 'claude-sonnet-4-6',
+            };
             setAiSettings(restored);
             saveSessionSettings(restored);
-            setPendingEmbedBlob(embeddedConfig);
         }
         catch (_e) {
-            alert('Wrong password or corrupted blob - skipping embedded key.');
+            // Corrupt/foreign blob — ignore silently; the user can paste a key.
         }
     };
     // Replace the whole schedule and rebuild the compliance cache from scratch.
@@ -187,40 +211,56 @@ export default function App() {
         setCompCache(buildCache(next));
     };
     // Apply an already-parsed import as the working schedule. On native we prime
-    // the in-memory store nativeApi serves from; on web we POST the raw file so
-    // the Express server's store is the source of truth for later /api calls.
-    const applyImported = async (file, data, embeddedConfig) => {
+    // the in-memory store nativeApi serves from; on web we POST the (decrypted,
+    // plain) bytes so the Express server's store is the source of truth.
+    const applyImported = async (bytes, data, embeddedConfig) => {
         if (Capacitor.isNativePlatform()) {
             setNativeStore(data);
             commitFull(data);
             setSolutions([]);
             if (embeddedConfig)
-                await promptForEmbeddedKey(embeddedConfig);
+                await loadEmbeddedKey(embeddedConfig);
             return;
         }
-        const response = await axios.post(`${API_BASE}/upload`, file, {
+        const response = await axios.post(`${API_BASE}/upload`, new Blob([bytes]), {
             headers: { 'Content-Type': 'application/octet-stream' },
         });
         commitFull(response.data.data);
         setSolutions([]);
         if (response.data.embeddedConfig)
-            await promptForEmbeddedKey(response.data.embeddedConfig);
+            await loadEmbeddedKey(response.data.embeddedConfig);
     };
     const handleFileUpload = async (file) => {
         setLoading(true);
         try {
-            // Parse client-side first (cheap, pure) so we can either apply it
-            // immediately on first run or show a delta before overwriting existing
-            // data. parseWorkbook is the same parser the server/native paths use.
-            const buffer = await file.arrayBuffer();
-            const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
+            let bytes = new Uint8Array(await file.arrayBuffer());
+            // Whole-file encryption: a foreign/encrypted schedule is opaque until the
+            // owner's password decrypts it. Prefer the session password, else prompt.
+            if (isEncryptedSchedule(bytes)) {
+                const password = aiSettings.schedulePassword
+                    || prompt('This schedule is password-protected. Enter the schedule password to open it:') || '';
+                if (!password) {
+                    setLoading(false);
+                    return;
+                }
+                try {
+                    bytes = await decryptBytes(bytes, password);
+                }
+                catch (_e) {
+                    alert('Wrong password — could not open this schedule.');
+                    setLoading(false);
+                    return;
+                }
+            }
+            // Parse client-side (cheap, pure) — same parser the server/native use.
+            const workbook = XLSX.read(bytes, { type: 'array' });
             const parsed = parseWorkbook(workbook);
             if (scheduleData) {
                 // Replacing a loaded schedule — stage it and let the user confirm.
-                setPendingImport({ file, data: parsed.data, embeddedConfig: parsed.embeddedConfig });
+                setPendingImport({ bytes, fileName: file.name, data: parsed.data, embeddedConfig: parsed.embeddedConfig });
                 return;
             }
-            await applyImported(file, parsed.data, parsed.embeddedConfig);
+            await applyImported(bytes, parsed.data, parsed.embeddedConfig);
         }
         catch (error) {
             const msg = error.response?.data?.error || error.message || String(error);
@@ -239,7 +279,7 @@ export default function App() {
             return;
         setLoading(true);
         try {
-            await applyImported(pendingImport.file, pendingImport.data, pendingImport.embeddedConfig);
+            await applyImported(pendingImport.bytes, pendingImport.data, pendingImport.embeddedConfig);
             setPendingImport(null);
             setView('schedule');
         }
@@ -252,38 +292,147 @@ export default function App() {
             setLoading(false);
         }
     };
-    const handleAppointmentChange = async (appointment) => {
-        setLoading(true);
+    // ---- Draft staging --------------------------------------------------------
+    // Add/replace ops, collapsing any prior op that targets the same appointment
+    // so the latest edit wins (matches applyOps).
+    const stageOps = (incoming) => {
+        const idOf = (o) => (o.kind === 'add' ? o.appt?.id : o.targetId);
+        const ids = new Set(incoming.map(idOf));
+        setDraftOps(prev => [...prev.filter(o => !ids.has(idOf(o))), ...incoming]);
+    };
+    // Calendar drag → stage a move (uncommitted). No server call, no auto-AI.
+    const handleAppointmentChange = (appointment) => {
+        stageOps([newMoveOp(appointment)]);
+    };
+    // Sync the live store (native in-memory / Express) to a full replacement, then
+    // commit to React state + rebuild the compliance cache.
+    const commitScheduleData = async (next) => {
+        if (Capacitor.isNativePlatform()) {
+            setNativeStore(next);
+            commitFull(next);
+            return;
+        }
+        const response = await axios.post(`${API_BASE}/schedule`, next);
+        commitFull(response.data.data);
+    };
+    const acceptDraft = async () => {
+        if (!scheduleData || !draftStatus)
+            return;
+        const next = draftStatus.resolved || applyOps(scheduleData, draftOps);
+        await commitScheduleData(next);
+        setDraftOps([]);
+        setSolutions([]);
+        setSelectedAppointment(null);
+    };
+    const saveAnyway = async () => {
+        if (!scheduleData)
+            return;
+        if (!confirm('Save this schedule as-is, with the flagged conflicts?'))
+            return;
+        await commitScheduleData(applyOps(scheduleData, draftOps));
+        setDraftOps([]);
+        setSolutions([]);
+        setSelectedAppointment(null);
+    };
+    const cancelDraft = () => { setDraftOps([]); setSolutions([]); };
+    const resetOp = (opId) => setDraftOps(ops => ops.filter(o => o.id !== opId));
+    // Picking a yellow trade-off stages the corresponding op so the next solve
+    // can clear the conflict. "Shorten" trims the session by 30 min (a starting
+    // point the BCBA can fine-tune); "move-family" stages a relocation to its
+    // first open in-week slot — left as a move the user can drag.
+    const pickChoice = (choice) => {
+        if (!scheduleData)
+            return;
+        const preview = applyOps(scheduleData, draftOps);
+        const a = preview.appointments.find(x => x.id === choice.appointmentId);
+        if (!a)
+            return;
+        if (choice.kind === 'shorten') {
+            const end = new Date(new Date(a.endTime).getTime() - 30 * 60000);
+            if (end.getTime() <= new Date(a.startTime).getTime())
+                return;
+            stageOps([newShortenOp({ ...a, endTime: formatLocalISO(end) })]);
+        }
+        else {
+            stageOps([newMoveOp({ ...a })]);
+        }
+    };
+    // ---- AI escalation (browser-side ClaudeScheduler over the preview) --------
+    const runDraftAI = async () => {
+        if (!scheduleData || !aiSettings.apiKey)
+            return;
+        const preview = applyOps(scheduleData, draftOps);
+        const changed = draftOps.find(o => o.appt)?.appt || preview.appointments[0];
+        if (!changed)
+            return;
+        setAiLoading(true);
         try {
-            const headers = {};
-            if (aiSettings.apiKey)
-                headers['X-Claude-Api-Key'] = aiSettings.apiKey;
-            if (aiSettings.model)
-                headers['X-Claude-Model'] = aiSettings.model;
-            const response = await axios.post(`${API_BASE}/appointment/${appointment.id}`, appointment, { headers });
-            setSelectedAppointment(response.data.appointment);
-            setConflicts(response.data.conflicts);
-            setSolutions(response.data.solutions || []);
-            if (response.data.claudeError) {
-                console.warn('Claude error:', response.data.claudeError);
-            }
-            if (scheduleData) {
-                const before = scheduleData.appointments.find(a => a.id === appointment.id);
-                const updated = { ...scheduleData, appointments: [...scheduleData.appointments] };
-                const idx = updated.appointments.findIndex(a => a.id === appointment.id);
-                if (idx >= 0) {
-                    updated.appointments[idx] = response.data.appointment;
-                }
-                setScheduleData(updated);
-                setCompCache(prev => recomputeCache(prev, scheduleData, updated, [{ before, after: response.data.appointment }]));
-            }
+            const messages = new ConstraintValidator(preview).validateSchedule().map(c => c.message);
+            const scheduler = new ClaudeScheduler(aiSettings.apiKey, preview, aiSettings.model);
+            const sols = await scheduler.generateSolutions(changed, messages);
+            setSolutions(sols);
+            if (sols.length === 0)
+                setDebugMsg('AI returned no in-month options.');
         }
         catch (error) {
-            alert('Error updating appointment: ' + (error.response?.data?.error || error.message));
+            alert('AI error: ' + (error.message || error));
         }
         finally {
-            setLoading(false);
+            setAiLoading(false);
         }
+    };
+    const acceptAiSolution = async (sol) => {
+        if (!scheduleData)
+            return;
+        const next = applySolutionChanges(applyOps(scheduleData, draftOps), sol);
+        await commitScheduleData(next);
+        setDraftOps([]);
+        setSolutions([]);
+        setSelectedAppointment(null);
+    };
+    const customizeAiSolution = (sol) => {
+        if (!scheduleData)
+            return;
+        const preview = applyOps(scheduleData, draftOps);
+        const moves = [];
+        for (const ch of sol.changes) {
+            const a = preview.appointments.find(x => x.id === ch.appointmentId);
+            if (a)
+                moves.push(newMoveOp({ ...a, startTime: ch.newTime.start, endTime: ch.newTime.end }));
+        }
+        stageOps(moves);
+        setSolutions([]);
+    };
+    const rejectAiSet = () => setSolutions([]);
+    // Refuse and log: commit the staged ADD requests as ghosts (visible reminders)
+    // and discard the rest of the draft.
+    const logAddsAsGhosts = async () => {
+        if (!scheduleData)
+            return;
+        const ghosts = draftOps
+            .filter(o => o.kind === 'add' && o.appt)
+            .map(o => ({ ...o.appt, isGhost: true }));
+        const next = ghosts.length
+            ? { ...scheduleData, appointments: [...scheduleData.appointments, ...ghosts] }
+            : scheduleData;
+        await commitScheduleData(next);
+        setDraftOps([]);
+        setSolutions([]);
+        setSelectedAppointment(null);
+    };
+    // ---- Ghost lifecycle (committed) ------------------------------------------
+    const promoteGhost = (a) => {
+        stageOps([newMoveOp({ ...a, isGhost: false })]);
+        setSelectedAppointment(null);
+    };
+    const dismissGhost = async (a) => {
+        if (!scheduleData)
+            return;
+        await axios.delete(`${API_BASE}/admin/appointment/${a.id}`);
+        const next = { ...scheduleData, appointments: scheduleData.appointments.filter(x => x.id !== a.id) };
+        setScheduleData(next);
+        setCompCache(prev => recomputeCache(prev, scheduleData, next, [{ before: a, after: undefined }]));
+        setSelectedAppointment(null);
     };
     const persistAppointment = async (updated) => {
         if (!scheduleData)
@@ -316,89 +465,26 @@ export default function App() {
         persistAppointment({ ...cancelTarget, status: 'canceled', cancellation });
         setCancelTarget(null);
     };
-    const handleApplySolution = async (solution) => {
-        setLoading(true);
-        try {
-            const response = await axios.post(`${API_BASE}/apply-solution`, {
-                solutionId: solution.id,
-                changes: solution.changes,
-            });
-            // A solution can touch many appointments at once — rebuild the cache fully.
-            commitFull(response.data.data);
-            setConflicts(response.data.conflicts);
-            setSolutions([]);
-            setSelectedAppointment(null);
-        }
-        catch (error) {
-            alert('Error applying solution: ' + (error.response?.data?.error || error.message));
-        }
-        finally {
-            setLoading(false);
-        }
-    };
-    const handleSaveAppointments = async (apps) => {
+    // Add (new id) or edit (existing id) → stage as draft ops. Nothing commits
+    // until the user Accepts or overrides in the DraftTray.
+    const handleSaveAppointments = (apps) => {
         if (apps.length === 0 || !scheduleData)
             return;
-        try {
-            // POST each in parallel — the local nativeApi adapter handles upserts
-            // by id (insert if new, Object.assign if existing).
-            await Promise.all(apps.map(a => axios.post(`${API_BASE}/admin/appointment`, a)));
-            const byId = new Map(apps.map(a => [a.id, a]));
-            const beforeById = new Map(scheduleData.appointments.map(a => [a.id, a]));
-            const nextAppts = scheduleData.appointments.map(a => byId.get(a.id) || a);
-            apps.forEach(a => {
-                if (!scheduleData.appointments.some(x => x.id === a.id))
-                    nextAppts.push(a);
-            });
-            const next = { ...scheduleData, appointments: nextAppts };
-            setScheduleData(next);
-            const changes = apps.map(a => ({ before: beforeById.get(a.id), after: a }));
-            setCompCache(prev => recomputeCache(prev, scheduleData, next, changes));
-            // Refresh the side panel if the selected appointment was part of the batch.
-            if (selectedAppointment) {
-                const updated = byId.get(selectedAppointment.id);
-                if (updated)
-                    setSelectedAppointment(updated);
-            }
-            setConflicts(new ConstraintValidator(next).validateSchedule());
-            setShowAddAppointment(false);
-            setEditingAppointment(null);
-        }
-        catch (error) {
-            alert('Error saving appointment: ' + (error.response?.data?.error || error.message));
-        }
+        const ops = apps.map(a => scheduleData.appointments.some(x => x.id === a.id) ? newMoveOp(a) : newAddOp(a));
+        stageOps(ops);
+        setShowAddAppointment(false);
+        setEditingAppointment(null);
     };
-    const handleDeleteAppointments = async (ids) => {
+    // Delete → stage remove op(s) (a tombstone shows in the preview until commit).
+    const handleDeleteAppointments = (ids) => {
         if (ids.length === 0 || !scheduleData)
             return;
-        try {
-            await Promise.all(ids.map(id => axios.delete(`${API_BASE}/admin/appointment/${id}`)));
-            const idSet = new Set(ids);
-            const removed = scheduleData.appointments.filter(a => idSet.has(a.id));
-            const next = {
-                ...scheduleData,
-                appointments: scheduleData.appointments.filter(a => !idSet.has(a.id)),
-            };
-            setScheduleData(next);
-            const changes = removed.map(a => ({ before: a, after: undefined }));
-            setCompCache(prev => recomputeCache(prev, scheduleData, next, changes));
-            if (selectedAppointment && idSet.has(selectedAppointment.id)) {
-                setSelectedAppointment(null);
-            }
-            setConflicts(new ConstraintValidator(next).validateSchedule());
-            setEditingAppointment(null);
-        }
-        catch (error) {
-            alert('Error deleting appointment: ' + (error.response?.data?.error || error.message));
-        }
+        stageOps(ids.map(id => newRemoveOp(id)));
+        if (selectedAppointment && ids.includes(selectedAppointment.id))
+            setSelectedAppointment(null);
+        setEditingAppointment(null);
     };
-    // Side-panel Delete button: always single-instance. The scope-aware delete
-    // lives inside the edit form (where the slider is visible).
-    const handleDeleteAppointment = async (id) => {
-        if (!confirm('Delete this appointment?'))
-            return;
-        handleDeleteAppointments([id]);
-    };
+    const handleDeleteAppointment = (id) => handleDeleteAppointments([id]);
     const handleWizardComplete = async (data) => {
         try {
             const response = await axios.post(`${API_BASE}/schedule`, data);
@@ -417,11 +503,20 @@ export default function App() {
     };
     const handleDownload = async () => {
         try {
-            const response = await axios.post(`${API_BASE}/download`, { embeddedConfig: pendingEmbedBlob }, { responseType: 'blob' });
-            const blob = new Blob([response.data]);
-            // Native /api/download bypasses the AES-CBC step (Node-only crypto), so
-            // mark the file as plain so anyone receiving it doesn't try to decrypt.
-            const filename = Capacitor.isNativePlatform() ? 'schedule.xlsx' : 'schedule.enc.xlsx';
+            // Layer 1: the API key (if any) rides inside the workbook, app-obfuscated
+            // (no user password) so it loads automatically on re-import.
+            const embeddedConfig = aiSettings.apiKey
+                ? await obfuscateKey(JSON.stringify({ apiKey: aiSettings.apiKey, model: aiSettings.model }))
+                : undefined;
+            const response = await axios.post(`${API_BASE}/download`, { embeddedConfig }, { responseType: 'blob' });
+            let bytes = new Uint8Array(await response.data.arrayBuffer());
+            // Layer 2: if a schedule password is set, encrypt the whole file so it's
+            // opaque in a file browser and unopenable without the password.
+            const password = aiSettings.schedulePassword;
+            if (password)
+                bytes = await encryptBytes(bytes, password);
+            const filename = password ? 'schedule.enc.xlsx' : 'schedule.xlsx';
+            const blob = new Blob([bytes]);
             if (Capacitor.isNativePlatform()) {
                 // iOS WKWebView ignores <a download>. Write the file to the app's
                 // Cache directory and pop the iOS share sheet so the user can
@@ -506,13 +601,13 @@ export default function App() {
                                                 padding: '8px 12px', backgroundColor: '#fef3c7',
                                                 border: '1px solid #fcd34d', borderRadius: 6, cursor: 'pointer',
                                                 fontSize: 13, fontWeight: 600, color: '#92400e', textAlign: 'left',
-                                            }, children: ["\uD83D\uDCCB ", pendingReview.length, " past session", pendingReview.length === 1 ? '' : 's', " awaiting review \u2014 complete or cancel them"] })), _jsx(Calendar, { appointments: scheduleData.appointments, technicians: scheduleData.technicians, clients: scheduleData.clients, settings: scheduleData.settings, onAppointmentChange: handleAppointmentChange, onSelectAppointment: setSelectedAppointment, onViewDateChange: setViewDate })] }), (conflicts.length > 0 || solutions.length > 0 || selectedAppointment) && (_jsxs("div", { ref: detailPanelRef, style: {
+                                            }, children: ["\uD83D\uDCCB ", pendingReview.length, " past session", pendingReview.length === 1 ? '' : 's', " awaiting review \u2014 complete or cancel them"] })), _jsx(Calendar, { appointments: calendarAppointments, technicians: scheduleData.technicians, clients: scheduleData.clients, settings: scheduleData.settings, onAppointmentChange: handleAppointmentChange, onSelectAppointment: setSelectedAppointment, onViewDateChange: setViewDate, draftMarks: calendarMarks })] }), (draftActive || conflicts.length > 0 || solutions.length > 0 || selectedAppointment) && (_jsxs("div", { ref: detailPanelRef, style: {
                                         flex: '0 0 auto',
                                         width: 'min(350px, 100%)',
                                         borderLeft: '1px solid #e5e7eb',
                                         display: 'flex',
                                         flexDirection: 'column',
-                                    }, children: [conflicts.length > 0 && (_jsx(ConflictPanel, { conflicts: conflicts, appointments: scheduleData?.appointments, onSelectAppointment: setSelectedAppointment })), !aiSettings.apiKey && conflicts.length > 0 && (_jsx("div", { style: { padding: '12px', backgroundColor: '#fef3c7', fontSize: '12px', color: '#92400e' }, children: "Add a Claude API key in Settings to get AI-powered solutions for these conflicts." })), solutions.length > 0 && _jsx(SolutionPanel, { solutions: solutions, onApply: handleApplySolution }), selectedAppointment && (() => {
+                                    }, children: [draftActive && draftStatus && (_jsx(DraftTray, { base: scheduleData, ops: draftOps, status: draftStatus, hasApiKey: !!aiSettings.apiKey, aiLoading: aiLoading, onResetOp: resetOp, onResetAll: cancelDraft, onCancel: cancelDraft, onAccept: acceptDraft, onSaveAnyway: saveAnyway, onAI: runDraftAI, onPickChoice: pickChoice, onLogGhosts: logAddsAsGhosts })), !draftActive && conflicts.length > 0 && (_jsx(ConflictPanel, { conflicts: conflicts, appointments: scheduleData?.appointments, onSelectAppointment: setSelectedAppointment })), solutions.length > 0 && (_jsx(SolutionPanel, { solutions: solutions, heading: "AI options (within the month)", onAccept: acceptAiSolution, onCustomize: customizeAiSolution, onReject: rejectAiSet })), selectedAppointment && (() => {
                                             const a = selectedAppointment;
                                             const status = a.status || 'scheduled';
                                             const statusColor = status === 'canceled' ? '#b91c1c' : status === 'completed' ? '#15803d' : '#374151';
@@ -524,7 +619,13 @@ export default function App() {
                                                                         }, children: status }), _jsx("button", { onClick: () => setSelectedAppointment(null), "aria-label": "Close", style: {
                                                                             background: 'none', border: 'none', color: '#6b7280',
                                                                             fontSize: 20, lineHeight: 1, cursor: 'pointer', padding: 4,
-                                                                        }, children: "\u2715" })] })] }), _jsx("p", { children: _jsx("strong", { children: a.title }) }), _jsxs("p", { style: { fontSize: '12px', color: '#6b7280', marginTop: '4px' }, children: [new Date(a.startTime).toLocaleString(), " \u2192 ", new Date(a.endTime).toLocaleString()] }), a.technician && (_jsxs("p", { style: { fontSize: '12px', color: '#374151', marginTop: '4px' }, children: ["Tech: ", a.technician] })), (status === 'canceled' || status === 'completed') && (_jsx("p", { style: { color: '#6b7280', marginTop: '4px', fontSize: 12 }, children: "\uD83D\uDD12 Locked \u2014 reopen to edit time, status, or assignment" })), a.cancellation && (_jsxs("div", { style: { fontSize: 12, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }, children: [_jsxs("div", { children: ["Source: ", _jsxs("strong", { children: ["Cancel-", a.cancellation.source.toUpperCase()] })] }), _jsxs("div", { children: ["Reason: ", _jsx("strong", { children: a.cancellation.reason.replace('_', ' ') })] }), _jsxs("div", { children: [a.cancellation.unplanned ? 'Unplanned' : 'Planned', " \u00B7 notice met: ", _jsx("strong", { children: a.cancellation.noticeMet ? 'yes' : 'no' })] }), a.cancellation.notes && _jsxs("div", { children: ["Notes: ", a.cancellation.notes] })] })), _jsxs("div", { style: { display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }, children: [_jsx("button", { onClick: () => setEditingAppointment(a), style: {
+                                                                        }, children: "\u2715" })] })] }), _jsx("p", { children: _jsx("strong", { children: a.title }) }), _jsxs("p", { style: { fontSize: '12px', color: '#6b7280', marginTop: '4px' }, children: [new Date(a.startTime).toLocaleString(), " \u2192 ", new Date(a.endTime).toLocaleString()] }), a.technician && (_jsxs("p", { style: { fontSize: '12px', color: '#374151', marginTop: '4px' }, children: ["Tech: ", a.technician] })), (status === 'canceled' || status === 'completed') && (_jsx("p", { style: { color: '#6b7280', marginTop: '4px', fontSize: 12 }, children: "\uD83D\uDD12 Locked \u2014 reopen to edit time, status, or assignment" })), a.cancellation && (_jsxs("div", { style: { fontSize: 12, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }, children: [_jsxs("div", { children: ["Source: ", _jsxs("strong", { children: ["Cancel-", a.cancellation.source.toUpperCase()] })] }), _jsxs("div", { children: ["Reason: ", _jsx("strong", { children: a.cancellation.reason.replace('_', ' ') })] }), _jsxs("div", { children: [a.cancellation.unplanned ? 'Unplanned' : 'Planned', " \u00B7 notice met: ", _jsx("strong", { children: a.cancellation.noticeMet ? 'yes' : 'no' })] }), a.cancellation.notes && _jsxs("div", { children: ["Notes: ", a.cancellation.notes] })] })), a.isGhost ? (_jsxs("div", { style: { display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }, children: [_jsx("button", { onClick: () => promoteGhost(a), style: {
+                                                                    flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
+                                                                    border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
+                                                                }, children: "Promote" }), _jsx("button", { onClick: () => dismissGhost(a), style: {
+                                                                    flex: '1 1 auto', padding: '6px 12px', backgroundColor: 'white', color: '#6b7280',
+                                                                    border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                                                                }, children: "Dismiss" })] })) : (_jsxs("div", { style: { display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }, children: [_jsx("button", { onClick: () => setEditingAppointment(a), style: {
                                                                     flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
                                                                     border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
                                                                 }, children: "Edit" }), status === 'scheduled' && (_jsxs(_Fragment, { children: [_jsx("button", { onClick: () => handleMarkComplete(a), style: {
@@ -539,7 +640,7 @@ export default function App() {
                                                                 }, children: "Reopen" })), _jsx("button", { onClick: () => handleDeleteAppointment(a.id), style: {
                                                                     padding: '6px 12px', backgroundColor: 'white', color: '#6b7280',
                                                                     border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                                                                }, children: "Delete" })] })] }));
+                                                                }, children: "Delete" })] }))] }));
                                         })()] }))] })), view === 'admin' && (_jsx(AdminPanel, { data: scheduleData, onDataChange: commitFull, onImportFile: triggerImportPicker, onRerunWizard: () => setShowWizard(true) })), view === 'compliance' && (_jsx(ComplianceDashboard, { data: scheduleData, cache: compCache, onMarkComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onSelectAppointment: (a) => { setView('schedule'); setSelectedAppointment(a); } })), view === 'caseload' && (_jsx(CaseloadView, { data: scheduleData, now: viewDate }))] })) : (_jsxs("div", { style: {
                         flex: 1,
                         display: 'flex',
@@ -550,12 +651,12 @@ export default function App() {
                         gap: '16px',
                         padding: '0 24px',
                         textAlign: 'center',
-                    }, children: [_jsx("p", { children: "Upload an Excel file or run the Setup Wizard to get started." }), _jsxs("p", { style: { fontSize: '12px', maxWidth: '320px' }, children: ["A sample schedule (", _jsx("code", { children: "sample_schedule.xlsx" }), ") is in this app's Documents folder \u2014 pick it from Files via Upload Schedule."] }), debugMsg && (_jsx("p", { style: { fontSize: '12px', color: '#b91c1c', maxWidth: '320px', backgroundColor: '#fee2e2', padding: '8px', borderRadius: '4px' }, children: debugMsg })), _jsxs("p", { style: { fontSize: '10px', color: '#d1d5db', fontFamily: 'monospace' }, children: ["build ", BUILD_STAMP, " \u00B7 native ", String(Capacitor.isNativePlatform())] })] })) }), showSettings && (_jsx(Settings, { settings: aiSettings, onSave: handleAISettingsSave, onClose: () => setShowSettings(false), onEmbedInExcel: handlePrepareEmbed, onClearKey: handleClearKey })), showWizard && (_jsx(SetupWizard, { onComplete: handleWizardComplete, onCancel: () => setShowWizard(false), initialData: scheduleData || undefined })), _jsx("input", { ref: importInputRef, type: "file", accept: ".xlsx,.xls", style: { display: 'none' }, onChange: e => {
+                    }, children: [_jsx("p", { children: "Upload an Excel file or run the Setup Wizard to get started." }), _jsxs("p", { style: { fontSize: '12px', maxWidth: '320px' }, children: ["A sample schedule (", _jsx("code", { children: "sample_schedule.xlsx" }), ") is in this app's Documents folder \u2014 pick it from Files via Upload Schedule."] }), debugMsg && (_jsx("p", { style: { fontSize: '12px', color: '#b91c1c', maxWidth: '320px', backgroundColor: '#fee2e2', padding: '8px', borderRadius: '4px' }, children: debugMsg })), _jsxs("p", { style: { fontSize: '10px', color: '#d1d5db', fontFamily: 'monospace' }, children: ["build ", BUILD_STAMP, " \u00B7 native ", String(Capacitor.isNativePlatform())] })] })) }), showSettings && (_jsx(Settings, { settings: aiSettings, onSave: handleAISettingsSave, onClose: () => setShowSettings(false), onClearKey: handleClearKey })), showWizard && (_jsx(SetupWizard, { onComplete: handleWizardComplete, onCancel: () => setShowWizard(false), initialData: scheduleData || undefined })), _jsx("input", { ref: importInputRef, type: "file", accept: ".xlsx,.xls", style: { display: 'none' }, onChange: e => {
                     const file = e.target.files?.[0];
                     e.target.value = '';
                     if (file)
                         handleFileUpload(file);
-                } }), pendingImport && scheduleData && (_jsx(ImportPreview, { current: scheduleData, next: pendingImport.data, fileName: pendingImport.file.name, onConfirm: confirmPendingImport, onCancel: () => setPendingImport(null) })), cancelTarget && scheduleData && (_jsx(CancellationDialog, { appointment: cancelTarget, settings: scheduleData.settings, onConfirm: handleConfirmCancel, onCancel: () => setCancelTarget(null) })), showAddAppointment && scheduleData && (_jsx(AppointmentForm, { allAppointments: scheduleData.appointments, authorizations: scheduleData.authorizations, technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleSaveAppointments, onCancel: () => setShowAddAppointment(false) })), editingAppointment && scheduleData && (_jsx(AppointmentForm, { appointment: editingAppointment, allAppointments: scheduleData.appointments, authorizations: scheduleData.authorizations, technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleSaveAppointments, onDelete: handleDeleteAppointments, onCancel: () => setEditingAppointment(null) })), showDayReview && scheduleData && (_jsx(DayReview, { appointments: pendingReview, onComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onClose: () => setShowDayReview(false) }))] }));
+                } }), pendingImport && scheduleData && (_jsx(ImportPreview, { current: scheduleData, next: pendingImport.data, fileName: pendingImport.fileName, onConfirm: confirmPendingImport, onCancel: () => setPendingImport(null) })), cancelTarget && scheduleData && (_jsx(CancellationDialog, { appointment: cancelTarget, settings: scheduleData.settings, onConfirm: handleConfirmCancel, onCancel: () => setCancelTarget(null) })), showAddAppointment && scheduleData && (_jsx(AppointmentForm, { allAppointments: scheduleData.appointments, authorizations: scheduleData.authorizations, technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleSaveAppointments, onCancel: () => setShowAddAppointment(false) })), editingAppointment && scheduleData && (_jsx(AppointmentForm, { appointment: editingAppointment, allAppointments: scheduleData.appointments, authorizations: scheduleData.authorizations, technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleSaveAppointments, onDelete: handleDeleteAppointments, onCancel: () => setEditingAppointment(null) })), showDayReview && scheduleData && (_jsx(DayReview, { appointments: pendingReview, onComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onClose: () => setShowDayReview(false) }))] }));
 }
 // Three-way segmented control for the active view. Sits inline in the header
 // at compact-button size so it doesn't blow up the chrome.

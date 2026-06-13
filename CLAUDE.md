@@ -37,6 +37,35 @@ ask before each merge.
   the empty-state footer; useful for confirming the device isn't running a
   stale `ios/App/App/public/` copy.
 
+## Excel workbook format (v2, normalized — `src/excelHandler.ts`)
+
+- `SCHEMA_VERSION = 2`. A `_Meta` sheet (`schemaVersion`, `id`, `lastModified`,
+  `exportedAt`, `appName`) marks the format. The parser understands **v2 only**.
+- **Normalized, relational sheets:** `Clients`/`Technicians` hold scalars only;
+  availability lives in one `Availability` sheet (`ownerType client|technician|
+  clinician, ownerId, ownerName, day, start, end`, one row per window — this also
+  replaces the old `settings.clinicianAvailability` JSON); tech-client links live
+  in `Assignments`; cancellations live in `Cancellations` (child of canceled
+  appointments). `Settings` is fully de-JSON'd (utilization, cancellation-notice,
+  and report-lead fields are plain columns). `Authorizations`/`ManualUsage`/
+  `Blackouts` unchanged.
+- Generated with `aoa_to_sheet` + explicit header arrays (stable column order) and
+  **`XLSX.write(..., { compression: true })`** — the old generator stored the zip
+  uncompressed (a real ~4–5x size bug: 463 KB → ~120 KB for the same data).
+- Child sheets reference owners by id, falling back to name (mirrors the app's
+  `find(x => x.id===v || x.name===v)`); denormalized name columns are for human
+  readability only.
+- **Legacy v1 files** (per-day `*Start/*End/*Windows`, `client1..hours10`,
+  inline cancellation columns, JSON-packed Settings) are upgraded once via
+  `scripts/migrate-legacy-xlsx.ts <in> <out> [data.json]`, which carries a
+  self-contained v1 reader and folds the dead `reportLeadWeeks*` settings into
+  the modern `reportDraftLead`/`reportFinalLead`.
+- The bundled sample (`public-assets/sample_schedule.xlsx`) is regenerated from
+  the `src/sampleSchedule.json` fixture via `npx tsx src/createSampleData.ts`.
+  Round-trip coverage: `npx tsx scripts/verify-excel.ts`.
+- Connectors (`nativeApi.ts`, `server.ts`, `app.tsx`) are pass-throughs over
+  `parseWorkbook`/`generateExcelFile` — unchanged by the format rework.
+
 ## App lock & at-rest persistence (native only)
 
 - On native, the app locks on **cold launch only** (no background/foreground

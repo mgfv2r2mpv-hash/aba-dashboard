@@ -20,7 +20,9 @@ import AppointmentForm from './components/AppointmentForm';
 import SetupWizard from './components/SetupWizard';
 import CancellationDialog from './components/CancellationDialog';
 import DayReview from './components/DayReview';
+import ImportPreview from './components/ImportPreview';
 import { pastIncompleteAppointments } from './compliance';
+import { buildCache, recomputeCache, summarize, } from './complianceCache';
 import { encryptString, decryptString } from './clientCrypto';
 // Route axios /api/* calls through an in-memory store on iOS/Android,
 // since the Express server isn't reachable from inside the WebView.
@@ -76,7 +78,16 @@ export default function App() {
     // Issues panel reflects what you're looking at, not just today.
     const [viewDate, setViewDate] = useState(new Date());
     const [showDayReview, setShowDayReview] = useState(false);
+    // Per-entity supervision-compliance cache for the current month. Recomputed
+    // incrementally (only the affected clients/techs) on each appointment change
+    // so the Comp-tab badge and dashboard stay live without a full pass.
+    const [compCache, setCompCache] = useState(null);
+    // A file picked from Admin → "Upload schedule", parsed but not yet applied:
+    // the user reviews the delta and confirms before it replaces current data.
+    const [pendingImport, setPendingImport] = useState(null);
     const detailPanelRef = React.useRef(null);
+    const importInputRef = React.useRef(null);
+    const compSummary = scheduleData && compCache ? summarize(compCache, scheduleData) : null;
     // Past-dated sessions still marked scheduled — the day-review queue.
     const pendingReview = scheduleData ? pastIncompleteAppointments(scheduleData) : [];
     // On narrow screens the right-side detail panel wraps below the calendar.
@@ -167,39 +178,75 @@ export default function App() {
             alert('Wrong password or corrupted blob - skipping embedded key.');
         }
     };
+    // Replace the whole schedule and rebuild the compliance cache from scratch.
+    // Used on first load, wizard finish, applied AI solutions, and admin edits —
+    // anything that can shift many entities at once. (Conflicts are recomputed by
+    // the scheduleData/viewDate effect, so we don't set them here.)
+    const commitFull = (next) => {
+        setScheduleData(next);
+        setCompCache(buildCache(next));
+    };
+    // Apply an already-parsed import as the working schedule. On native we prime
+    // the in-memory store nativeApi serves from; on web we POST the raw file so
+    // the Express server's store is the source of truth for later /api calls.
+    const applyImported = async (file, data, embeddedConfig) => {
+        if (Capacitor.isNativePlatform()) {
+            setNativeStore(data);
+            commitFull(data);
+            setSolutions([]);
+            if (embeddedConfig)
+                await promptForEmbeddedKey(embeddedConfig);
+            return;
+        }
+        const response = await axios.post(`${API_BASE}/upload`, file, {
+            headers: { 'Content-Type': 'application/octet-stream' },
+        });
+        commitFull(response.data.data);
+        setSolutions([]);
+        if (response.data.embeddedConfig)
+            await promptForEmbeddedKey(response.data.embeddedConfig);
+    };
     const handleFileUpload = async (file) => {
         setLoading(true);
         try {
-            if (Capacitor.isNativePlatform()) {
-                // No server is reachable from inside the iOS/Android WebView, so do
-                // the parse + validate entirely client-side, then prime the in-memory
-                // store that nativeApi serves /api/* requests from.
-                const buffer = await file.arrayBuffer();
-                const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
-                const parsed = parseWorkbook(workbook);
-                const conflicts = new ConstraintValidator(parsed.data).validateSchedule();
-                setNativeStore(parsed.data);
-                setScheduleData(parsed.data);
-                setConflicts(conflicts);
-                setSolutions([]);
-                if (parsed.embeddedConfig)
-                    await promptForEmbeddedKey(parsed.embeddedConfig);
+            // Parse client-side first (cheap, pure) so we can either apply it
+            // immediately on first run or show a delta before overwriting existing
+            // data. parseWorkbook is the same parser the server/native paths use.
+            const buffer = await file.arrayBuffer();
+            const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
+            const parsed = parseWorkbook(workbook);
+            if (scheduleData) {
+                // Replacing a loaded schedule — stage it and let the user confirm.
+                setPendingImport({ file, data: parsed.data, embeddedConfig: parsed.embeddedConfig });
                 return;
             }
-            const response = await axios.post(`${API_BASE}/upload`, file, {
-                headers: { 'Content-Type': 'application/octet-stream' },
-            });
-            setScheduleData(response.data.data);
-            setConflicts(response.data.conflicts);
-            setSolutions([]);
-            if (response.data.embeddedConfig)
-                await promptForEmbeddedKey(response.data.embeddedConfig);
+            await applyImported(file, parsed.data, parsed.embeddedConfig);
         }
         catch (error) {
             const msg = error.response?.data?.error || error.message || String(error);
             console.error('[upload] failed', error);
             setDebugMsg(`Upload failed: ${msg}`);
             alert('Error uploading file: ' + msg);
+        }
+        finally {
+            setLoading(false);
+        }
+    };
+    // Hidden file input fired by Admin → "Upload schedule…".
+    const triggerImportPicker = () => importInputRef.current?.click();
+    const confirmPendingImport = async () => {
+        if (!pendingImport)
+            return;
+        setLoading(true);
+        try {
+            await applyImported(pendingImport.file, pendingImport.data, pendingImport.embeddedConfig);
+            setPendingImport(null);
+            setView('schedule');
+        }
+        catch (error) {
+            const msg = error.response?.data?.error || error.message || String(error);
+            setDebugMsg(`Import failed: ${msg}`);
+            alert('Error importing file: ' + msg);
         }
         finally {
             setLoading(false);
@@ -221,12 +268,14 @@ export default function App() {
                 console.warn('Claude error:', response.data.claudeError);
             }
             if (scheduleData) {
-                const updated = { ...scheduleData };
+                const before = scheduleData.appointments.find(a => a.id === appointment.id);
+                const updated = { ...scheduleData, appointments: [...scheduleData.appointments] };
                 const idx = updated.appointments.findIndex(a => a.id === appointment.id);
                 if (idx >= 0) {
                     updated.appointments[idx] = response.data.appointment;
                 }
                 setScheduleData(updated);
+                setCompCache(prev => recomputeCache(prev, scheduleData, updated, [{ before, after: response.data.appointment }]));
             }
         }
         catch (error) {
@@ -240,6 +289,7 @@ export default function App() {
         if (!scheduleData)
             return;
         try {
+            const before = scheduleData.appointments.find(a => a.id === updated.id);
             await axios.post(`${API_BASE}/admin/appointment`, updated);
             const next = {
                 ...scheduleData,
@@ -247,6 +297,7 @@ export default function App() {
             };
             setScheduleData(next);
             setSelectedAppointment(updated);
+            setCompCache(prev => recomputeCache(prev, scheduleData, next, [{ before, after: updated }]));
             // Recompute conflicts so the side panel reflects the new lifecycle state
             // (canceled appointments are now excluded from compliance totals).
             setConflicts(new ConstraintValidator(next).validateSchedule());
@@ -272,7 +323,8 @@ export default function App() {
                 solutionId: solution.id,
                 changes: solution.changes,
             });
-            setScheduleData(response.data.data);
+            // A solution can touch many appointments at once — rebuild the cache fully.
+            commitFull(response.data.data);
             setConflicts(response.data.conflicts);
             setSolutions([]);
             setSelectedAppointment(null);
@@ -292,6 +344,7 @@ export default function App() {
             // by id (insert if new, Object.assign if existing).
             await Promise.all(apps.map(a => axios.post(`${API_BASE}/admin/appointment`, a)));
             const byId = new Map(apps.map(a => [a.id, a]));
+            const beforeById = new Map(scheduleData.appointments.map(a => [a.id, a]));
             const nextAppts = scheduleData.appointments.map(a => byId.get(a.id) || a);
             apps.forEach(a => {
                 if (!scheduleData.appointments.some(x => x.id === a.id))
@@ -299,6 +352,8 @@ export default function App() {
             });
             const next = { ...scheduleData, appointments: nextAppts };
             setScheduleData(next);
+            const changes = apps.map(a => ({ before: beforeById.get(a.id), after: a }));
+            setCompCache(prev => recomputeCache(prev, scheduleData, next, changes));
             // Refresh the side panel if the selected appointment was part of the batch.
             if (selectedAppointment) {
                 const updated = byId.get(selectedAppointment.id);
@@ -319,11 +374,14 @@ export default function App() {
         try {
             await Promise.all(ids.map(id => axios.delete(`${API_BASE}/admin/appointment/${id}`)));
             const idSet = new Set(ids);
+            const removed = scheduleData.appointments.filter(a => idSet.has(a.id));
             const next = {
                 ...scheduleData,
                 appointments: scheduleData.appointments.filter(a => !idSet.has(a.id)),
             };
             setScheduleData(next);
+            const changes = removed.map(a => ({ before: a, after: undefined }));
+            setCompCache(prev => recomputeCache(prev, scheduleData, next, changes));
             if (selectedAppointment && idSet.has(selectedAppointment.id)) {
                 setSelectedAppointment(null);
             }
@@ -344,7 +402,7 @@ export default function App() {
     const handleWizardComplete = async (data) => {
         try {
             const response = await axios.post(`${API_BASE}/schedule`, data);
-            setScheduleData(response.data.data);
+            commitFull(response.data.data);
             setConflicts(response.data.conflicts || []);
             setSolutions([]);
             setShowWizard(false);
@@ -433,7 +491,7 @@ export default function App() {
                 }, children: _jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }, children: [_jsx("h1", { style: { fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }, children: "ABA Schedule" }), _jsxs("div", { style: { display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }, children: [aiSettings.apiKey && (_jsx("span", { title: `AI: ${aiSettings.model}`, style: {
                                         width: 8, height: 8, borderRadius: '50%',
                                         backgroundColor: '#10b981', display: 'inline-block',
-                                    } })), compactBtn('⚙', 'Settings', () => setShowSettings(true)), !scheduleData ? (_jsxs(_Fragment, { children: [compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6'), _jsx(FileUpload, { onUpload: handleFileUpload, loading: loading })] })) : (_jsxs(_Fragment, { children: [compactBtn('+', 'Add appointment', () => setShowAddAppointment(true), '#3b82f6'), _jsx(ViewTabs, { view: view, onChange: setView }), compactBtn('↓', 'Download', handleDownload, '#10b981')] }))] })] }) }), _jsx("div", { style: {
+                                    } })), compactBtn('⚙', 'Settings', () => setShowSettings(true)), !scheduleData ? (_jsxs(_Fragment, { children: [compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6'), _jsx(FileUpload, { onUpload: handleFileUpload, loading: loading })] })) : (_jsxs(_Fragment, { children: [compactBtn('+', 'Add appointment', () => setShowAddAppointment(true), '#3b82f6'), _jsx(ViewTabs, { view: view, onChange: setView, compSummary: compSummary }), compactBtn('↓', 'Download', handleDownload, '#10b981')] }))] })] }) }), _jsx("div", { style: {
                     display: 'flex', flex: 1, flexWrap: 'wrap',
                     // Single scroll region for the whole post-header area.
                     // Each child below reports its natural height instead of carving
@@ -482,7 +540,7 @@ export default function App() {
                                                                     padding: '6px 12px', backgroundColor: 'white', color: '#6b7280',
                                                                     border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
                                                                 }, children: "Delete" })] })] }));
-                                        })()] }))] })), view === 'admin' && (_jsx(AdminPanel, { data: scheduleData, onDataChange: setScheduleData })), view === 'compliance' && (_jsx(ComplianceDashboard, { data: scheduleData, onMarkComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onSelectAppointment: (a) => { setView('schedule'); setSelectedAppointment(a); } })), view === 'caseload' && (_jsx(CaseloadView, { data: scheduleData, now: viewDate }))] })) : (_jsxs("div", { style: {
+                                        })()] }))] })), view === 'admin' && (_jsx(AdminPanel, { data: scheduleData, onDataChange: commitFull, onImportFile: triggerImportPicker, onRerunWizard: () => setShowWizard(true) })), view === 'compliance' && (_jsx(ComplianceDashboard, { data: scheduleData, cache: compCache, onMarkComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onSelectAppointment: (a) => { setView('schedule'); setSelectedAppointment(a); } })), view === 'caseload' && (_jsx(CaseloadView, { data: scheduleData, now: viewDate }))] })) : (_jsxs("div", { style: {
                         flex: 1,
                         display: 'flex',
                         alignItems: 'center',
@@ -492,25 +550,45 @@ export default function App() {
                         gap: '16px',
                         padding: '0 24px',
                         textAlign: 'center',
-                    }, children: [_jsx("p", { children: "Upload an Excel file or run the Setup Wizard to get started." }), _jsxs("p", { style: { fontSize: '12px', maxWidth: '320px' }, children: ["A sample schedule (", _jsx("code", { children: "sample_schedule.xlsx" }), ") is in this app's Documents folder \u2014 pick it from Files via Upload Schedule."] }), debugMsg && (_jsx("p", { style: { fontSize: '12px', color: '#b91c1c', maxWidth: '320px', backgroundColor: '#fee2e2', padding: '8px', borderRadius: '4px' }, children: debugMsg })), _jsxs("p", { style: { fontSize: '10px', color: '#d1d5db', fontFamily: 'monospace' }, children: ["build ", BUILD_STAMP, " \u00B7 native ", String(Capacitor.isNativePlatform())] })] })) }), showSettings && (_jsx(Settings, { settings: aiSettings, onSave: handleAISettingsSave, onClose: () => setShowSettings(false), onEmbedInExcel: handlePrepareEmbed, onClearKey: handleClearKey })), showWizard && (_jsx(SetupWizard, { onComplete: handleWizardComplete, onCancel: () => setShowWizard(false) })), cancelTarget && scheduleData && (_jsx(CancellationDialog, { appointment: cancelTarget, settings: scheduleData.settings, onConfirm: handleConfirmCancel, onCancel: () => setCancelTarget(null) })), showAddAppointment && scheduleData && (_jsx(AppointmentForm, { allAppointments: scheduleData.appointments, authorizations: scheduleData.authorizations, technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleSaveAppointments, onCancel: () => setShowAddAppointment(false) })), editingAppointment && scheduleData && (_jsx(AppointmentForm, { appointment: editingAppointment, allAppointments: scheduleData.appointments, authorizations: scheduleData.authorizations, technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleSaveAppointments, onDelete: handleDeleteAppointments, onCancel: () => setEditingAppointment(null) })), showDayReview && scheduleData && (_jsx(DayReview, { appointments: pendingReview, onComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onClose: () => setShowDayReview(false) }))] }));
+                    }, children: [_jsx("p", { children: "Upload an Excel file or run the Setup Wizard to get started." }), _jsxs("p", { style: { fontSize: '12px', maxWidth: '320px' }, children: ["A sample schedule (", _jsx("code", { children: "sample_schedule.xlsx" }), ") is in this app's Documents folder \u2014 pick it from Files via Upload Schedule."] }), debugMsg && (_jsx("p", { style: { fontSize: '12px', color: '#b91c1c', maxWidth: '320px', backgroundColor: '#fee2e2', padding: '8px', borderRadius: '4px' }, children: debugMsg })), _jsxs("p", { style: { fontSize: '10px', color: '#d1d5db', fontFamily: 'monospace' }, children: ["build ", BUILD_STAMP, " \u00B7 native ", String(Capacitor.isNativePlatform())] })] })) }), showSettings && (_jsx(Settings, { settings: aiSettings, onSave: handleAISettingsSave, onClose: () => setShowSettings(false), onEmbedInExcel: handlePrepareEmbed, onClearKey: handleClearKey })), showWizard && (_jsx(SetupWizard, { onComplete: handleWizardComplete, onCancel: () => setShowWizard(false), initialData: scheduleData || undefined })), _jsx("input", { ref: importInputRef, type: "file", accept: ".xlsx,.xls", style: { display: 'none' }, onChange: e => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (file)
+                        handleFileUpload(file);
+                } }), pendingImport && scheduleData && (_jsx(ImportPreview, { current: scheduleData, next: pendingImport.data, fileName: pendingImport.file.name, onConfirm: confirmPendingImport, onCancel: () => setPendingImport(null) })), cancelTarget && scheduleData && (_jsx(CancellationDialog, { appointment: cancelTarget, settings: scheduleData.settings, onConfirm: handleConfirmCancel, onCancel: () => setCancelTarget(null) })), showAddAppointment && scheduleData && (_jsx(AppointmentForm, { allAppointments: scheduleData.appointments, authorizations: scheduleData.authorizations, technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleSaveAppointments, onCancel: () => setShowAddAppointment(false) })), editingAppointment && scheduleData && (_jsx(AppointmentForm, { appointment: editingAppointment, allAppointments: scheduleData.appointments, authorizations: scheduleData.authorizations, technicians: scheduleData.technicians, clients: scheduleData.clients, onSave: handleSaveAppointments, onDelete: handleDeleteAppointments, onCancel: () => setEditingAppointment(null) })), showDayReview && scheduleData && (_jsx(DayReview, { appointments: pendingReview, onComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onClose: () => setShowDayReview(false) }))] }));
 }
 // Three-way segmented control for the active view. Sits inline in the header
 // at compact-button size so it doesn't blow up the chrome.
-function ViewTabs({ view, onChange }) {
+function ViewTabs({ view, onChange, compSummary }) {
     const tabs = [
         { key: 'schedule', label: 'Sched', aria: 'Schedule' },
         { key: 'admin', label: 'Admin', aria: 'Admin' },
         { key: 'compliance', label: 'Comp', aria: 'Compliance' },
         { key: 'caseload', label: 'Cases', aria: 'Caseload' },
     ];
+    // Live count of clients/techs needing attention this month, updated on every
+    // appointment change. Red = behind even projected; amber = projected ok only.
+    const attention = compSummary ? compSummary.red + compSummary.yellow : 0;
+    const badgeColor = compSummary?.worst === 'red' ? '#ef4444'
+        : compSummary?.worst === 'yellow' ? '#f59e0b' : '#10b981';
     return (_jsx("div", { style: { display: 'flex', borderRadius: 5, overflow: 'hidden', border: '1px solid #4b5563' }, children: tabs.map(t => {
             const active = t.key === view;
-            return (_jsx("button", { onClick: () => onChange(t.key), "aria-label": t.aria, title: t.aria, style: {
+            const showBadge = t.key === 'compliance' && !!compSummary;
+            return (_jsxs("button", { onClick: () => onChange(t.key), "aria-label": showBadge && attention > 0 ? `${t.aria} — ${attention} need attention` : t.aria, title: showBadge && attention > 0 ? `${attention} client(s)/tech(s) need attention this month` : t.aria, style: {
+                    position: 'relative',
                     padding: '5px 9px', border: 'none',
                     backgroundColor: active ? '#6366f1' : 'transparent',
                     color: 'white', cursor: 'pointer',
                     fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', lineHeight: 1.2,
-                }, children: t.label }, t.key));
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                }, children: [t.label, showBadge && (attention > 0 ? (_jsx("span", { style: {
+                            minWidth: 15, height: 15, padding: '0 4px', borderRadius: 8,
+                            backgroundColor: badgeColor, color: 'white',
+                            fontSize: 10, fontWeight: 700, lineHeight: '15px', textAlign: 'center',
+                        }, children: attention })) : (_jsx("span", { style: {
+                            width: 8, height: 8, borderRadius: '50%',
+                            backgroundColor: badgeColor, display: 'inline-block',
+                        } })))] }, t.key));
         }) }));
 }
 //# sourceMappingURL=app.js.map

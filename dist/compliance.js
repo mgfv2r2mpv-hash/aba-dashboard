@@ -31,11 +31,17 @@ export function monthPeriod(ref) {
 //                 from the direct's client; that's a data-quality
 //                 question we'll surface separately when we add this).
 export function computeClientCompliance(data, period, now = new Date()) {
-    return data.clients.map(client => ({
+    return data.clients.map(client => computeOneClientCompliance(data, client, period, now));
+}
+// Single-client compliance — the unit the incremental cache recomputes when an
+// appointment touching this client changes. `computeClientCompliance` is just a
+// map over this, so the two can never drift.
+export function computeOneClientCompliance(data, client, period, now = new Date()) {
+    return {
         client,
         actual: computeMetrics(data, client, period, 'actual', now),
         projected: computeMetrics(data, client, period, 'projected', now),
-    }));
+    };
 }
 function computeMetrics(data, client, period, scope, now) {
     const targetPct = data.settings.supervisionDirectHoursPercent || 5;
@@ -83,11 +89,16 @@ function computeMetrics(data, client, period, scope, now) {
 // Two thresholds for RBTs (BACB hard 5% + company target). One for non-RBT
 // techs (company target only). Cards fail if any applicable threshold misses.
 export function computeTechCompliance(data, period, now = new Date()) {
-    return data.technicians.map(tech => ({
+    return data.technicians.map(tech => computeOneTechCompliance(data, tech, period, now));
+}
+// Single-technician compliance — the per-entity unit the incremental cache
+// recomputes. `computeTechCompliance` maps over this.
+export function computeOneTechCompliance(data, tech, period, now = new Date()) {
+    return {
         tech,
         actual: computeTechMetrics(data, tech, period, 'actual', now),
         projected: computeTechMetrics(data, tech, period, 'projected', now),
-    }));
+    };
 }
 function computeTechMetrics(data, tech, period, scope, now) {
     const startMs = period.start.getTime();
@@ -175,7 +186,7 @@ export function pastIncompleteAppointments(data, now = new Date()) {
 function duration(a) {
     return (new Date(a.endTime).getTime() - new Date(a.startTime).getTime()) / 3600000;
 }
-function overlapHours(a, b) {
+export function overlapHours(a, b) {
     const aS = new Date(a.startTime).getTime();
     const aE = new Date(a.endTime).getTime();
     const bS = new Date(b.startTime).getTime();

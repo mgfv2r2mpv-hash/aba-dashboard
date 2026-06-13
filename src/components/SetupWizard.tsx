@@ -6,6 +6,10 @@ import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, WEEKDAYS, isPresetActive, tog
 interface SetupWizardProps {
   onComplete: (data: ScheduleData) => void;
   onCancel: () => void;
+  // When re-run from an existing schedule, prefill the form with current data.
+  // Company/clients/technicians are editable here; appointments and the
+  // authorization/blackout records are carried through untouched on finish.
+  initialData?: ScheduleData;
 }
 
 type Step = 'welcome' | 'company' | 'clients' | 'technicians' | 'review';
@@ -37,10 +41,12 @@ const cardStyle: React.CSSProperties = {
   overflow: 'hidden',
 };
 
-export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) {
+export default function SetupWizard({ onComplete, onCancel, initialData }: SetupWizardProps) {
   const [step, setStep] = useState<Step>('welcome');
 
-  const [settings, setSettings] = useState<CompanySettings>({
+  const seed = initialData?.settings;
+
+  const [settings, setSettings] = useState<CompanySettings>(seed ?? {
     supervisionDirectHoursPercent: 5,
     supervisionRBTHoursPercent: BACB_RBT_SUPERVISION_MIN_PERCENT,
     parentTraining: {
@@ -54,19 +60,19 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
     ),
   });
 
-  const [supDirectStr, setSupDirectStr] = useState('5');
-  const [supRBTStr, setSupRBTStr] = useState(String(BACB_RBT_SUPERVISION_MIN_PERCENT));
-  const [rbtOverride, setRBTOverride] = useState(false);
-  const [supTechStr, setSupTechStr] = useState('0');
-  const [supMaxStr, setSupMaxStr] = useState('20');
-  const [minHoursStr, setMinHoursStr] = useState('1.5');
-  const [targetMinStr, setTargetMinStr] = useState('2');
-  const [targetMaxStr, setTargetMaxStr] = useState('4');
-  const [unplannedHoursStr, setUnplannedHoursStr] = useState(String(DEFAULT_CANCELLATION_NOTICE.unplannedHoursThreshold));
-  const [plannedDaysStr, setPlannedDaysStr] = useState(String(DEFAULT_CANCELLATION_NOTICE.plannedDaysThreshold));
+  const [supDirectStr, setSupDirectStr] = useState(seed ? String(seed.supervisionDirectHoursPercent) : '5');
+  const [supRBTStr, setSupRBTStr] = useState(seed ? String(seed.supervisionRBTHoursPercent) : String(BACB_RBT_SUPERVISION_MIN_PERCENT));
+  const [rbtOverride, setRBTOverride] = useState(!!seed && seed.supervisionRBTHoursPercent !== BACB_RBT_SUPERVISION_MIN_PERCENT);
+  const [supTechStr, setSupTechStr] = useState(seed?.supervisionTechHoursPercent != null ? String(seed.supervisionTechHoursPercent) : '0');
+  const [supMaxStr, setSupMaxStr] = useState(seed ? (seed.supervisionMaxHoursPercent != null ? String(seed.supervisionMaxHoursPercent) : '') : '20');
+  const [minHoursStr, setMinHoursStr] = useState(seed ? String(seed.parentTraining.minimumHours) : '1.5');
+  const [targetMinStr, setTargetMinStr] = useState(seed ? String(seed.parentTraining.targetMinHours) : '2');
+  const [targetMaxStr, setTargetMaxStr] = useState(seed ? String(seed.parentTraining.targetMaxHours) : '4');
+  const [unplannedHoursStr, setUnplannedHoursStr] = useState(String(seed?.cancellationNotice?.unplannedHoursThreshold ?? DEFAULT_CANCELLATION_NOTICE.unplannedHoursThreshold));
+  const [plannedDaysStr, setPlannedDaysStr] = useState(String(seed?.cancellationNotice?.plannedDaysThreshold ?? DEFAULT_CANCELLATION_NOTICE.plannedDaysThreshold));
 
-  const [clients, setClients] = useState<Client[]>([]);
-  const [technicians, setTechnicians] = useState<Technician[]>([]);
+  const [clients, setClients] = useState<Client[]>(initialData ? initialData.clients.map(c => ({ ...c })) : []);
+  const [technicians, setTechnicians] = useState<Technician[]>(initialData ? initialData.technicians.map(t => ({ ...t })) : []);
   const [assignmentHoursStr, setAssignmentHoursStr] = useState<{ [key: string]: string }>({});
 
   const addClient = () => setClients([...clients, {
@@ -133,12 +139,18 @@ export default function SetupWizard({ onComplete, onCancel }: SetupWizardProps) 
       }),
     }));
     const data: ScheduleData = {
-      id: uuidv4(),
-      version: 1,
+      // Re-running on an existing schedule edits only company/clients/techs;
+      // appointments and the auth/blackout/usage records carry through so the
+      // wizard never silently drops the calendar.
+      id: initialData?.id ?? uuidv4(),
+      version: initialData?.version ?? 1,
       clients,
       technicians: techniciansWithParsedHours,
       settings: updateSettingsFromStrings(),
-      appointments: [],
+      appointments: initialData?.appointments ?? [],
+      blackouts: initialData?.blackouts,
+      authorizations: initialData?.authorizations,
+      manualUsage: initialData?.manualUsage,
       lastModified: new Date().toISOString(),
     };
     onComplete(data);

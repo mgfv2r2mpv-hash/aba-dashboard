@@ -20,7 +20,12 @@ import AppointmentForm from './components/AppointmentForm';
 import SetupWizard from './components/SetupWizard';
 import CancellationDialog from './components/CancellationDialog';
 import DayReview from './components/DayReview';
+import ImportPreview from './components/ImportPreview';
 import { pastIncompleteAppointments } from './compliance';
+import {
+  ComplianceCache, ComplianceSummary, ApptChange,
+  buildCache, recomputeCache, summarize,
+} from './complianceCache';
 import { encryptString, decryptString } from './clientCrypto';
 
 // Route axios /api/* calls through an in-memory store on iOS/Android,
@@ -83,7 +88,18 @@ export default function App() {
   // Issues panel reflects what you're looking at, not just today.
   const [viewDate, setViewDate] = useState<Date>(new Date());
   const [showDayReview, setShowDayReview] = useState(false);
+  // Per-entity supervision-compliance cache for the current month. Recomputed
+  // incrementally (only the affected clients/techs) on each appointment change
+  // so the Comp-tab badge and dashboard stay live without a full pass.
+  const [compCache, setCompCache] = useState<ComplianceCache | null>(null);
+  // A file picked from Admin → "Upload schedule", parsed but not yet applied:
+  // the user reviews the delta and confirms before it replaces current data.
+  const [pendingImport, setPendingImport] = useState<{ file: File; data: ScheduleData; embeddedConfig?: string } | null>(null);
   const detailPanelRef = React.useRef<HTMLDivElement | null>(null);
+  const importInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const compSummary: ComplianceSummary | null =
+    scheduleData && compCache ? summarize(compCache, scheduleData) : null;
 
   // Past-dated sessions still marked scheduled — the day-review queue.
   const pendingReview = scheduleData ? pastIncompleteAppointments(scheduleData) : [];
@@ -176,37 +192,74 @@ export default function App() {
     }
   };
 
+  // Replace the whole schedule and rebuild the compliance cache from scratch.
+  // Used on first load, wizard finish, applied AI solutions, and admin edits —
+  // anything that can shift many entities at once. (Conflicts are recomputed by
+  // the scheduleData/viewDate effect, so we don't set them here.)
+  const commitFull = (next: ScheduleData) => {
+    setScheduleData(next);
+    setCompCache(buildCache(next));
+  };
+
+  // Apply an already-parsed import as the working schedule. On native we prime
+  // the in-memory store nativeApi serves from; on web we POST the raw file so
+  // the Express server's store is the source of truth for later /api calls.
+  const applyImported = async (file: File, data: ScheduleData, embeddedConfig?: string) => {
+    if (Capacitor.isNativePlatform()) {
+      setNativeStore(data);
+      commitFull(data);
+      setSolutions([]);
+      if (embeddedConfig) await promptForEmbeddedKey(embeddedConfig);
+      return;
+    }
+    const response = await axios.post(`${API_BASE}/upload`, file, {
+      headers: { 'Content-Type': 'application/octet-stream' },
+    });
+    commitFull(response.data.data);
+    setSolutions([]);
+    if (response.data.embeddedConfig) await promptForEmbeddedKey(response.data.embeddedConfig);
+  };
+
   const handleFileUpload = async (file: File) => {
     setLoading(true);
     try {
-      if (Capacitor.isNativePlatform()) {
-        // No server is reachable from inside the iOS/Android WebView, so do
-        // the parse + validate entirely client-side, then prime the in-memory
-        // store that nativeApi serves /api/* requests from.
-        const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
-        const parsed = parseWorkbook(workbook);
-        const conflicts = new ConstraintValidator(parsed.data).validateSchedule();
-        setNativeStore(parsed.data);
-        setScheduleData(parsed.data);
-        setConflicts(conflicts);
-        setSolutions([]);
-        if (parsed.embeddedConfig) await promptForEmbeddedKey(parsed.embeddedConfig);
+      // Parse client-side first (cheap, pure) so we can either apply it
+      // immediately on first run or show a delta before overwriting existing
+      // data. parseWorkbook is the same parser the server/native paths use.
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(new Uint8Array(buffer), { type: 'array' });
+      const parsed = parseWorkbook(workbook);
+
+      if (scheduleData) {
+        // Replacing a loaded schedule — stage it and let the user confirm.
+        setPendingImport({ file, data: parsed.data, embeddedConfig: parsed.embeddedConfig });
         return;
       }
-
-      const response = await axios.post(`${API_BASE}/upload`, file, {
-        headers: { 'Content-Type': 'application/octet-stream' },
-      });
-      setScheduleData(response.data.data);
-      setConflicts(response.data.conflicts);
-      setSolutions([]);
-      if (response.data.embeddedConfig) await promptForEmbeddedKey(response.data.embeddedConfig);
+      await applyImported(file, parsed.data, parsed.embeddedConfig);
     } catch (error: any) {
       const msg = error.response?.data?.error || error.message || String(error);
       console.error('[upload] failed', error);
       setDebugMsg(`Upload failed: ${msg}`);
       alert('Error uploading file: ' + msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Hidden file input fired by Admin → "Upload schedule…".
+  const triggerImportPicker = () => importInputRef.current?.click();
+
+  const confirmPendingImport = async () => {
+    if (!pendingImport) return;
+    setLoading(true);
+    try {
+      await applyImported(pendingImport.file, pendingImport.data, pendingImport.embeddedConfig);
+      setPendingImport(null);
+      setView('schedule');
+    } catch (error: any) {
+      const msg = error.response?.data?.error || error.message || String(error);
+      setDebugMsg(`Import failed: ${msg}`);
+      alert('Error importing file: ' + msg);
     } finally {
       setLoading(false);
     }
@@ -229,12 +282,15 @@ export default function App() {
       }
 
       if (scheduleData) {
-        const updated = { ...scheduleData };
+        const before = scheduleData.appointments.find(a => a.id === appointment.id);
+        const updated = { ...scheduleData, appointments: [...scheduleData.appointments] };
         const idx = updated.appointments.findIndex(a => a.id === appointment.id);
         if (idx >= 0) {
           updated.appointments[idx] = response.data.appointment;
         }
         setScheduleData(updated);
+        setCompCache(prev => recomputeCache(prev, scheduleData, updated,
+          [{ before, after: response.data.appointment }]));
       }
     } catch (error: any) {
       alert('Error updating appointment: ' + (error.response?.data?.error || error.message));
@@ -246,6 +302,7 @@ export default function App() {
   const persistAppointment = async (updated: Appointment) => {
     if (!scheduleData) return;
     try {
+      const before = scheduleData.appointments.find(a => a.id === updated.id);
       await axios.post(`${API_BASE}/admin/appointment`, updated);
       const next: ScheduleData = {
         ...scheduleData,
@@ -253,6 +310,7 @@ export default function App() {
       };
       setScheduleData(next);
       setSelectedAppointment(updated);
+      setCompCache(prev => recomputeCache(prev, scheduleData, next, [{ before, after: updated }]));
       // Recompute conflicts so the side panel reflects the new lifecycle state
       // (canceled appointments are now excluded from compliance totals).
       setConflicts(new ConstraintValidator(next).validateSchedule());
@@ -283,7 +341,8 @@ export default function App() {
         changes: solution.changes,
       });
 
-      setScheduleData(response.data.data);
+      // A solution can touch many appointments at once — rebuild the cache fully.
+      commitFull(response.data.data);
       setConflicts(response.data.conflicts);
       setSolutions([]);
       setSelectedAppointment(null);
@@ -301,12 +360,15 @@ export default function App() {
       // by id (insert if new, Object.assign if existing).
       await Promise.all(apps.map(a => axios.post(`${API_BASE}/admin/appointment`, a)));
       const byId = new Map(apps.map(a => [a.id, a]));
+      const beforeById = new Map(scheduleData.appointments.map(a => [a.id, a]));
       const nextAppts = scheduleData.appointments.map(a => byId.get(a.id) || a);
       apps.forEach(a => {
         if (!scheduleData.appointments.some(x => x.id === a.id)) nextAppts.push(a);
       });
       const next: ScheduleData = { ...scheduleData, appointments: nextAppts };
       setScheduleData(next);
+      const changes: ApptChange[] = apps.map(a => ({ before: beforeById.get(a.id), after: a }));
+      setCompCache(prev => recomputeCache(prev, scheduleData, next, changes));
       // Refresh the side panel if the selected appointment was part of the batch.
       if (selectedAppointment) {
         const updated = byId.get(selectedAppointment.id);
@@ -325,11 +387,14 @@ export default function App() {
     try {
       await Promise.all(ids.map(id => axios.delete(`${API_BASE}/admin/appointment/${id}`)));
       const idSet = new Set(ids);
+      const removed = scheduleData.appointments.filter(a => idSet.has(a.id));
       const next: ScheduleData = {
         ...scheduleData,
         appointments: scheduleData.appointments.filter(a => !idSet.has(a.id)),
       };
       setScheduleData(next);
+      const changes: ApptChange[] = removed.map(a => ({ before: a, after: undefined }));
+      setCompCache(prev => recomputeCache(prev, scheduleData, next, changes));
       if (selectedAppointment && idSet.has(selectedAppointment.id)) {
         setSelectedAppointment(null);
       }
@@ -350,7 +415,7 @@ export default function App() {
   const handleWizardComplete = async (data: ScheduleData) => {
     try {
       const response = await axios.post(`${API_BASE}/schedule`, data);
-      setScheduleData(response.data.data);
+      commitFull(response.data.data);
       setConflicts(response.data.conflicts || []);
       setSolutions([]);
       setShowWizard(false);
@@ -470,7 +535,7 @@ export default function App() {
             ) : (
               <>
                 {compactBtn('+', 'Add appointment', () => setShowAddAppointment(true), '#3b82f6')}
-                <ViewTabs view={view} onChange={setView} />
+                <ViewTabs view={view} onChange={setView} compSummary={compSummary} />
                 {compactBtn('↓', 'Download', handleDownload, '#10b981')}
               </>
             )}
@@ -636,11 +701,17 @@ export default function App() {
               </>
             )}
             {view === 'admin' && (
-              <AdminPanel data={scheduleData} onDataChange={setScheduleData} />
+              <AdminPanel
+                data={scheduleData}
+                onDataChange={commitFull}
+                onImportFile={triggerImportPicker}
+                onRerunWizard={() => setShowWizard(true)}
+              />
             )}
             {view === 'compliance' && (
               <ComplianceDashboard
                 data={scheduleData}
+                cache={compCache}
                 onMarkComplete={handleMarkComplete}
                 onRequestCancel={(a) => setCancelTarget(a)}
                 onSelectAppointment={(a) => { setView('schedule'); setSelectedAppointment(a); }}
@@ -693,6 +764,31 @@ export default function App() {
         <SetupWizard
           onComplete={handleWizardComplete}
           onCancel={() => setShowWizard(false)}
+          initialData={scheduleData || undefined}
+        />
+      )}
+
+      {/* Hidden picker for Admin → "Upload schedule…". The header FileUpload
+          handles the first-run case; this covers replacing a loaded schedule. */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        style={{ display: 'none' }}
+        onChange={e => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file) handleFileUpload(file);
+        }}
+      />
+
+      {pendingImport && scheduleData && (
+        <ImportPreview
+          current={scheduleData}
+          next={pendingImport.data}
+          fileName={pendingImport.file.name}
+          onConfirm={confirmPendingImport}
+          onCancel={() => setPendingImport(null)}
         />
       )}
 
@@ -743,9 +839,10 @@ export default function App() {
 
 // Three-way segmented control for the active view. Sits inline in the header
 // at compact-button size so it doesn't blow up the chrome.
-function ViewTabs({ view, onChange }: {
+function ViewTabs({ view, onChange, compSummary }: {
   view: 'schedule' | 'admin' | 'compliance' | 'caseload';
   onChange: (v: 'schedule' | 'admin' | 'compliance' | 'caseload') => void;
+  compSummary?: ComplianceSummary | null;
 }) {
   const tabs: { key: 'schedule' | 'admin' | 'compliance' | 'caseload'; label: string; aria: string }[] = [
     { key: 'schedule', label: 'Sched', aria: 'Schedule' },
@@ -753,23 +850,47 @@ function ViewTabs({ view, onChange }: {
     { key: 'compliance', label: 'Comp', aria: 'Compliance' },
     { key: 'caseload', label: 'Cases', aria: 'Caseload' },
   ];
+  // Live count of clients/techs needing attention this month, updated on every
+  // appointment change. Red = behind even projected; amber = projected ok only.
+  const attention = compSummary ? compSummary.red + compSummary.yellow : 0;
+  const badgeColor = compSummary?.worst === 'red' ? '#ef4444'
+    : compSummary?.worst === 'yellow' ? '#f59e0b' : '#10b981';
   return (
     <div style={{ display: 'flex', borderRadius: 5, overflow: 'hidden', border: '1px solid #4b5563' }}>
       {tabs.map(t => {
         const active = t.key === view;
+        const showBadge = t.key === 'compliance' && !!compSummary;
         return (
           <button
             key={t.key}
             onClick={() => onChange(t.key)}
-            aria-label={t.aria}
-            title={t.aria}
+            aria-label={showBadge && attention > 0 ? `${t.aria} — ${attention} need attention` : t.aria}
+            title={showBadge && attention > 0 ? `${attention} client(s)/tech(s) need attention this month` : t.aria}
             style={{
+              position: 'relative',
               padding: '5px 9px', border: 'none',
               backgroundColor: active ? '#6366f1' : 'transparent',
               color: 'white', cursor: 'pointer',
               fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', lineHeight: 1.2,
+              display: 'inline-flex', alignItems: 'center', gap: 5,
             }}
-          >{t.label}</button>
+          >
+            {t.label}
+            {showBadge && (
+              attention > 0 ? (
+                <span style={{
+                  minWidth: 15, height: 15, padding: '0 4px', borderRadius: 8,
+                  backgroundColor: badgeColor, color: 'white',
+                  fontSize: 10, fontWeight: 700, lineHeight: '15px', textAlign: 'center',
+                }}>{attention}</span>
+              ) : (
+                <span style={{
+                  width: 8, height: 8, borderRadius: '50%',
+                  backgroundColor: badgeColor, display: 'inline-block',
+                }} />
+              )
+            )}
+          </button>
         );
       })}
     </div>

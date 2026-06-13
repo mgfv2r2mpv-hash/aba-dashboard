@@ -63,7 +63,16 @@ export default function Calendar({
   const [view, setView] = useState<View>('month');
   const [lens, setLens] = useState<Lens>('bcba');
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [pickedDay, setPickedDay] = useState<Date | null>(null);
   const isLandscape = useIsLandscape();
+
+  // From the month grid, tapping a day offers a jump to that day's week or day
+  // view. Both set the anchor date first, then switch the view.
+  const openDayIn = (target: View) => {
+    if (pickedDay) setCurrentDate(pickedDay);
+    setView(target);
+    setPickedDay(null);
+  };
 
   // Surface the viewed anchor date to the parent whenever it changes.
   useEffect(() => {
@@ -147,7 +156,7 @@ export default function Calendar({
       </div>
 
       {view === 'month' && (
-        <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} onSelectAppointment={onSelectAppointment} draftMarks={draftMarks} />
+        <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} onSelectAppointment={onSelectAppointment} onPickDay={setPickedDay} draftMarks={draftMarks} />
       )}
       {view === 'week' && (
         <TimeGrid
@@ -174,18 +183,67 @@ export default function Calendar({
           Rotate to landscape to drag appointments to a new time.
         </p>
       )}
+
+      {pickedDay && (
+        <div
+          onClick={() => setPickedDay(null)}
+          style={{
+            position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.35)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400, padding: 16,
+          }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'white', borderRadius: 8, padding: 16, maxWidth: 320, width: '100%',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>
+              {format(pickedDay, 'EEEE, MMM d, yyyy')}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => openDayIn('week')}
+                style={{
+                  flex: 1, padding: '10px 12px', borderRadius: 6, border: '1px solid #d1d5db',
+                  background: '#f9fafb', cursor: 'pointer', fontSize: 14, fontWeight: 600,
+                }}
+              >
+                Week view
+              </button>
+              <button
+                onClick={() => openDayIn('day')}
+                style={{
+                  flex: 1, padding: '10px 12px', borderRadius: 6, border: '1px solid #3b82f6',
+                  background: '#3b82f6', color: 'white', cursor: 'pointer', fontSize: 14, fontWeight: 600,
+                }}
+              >
+                Day view
+              </button>
+            </div>
+            <button
+              onClick={() => setPickedDay(null)}
+              style={{
+                marginTop: 12, width: '100%', padding: '8px 12px', borderRadius: 6,
+                border: 'none', background: 'transparent', color: '#6b7280', cursor: 'pointer', fontSize: 13,
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // ---------- Month View ----------
 
-function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment, draftMarks }: {
+function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment, onPickDay, draftMarks }: {
   currentDate: Date;
   appointments: Appointment[];
   lens: Lens;
   settings?: CompanySettings;
   onSelectAppointment: (a: Appointment) => void;
+  onPickDay: (day: Date) => void;
   draftMarks?: Map<string, DraftMark>;
 }) {
   const monthStart = startOfMonth(currentDate);
@@ -248,10 +306,16 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
             const dow = getDay(day); // 0 = Sun (now the rightmost column)
             const weekStart = startOfWeek(day, { weekStartsOn: 1 });
             return (
-              <div key={format(day, 'yyyy-MM-dd')} style={{
-                backgroundColor: inCurrentMonth ? '#ffffff' : '#f3f4f6',
-                minHeight: 110, padding: 6, opacity: inCurrentMonth ? 1 : 0.5,
-              }}>
+              <div
+                key={format(day, 'yyyy-MM-dd')}
+                onClick={() => onPickDay(day)}
+                title="Open week or day view"
+                style={{
+                  backgroundColor: inCurrentMonth ? '#ffffff' : '#f3f4f6',
+                  minHeight: 110, padding: 6, opacity: inCurrentMonth ? 1 : 0.5,
+                  cursor: 'pointer',
+                }}
+              >
                 <div style={{
                   fontWeight: isToday ? 700 : 400,
                   marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: 12,

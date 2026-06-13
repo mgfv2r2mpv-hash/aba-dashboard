@@ -1,0 +1,316 @@
+// Native draft solver + grading.
+//
+// Given the live schedule and the user's staged draft ops, this computes the
+// PREVIEW and grades it for the live status badge, attempting an in-week
+// reshuffle that moves only "mobile" sessions (direct service assigned to a
+// technician — easy to relocate). Sessions booked directly with the family
+// (no technician) are "sticky": the engine won't move them on its own, it asks
+// the BCBA to choose. The grade drives the badge:
+//
+//   green  — resolvable with mobile moves only, billable within target.
+//   yellow — resolvable but needs a human call (shorten a session / move a
+//            family session), or it solves but pushes BCBA above billable target.
+//   red    — no in-week solution, or it would drop BCBA below the billable floor.
+//            On red the AI escalation button becomes available.
+//
+// The grade is advisory: the user can always override and Save anyway.
+
+import { Appointment, ScheduleData, CompanySettings, DayOfWeek, TimeWindow } from './types';
+import { DraftOp, applyOps } from './draft';
+import { overlapHours } from './compliance';
+import { weekRange } from './caseModel';
+import { findOpenSlots } from './corrections';
+import { rollupHours, resolveUtilization, bucketOf } from './utilization';
+
+export type DraftGrade = 'green' | 'yellow' | 'red';
+
+export interface PrioritizationChoice {
+  kind: 'shorten' | 'move-family';
+  appointmentId: string;
+  label: string; // terse, e.g. "Shorten EC 3:00–5:00" / "Move family session BW"
+}
+
+export interface DraftStatus {
+  grade: DraftGrade;
+  label: string;                 // terse far-left badge text
+  resolved?: ScheduleData;       // engine's best arrangement, committed on Accept
+  movedIds: string[];            // ids the engine relocated beyond the user's ops
+  choices: PrioritizationChoice[];
+  needsChoice: boolean;          // yellow that requires a human pick before Accept
+  aiEligible: boolean;           // red → enable AI button
+}
+
+const DAY_NAMES: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as any;
+const MAX_ROUNDS = 60; // hill-climb cap — keeps the badge instant
+
+// ---- small time helpers (local-day, matching the seeder's ISO format) ----
+function ms(iso: string): number { return new Date(iso).getTime(); }
+function minutesOfDay(iso: string): number { const d = new Date(iso); return d.getHours() * 60 + d.getMinutes(); }
+function toMin(hhmm: string): number { const [h, m] = hhmm.split(':').map(Number); return (h || 0) * 60 + (m || 0); }
+function dateStrOf(iso: string): string { return iso.slice(0, 10); }
+function durationMin(a: Appointment): number { return Math.round((ms(a.endTime) - ms(a.startTime)) / 60000); }
+
+// A session occupies the CLIENT's presence (so two can't overlap) unless it's
+// supervision (which is meant to overlap a direct) or an internal task.
+function occupiesClient(a: Appointment): boolean {
+  return a.type !== 'supervision' && a.type !== 'internal-task';
+}
+function isActive(a: Appointment): boolean {
+  return a.status !== 'canceled' && !a.isGhost;
+}
+// Mobile = a future, still-scheduled, non-fixed direct session with a technician.
+function isMobile(a: Appointment, nowMs: number): boolean {
+  return isActive(a) && !a.isFixed && a.status !== 'completed'
+    && !!a.technician && ms(a.startTime) >= nowMs;
+}
+// Sticky = a future, active session with NO technician (booked with the family).
+function isSticky(a: Appointment, nowMs: number): boolean {
+  return isActive(a) && !a.technician && a.status !== 'completed' && ms(a.startTime) >= nowMs;
+}
+
+function windowsCover(windows: TimeWindow[] | undefined, startMin: number, endMin: number): boolean {
+  if (!Array.isArray(windows) || windows.length === 0) return true; // unconfigured = not faulted
+  return windows.some(w => startMin >= toMin(w.start) && endMin <= toMin(w.end));
+}
+
+// A conflict between two sessions, or an availability/blackout problem on one.
+interface Conflict {
+  ids: string[];                 // appointment id(s) involved
+  kind: 'double-book' | 'availability' | 'blackout';
+}
+
+// Focused conflict scan, limited to the affected weeks. Detects technician
+// double-booking, client double-booking, availability-window violations, and
+// blackout collisions — the things an in-week reshuffle is meant to fix.
+function focusedConflicts(data: ScheduleData, weekStartMs: number[]): Conflict[] {
+  const inAffectedWeek = (a: Appointment) =>
+    weekStartMs.some(w => { const t = ms(a.startTime); return t >= w && t < w + 7 * 86400000; });
+  const sessions = data.appointments.filter(a => isActive(a) && inAffectedWeek(a));
+  const conflicts: Conflict[] = [];
+
+  // Pairwise double-booking (same tech, or same client for client-occupying types).
+  for (let i = 0; i < sessions.length; i++) {
+    for (let j = i + 1; j < sessions.length; j++) {
+      const a = sessions[i], b = sessions[j];
+      if (overlapHours(a, b) <= 0) continue;
+      const sameTech = !!a.technician && (a.technician === b.technician);
+      const sameClient = !!a.client && (a.client === b.client);
+      if (sameTech || (sameClient && occupiesClient(a) && occupiesClient(b))) {
+        conflicts.push({ ids: [a.id, b.id], kind: 'double-book' });
+      }
+    }
+  }
+
+  // Availability + blackout, per session.
+  const clientById = new Map(data.clients.map(c => [c.id, c]));
+  const clientByName = new Map(data.clients.map(c => [c.name, c]));
+  const techById = new Map(data.technicians.map(t => [t.id, t]));
+  const techByName = new Map(data.technicians.map(t => [t.name, t]));
+  const blackouts = data.blackouts || [];
+  for (const a of sessions) {
+    const day = DAY_NAMES[new Date(a.startTime).getDay()];
+    const date = dateStrOf(a.startTime);
+    const s = minutesOfDay(a.startTime), e = minutesOfDay(a.endTime);
+    const client = a.client ? (clientById.get(a.client) || clientByName.get(a.client)) : undefined;
+    const tech = a.technician ? (techById.get(a.technician) || techByName.get(a.technician)) : undefined;
+    if (blackouts.some(b =>
+      b.date === date && (
+        (client && b.entityType === 'client' && b.entityId === client.id) ||
+        (tech && b.entityType === 'technician' && b.entityId === tech.id)
+      ))) {
+      conflicts.push({ ids: [a.id], kind: 'blackout' });
+      continue;
+    }
+    const techBad = tech && !windowsCover((tech.availability as any)[day], s, e);
+    // Clients are only faulted when they HAVE windows that don't cover the slot.
+    const clientWindows = client ? (client.availabilityWindows as any)[day] as TimeWindow[] : undefined;
+    const clientBad = clientWindows && clientWindows.length > 0 && !windowsCover(clientWindows, s, e);
+    if (techBad || clientBad) conflicts.push({ ids: [a.id], kind: 'availability' });
+  }
+
+  return conflicts;
+}
+
+// Relocate `appt` to its first feasible in-week slot (for its client+tech) that
+// is not before `now`. Returns a moved clone, or null if no slot exists.
+function relocate(
+  data: ScheduleData, appt: Appointment, weekStartMs: number, nowMs: number,
+): Appointment | null {
+  const weekEnd = new Date(weekStartMs + 6 * 86400000);
+  const throughDate = `${weekEnd.getFullYear()}-${String(weekEnd.getMonth() + 1).padStart(2, '0')}-${String(weekEnd.getDate()).padStart(2, '0')}`;
+  const from = new Date(Math.max(weekStartMs, nowMs));
+  const client = data.clients.find(c => c.id === appt.client || c.name === appt.client);
+  const tech = data.technicians.find(t => t.id === appt.technician || t.name === appt.technician);
+  const slots = findOpenSlots(data, {
+    durationMinutes: durationMin(appt),
+    clientId: client?.id,
+    techId: tech?.id,
+    fromDate: from,
+    throughDate,
+    weekendsOk: true,
+    useClinicianAvailability: !appt.technician,
+  }, 12);
+  for (const slot of slots) {
+    const start = `${slot.date}T${slot.start}:00`;
+    const end = `${slot.date}T${slot.end}:00`;
+    if (start === appt.startTime && end === appt.endTime) continue; // no-op slot
+    return { ...appt, startTime: start, endTime: end };
+  }
+  return null;
+}
+
+// Greedy hill-climb: relocate mobile sessions involved in conflicts until clean
+// or stuck. Mutates a working copy; returns the resolved schedule + moved ids
+// and whether it reached zero conflicts.
+function reshuffleMobile(
+  base: ScheduleData, weekStartMs: number[], nowMs: number,
+): { data: ScheduleData; movedIds: Set<string>; clean: boolean } {
+  let working: ScheduleData = { ...base, appointments: base.appointments.map(a => ({ ...a })) };
+  const movedIds = new Set<string>();
+
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const conflicts = focusedConflicts(working, weekStartMs);
+    if (conflicts.length === 0) return { data: working, movedIds, clean: true };
+
+    // Find a mobile session inside any conflict whose relocation strictly
+    // reduces the conflict count.
+    let improved = false;
+    outer:
+    for (const c of conflicts) {
+      for (const id of c.ids) {
+        const idx = working.appointments.findIndex(a => a.id === id);
+        if (idx < 0) continue;
+        const appt = working.appointments[idx];
+        const wkStart = startOfWeekMs(ms(appt.startTime));
+        if (!isMobile(appt, nowMs)) continue;
+        const moved = relocate(working, appt, wkStart, nowMs);
+        if (!moved) continue;
+        const trial: ScheduleData = {
+          ...working,
+          appointments: working.appointments.map(a => a.id === id ? moved : a),
+        };
+        if (focusedConflicts(trial, weekStartMs).length < conflicts.length) {
+          working = trial;
+          movedIds.add(id);
+          improved = true;
+          break outer;
+        }
+      }
+    }
+    if (!improved) return { data: working, movedIds, clean: false };
+  }
+  return { data: working, movedIds, clean: focusedConflicts(working, weekStartMs).length === 0 };
+}
+
+function startOfWeekMs(t: number): number {
+  const d = new Date(t);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay()).getTime();
+}
+
+// BCBA weekly billable (no-technician lens), summed over the affected weeks,
+// counting completed + scheduled.
+function bcbaBillable(data: ScheduleData, weekStartMs: number[]): number {
+  let total = 0;
+  for (const w of weekStartMs) {
+    const h = rollupHours(data.appointments, w, w + 7 * 86400000, 'bcba');
+    total += h.completed + h.scheduled;
+  }
+  return total;
+}
+
+// For the unresolved conflicts left after mobile reshuffle, surface the human
+// trade-offs: which family (sticky) sessions could move, and which overlapping
+// sessions could be shortened.
+function buildChoices(data: ScheduleData, conflicts: Conflict[], nowMs: number): PrioritizationChoice[] {
+  const choices: PrioritizationChoice[] = [];
+  const seen = new Set<string>();
+  const label = (a: Appointment) => {
+    const who = a.client || a.title || a.id.slice(0, 4);
+    const t = new Date(a.startTime);
+    return `${who} ${t.getHours()}:${String(t.getMinutes()).padStart(2, '0')}`;
+  };
+  for (const c of conflicts) {
+    if (c.kind !== 'double-book') continue;
+    for (const id of c.ids) {
+      if (seen.has(id)) continue;
+      const a = data.appointments.find(x => x.id === id);
+      if (!a) continue;
+      if (isSticky(a, nowMs)) {
+        choices.push({ kind: 'move-family', appointmentId: id, label: `Move family session ${label(a)}` });
+        seen.add(id);
+      } else if (isActive(a) && a.status !== 'completed' && ms(a.startTime) >= nowMs) {
+        choices.push({ kind: 'shorten', appointmentId: id, label: `Shorten ${label(a)}` });
+        seen.add(id);
+      }
+    }
+  }
+  return choices;
+}
+
+export function solveDraft(
+  base: ScheduleData,
+  ops: DraftOp[],
+  now: Date,
+  settings: CompanySettings,
+): DraftStatus {
+  const nowMs = now.getTime();
+  const preview = applyOps(base, ops);
+
+  // Affected weeks: the weeks of every op-touched appointment.
+  const weekSet = new Set<number>();
+  for (const op of ops) {
+    const iso = op.appt?.startTime
+      ?? base.appointments.find(a => a.id === op.targetId)?.startTime;
+    if (iso) weekSet.add(weekRange(new Date(iso)).start.getTime());
+  }
+  // Fallback: if a draft op carried no date (shouldn't happen), use this week.
+  if (weekSet.size === 0) weekSet.add(weekRange(now).start.getTime());
+  const weeks = [...weekSet];
+
+  // Billable floor/target (no-tech BCBA lens). A draft that drops the BCBA below
+  // the floor for any affected week is a hard red.
+  const util = resolveUtilization(settings.utilization);
+  const target = util.bcbaWeeklyBillableHours;
+  const floor = util.bcbaWeeklyBillableMin;
+  const baseBillable = bcbaBillable(base, weeks);
+
+  const { data: resolved, movedIds, clean } = reshuffleMobile(preview, weeks, nowMs);
+  const previewBillable = bcbaBillable(resolved, weeks);
+  // Floor only binds when this draft DROPS the BCBA below it (e.g. removing or
+  // shortening a BCBA session) — not merely because the week is underbooked.
+  const belowFloor = floor > 0 && previewBillable + 0.01 < floor && previewBillable + 0.01 < baseBillable;
+  // "Above" only counts when this draft pushes further above target than the
+  // starting schedule already was.
+  const aboveTarget = previewBillable > target + 0.01 && previewBillable > baseBillable + 0.01;
+
+  if (clean && !belowFloor) {
+    if (aboveTarget) {
+      return { grade: 'yellow', label: 'confirmation needed; above hours', resolved,
+        movedIds: [...movedIds], choices: [], needsChoice: false, aiEligible: false };
+    }
+    return { grade: 'green', label: 'no conflict; within hours', resolved,
+      movedIds: [...movedIds], choices: [], needsChoice: false, aiEligible: false };
+  }
+
+  // Not clean (or below floor). If below floor → red regardless.
+  if (belowFloor) {
+    return { grade: 'red', label: 'billable below minimum', resolved: undefined,
+      movedIds: [...movedIds], choices: [], needsChoice: false, aiEligible: true };
+  }
+
+  // Conflicts remain after mobile reshuffle. If every remaining conflict offers
+  // a human trade-off (shorten / move a family session), it's yellow with
+  // choices; otherwise there's no in-week solution → red.
+  const remaining = focusedConflicts(resolved, weeks);
+  const choices = buildChoices(resolved, remaining, nowMs);
+  const everyConflictHasChoice = remaining.every(c =>
+    c.kind === 'double-book' && c.ids.some(id => choices.some(ch => ch.appointmentId === id)));
+
+  if (choices.length > 0 && everyConflictHasChoice) {
+    return { grade: 'yellow', label: 'confirmation needed', resolved,
+      movedIds: [...movedIds], choices, needsChoice: true, aiEligible: false };
+  }
+
+  return { grade: 'red', label: 'no in-week solution', resolved: undefined,
+    movedIds: [...movedIds], choices, needsChoice: false, aiEligible: true };
+}

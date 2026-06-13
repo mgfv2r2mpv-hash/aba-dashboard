@@ -175,11 +175,13 @@ app.post('/api/download', express.json(), (req, res) => {
     }
     try {
         const { embeddedConfig } = req.body;
+        // Return PLAIN workbook bytes. Whole-file encryption (when the user has set
+        // a schedule password) is applied client-side so it works identically on
+        // native and web; the server never holds the password.
         const buffer = generateExcelFile(currentScheduleData, embeddedConfig);
-        const encrypted = ExcelEncryption.encrypt(buffer, encryptionPassword);
         res.setHeader('Content-Type', 'application/octet-stream');
-        res.setHeader('Content-Disposition', 'attachment; filename=schedule.enc.xlsx');
-        res.send(encrypted);
+        res.setHeader('Content-Disposition', 'attachment; filename=schedule.xlsx');
+        res.send(buffer);
     }
     catch (error) {
         res.status(500).json({

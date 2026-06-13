@@ -129,7 +129,7 @@ function computeShaveRoom(data, now) {
     for (const c of data.clients)
         caseStates.set(c.id, computeCaseState(data, c, now));
     return data.appointments
-        .filter(a => a.type === 'supervision' && a.status !== 'canceled' &&
+        .filter(a => a.type === 'supervision' && a.status !== 'canceled' && !a.isGhost &&
         new Date(a.startTime).getTime() >= period.start.getTime() &&
         new Date(a.startTime).getTime() < period.end.getTime())
         .map(sup => {
@@ -217,7 +217,7 @@ function intersect(a, b) {
 }
 function busyIntervals(data, dateStr, client, tech, allowOverlapClientDirect = false) {
     return data.appointments
-        .filter(a => a.status !== 'canceled' && a.startTime.slice(0, 10) === dateStr && ((client && (a.client === client.id || a.client === client.name)) ||
+        .filter(a => a.status !== 'canceled' && !a.isGhost && a.startTime.slice(0, 10) === dateStr && ((client && (a.client === client.id || a.client === client.name)) ||
         (tech && (a.technician === tech.id || a.technician === tech.name))))
         // PT-coincides-with-direct mode: don't let the client's own direct sessions
         // block the slot (they are the slots we want to land on).
@@ -230,7 +230,7 @@ function directIntervalsFor(data, dateStr, client) {
     if (!client)
         return [];
     return data.appointments
-        .filter(a => a.type === 'client-session' && a.status !== 'canceled' && a.startTime.slice(0, 10) === dateStr &&
+        .filter(a => a.type === 'client-session' && a.status !== 'canceled' && !a.isGhost && a.startTime.slice(0, 10) === dateStr &&
         (a.client === client.id || a.client === client.name))
         .map(a => ({ start: minutesOfDay(a.startTime), end: minutesOfDay(a.endTime) }));
 }

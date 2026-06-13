@@ -17,41 +17,15 @@ const MODEL_OPTIONS = [
         description: 'Fastest and cheapest. Good for simple single-week conflicts.',
     },
 ];
-export default function Settings({ settings, onSave, onClose, onEmbedInExcel, onClearKey }) {
+export default function Settings({ settings, onSave, onClose, onClearKey }) {
     const [apiKey, setApiKey] = useState(settings.apiKey);
     const [model, setModel] = useState(settings.model);
     const [showKey, setShowKey] = useState(false);
-    const [embedPassword, setEmbedPassword] = useState('');
-    const [embedConfirm, setEmbedConfirm] = useState('');
-    const [embedStatus, setEmbedStatus] = useState(null);
-    const [showEmbedHelp, setShowEmbedHelp] = useState(false);
+    const [schedulePassword, setSchedulePassword] = useState(settings.schedulePassword || '');
+    const [showSchedulePw, setShowSchedulePw] = useState(false);
     const handleSave = () => {
-        onSave({ apiKey: apiKey.trim(), model });
+        onSave({ apiKey: apiKey.trim(), model, schedulePassword: schedulePassword.trim() || undefined });
         onClose();
-    };
-    const handleEmbed = async () => {
-        setEmbedStatus(null);
-        if (embedPassword.length < 8) {
-            setEmbedStatus('Password must be at least 8 characters');
-            return;
-        }
-        if (embedPassword !== embedConfirm) {
-            setEmbedStatus('Passwords do not match');
-            return;
-        }
-        if (!apiKey.trim()) {
-            setEmbedStatus('Enter an API key first');
-            return;
-        }
-        try {
-            await onEmbedInExcel(embedPassword);
-            setEmbedStatus('Encrypted blob ready - it will be saved on next download');
-            setEmbedPassword('');
-            setEmbedConfirm('');
-        }
-        catch (err) {
-            setEmbedStatus(`Error: ${err.message}`);
-        }
     };
     return (_jsx("div", { style: {
             position: 'fixed',
@@ -105,52 +79,18 @@ export default function Settings({ settings, onSave, onClose, onEmbedInExcel, on
                                 borderRadius: '4px',
                                 cursor: 'pointer',
                                 fontSize: '12px',
-                            }, children: "Clear stored key" }))] }), _jsxs("div", { style: { marginBottom: '24px', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px' }, children: [_jsxs("div", { style: { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }, children: [_jsx("label", { style: { fontWeight: '600' }, children: "Embed Encrypted Key in Excel (optional)" }), _jsx("button", { type: "button", onClick: () => setShowEmbedHelp(v => !v), "aria-label": "What is this?", "aria-expanded": showEmbedHelp, style: {
-                                        width: '20px',
-                                        height: '20px',
-                                        padding: 0,
-                                        borderRadius: '50%',
-                                        border: '1px solid #9ca3af',
-                                        background: showEmbedHelp ? '#6366f1' : 'white',
-                                        color: showEmbedHelp ? 'white' : '#6b7280',
+                            }, children: "Clear stored key" }))] }), _jsxs("div", { style: { marginBottom: '24px', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px' }, children: [_jsx("label", { style: { display: 'block', fontWeight: '600', marginBottom: '8px' }, children: "Schedule Password (optional)" }), _jsx("p", { style: { fontSize: '12px', color: '#6b7280', marginBottom: '8px' }, children: "Encrypts your downloaded schedule file. Opening it anywhere \u2014 including in this app on another device \u2014 requires this password. Leave blank to download a normal, readable file." }), _jsxs("div", { style: { display: 'flex', gap: '8px' }, children: [_jsx("input", { type: showSchedulePw ? 'text' : 'password', placeholder: "Leave blank for no encryption", value: schedulePassword, onChange: (e) => setSchedulePassword(e.target.value), style: {
+                                        flex: 1,
+                                        padding: '8px 12px',
+                                        border: '1px solid #d1d5db',
+                                        borderRadius: '6px',
+                                    } }), _jsx("button", { onClick: () => setShowSchedulePw(!showSchedulePw), style: {
+                                        padding: '8px 12px',
+                                        border: '1px solid #d1d5db',
+                                        borderRadius: '6px',
+                                        background: 'white',
                                         cursor: 'pointer',
-                                        fontSize: '12px',
-                                        fontWeight: 600,
-                                        lineHeight: 1,
-                                    }, children: "?" })] }), showEmbedHelp && (_jsx("div", { role: "note", style: {
-                                fontSize: '12px',
-                                color: '#374151',
-                                background: '#eef2ff',
-                                border: '1px solid #c7d2fe',
-                                borderRadius: '6px',
-                                padding: '10px 12px',
-                                marginBottom: '8px',
-                                lineHeight: 1.5,
-                            }, children: "Pick a password you'll remember (8+ characters). It's used only to lock your API key inside this Excel file. Anyone with this file and the password can use your Claude key \u2014 so don't share the file in places you wouldn't share the key. If you forget the password, the embedded key cannot be recovered. Your current session's key still works, and you can paste a new API key above and re-encrypt here with a fresh password." })), _jsx("p", { style: { fontSize: '12px', color: '#6b7280', marginBottom: '8px' }, children: "On next download, your API key + model will be encrypted with this password and saved into the Excel file. On re-upload, you'll be prompted for this password to decrypt." }), _jsx("input", { type: "password", placeholder: "Embed password (8+ chars)", value: embedPassword, onChange: (e) => setEmbedPassword(e.target.value), style: {
-                                width: '100%',
-                                padding: '8px 12px',
-                                border: '1px solid #d1d5db',
-                                borderRadius: '6px',
-                                marginBottom: '8px',
-                            } }), _jsx("input", { type: "password", placeholder: "Confirm password", value: embedConfirm, onChange: (e) => setEmbedConfirm(e.target.value), style: {
-                                width: '100%',
-                                padding: '8px 12px',
-                                border: '1px solid #d1d5db',
-                                borderRadius: '6px',
-                                marginBottom: '8px',
-                            } }), _jsx("button", { onClick: handleEmbed, style: {
-                                padding: '8px 16px',
-                                backgroundColor: '#6366f1',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '6px',
-                                cursor: 'pointer',
-                                fontSize: '13px',
-                            }, children: "Prepare Encrypted Embed" }), embedStatus && (_jsx("p", { style: {
-                                marginTop: '8px',
-                                fontSize: '12px',
-                                color: embedStatus.startsWith('Error') ? '#dc2626' : '#10b981',
-                            }, children: embedStatus }))] }), _jsxs("div", { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' }, children: [_jsx("button", { onClick: onClose, style: {
+                                    }, children: showSchedulePw ? 'Hide' : 'Show' })] })] }), _jsxs("div", { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' }, children: [_jsx("button", { onClick: onClose, style: {
                                 padding: '8px 16px',
                                 border: '1px solid #d1d5db',
                                 borderRadius: '6px',

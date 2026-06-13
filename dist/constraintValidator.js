@@ -3,13 +3,14 @@ import { computeAuthUsage } from './authorization';
 import { computeCaseState } from './caseModel';
 export class ConstraintValidator {
     constructor(data, now = new Date()) {
-        // Canceled appointments are excluded from every constraint check by
-        // shadowing the appointments array at the data-source level. Completed
-        // and scheduled appointments are both counted (completed appointments
-        // still consume hours that need to have been supervised, etc.).
+        // Canceled appointments (and ghosts — wished-for sessions that were never
+        // placed) are excluded from every constraint check by shadowing the
+        // appointments array at the data-source level. Completed and scheduled
+        // appointments are both counted (completed appointments still consume hours
+        // that need to have been supervised, etc.).
         this.data = {
             ...data,
-            appointments: data.appointments.filter(a => a.status !== 'canceled'),
+            appointments: data.appointments.filter(a => a.status !== 'canceled' && !a.isGhost),
         };
         this.now = now;
     }

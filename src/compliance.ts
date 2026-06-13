@@ -107,7 +107,7 @@ function computeMetrics(
   const endMs = period.end.getTime();
 
   const inScope = (a: Appointment) => {
-    if (a.status === 'canceled') return false;
+    if (a.status === 'canceled' || a.isGhost) return false;
     if (scope === 'projected') return true;
     return new Date(a.startTime).getTime() <= now.getTime();
   };
@@ -189,7 +189,7 @@ function computeTechMetrics(
   const startMs = period.start.getTime();
   const endMs = period.end.getTime();
   const inScope = (a: Appointment) => {
-    if (a.status === 'canceled') return false;
+    if (a.status === 'canceled' || a.isGhost) return false;
     if (scope === 'projected') return true;
     return new Date(a.startTime).getTime() <= now.getTime();
   };
@@ -255,7 +255,7 @@ export function computeTechContactDays(
   const startMs = period.start.getTime();
   const endMs = period.end.getTime();
   const inScope = (a: Appointment) => {
-    if (a.status === 'canceled') return false;
+    if (a.status === 'canceled' || a.isGhost) return false;
     if (scope === 'projected') return true;
     return new Date(a.startTime).getTime() <= now.getTime();
   };
@@ -293,6 +293,7 @@ export function pastIncompleteAppointments(
     .filter(a =>
       a.status !== 'canceled' &&
       a.status !== 'completed' &&
+      !a.isGhost &&
       new Date(a.startTime).getTime() <= nowMs
     )
     .sort((a, b) =>

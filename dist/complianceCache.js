@@ -33,6 +33,9 @@ export function buildCache(data, now = new Date()) {
 export function affectedEntities(appt, data) {
     const clientIds = new Set();
     const techIds = new Set();
+    // Ghosts never enter the supervision math, so they touch no entities.
+    if (appt.isGhost)
+        return { clientIds, techIds };
     const client = data.clients.find(c => c.id === appt.client || c.name === appt.client);
     if (appt.type === 'client-session') {
         if (client)
@@ -45,7 +48,7 @@ export function affectedEntities(appt, data) {
         if (client)
             clientIds.add(client.id);
         for (const d of data.appointments) {
-            if (d.type !== 'client-session')
+            if (d.type !== 'client-session' || d.isGhost)
                 continue;
             if (overlapHours(appt, d) <= 0)
                 continue;

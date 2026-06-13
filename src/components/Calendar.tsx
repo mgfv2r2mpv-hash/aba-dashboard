@@ -261,6 +261,10 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
   roomy?: boolean;
 }) {
   const maxChips = roomy ? 6 : 3;
+  // Minimum readable width per day column. Below 7×this, the grid scrolls
+  // horizontally inside its panel rather than smushing columns / pushing
+  // weekend days off-screen.
+  const colMin = roomy ? 108 : 92;
   // Which grid week-rows are expanded to reveal every appointment. Tapping a
   // cell's "+N more" expands the whole row downward (the CSS grid stretches
   // sibling cells to match), and a "Show less" control collapses it again.
@@ -312,11 +316,11 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
   useEffect(() => { setExpandedRows(new Set()); }, [monthKey]);
 
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-      <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as any, border: '1px solid #e5e7eb', borderRadius: 6 }}>
         <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1,
-          backgroundColor: '#e5e7eb', marginBottom: 1,
+          display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 1,
+          backgroundColor: '#e5e7eb', marginBottom: 1, minWidth: colMin * 7,
         }}>
           {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
             <div key={d} style={{
@@ -326,7 +330,7 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
           ))}
         </div>
         <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, backgroundColor: '#e5e7eb',
+          display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 1, backgroundColor: '#e5e7eb', minWidth: colMin * 7,
         }}>
           {days.map((day, idx) => {
             const dayAppts = appointmentsOn(appointments, day);
@@ -344,7 +348,7 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
                 style={{
                   backgroundColor: inCurrentMonth ? '#ffffff' : '#f3f4f6',
                   minHeight: roomy ? 168 : 110, padding: roomy ? 8 : 6, opacity: inCurrentMonth ? 1 : 0.5,
-                  cursor: 'pointer',
+                  cursor: 'pointer', overflow: 'hidden',
                 }}
               >
                 <div style={{
@@ -470,15 +474,16 @@ function WeekRibbon({ lens, weeks, weeklyTarget, monthHours, monthlyGoal, monthW
   monthWeeks: number;
 }) {
   return (
-    <div style={{ flex: '1 1 150px', minWidth: 140, maxWidth: 240, display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: '#111827' }}>
         {lens === 'bt' ? 'BT direct hours' : 'BCBA billable hours'}
       </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}>
       {weeks.filter(w => w.inMonth).map((w, i) => {
         const color = trackColor(w.hours, weeklyTarget);
         const live = w.hours.completed + w.hours.scheduled;
         return (
-          <div key={i} style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 8px', background: '#fff' }}>
+          <div key={i} style={{ flex: '1 1 200px', minWidth: 180, border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 8px', background: '#fff' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>Wk {format(w.weekStart, 'M/d')}</span>
               <span style={{ fontSize: 11, fontWeight: 700, color }}>{fmtH(live)}/{fmtH(weeklyTarget)}h</span>
@@ -490,8 +495,10 @@ function WeekRibbon({ lens, weeks, weeklyTarget, monthHours, monthlyGoal, monthW
           </div>
         );
       })}
-
-      <MonthTotalRow lens={lens} hours={monthHours} goal={monthlyGoal} weeklyTarget={weeklyTarget} monthWeeks={monthWeeks} />
+      <div style={{ flex: '1 1 200px', minWidth: 180 }}>
+        <MonthTotalRow lens={lens} hours={monthHours} goal={monthlyGoal} weeklyTarget={weeklyTarget} monthWeeks={monthWeeks} />
+      </div>
+      </div>
       <Legend />
     </div>
   );

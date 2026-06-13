@@ -297,6 +297,28 @@ export function solveDraft(
   if (weekSet.size === 0) weekSet.add(weekRange(now).start.getTime());
   const weeks = [...weekSet];
 
+  // Past-only drafts (e.g. logging a historical session that already happened):
+  // it can't be rescheduled, and billable floors/targets are forward-looking, so
+  // grade purely on hard timeslot conflicts. Two BILLABLE activities can't share
+  // a slot (you can't bill two at once), but a billable+nonbillable or
+  // nonbillable overlap is allowed and passes clean.
+  const allPast = ops.length > 0 && ops.every(op => {
+    const iso = op.appt?.startTime ?? base.appointments.find(a => a.id === op.targetId)?.startTime;
+    return !!iso && ms(iso) < nowMs;
+  });
+  if (allPast) {
+    const conflicts = focusedConflicts(preview, weeks);
+    const billable = new Map(preview.appointments.map(a => [a.id, a.isBillable === true]));
+    const blocking = conflicts.filter(c =>
+      c.kind === 'double-book' && c.ids.every(id => billable.get(id)));
+    if (blocking.length === 0) {
+      return { grade: 'green', label: 'past session — logged as actual', resolved: preview,
+        movedIds: [], choices: [], needsChoice: false, aiEligible: false };
+    }
+    return { grade: 'red', label: 'two billable sessions overlap', resolved: undefined,
+      movedIds: [], choices: [], needsChoice: false, aiEligible: false };
+  }
+
   // Billable floor/target (no-tech BCBA lens). A draft that drops the BCBA below
   // the floor for any affected week is a hard red.
   const util = resolveUtilization(settings.utilization);

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Appointment } from '../types';
+import CompleteTimePrompt from './CompleteTimePrompt';
 
 // End-of-day sweep: every past-dated session still marked "scheduled" gets a
 // quick Complete / Cancel / Skip decision so actuals stay current without
@@ -58,11 +59,8 @@ export default function DayReview({ appointments, onComplete, onRequestCancel, o
                     {a.technician ? ` · ${a.technician}` : ''}{a.client ? ` · ${a.client}` : ''}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button onClick={() => onComplete(a)} style={{
-                    padding: '6px 10px', backgroundColor: '#dcfce7', color: '#15803d',
-                    border: '1px solid #86efac', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                  }}>✓ Complete</button>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <CompleteTimePrompt key={a.id} a={a} onComplete={onComplete} flex="0 0 auto" />
                   <button onClick={() => onRequestCancel(a)} style={{
                     padding: '6px 10px', backgroundColor: '#fee2e2', color: '#b91c1c',
                     border: '1px solid #fca5a5', borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600,

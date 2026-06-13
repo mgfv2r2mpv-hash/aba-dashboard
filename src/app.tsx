@@ -20,6 +20,7 @@ import AppointmentForm from './components/AppointmentForm';
 import SetupWizard from './components/SetupWizard';
 import CancellationDialog from './components/CancellationDialog';
 import DayReview from './components/DayReview';
+import CompleteTimePrompt from './components/CompleteTimePrompt';
 import ImportPreview from './components/ImportPreview';
 import LockScreen from './components/LockScreen';
 import PasswordPrompt from './components/PasswordPrompt';
@@ -606,11 +607,32 @@ export default function App() {
 
   // Add (new id) or edit (existing id) → stage as draft ops. Nothing commits
   // until the user Accepts or overrides in the DraftTray.
-  const handleSaveAppointments = (apps: Appointment[]) => {
+  const handleSaveAppointments = async (apps: Appointment[]) => {
     if (apps.length === 0 || !scheduleData) return;
     const ops = apps.map(a =>
       scheduleData.appointments.some(x => x.id === a.id) ? newMoveOp(a) : newAddOp(a)
     );
+    // Historical sessions already happened — there's nothing to reschedule. When
+    // every staged session is in the past, solveDraft grades it purely on hard
+    // timeslot conflicts (two billable activities can't share a slot). If it
+    // comes back clean (green), commit straight away so compliance/goals update
+    // without a draft round-trip; a blocking overlap still falls through to the
+    // tray for the user to resolve.
+    const nowMs = Date.now();
+    const allPast = ops.every(o => {
+      const iso = o.appt?.startTime;
+      return !!iso && new Date(iso).getTime() < nowMs;
+    });
+    if (allPast) {
+      const status = solveDraft(scheduleData, ops, new Date(), scheduleData.settings);
+      if (status.grade === 'green') {
+        await commitScheduleData(status.resolved || applyOps(scheduleData, ops));
+        setSelectedAppointment(null);
+        setShowAddAppointment(false);
+        setEditingAppointment(null);
+        return;
+      }
+    }
     stageOps(ops);
     setShowAddAppointment(false);
     setEditingAppointment(null);
@@ -869,6 +891,7 @@ export default function App() {
                     {selectedAppointment && (() => {
                       const a = selectedAppointment;
                       const status = a.status || 'scheduled';
+                      const locked = status === 'canceled' || status === 'completed';
                       const statusColor = status === 'canceled' ? '#b91c1c' : status === 'completed' ? '#15803d' : '#374151';
                       const statusBg = status === 'canceled' ? '#fee2e2' : status === 'completed' ? '#dcfce7' : '#f3f4f6';
                       return (
@@ -933,21 +956,18 @@ export default function App() {
                           ) : (
                           <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
                             <button
-                              onClick={() => setEditingAppointment(a)}
+                              onClick={() => !locked && setEditingAppointment(a)}
+                              disabled={locked}
+                              title={locked ? 'Reopen to edit' : undefined}
                               style={{
-                                flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
-                                border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                                flex: '1 1 auto', padding: '6px 12px',
+                                backgroundColor: locked ? '#e5e7eb' : '#3b82f6', color: locked ? '#9ca3af' : 'white',
+                                border: 'none', borderRadius: '4px', cursor: locked ? 'not-allowed' : 'pointer', fontSize: '13px',
                               }}
                             >Edit</button>
                             {status === 'scheduled' && (
                               <>
-                                <button
-                                  onClick={() => handleMarkComplete(a)}
-                                  style={{
-                                    flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#dcfce7', color: '#15803d',
-                                    border: '1px solid #86efac', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
-                                  }}
-                                >✓ Complete</button>
+                                <CompleteTimePrompt key={a.id} a={a} onComplete={handleMarkComplete} />
                                 <button
                                   onClick={() => setCancelTarget(a)}
                                   style={{

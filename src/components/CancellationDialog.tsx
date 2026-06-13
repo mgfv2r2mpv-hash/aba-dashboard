@@ -3,9 +3,9 @@ import {
   Appointment,
   Cancellation,
   CancellationSource,
-  CancellationReason,
   CANCELLATION_SOURCES,
   CANCELLATION_REASONS,
+  activeCancellationCodes,
   CompanySettings,
   DEFAULT_CANCELLATION_NOTICE,
 } from '../types';
@@ -29,8 +29,13 @@ function applicableSources(apptType: Appointment['type']) {
 }
 
 export default function CancellationDialog({ appointment, settings, onConfirm, onCancel }: Props) {
+  // Active reason codes for this company; fall back to the built-ins if every
+  // code has been retired, so the cancel flow is never left with no options.
+  const activeReasons = activeCancellationCodes(settings);
+  const reasons = activeReasons.length ? activeReasons : CANCELLATION_REASONS;
+
   const [source, setSource] = useState<CancellationSource>('bt');
-  const [reason, setReason] = useState<CancellationReason>('sick');
+  const [reason, setReason] = useState<string>(() => reasons[0]?.value ?? '');
   const [unplanned, setUnplanned] = useState(true);
   const [noticeMet, setNoticeMet] = useState(false);
   const [notes, setNotes] = useState('');
@@ -41,6 +46,10 @@ export default function CancellationDialog({ appointment, settings, onConfirm, o
   // Keep source valid if appointment type changes the available list.
   if (!sources.some(s => s.value === source)) {
     setSource(sources[0].value);
+  }
+  // Keep reason valid if the active set changes (e.g. selected code retired).
+  if (reasons.length && !reasons.some(r => r.value === reason)) {
+    setReason(reasons[0].value);
   }
 
   const noticeQuestion = unplanned
@@ -84,8 +93,8 @@ export default function CancellationDialog({ appointment, settings, onConfirm, o
         </div>
 
         <label style={label}>Reason</label>
-        <select value={reason} onChange={e => setReason(e.target.value as CancellationReason)} style={input}>
-          {CANCELLATION_REASONS.map(r => (
+        <select value={reason} onChange={e => setReason(e.target.value)} style={input}>
+          {reasons.map(r => (
             <option key={r.value} value={r.value}>{r.label}</option>
           ))}
         </select>

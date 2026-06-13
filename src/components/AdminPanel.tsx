@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode } from '../types';
 import { computeAuthUsage, computeReportDates } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 import { resolveUtilization } from '../utilization';
@@ -1392,6 +1392,9 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
   const [draftLeadUnit, setDraftLeadUnit] = useState<'days' | 'weeks'>(settings.reportDraftLead?.unit ?? 'weeks');
   const [finalLeadVal, setFinalLeadVal] = useState(s(settings.reportFinalLead?.value ?? 2));
   const [finalLeadUnit, setFinalLeadUnit] = useState<'days' | 'weeks'>(settings.reportFinalLead?.unit ?? 'weeks');
+  // Cancellation reason codes — seeded from the company's set (or the built-in
+  // defaults). Saved with the rest of the settings via the "Save settings" button.
+  const [codes, setCodes] = useState<CancellationCode[]>(() => resolveCancellationCodes(settings).map(c => ({ ...c })));
 
   const num = (str: string, fallback: number) => {
     const n = parseFloat(str);
@@ -1432,6 +1435,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
       supervisionPreferredMaxPercent: num(prefMaxPct, 20),
       reportDraftLead: { value: num(draftLeadVal, 4), unit: draftLeadUnit },
       reportFinalLead: { value: num(finalLeadVal, 2), unit: finalLeadUnit },
+      cancellationReasons: codes,
     };
     onSave(next);
   };
@@ -1480,6 +1484,10 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
       <SettingsSection title="Cancellation notice thresholds">
         <NumField label="Unplanned: adequate notice if more than" value={unplannedHrs} onChange={setUnplannedHrs} suffix="hours" />
         <NumField label="Planned: adequate notice if more than" value={plannedDays} onChange={setPlannedDays} suffix="days" />
+      </SettingsSection>
+
+      <SettingsSection title="Cancellation reason codes">
+        <CancellationCodesEditor codes={codes} onChange={setCodes} />
       </SettingsSection>
 
       <SettingsSection title="Billable / utilization targets">
@@ -1531,6 +1539,92 @@ function SettingsSection({ title, children }: { title: string; children: React.R
     <div style={{ ...cardStyle, marginBottom: '16px' }}>
       <p style={{ fontSize: '13px', fontWeight: 700, color: '#111827', marginBottom: '12px' }}>{title}</p>
       <div style={{ display: 'grid', gap: '12px' }}>{children}</div>
+    </div>
+  );
+}
+
+// Add / rename / retire the cancellation reason codes offered in the cancel
+// dialog. Retiring keeps a code resolvable for historical records but hides it
+// from new cancellations; the stable `value` id is never changed once created
+// (renaming edits only the human label) so existing records keep resolving.
+function CancellationCodesEditor({ codes, onChange }: {
+  codes: CancellationCode[];
+  onChange: (next: CancellationCode[]) => void;
+}) {
+  const [newLabel, setNewLabel] = useState('');
+
+  const update = (idx: number, patch: Partial<CancellationCode>) =>
+    onChange(codes.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
+
+  const toggleRetired = (idx: number) =>
+    update(idx, { retired: !codes[idx].retired });
+
+  const addCode = () => {
+    const label = newLabel.trim();
+    if (!label) return;
+    const base = slugifyCancellationCode(label) || 'code';
+    // Keep the value id unique even if two labels slugify the same.
+    let value = base;
+    let n = 2;
+    const taken = new Set(codes.map(c => c.value));
+    while (taken.has(value)) value = `${base}_${n++}`;
+    onChange([...codes, { value, label }]);
+    setNewLabel('');
+  };
+
+  return (
+    <div style={{ display: 'grid', gap: '8px' }}>
+      {codes.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>
+          <div style={{ flex: 2, minWidth: 0 }}>Label</div>
+          <div style={{ flex: 1, minWidth: 0 }}>Code</div>
+          <div style={{ width: '76px', flexShrink: 0 }} />
+        </div>
+      )}
+      {codes.map((c, idx) => (
+        <div key={c.value} style={{ display: 'flex', gap: '6px', alignItems: 'center', opacity: c.retired ? 0.55 : 1 }}>
+          <input
+            value={c.label}
+            onChange={e => update(idx, { label: e.target.value })}
+            placeholder="Label"
+            style={{ ...inputStyle, flex: 2, width: 'auto', minWidth: 0 }}
+          />
+          <code style={{ flex: 1, minWidth: 0, fontSize: '12px', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {c.value}{c.retired ? ' · retired' : ''}
+          </code>
+          <button
+            onClick={() => toggleRetired(idx)}
+            title={c.retired ? 'Restore — offer this code again' : 'Retire — hide from new cancellations, keep history'}
+            style={{
+              width: '76px', flexShrink: 0, padding: '6px 8px', fontSize: '12px', cursor: 'pointer',
+              borderRadius: 4, border: '1px solid #d1d5db',
+              background: c.retired ? '#ecfdf5' : 'white', color: c.retired ? '#15803d' : '#b45309',
+            }}
+          >{c.retired ? 'Restore' : 'Retire'}</button>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '4px' }}>
+        <input
+          value={newLabel}
+          onChange={e => setNewLabel(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCode(); } }}
+          placeholder="New reason label (e.g. Transportation)"
+          style={{ ...inputStyle, flex: 1, width: 'auto', minWidth: 0 }}
+        />
+        <button
+          onClick={addCode}
+          disabled={!newLabel.trim()}
+          style={{
+            flexShrink: 0, padding: '8px 12px', fontSize: '13px', fontWeight: 600,
+            borderRadius: 6, border: 'none', cursor: newLabel.trim() ? 'pointer' : 'not-allowed',
+            background: newLabel.trim() ? '#3b82f6' : '#e5e7eb', color: newLabel.trim() ? 'white' : '#9ca3af',
+          }}
+        >+ Add</button>
+      </div>
+      <p style={{ fontSize: '11px', color: '#9ca3af', margin: '2px 0 0' }}>
+        Retiring keeps a code on past cancellations but removes it from the cancel
+        picker. Renaming changes only the label. Changes save with “Save settings”.
+      </p>
     </div>
   );
 }

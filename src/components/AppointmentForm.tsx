@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Appointment, Technician, Client, DayOfWeek, Authorization, ScheduleData } from '../types';
-import { makeupCandidates } from '../authorization';
+import { makeupCandidates, findAuthFor } from '../authorization';
 import { v4 as uuidv4 } from 'uuid';
 
 interface AppointmentFormProps {
@@ -32,6 +32,25 @@ type RecurrencePattern =
 
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
+// HH:MM helpers for the start/end clock fields. Shifts stay within one day
+// (appointments never cross midnight).
+function clockToMin(clock: string): number {
+  const [h, m] = clock.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+function minToClock(total: number): string {
+  const clamped = Math.max(0, Math.min(23 * 60 + 59, Math.round(total)));
+  return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`;
+}
+
+// Maps an appointment type to the weekly authorized-rate key it draws from.
+const TYPE_TO_WEEKLY: Partial<Record<Appointment['type'], 'direct' | 'supervision' | 'parentTraining' | 'casePlanning'>> = {
+  'client-session': 'direct',
+  'supervision': 'supervision',
+  'parent-training': 'parentTraining',
+  'case-planning': 'casePlanning',
+};
+
 export default function AppointmentForm({
   appointment,
   allAppointments,
@@ -59,6 +78,60 @@ export default function AppointmentForm({
   const [isBillable, setIsBillable] = useState(appointment?.isBillable ?? true);
   const [isMakeUp, setIsMakeUp] = useState(appointment?.isMakeUp ?? false);
   const [makeupForId, setMakeupForId] = useState(appointment?.makeupForId || '');
+
+  const isNew = !appointment?.id;
+  // "Move end time with start time": preserve the current duration when the
+  // start shifts. Default checked on every fresh open/select.
+  const [moveEndWithStart, setMoveEndWithStart] = useState(true);
+  // Whether the user has hand-edited the end time. Until they do, a new
+  // appointment auto-fills the end from the type's authorized weekly hours.
+  const [endManual, setEndManual] = useState(!!appointment?.endTime);
+
+  // Authorized weekly hours for the given type from the client's active auth
+  // (resolved by the chosen date). Used to default a new session's duration.
+  const authHoursForType = (typeArg: Appointment['type'], clientArg: string, dateArg: string): number | undefined => {
+    if (!clientArg || !dateArg) return undefined;
+    const key = TYPE_TO_WEEKLY[typeArg];
+    if (!key) return undefined;
+    const auth = findAuthFor(
+      { appointments: allAppointments || [], authorizations: authorizations || [], clients } as unknown as ScheduleData,
+      clientArg, dateArg,
+    );
+    const h = auth?.weekly?.[key];
+    return h && h > 0 ? h : undefined;
+  };
+
+  // Apply the auth-default duration for a new appointment when the end is still
+  // empty or auto-managed and we have a start + type + client.
+  const applyAuthDefaultEnd = (typeArg: Appointment['type'], clientArg: string, startArg: string, dateArg: string) => {
+    if (!isNew || endManual) return;
+    if (!startArg) return;
+    const h = authHoursForType(typeArg, clientArg, dateArg);
+    if (h === undefined) return;
+    setEndClock(minToClock(clockToMin(startArg) + h * 60));
+  };
+
+  const handleStartChange = (newStart: string) => {
+    const prevDuration = startClock && endClock ? clockToMin(endClock) - clockToMin(startClock) : undefined;
+    setStartClock(newStart);
+    if (!newStart) return;
+    // Move end with start: keep the existing duration.
+    if (moveEndWithStart && prevDuration !== undefined && prevDuration > 0) {
+      setEndClock(minToClock(clockToMin(newStart) + prevDuration));
+      return;
+    }
+    applyAuthDefaultEnd(type, clientId, newStart, date);
+  };
+
+  const handleTypeChange = (t: Appointment['type']) => {
+    setType(t);
+    applyAuthDefaultEnd(t, clientId, startClock, date);
+  };
+
+  const handleClientChange = (c: string) => {
+    setClientId(c);
+    applyAuthDefaultEnd(type, c, startClock, date);
+  };
 
   // Canceled, not-fully-made-up sessions for this client within the auth
   // covering the chosen date (same calendar month when no auth covers it).
@@ -355,7 +428,7 @@ export default function AppointmentForm({
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
             <div>
               <label style={labelStyle}>Type</label>
-              <select value={type} onChange={(e) => setType(e.target.value as any)} style={inputStyle}>
+              <select value={type} onChange={(e) => handleTypeChange(e.target.value as Appointment['type'])} style={inputStyle}>
                 <option value="client-session">Client Session</option>
                 <option value="supervision">Supervision</option>
                 <option value="parent-training">Parent Training / Coord. of Care</option>
@@ -390,7 +463,7 @@ export default function AppointmentForm({
             )}
             <div>
               <label style={labelStyle}>Client {type === 'supervision' && '*'}</label>
-              <select value={clientId} onChange={(e) => setClientId(e.target.value)} style={inputStyle}>
+              <select value={clientId} onChange={(e) => handleClientChange(e.target.value)} style={inputStyle}>
                 <option value="">— None —</option>
                 {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
               </select>
@@ -412,13 +485,18 @@ export default function AppointmentForm({
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
             <div>
               <label style={labelStyle}>Start time *</label>
-              <input type="time" step="900" value={startClock} onChange={(e) => setStartClock(e.target.value)} style={inputStyle} />
+              <input type="time" step="900" value={startClock} onChange={(e) => handleStartChange(e.target.value)} style={inputStyle} />
             </div>
             <div>
               <label style={labelStyle}>End time *</label>
-              <input type="time" step="900" value={endClock} onChange={(e) => setEndClock(e.target.value)} style={inputStyle} />
+              <input type="time" step="900" value={endClock} onChange={(e) => { setEndClock(e.target.value); setEndManual(true); }} style={inputStyle} />
             </div>
           </div>
+
+          <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer', fontSize: 13 }}>
+            <input type="checkbox" checked={moveEndWithStart} onChange={(e) => setMoveEndWithStart(e.target.checked)} />
+            <span>Move end time with start time</span>
+          </label>
 
           {recurrence === 'custom-days' && (
             <div>

@@ -98,14 +98,19 @@ appointments.push(appt({ type: 'supervision', client: 'FloorCase', date: '2026-0
 appointments.push(appt({ type: 'client-session', client: 'EowCase', technician: 'rbt1', date: '2026-06-15', start: '09:00', end: '14:00' }));
 appointments.push(appt({ type: 'supervision', client: 'EowCase', date: '2026-06-15', start: '09:00', end: '11:00' }));
 
-// ReassessCase: 8h reassessment block, none done, report final due July 6 → internal CD due within range.
+// ReassessCase: 8h reassessment block, none done. Auth ends 2026-07-15 so the
+// internal initial-draft milestone (auth end minus the 4-week draft lead) lands
+// on/just before NOW → behind pace.
 appointments.push(appt({ type: 'client-session', client: 'ReassessCase', technician: 'rbt1', date: '2026-06-15', start: '09:00', end: '13:00' }));
 
-// ShaveCase: 20h direct, 4h supervision (=20%, well above 10% floor) → shave room > 0.
+// ShaveCase: 20h direct, well above the 10% floor → shave room > 0. A past
+// supervision covers the actual roll; a FUTURE supervision is the one the
+// shave-room offers (past sessions are never proposed for trimming).
 for (const d of ['2026-06-08', '2026-06-15', '2026-06-22', '2026-06-29']) {
   appointments.push(appt({ type: 'client-session', client: 'ShaveCase', technician: 'rbt1', date: d, start: '09:00', end: '14:00' }));
 }
-const shaveSup = appt({ type: 'supervision', client: 'ShaveCase', date: '2026-06-15', start: '09:00', end: '13:00' }); // 4h overlap
+appointments.push(appt({ type: 'supervision', client: 'ShaveCase', date: '2026-06-15', start: '09:00', end: '13:00' })); // 4h past (actual)
+const shaveSup = appt({ type: 'supervision', client: 'ShaveCase', date: '2026-06-22', start: '09:00', end: '13:00' }); // 4h future (shaveable)
 appointments.push(shaveSup);
 
 // PtBoundCase: a direct session window on the 17th (parent present only then).
@@ -121,7 +126,7 @@ const data: ScheduleData = {
     { id: 'au1', clientId: 'Somerville', startDate: '2026-01-01', endDate: '2026-12-31', buckets: {}, weekly: { direct: 20, supervision: 4, parentTraining: 1, casePlanning: 1 } },
     { id: 'au2', clientId: 'FloorCase', startDate: '2026-01-01', endDate: '2026-12-31', buckets: {}, weekly: { direct: 20 } },
     { id: 'au3', clientId: 'EowCase', startDate: '2026-01-01', endDate: '2026-12-31', buckets: {}, weekly: { direct: 10 } },
-    { id: 'au4', clientId: 'ReassessCase', startDate: '2026-01-01', endDate: '2026-08-31', buckets: { reassessment: 8 }, weekly: { direct: 15 }, reportFinalDue: '2026-07-06' },
+    { id: 'au4', clientId: 'ReassessCase', startDate: '2026-01-01', endDate: '2026-07-15', buckets: { reassessment: 8 }, weekly: { direct: 15 } },
     { id: 'au5', clientId: 'ShaveCase', startDate: '2026-01-01', endDate: '2026-12-31', buckets: {}, weekly: { direct: 20 } },
     { id: 'au6', clientId: 'PtBoundCase', startDate: '2026-01-01', endDate: '2026-12-31', buckets: {}, weekly: { direct: 15, parentTraining: 1 } },
   ],
@@ -170,7 +175,9 @@ const shaveEntry = report.shaveRoom.find(s => s.appointmentId === shaveSup.id);
 check('ShaveCase supervision session has shave room > 0', !!shaveEntry && shaveEntry.shaveMinutes > 0,
   `mins=${shaveEntry?.shaveMinutes}`);
 const floorSup = report.shaveRoom.find(s => s.clientId === 'FloorCase');
-check('FloorCase supervision has no shave room (at/below floor)', !!floorSup && floorSup.shaveMinutes === 0);
+// FloorCase's only supervision is in the past (not offered for shaving) and the
+// case is at/below floor anyway — either way there is no room to trim.
+check('FloorCase supervision has no shave room (at/below floor)', !floorSup || floorSup.shaveMinutes === 0);
 
 console.log('\n[4] Slot search — hard constraints');
 const weekdaySlots = findOpenSlots(data, { durationMinutes: 60, clientId: 'Somerville', techId: 'rbt1', fromDate: NOW });

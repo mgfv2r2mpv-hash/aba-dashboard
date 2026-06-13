@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Appointment, Technician, Client, CompanySettings } from '../types';
 import { DraftMark } from '../draft';
 import { rollupHours, resolveUtilization, HoursByStatus } from '../utilization';
+import { tileStyle, clientPastel, legendStripeStyle } from '../calendarColors';
 import {
   startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek,
   format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay,
@@ -22,7 +23,7 @@ interface CalendarProps {
   draftMarks?: Map<string, DraftMark>;
 }
 
-type View = 'month' | 'week';
+type View = 'month' | 'week' | 'day';
 // Which slice of the schedule the calendar shows. BT = appointments assigned to
 // a technician (direct service); BCBA = appointments with no technician (the
 // clinician's own: supervision, BCBA-run parent training, etc.).
@@ -82,7 +83,7 @@ export default function Calendar({
       const d = new Date(a.startTime);
       return view === 'month'
         ? isSameMonth(d, currentDate)
-        : d >= startOfWeek(currentDate) && d <= endOfWeek(currentDate);
+        : d >= startOfWeek(currentDate, { weekStartsOn: 1 }) && d <= endOfWeek(currentDate, { weekStartsOn: 1 });
     });
     if (inRange) return;
     const earliest = appointments
@@ -93,19 +94,29 @@ export default function Calendar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appointments, view]);
 
-  const goPrev = () => setCurrentDate(view === 'month' ? subMonths(currentDate, 1) : subWeeks(currentDate, 1));
-  const goNext = () => setCurrentDate(view === 'month' ? addMonths(currentDate, 1) : addWeeks(currentDate, 1));
+  const goPrev = () => setCurrentDate(
+    view === 'month' ? subMonths(currentDate, 1)
+    : view === 'week' ? subWeeks(currentDate, 1)
+    : addDays(currentDate, -1)
+  );
+  const goNext = () => setCurrentDate(
+    view === 'month' ? addMonths(currentDate, 1)
+    : view === 'week' ? addWeeks(currentDate, 1)
+    : addDays(currentDate, 1)
+  );
   const goToday = () => setCurrentDate(new Date());
 
   const headerLabel = view === 'month'
     ? format(currentDate, 'MMMM yyyy')
+    : view === 'day'
+    ? format(currentDate, 'EEEE, MMM d, yyyy')
     : (() => {
-        const ws = startOfWeek(currentDate);
-        const we = endOfWeek(currentDate);
+        const ws = startOfWeek(currentDate, { weekStartsOn: 1 });
+        const we = endOfWeek(currentDate, { weekStartsOn: 1 });
         const sameMonth = isSameMonth(ws, we);
         return sameMonth
-          ? `${format(ws, 'MMM d')}–${format(we, 'd, yyyy')}`
-          : `${format(ws, 'MMM d')} – ${format(we, 'MMM d, yyyy')}`;
+          ? `${format(ws, 'MMM d')} to ${format(we, 'd, yyyy')}`
+          : `${format(ws, 'MMM d')} to ${format(we, 'MMM d, yyyy')}`;
       })();
 
   return (
@@ -118,6 +129,7 @@ export default function Calendar({
           <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
             <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
             <ViewBtn active={view === 'week'} onClick={() => setView('week')}>Week</ViewBtn>
+            <ViewBtn active={view === 'day'} onClick={() => setView('day')}>Day</ViewBtn>
           </div>
           <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
             <ViewBtn active={lens === 'bcba'} onClick={() => setLens('bcba')}>BCBA</ViewBtn>
@@ -134,18 +146,30 @@ export default function Calendar({
         </h2>
       </div>
 
-      {view === 'month'
-        ? <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} onSelectAppointment={onSelectAppointment} draftMarks={draftMarks} />
-        : <WeekView
-            currentDate={currentDate}
-            appointments={lensAppts}
-            onSelectAppointment={onSelectAppointment}
-            onAppointmentChange={onAppointmentChange}
-            dragEnabled={isLandscape}
-            draftMarks={draftMarks}
-          />
-      }
-      {view === 'week' && !isLandscape && (
+      {view === 'month' && (
+        <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} onSelectAppointment={onSelectAppointment} draftMarks={draftMarks} />
+      )}
+      {view === 'week' && (
+        <TimeGrid
+          days={Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(currentDate, { weekStartsOn: 1 }), i))}
+          appointments={lensAppts}
+          onSelectAppointment={onSelectAppointment}
+          onAppointmentChange={onAppointmentChange}
+          dragEnabled={isLandscape}
+          draftMarks={draftMarks}
+        />
+      )}
+      {view === 'day' && (
+        <TimeGrid
+          days={[currentDate]}
+          appointments={lensAppts}
+          onSelectAppointment={onSelectAppointment}
+          onAppointmentChange={onAppointmentChange}
+          dragEnabled={isLandscape}
+          draftMarks={draftMarks}
+        />
+      )}
+      {(view === 'week' || view === 'day') && !isLandscape && (
         <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
           Rotate to landscape to drag appointments to a new time.
         </p>
@@ -166,8 +190,8 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
 }) {
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(monthStart);
-  const calendarStart = startOfWeek(monthStart);
-  const calendarEnd = endOfWeek(monthEnd);
+  const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+  const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
   const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
 
   const util = resolveUtilization(settings?.utilization);
@@ -207,7 +231,7 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
           display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1,
           backgroundColor: '#e5e7eb', marginBottom: 1,
         }}>
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
             <div key={d} style={{
               padding: '10px 8px', backgroundColor: '#f9f9f9',
               fontWeight: 600, textAlign: 'center', fontSize: 13,
@@ -221,8 +245,8 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
             const dayAppts = appointmentsOn(appointments, day);
             const inCurrentMonth = isSameMonth(day, monthStart);
             const isToday = isSameDay(day, new Date());
-            const dow = getDay(day); // 0 = Sun
-            const weekStart = startOfWeek(day);
+            const dow = getDay(day); // 0 = Sun (now the rightmost column)
+            const weekStart = startOfWeek(day, { weekStartsOn: 1 });
             return (
               <div key={format(day, 'yyyy-MM-dd')} style={{
                 backgroundColor: inCurrentMonth ? '#ffffff' : '#f3f4f6',
@@ -240,7 +264,10 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
                     <div style={{ fontSize: 10, color: '#9ca3af' }}>+{dayAppts.length - 3} more</div>
                   )}
                 </div>
-                {inCurrentMonth && dow === 0 && (
+                {/* Sunday is the end-of-week (rightmost) cell. Show the full
+                    Mon–Sun total even when the week straddles a month rollover
+                    (BT utilization is weekly, so the week still counts). */}
+                {dow === 0 && (
                   <SundayTotal
                     lens={lens}
                     hours={rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens)}
@@ -418,21 +445,26 @@ function Legend() {
   );
 }
 
-// ---------- Week View ----------
+// ---------- Time grid (Week + Day views) ----------
 
-function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks }: {
-  currentDate: Date;
+// Shared columned timeline used by both Week (7 days) and Day (1 day) views.
+// Tiles are color-coded (client pastel background + staff diagonal stripes),
+// the time axis is frozen on side-scroll, and tapping a tile pops a small
+// dialog to view the session in the detail panel.
+function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks }: {
+  days: Date[];
   appointments: Appointment[];
   onSelectAppointment: (a: Appointment) => void;
   onAppointmentChange: (a: Appointment) => void;
   dragEnabled: boolean;
   draftMarks?: Map<string, DraftMark>;
 }) {
-  const weekStart = startOfWeek(currentDate);
-  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const hours = Array.from({ length: VISIBLE_END_HOUR - VISIBLE_START_HOUR }, (_, i) => VISIBLE_START_HOUR + i);
   const totalHeight = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * HOUR_HEIGHT;
   const today = new Date();
+  const minWidth = days.length > 1 ? 560 : undefined;
+  // The tapped tile (shows a small "view session" dialog). Distinct from drag.
+  const [tapped, setTapped] = useState<Appointment | null>(null);
 
   // Active drag — only one appointment moves at a time. dragState tracks
   // the snapped delta so we can show a floating preview tooltip and apply
@@ -499,11 +531,18 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
     });
   };
 
+  // Sticky cells keep the time axis pinned to the left while day columns
+  // scroll horizontally. Opaque background so columns don't show through.
+  const stickyAxis: React.CSSProperties = {
+    width: TIME_AXIS_WIDTH, flexShrink: 0,
+    position: 'sticky', left: 0, zIndex: 3, backgroundColor: 'white',
+  };
+
   return (
     <div style={{ overflowX: 'auto' }}>
       {/* Day header */}
-      <div style={{ display: 'flex', minWidth: 560, borderBottom: '1px solid #e5e7eb' }}>
-        <div style={{ width: TIME_AXIS_WIDTH, flexShrink: 0 }} />
+      <div style={{ display: 'flex', minWidth, borderBottom: '1px solid #e5e7eb' }}>
+        <div style={{ ...stickyAxis, borderRight: '1px solid #e5e7eb' }} />
         {days.map(day => {
           const isToday = isSameDay(day, today);
           return (
@@ -521,10 +560,10 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
         })}
       </div>
 
-      {/* Body: time axis + 7 day columns */}
-      <div style={{ display: 'flex', minWidth: 560, height: totalHeight, position: 'relative' }}>
+      {/* Body: frozen time axis + day columns */}
+      <div style={{ display: 'flex', minWidth, height: totalHeight, position: 'relative' }}>
         {/* Time axis */}
-        <div style={{ width: TIME_AXIS_WIDTH, flexShrink: 0, position: 'relative', borderRight: '1px solid #e5e7eb' }}>
+        <div style={{ ...stickyAxis, borderRight: '1px solid #e5e7eb' }}>
           {hours.map(h => (
             <div key={h} style={{
               position: 'absolute', top: (h - VISIBLE_START_HOUR) * HOUR_HEIGHT,
@@ -546,13 +585,18 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
                 flex: 1, position: 'relative', borderLeft: '1px solid #f3f4f6',
                 backgroundColor: isToday ? '#fafbff' : 'transparent',
               }}>
-              {/* Hour grid lines */}
-              {hours.map(h => (
-                <div key={h} style={{
-                  position: 'absolute', top: (h - VISIBLE_START_HOUR) * HOUR_HEIGHT,
-                  left: 0, right: 0, borderTop: '1px solid #f3f4f6',
-                }} />
-              ))}
+              {/* Hour / half-hour / quarter-hour grid lines (decreasing weight). */}
+              {hours.map(h => {
+                const base = (h - VISIBLE_START_HOUR) * HOUR_HEIGHT;
+                return (
+                  <React.Fragment key={h}>
+                    <GridLine top={base} color="#e5e7eb" />
+                    <GridLine top={base + HOUR_HEIGHT / 4} color="#f5f6f7" />
+                    <GridLine top={base + HOUR_HEIGHT / 2} color="#eef0f2" />
+                    <GridLine top={base + (HOUR_HEIGHT * 3) / 4} color="#f5f6f7" />
+                  </React.Fragment>
+                );
+              })}
               {/* Appointments */}
               {laid.map(({ appt, lane, lanes }) => {
                 const layout = appointmentLayout(appt);
@@ -567,7 +611,7 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
                     key={appt.id}
                     apt={appt}
                     mark={mark}
-                    onClick={() => onSelectAppointment(appt)}
+                    onClick={() => setTapped(appt)}
                     onPointerDown={draggable ? (e) => beginDrag(appt, e) : undefined}
                     dragHandle={draggable}
                     style={{
@@ -585,6 +629,41 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
           );
         })}
       </div>
+
+      <TileLegend appointments={appointments.filter(a => days.some(d => isSameDay(d, new Date(a.startTime))))} />
+
+      {/* Tap dialog: session name + view button (opens the detail panel). */}
+      {tapped && (
+        <div
+          onClick={() => setTapped(null)}
+          style={{
+            position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.35)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400, padding: 16,
+          }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'white', borderRadius: 8, padding: 16, maxWidth: 320, width: '100%',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{tapped.title}</div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+              {format(new Date(tapped.startTime), 'EEE M/d, h:mm')}–{format(new Date(tapped.endTime), 'h:mm a')}
+              {tapped.client && <> · {tapped.client}</>}
+              {tapped.technician && <> · {tapped.technician}</>}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setTapped(null)} style={{
+                padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: 6,
+                background: 'white', cursor: 'pointer', fontSize: 13,
+              }}>Close</button>
+              <button onClick={() => { const a = tapped; setTapped(null); onSelectAppointment(a); }} style={{
+                padding: '6px 12px', border: 'none', borderRadius: 6,
+                background: '#3b82f6', color: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+              }}>Select / View</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floating drag preview tooltip */}
       {dragState && (() => {
@@ -604,6 +683,37 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
           </div>
         );
       })()}
+    </div>
+  );
+}
+
+// A single horizontal grid line at `top` px.
+function GridLine({ top, color }: { top: number; color: string }) {
+  return (
+    <div style={{ position: 'absolute', top, left: 0, right: 0, borderTop: `1px solid ${color}` }} />
+  );
+}
+
+// Legend mapping client background colors (solid squares) and staff stripe
+// colors (diagonal stripes on white) for the sessions currently in view.
+function TileLegend({ appointments }: { appointments: Appointment[] }) {
+  const clients = Array.from(new Set(appointments.map(a => a.client).filter((c): c is string => !!c)));
+  const staff = Array.from(new Set(appointments.map(a => a.technician).filter((t): t is string => !!t)));
+  if (clients.length === 0 && staff.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', fontSize: 11, color: '#374151', marginTop: 10 }}>
+      {clients.map(c => (
+        <span key={`c-${c}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: clientPastel(c), border: '1px solid rgba(0,0,0,0.1)', display: 'inline-block' }} />
+          {c}
+        </span>
+      ))}
+      {staff.map(t => (
+        <span key={`t-${t}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ width: 12, height: 12, borderRadius: 3, border: '1px solid rgba(0,0,0,0.1)', display: 'inline-block', ...legendStripeStyle(t) }} />
+          {t}
+        </span>
+      ))}
     </div>
   );
 }
@@ -711,6 +821,44 @@ function AppointmentChip({ apt, mark, onClick }: { apt: Appointment; mark?: Draf
   );
 }
 
+// Status / draft coding for a time-grid tile. The CLIENT pastel + STAFF stripe
+// coding is the base; status (completed / canceled / ghost / draft) is folded
+// into the border, opacity, strike, and a corner icon rather than overriding
+// the color, so client/staff stay identifiable at a glance.
+function blockLook(apt: Appointment, mark?: DraftMark) {
+  const canceled = apt.status === 'canceled';
+  const completed = apt.status === 'completed';
+  const tile = tileStyle(apt.client, apt.technician);
+
+  let border = '1px solid rgba(0,0,0,0.15)';
+  let opacity = 1;
+  let strike = false;
+  let prefix = '';
+  let statusIcon: string | null = null;
+
+  if (completed) { border = '2px solid #16a34a'; statusIcon = '✓'; }
+  else if (canceled) {
+    border = `2px solid ${apt.cancellation?.source === 'family' ? '#f97316' : '#dc2626'}`;
+    opacity = 0.55; strike = true; statusIcon = '✕';
+  }
+
+  if (apt.isGhost) {
+    border = '1px dashed #9ca3af'; opacity = 0.5; prefix = '👻 ';
+  } else if (mark) {
+    if (mark === 'remove') { border = '1px dashed #fca5a5'; opacity = 0.6; strike = true; prefix = '🗑 '; }
+    else { border = '1px dashed #2563eb'; prefix = mark === 'add' ? '＋ ' : mark === 'shorten' ? '✂ ' : '✎ '; }
+  }
+
+  return {
+    canceled, completed,
+    backgroundColor: tile.backgroundColor,
+    backgroundImage: tile.backgroundImage,
+    border, opacity, strike, prefix, statusIcon,
+    color: '#1f2937',
+    statusColor: 'rgba(0,0,0,0.65)',
+  };
+}
+
 function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style }: {
   apt: Appointment;
   mark?: DraftMark;
@@ -719,7 +867,7 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
   dragHandle?: boolean;
   style: React.CSSProperties;
 }) {
-  const look = appointmentLook(apt, mark);
+  const look = blockLook(apt, mark);
   // When drag is enabled, suppress the click (click fires after pointerup
   // and would re-open the detail panel after a drag). Track whether the
   // pointer moved meaningfully between down and up to distinguish tap vs drag.
@@ -738,7 +886,9 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
       }}
       style={{
         ...style,
-        background: look.background, color: look.color,
+        backgroundColor: look.backgroundColor,
+        backgroundImage: look.backgroundImage,
+        color: look.color,
         padding: '4px 6px', borderRadius: 4, fontSize: 11,
         overflow: 'hidden', cursor: dragHandle ? 'grab' : 'pointer', boxSizing: 'border-box',
         border: look.border,

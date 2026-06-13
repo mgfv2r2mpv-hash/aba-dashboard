@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "esnext",
+    "lib": ["es2020", "dom"],
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "noUncheckedSideEffectImports": true,
+    "paths": {
+      "@shared/*": ["../src/*"]
+    }
+  },
+  "include": ["src"]
+}

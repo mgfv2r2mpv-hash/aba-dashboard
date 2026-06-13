@@ -8,7 +8,7 @@ import { parseWorkbook } from './excelHandler';
 import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
 import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, Cancellation } from './types';
-import Calendar from './components/Calendar';
+import Calendar, { HoursSummary } from './components/Calendar';
 import ConflictPanel from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
 import AdminPanel from './components/AdminPanel';
@@ -125,6 +125,9 @@ export default function App() {
   // The month/week the calendar is showing. Conflicts are scoped to this so the
   // Issues panel reflects what you're looking at, not just today.
   const [viewDate, setViewDate] = useState<Date>(new Date());
+  // Active calendar lens (bcba/bt), surfaced from <Calendar> so the docked pane
+  // can render the matching hours totals.
+  const [calLens, setCalLens] = useState<'bcba' | 'bt'>('bcba');
   const [showDayReview, setShowDayReview] = useState(false);
   // Per-entity supervision-compliance cache for the current month. Recomputed
   // incrementally (only the affected clients/techs) on each appointment change
@@ -176,6 +179,10 @@ export default function App() {
   // docked beside the calendar, so the extra width shows the selected session /
   // draft / conflicts, or an at-a-glance agenda when nothing is selected.
   const dockPane = useMinWidth(1000);
+  // Wide screens in the schedule view get a two-pane split with independent
+  // scrolling (calendar | bounded context pane). Other views and narrow screens
+  // keep the single page-scroll layout.
+  const splitView = dockPane && view === 'schedule';
 
   // Draft sandbox derivations. The Sched view renders the PREVIEW (staged ops
   // applied) with per-appointment marks; the status badge grades it.
@@ -768,6 +775,118 @@ export default function App() {
     );
   }
 
+  // The selected-appointment detail card. Extracted so it can render either in
+  // the on-demand narrow pane or pinned to the bottom of the docked wide pane.
+  const renderSelectedDetail = (a: Appointment) => {
+    const status = a.status || 'scheduled';
+    const locked = status === 'canceled' || status === 'completed';
+    const statusColor = status === 'canceled' ? '#b91c1c' : status === 'completed' ? '#15803d' : '#374151';
+    const statusBg = status === 'canceled' ? '#fee2e2' : status === 'completed' ? '#dcfce7' : '#f3f4f6';
+    return (
+      <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: 8 }}>
+          <h3 style={{ margin: 0 }}>Selected Appointment</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+              color: statusColor, backgroundColor: statusBg,
+              padding: '2px 8px', borderRadius: 10,
+            }}>{status}</span>
+            <button
+              onClick={() => setSelectedAppointment(null)}
+              aria-label="Close"
+              style={{
+                background: 'none', border: 'none', color: '#6b7280',
+                fontSize: 20, lineHeight: 1, cursor: 'pointer', padding: 4,
+              }}
+            >✕</button>
+          </div>
+        </div>
+        <p><strong>{a.title}</strong></p>
+        <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+          {new Date(a.startTime).toLocaleString()} → {new Date(a.endTime).toLocaleString()}
+        </p>
+        {a.technician && (
+          <p style={{ fontSize: '12px', color: '#374151', marginTop: '4px' }}>
+            Tech: {a.technician}
+          </p>
+        )}
+        {(status === 'canceled' || status === 'completed') && (
+          <p style={{ color: '#6b7280', marginTop: '4px', fontSize: 12 }}>
+            🔒 Locked — reopen to edit time, status, or assignment
+          </p>
+        )}
+        {a.cancellation && (
+          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }}>
+            <div>Source: <strong>Cancel-{a.cancellation.source.toUpperCase()}</strong></div>
+            <div>Reason: <strong>{a.cancellation.reason.replace('_', ' ')}</strong></div>
+            <div>{a.cancellation.unplanned ? 'Unplanned' : 'Planned'} · notice met: <strong>{a.cancellation.noticeMet ? 'yes' : 'no'}</strong></div>
+            {a.cancellation.notes && <div>Notes: {a.cancellation.notes}</div>}
+          </div>
+        )}
+        {a.isGhost ? (
+          <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => promoteGhost(a)}
+              style={{
+                flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
+                border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
+              }}
+            >Promote</button>
+            <button
+              onClick={() => dismissGhost(a)}
+              style={{
+                flex: '1 1 auto', padding: '6px 12px', backgroundColor: 'white', color: '#6b7280',
+                border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+              }}
+            >Dismiss</button>
+          </div>
+        ) : (
+        <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => !locked && setEditingAppointment(a)}
+            disabled={locked}
+            title={locked ? 'Reopen to edit' : undefined}
+            style={{
+              flex: '1 1 auto', padding: '6px 12px',
+              backgroundColor: locked ? '#e5e7eb' : '#3b82f6', color: locked ? '#9ca3af' : 'white',
+              border: 'none', borderRadius: '4px', cursor: locked ? 'not-allowed' : 'pointer', fontSize: '13px',
+            }}
+          >Edit</button>
+          {status === 'scheduled' && (
+            <>
+              <CompleteTimePrompt key={a.id} a={a} onComplete={handleMarkComplete} />
+              <button
+                onClick={() => setCancelTarget(a)}
+                style={{
+                  flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#fee2e2', color: '#b91c1c',
+                  border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
+                }}
+              >✕ Cancel</button>
+            </>
+          )}
+          {(status === 'completed' || status === 'canceled') && (
+            <button
+              onClick={() => handleReopen(a)}
+              style={{
+                flex: '1 1 auto', padding: '6px 12px', backgroundColor: 'white', color: '#374151',
+                border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+              }}
+            >Reopen</button>
+          )}
+          <button
+            onClick={() => handleDeleteAppointment(a.id)}
+            style={{
+              padding: '6px 12px', backgroundColor: 'white', color: '#6b7280',
+              border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+            }}
+          >Delete</button>
+        </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div style={{
       display: 'flex', height: '100vh', maxWidth: '100vw',
@@ -815,21 +934,30 @@ export default function App() {
       </header>
 
       <div style={{
-        display: 'flex', flex: 1, flexWrap: 'wrap',
-        // Single scroll region for the whole post-header area.
-        // Each child below reports its natural height instead of carving
-        // out its own scrollbox — fixes the "stuck mid-page" trap on iPhone
-        // where the calendar and issues pane were independent scroll panes
-        // and tapping ✕ on the appointment panel left no way to scroll back up.
-        overflowY: 'auto', overflowX: 'hidden',
+        display: 'flex', flex: 1, minHeight: 0,
+        // Narrow / non-schedule views keep a single scroll region for the whole
+        // post-header area: each child reports its natural height instead of
+        // carving out its own scrollbox — this fixes the "stuck mid-page" trap
+        // on iPhone where the calendar and issues pane were independent scroll
+        // panes and tapping ✕ on the appointment panel left no way to scroll up.
+        // On wide schedule view we split instead: the calendar and the docked
+        // pane each scroll independently inside a bounded height, so the pane's
+        // violations list fills the space and the appointment detail can open
+        // below it without growing the page.
+        flexWrap: splitView ? 'nowrap' : 'wrap',
+        overflowY: splitView ? 'hidden' : 'auto',
+        overflowX: 'hidden',
         WebkitOverflowScrolling: 'touch' as any,
-        paddingBottom: 'env(safe-area-inset-bottom)',
+        paddingBottom: splitView ? 0 : 'env(safe-area-inset-bottom)',
       }}>
         {scheduleData ? (
           <>
             {view === 'schedule' && (
               <>
-                <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+                <div style={{
+                  flex: '1 1 320px', minWidth: 0,
+                  ...(splitView ? { overflowY: 'auto', minHeight: 0, WebkitOverflowScrolling: 'touch' as any } : {}),
+                }}>
                   {pendingReview.length > 0 && (
                     <button
                       onClick={() => setShowDayReview(true)}
@@ -851,17 +979,15 @@ export default function App() {
                     onAppointmentChange={handleAppointmentChange}
                     onSelectAppointment={setSelectedAppointment}
                     onViewDateChange={setViewDate}
+                    onLensChange={setCalLens}
+                    hideTotals={dockPane}
                     draftMarks={calendarMarks}
                   />
                 </div>
-                {(dockPane || draftActive || conflicts.length > 0 || solutions.length > 0 || selectedAppointment) && (
-                  <div ref={detailPanelRef} style={{
-                    flex: '0 0 auto',
-                    width: dockPane ? 380 : 'min(350px, 100%)',
-                    borderLeft: '1px solid #e5e7eb',
-                    display: 'flex',
-                    flexDirection: 'column',
-                  }}>
+                {(dockPane || draftActive || conflicts.length > 0 || solutions.length > 0 || selectedAppointment) && (() => {
+                  const detail = selectedAppointment ? renderSelectedDetail(selectedAppointment) : null;
+                  const middle = (
+                    <>
                     {draftActive && draftStatus && (
                       <DraftTray
                         base={scheduleData}
@@ -895,125 +1021,54 @@ export default function App() {
                         onReject={rejectAiSet}
                       />
                     )}
-                    {selectedAppointment && (() => {
-                      const a = selectedAppointment;
-                      const status = a.status || 'scheduled';
-                      const locked = status === 'canceled' || status === 'completed';
-                      const statusColor = status === 'canceled' ? '#b91c1c' : status === 'completed' ? '#15803d' : '#374151';
-                      const statusBg = status === 'canceled' ? '#fee2e2' : status === 'completed' ? '#dcfce7' : '#f3f4f6';
-                      return (
-                        <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: 8 }}>
-                            <h3 style={{ margin: 0 }}>Selected Appointment</h3>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <span style={{
-                                fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
-                                color: statusColor, backgroundColor: statusBg,
-                                padding: '2px 8px', borderRadius: 10,
-                              }}>{status}</span>
-                              <button
-                                onClick={() => setSelectedAppointment(null)}
-                                aria-label="Close"
-                                style={{
-                                  background: 'none', border: 'none', color: '#6b7280',
-                                  fontSize: 20, lineHeight: 1, cursor: 'pointer', padding: 4,
-                                }}
-                              >✕</button>
-                            </div>
-                          </div>
-                          <p><strong>{a.title}</strong></p>
-                          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
-                            {new Date(a.startTime).toLocaleString()} → {new Date(a.endTime).toLocaleString()}
-                          </p>
-                          {a.technician && (
-                            <p style={{ fontSize: '12px', color: '#374151', marginTop: '4px' }}>
-                              Tech: {a.technician}
-                            </p>
-                          )}
-                          {(status === 'canceled' || status === 'completed') && (
-                            <p style={{ color: '#6b7280', marginTop: '4px', fontSize: 12 }}>
-                              🔒 Locked — reopen to edit time, status, or assignment
-                            </p>
-                          )}
-                          {a.cancellation && (
-                            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }}>
-                              <div>Source: <strong>Cancel-{a.cancellation.source.toUpperCase()}</strong></div>
-                              <div>Reason: <strong>{a.cancellation.reason.replace('_', ' ')}</strong></div>
-                              <div>{a.cancellation.unplanned ? 'Unplanned' : 'Planned'} · notice met: <strong>{a.cancellation.noticeMet ? 'yes' : 'no'}</strong></div>
-                              {a.cancellation.notes && <div>Notes: {a.cancellation.notes}</div>}
-                            </div>
-                          )}
-                          {a.isGhost ? (
-                            <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
-                              <button
-                                onClick={() => promoteGhost(a)}
-                                style={{
-                                  flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
-                                  border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
-                                }}
-                              >Promote</button>
-                              <button
-                                onClick={() => dismissGhost(a)}
-                                style={{
-                                  flex: '1 1 auto', padding: '6px 12px', backgroundColor: 'white', color: '#6b7280',
-                                  border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                                }}
-                              >Dismiss</button>
-                            </div>
-                          ) : (
-                          <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
-                            <button
-                              onClick={() => !locked && setEditingAppointment(a)}
-                              disabled={locked}
-                              title={locked ? 'Reopen to edit' : undefined}
-                              style={{
-                                flex: '1 1 auto', padding: '6px 12px',
-                                backgroundColor: locked ? '#e5e7eb' : '#3b82f6', color: locked ? '#9ca3af' : 'white',
-                                border: 'none', borderRadius: '4px', cursor: locked ? 'not-allowed' : 'pointer', fontSize: '13px',
-                              }}
-                            >Edit</button>
-                            {status === 'scheduled' && (
-                              <>
-                                <CompleteTimePrompt key={a.id} a={a} onComplete={handleMarkComplete} />
-                                <button
-                                  onClick={() => setCancelTarget(a)}
-                                  style={{
-                                    flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#fee2e2', color: '#b91c1c',
-                                    border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
-                                  }}
-                                >✕ Cancel</button>
-                              </>
-                            )}
-                            {(status === 'completed' || status === 'canceled') && (
-                              <button
-                                onClick={() => handleReopen(a)}
-                                style={{
-                                  flex: '1 1 auto', padding: '6px 12px', backgroundColor: 'white', color: '#374151',
-                                  border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                                }}
-                              >Reopen</button>
-                            )}
-                            <button
-                              onClick={() => handleDeleteAppointment(a.id)}
-                              style={{
-                                padding: '6px 12px', backgroundColor: 'white', color: '#6b7280',
-                                border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                              }}
-                            >Delete</button>
-                          </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    {dockPane && !draftActive && conflicts.length === 0 && solutions.length === 0 && !selectedAppointment && (
+                    {!draftActive && conflicts.length === 0 && solutions.length === 0 && !selectedAppointment && (
                       <AgendaRail
                         appointments={scheduleData.appointments}
                         date={viewDate}
                         onSelect={setSelectedAppointment}
                       />
                     )}
-                  </div>
-                )}
+                    </>
+                  );
+
+                  // Wide: a bounded, internally-scrolling pane — totals pinned at
+                  // top, violations/agenda filling the middle, and the selected
+                  // appointment opening below by shrinking the middle to fit.
+                  if (splitView) {
+                    return (
+                      <div ref={detailPanelRef} style={{
+                        flex: '0 0 auto', width: 380, borderLeft: '1px solid #e5e7eb',
+                        display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%',
+                      }}>
+                        {!draftActive && (
+                          <div style={{ flexShrink: 0, maxHeight: '45%', overflowY: 'auto', padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
+                            <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} currentDate={viewDate} />
+                          </div>
+                        )}
+                        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
+                          {middle}
+                        </div>
+                        {detail && (
+                          <div style={{ flexShrink: 0, maxHeight: '55%', overflowY: 'auto' }}>
+                            {detail}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  // Narrow: the on-demand pane that flows under the calendar in
+                  // the single page-scroll layout.
+                  return (
+                    <div ref={detailPanelRef} style={{
+                      flex: '0 0 auto', width: 'min(350px, 100%)', borderLeft: '1px solid #e5e7eb',
+                      display: 'flex', flexDirection: 'column',
+                    }}>
+                      {middle}
+                      {detail}
+                    </div>
+                  );
+                })()}
               </>
             )}
             {view === 'admin' && (

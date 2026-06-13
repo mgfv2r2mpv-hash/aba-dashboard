@@ -18,6 +18,9 @@ interface AppointmentFormProps {
   // Delete is scope-aware too — returns the ids to remove (empty array on cancel).
   onDelete?: (ids: string[]) => void;
   onCancel: () => void;
+  // 'modal' (default) renders the full-screen overlay; 'inline' renders just the
+  // form body to fill its container (used by the slide-up edit panel/sheet).
+  variant?: 'modal' | 'inline';
 }
 
 type EditScope = 'instance' | 'following' | 'all';
@@ -60,6 +63,7 @@ export default function AppointmentForm({
   onSave,
   onDelete,
   onCancel,
+  variant = 'modal',
 }: AppointmentFormProps) {
   const [title, setTitle] = useState(appointment?.title || '');
   const [description, setDescription] = useState(appointment?.description || '');
@@ -380,19 +384,8 @@ export default function AppointmentForm({
     fontSize: '13px',
   };
 
-  return (
-    <div style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-      padding: 'max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))',
-      boxSizing: 'border-box',
-    }}>
-      <div style={{
-        backgroundColor: 'white', borderRadius: '8px', padding: '20px',
-        width: '100%', maxWidth: 600, maxHeight: '100%', overflowY: 'auto',
-        boxSizing: 'border-box',
-      }}>
+  const content = (
+    <>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
           <h2 style={{ fontSize: '20px', fontWeight: 'bold' }}>
             {appointment ? 'Edit Appointment' : 'Add Appointment'}
@@ -622,6 +615,34 @@ export default function AppointmentForm({
             border: 'none', borderRadius: '6px', cursor: 'pointer',
           }}>Save</button>
         </div>
+    </>
+  );
+
+  if (variant === 'inline') {
+    return (
+      <div style={{
+        height: '100%', overflowY: 'auto', padding: 16, boxSizing: 'border-box',
+        background: '#fff', WebkitOverflowScrolling: 'touch' as any,
+      }}>
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+      padding: 'max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))',
+      boxSizing: 'border-box',
+    }}>
+      <div style={{
+        backgroundColor: 'white', borderRadius: '8px', padding: '20px',
+        width: '100%', maxWidth: 600, maxHeight: '100%', overflowY: 'auto',
+        boxSizing: 'border-box',
+      }}>
+        {content}
       </div>
     </div>
   );

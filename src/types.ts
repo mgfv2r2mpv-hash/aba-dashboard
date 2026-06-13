@@ -153,6 +153,11 @@ export interface CompanySettings {
     unplannedHoursThreshold: number;
     plannedDaysThreshold: number;
   };
+  // Company-customizable cancellation reason codes. When set (and non-empty)
+  // these replace the built-in CANCELLATION_REASONS in the cancel picker.
+  // `retired` codes are kept (so historical cancellations still resolve to a
+  // label) but hidden from new cancellations. Edited via Admin → Settings.
+  cancellationReasons?: CancellationCode[];
   // Billable / utilization targets (BCBA weekly+monthly, BT weekly).
   utilization?: UtilizationSettings;
   // BACB cadence: minimum distinct supervision contact-days per month for an
@@ -231,8 +236,20 @@ export const CANCELLATION_SOURCES: { value: CancellationSource; label: string }[
   { value: 'family', label: 'Cancel-Family' },
 ];
 
-export type CancellationReason = 'sick' | 'pto' | 'training' | 'holiday' | 'weather' | 'auth_issues';
-export const CANCELLATION_REASONS: { value: CancellationReason; label: string }[] = [
+// A cancellation reason code. `value` is the stable id stored on records;
+// `label` is what humans see; `retired` hides it from new cancellations while
+// keeping it resolvable for historical records.
+export interface CancellationCode {
+  value: string;
+  label: string;
+  retired?: boolean;
+}
+
+// Reason values are free-form strings so companies can customize the set
+// (see CompanySettings.cancellationReasons). The list below is the built-in
+// default; the literal type just documents the shipped codes.
+export type CancellationReason = string;
+export const CANCELLATION_REASONS: CancellationCode[] = [
   { value: 'sick', label: 'Sick' },
   { value: 'pto', label: 'PTO/Vacation' },
   { value: 'training', label: 'Training' },
@@ -240,6 +257,38 @@ export const CANCELLATION_REASONS: { value: CancellationReason; label: string }[
   { value: 'weather', label: 'Weather' },
   { value: 'auth_issues', label: 'Auth Issues' },
 ];
+
+// Effective reason codes for a company: their customized list when set (and
+// non-empty), otherwise the built-in defaults.
+export function resolveCancellationCodes(
+  settings?: { cancellationReasons?: CancellationCode[] },
+): CancellationCode[] {
+  const custom = settings?.cancellationReasons;
+  return custom && custom.length ? custom : CANCELLATION_REASONS;
+}
+
+// Active (non-retired) codes — what the cancel picker offers for new records.
+export function activeCancellationCodes(
+  settings?: { cancellationReasons?: CancellationCode[] },
+): CancellationCode[] {
+  return resolveCancellationCodes(settings).filter(c => !c.retired);
+}
+
+// Human label for a stored reason value. Falls back to a de-slugged version of
+// the raw value so historical / unknown codes still read cleanly.
+export function cancellationReasonLabel(
+  value: string,
+  settings?: { cancellationReasons?: CancellationCode[] },
+): string {
+  const found = resolveCancellationCodes(settings).find(c => c.value === value);
+  return found?.label || value.replace(/_/g, ' ');
+}
+
+// Turn a free-text label into a stable code value: lowercase, non-alphanumerics
+// to underscores, collapsed and trimmed (e.g. "Auth Issues" -> "auth_issues").
+export function slugifyCancellationCode(label: string): string {
+  return label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
 
 export interface Cancellation {
   source: CancellationSource;

@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import {
   ScheduleData, Appointment, Technician, Client, CompanySettings, DayOfWeek,
-  Blackout, Authorization, ManualUsage, Cancellation, AUTH_BUCKETS,
+  Blackout, Authorization, ManualUsage, Cancellation, CancellationCode, AUTH_BUCKETS,
 } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -294,6 +294,16 @@ function parseSettings(
   const finalVal = num(row.reportFinalLeadValue);
   if (finalVal !== undefined) settings.reportFinalLead = { value: finalVal, unit: row.reportFinalLeadUnit === 'days' ? 'days' : 'weeks' };
 
+  // Custom cancellation reason codes (own child sheet).
+  const codeRows = rowsOf(workbook, 'CancellationCodes').filter(r => r && !isBlank(r.value));
+  if (codeRows.length) {
+    settings.cancellationReasons = codeRows.map((r: any): CancellationCode => {
+      const code: CancellationCode = { value: String(r.value), label: text(r.label) || String(r.value) };
+      if (truthy(r.retired)) code.retired = true;
+      return code;
+    });
+  }
+
   return settings;
 }
 
@@ -446,6 +456,11 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
     if (c) cxRows.push([a.id, c.source, c.reason, WB(c.unplanned), WB(c.noticeMet), W(c.canceledAt), W(c.notes)]);
   });
   add('Cancellations', ['appointmentId', 'source', 'reason', 'unplanned', 'noticeMet', 'canceledAt', 'notes'], cxRows);
+
+  // Company-customized cancellation reason codes (one row per code). Absent /
+  // empty falls back to the built-in defaults at read time.
+  add('CancellationCodes', ['value', 'label', 'retired'],
+    (s.cancellationReasons || []).map(c => [c.value, c.label, WB(!!c.retired)]));
 
   // Blackouts.
   add('Blackouts', ['id', 'entityType', 'entityId', 'entityName', 'date', 'reason', 'createdAt'],

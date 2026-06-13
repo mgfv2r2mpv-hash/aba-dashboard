@@ -7,7 +7,7 @@ import { Share } from '@capacitor/share';
 import { parseWorkbook } from './excelHandler';
 import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
-import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, Cancellation } from './types';
+import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, Cancellation, cancellationReasonLabel } from './types';
 import Calendar, { HoursSummary } from './components/Calendar';
 import ConflictPanel from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
@@ -819,7 +819,7 @@ export default function App() {
         {a.cancellation && (
           <div style={{ fontSize: 12, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }}>
             <div>Source: <strong>Cancel-{a.cancellation.source.toUpperCase()}</strong></div>
-            <div>Reason: <strong>{a.cancellation.reason.replace('_', ' ')}</strong></div>
+            <div>Reason: <strong>{cancellationReasonLabel(a.cancellation.reason, scheduleData?.settings)}</strong></div>
             <div>{a.cancellation.unplanned ? 'Unplanned' : 'Planned'} · notice met: <strong>{a.cancellation.noticeMet ? 'yes' : 'no'}</strong></div>
             {a.cancellation.notes && <div>Notes: {a.cancellation.notes}</div>}
           </div>

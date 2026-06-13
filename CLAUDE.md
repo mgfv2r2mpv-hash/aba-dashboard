@@ -48,7 +48,11 @@ ask before each merge.
   in `Assignments`; cancellations live in `Cancellations` (child of canceled
   appointments). `Settings` is fully de-JSON'd (utilization, cancellation-notice,
   and report-lead fields are plain columns). `Authorizations`/`ManualUsage`/
-  `Blackouts` unchanged.
+  `Blackouts` unchanged. Company-customized cancellation **reason codes** live in
+  a `CancellationCodes` sheet (`value`, `label`, `retired`), one row per code —
+  empty/absent falls back to the built-in `CANCELLATION_REASONS`. Edited in
+  Admin → Settings; reason `value`s are stable ids (retire, don't delete, so
+  historical `Cancellations.reason` keep resolving via `cancellationReasonLabel`).
 - Generated with `aoa_to_sheet` + explicit header arrays (stable column order) and
   **`XLSX.write(..., { compression: true })`** — the old generator stored the zip
   uncompressed (a real ~4–5x size bug: 463 KB → ~120 KB for the same data).

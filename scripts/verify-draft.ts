@@ -121,5 +121,33 @@ console.log('solveDraft grading');
   check('accepted green arrangement has no availability conflicts', sched.length === 0, `${sched.length}`);
 }
 
+// ---------------------------------------------------------------------------
+// Historical (before-now) appointments: graded purely on hard timeslot conflicts
+// (two billable activities can't share a slot); forward-looking floors/targets
+// don't apply, so a clean past add is green and auto-commits in the app.
+console.log('past-only drafts');
+{
+  const PAST = '2026-06-12'; // Fri, before NOW (Mon Jun 15)
+  const existing = appt({ type: 'client-session', client: 'C1', technician: 'T1', date: PAST, start: '10:00', end: '12:00' });
+
+  const noOverlap = appt({ type: 'client-session', client: 'C1', technician: 'T1', date: PAST, start: '13:00', end: '14:00' });
+  let s = solveDraft(makeData([existing]), [newAddOp(noOverlap)], NOW, baseSettings);
+  check('past add, no overlap → green', s.grade === 'green' && !!s.resolved, `${s.grade}/${s.label}`);
+
+  // Force the floor that would red a future draft, to prove past adds ignore it.
+  const lowFloor = { bcbaWeeklyBillableHours: 99, bcbaWeeklyBillableMin: 40 };
+  s = solveDraft(makeData([existing], lowFloor), [newAddOp(noOverlap)], NOW, { ...baseSettings, utilization: lowFloor });
+  check('past add ignores billable floor/target', s.grade === 'green', `${s.grade}/${s.label}`);
+
+  const bothBillable = appt({ type: 'client-session', client: 'C1', technician: 'T1', date: PAST, start: '11:00', end: '13:00', isBillable: true });
+  s = solveDraft(makeData([existing]), [newAddOp(bothBillable)], NOW, baseSettings);
+  check('past add, two billable overlap → red (blocked)', s.grade === 'red' && s.label.includes('two billable'), `${s.grade}/${s.label}`);
+  check('blocked past overlap is not AI-eligible', !s.aiEligible);
+
+  const nonBillableOverlap = appt({ type: 'internal-task', technician: 'T1', date: PAST, start: '11:00', end: '13:00', isBillable: false });
+  s = solveDraft(makeData([existing]), [newAddOp(nonBillableOverlap)], NOW, baseSettings);
+  check('past add, billable+nonbillable overlap → green (allowed)', s.grade === 'green', `${s.grade}/${s.label}`);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

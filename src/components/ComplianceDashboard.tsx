@@ -7,6 +7,7 @@ import {
 } from '../compliance';
 import { ComplianceCache } from '../complianceCache';
 import { BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
+import CompleteTimePrompt from './CompleteTimePrompt';
 
 interface Props {
   data: ScheduleData;
@@ -169,21 +170,6 @@ function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }: {
   onRequestCancel: (a: Appointment) => void;
   onSelect: (a: Appointment) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [startClock, setStartClock] = useState(a.startTime.slice(11, 16));
-  const [endClock, setEndClock] = useState(a.endTime.slice(11, 16));
-
-  const accept = () => {
-    const date = a.startTime.slice(0, 10);
-    const newStart = `${date}T${startClock}:00`;
-    const newEnd = `${date}T${endClock}:00`;
-    if (newEnd <= newStart) {
-      alert('End time must be after the start time.');
-      return;
-    }
-    onMarkComplete({ ...a, startTime: newStart, endTime: newEnd });
-  };
-
   return (
     <div style={{
       backgroundColor: 'white', borderRadius: 6, padding: 8,
@@ -202,25 +188,10 @@ function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }: {
         {a.client && <> · {a.client}</>}
         {a.technician && <> · {a.technician}</>}
       </div>
-      {editing ? (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <label style={{ fontSize: 11, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }}>
-            Start
-            <input type="time" step="900" value={startClock} onChange={e => setStartClock(e.target.value)} style={timeInput} />
-          </label>
-          <label style={{ fontSize: 11, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }}>
-            End
-            <input type="time" step="900" value={endClock} onChange={e => setEndClock(e.target.value)} style={timeInput} />
-          </label>
-          <button onClick={accept} style={completeBtn}>Accept</button>
-          <button onClick={() => setEditing(false)} style={ghostBtn}>Cancel</button>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button onClick={() => setEditing(true)} style={completeBtn}>✓ Complete</button>
-          <button onClick={() => onRequestCancel(a)} style={cancelBtn}>✕ Cancel</button>
-        </div>
-      )}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <CompleteTimePrompt a={a} onComplete={onMarkComplete} />
+        <button onClick={() => onRequestCancel(a)} style={cancelBtn}>✕ Cancel</button>
+      </div>
     </div>
   );
 }
@@ -476,25 +447,9 @@ function NavBtn({ onClick, children }: { onClick: () => void; children: React.Re
   );
 }
 
-const completeBtn: React.CSSProperties = {
-  flex: '1 1 auto', padding: '5px 9px',
-  backgroundColor: '#dcfce7', color: '#15803d',
-  border: '1px solid #86efac', borderRadius: 4,
-  cursor: 'pointer', fontSize: 12, fontWeight: 600,
-};
 const cancelBtn: React.CSSProperties = {
   flex: '1 1 auto', padding: '5px 9px',
   backgroundColor: '#fee2e2', color: '#b91c1c',
   border: '1px solid #fca5a5', borderRadius: 4,
   cursor: 'pointer', fontSize: 12, fontWeight: 600,
-};
-const ghostBtn: React.CSSProperties = {
-  padding: '5px 9px',
-  backgroundColor: 'white', color: '#6b7280',
-  border: '1px solid #d1d5db', borderRadius: 4,
-  cursor: 'pointer', fontSize: 12, fontWeight: 600,
-};
-const timeInput: React.CSSProperties = {
-  fontSize: 12, padding: '3px 6px',
-  border: '1px solid #d1d5db', borderRadius: 4,
 };

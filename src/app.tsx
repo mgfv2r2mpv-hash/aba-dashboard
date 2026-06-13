@@ -393,6 +393,11 @@ export default function App() {
           setLoading(false);
           return;
         }
+        // An encrypted file in → re-encrypt on export with the same password by
+        // default, so a round-trip stays protected without re-entering it.
+        if (password !== aiSettings.schedulePassword) {
+          handleAISettingsSave({ ...aiSettings, schedulePassword: password });
+        }
       }
 
       // Parse client-side (cheap, pure) — same parser the server/native use.

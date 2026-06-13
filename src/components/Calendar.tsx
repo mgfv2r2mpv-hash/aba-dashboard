@@ -19,6 +19,12 @@ interface CalendarProps {
   // Reports the currently-viewed date (month/week anchor) so the parent can
   // scope month-bound concerns (e.g. conflict checks) to what's on screen.
   onViewDateChange?: (date: Date) => void;
+  // Reports the active lens (bcba/bt) so the parent can render the hours
+  // totals in a docked side pane instead of inline.
+  onLensChange?: (lens: 'bcba' | 'bt') => void;
+  // When true, the parent renders the hours totals in the docked pane, so the
+  // calendar suppresses its own inline ribbon.
+  hideTotals?: boolean;
   // When a draft is open, marks staged appointments (add/move/shorten/remove)
   // so they render as "proposed"/tombstoned rather than committed sessions.
   draftMarks?: Map<string, DraftMark>;
@@ -61,6 +67,8 @@ export default function Calendar({
   onAppointmentChange,
   onSelectAppointment,
   onViewDateChange,
+  onLensChange,
+  hideTotals,
   draftMarks,
 }: CalendarProps) {
   const [view, setView] = useState<View>('month');
@@ -86,6 +94,12 @@ export default function Calendar({
     onViewDateChange?.(currentDate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentDate]);
+
+  // Surface the active lens so the parent can dock the hours totals.
+  useEffect(() => {
+    onLensChange?.(lens);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lens]);
 
   // The lens hides the other party's appointments: BT = has a technician,
   // BCBA = none. Totals are computed from these filtered appointments too.
@@ -164,6 +178,11 @@ export default function Calendar({
 
       {view === 'month' && (
         <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} onSelectAppointment={onSelectAppointment} onPickDay={setPickedDay} draftMarks={draftMarks} roomy={roomy} />
+      )}
+      {view === 'month' && !hideTotals && (
+        <div style={{ marginTop: 16 }}>
+          <HoursSummary appointments={appointments} lens={lens} settings={settings} currentDate={currentDate} />
+        </div>
       )}
       {view === 'week' && (
         <TimeGrid
@@ -284,39 +303,11 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
   const util = resolveUtilization(settings?.utilization);
   const weeklyTarget = lens === 'bt' ? util.btWeeklyDirectHours : util.bcbaWeeklyBillableHours;
 
-  const weekRows = days.length / 7;
-  // Week rows that touch the month at all — drives the ribbon and the BT
-  // monthly denominator (weeks present × weekly target).
-  let inMonthWeeks = 0;
-  // "Work weeks" for the BCBA monthly goal: a row only counts as a full work
-  // week if it has 3+ of this month's weekdays. June 2026's trailing Mon/Tue
-  // (Jun 29–30) is a 2-weekday stub, so June is a 4-week month, not 5.
-  let workWeeks = 0;
-  for (let r = 0; r < weekRows; r++) {
-    const row = days.slice(r * 7, r * 7 + 7);
-    if (row.some(d => isSameMonth(d, monthStart))) inMonthWeeks++;
-    const weekdaysInMonth = row.filter(d => isSameMonth(d, monthStart) && getDay(d) >= 1 && getDay(d) <= 5).length;
-    if (weekdaysInMonth >= 3) workWeeks++;
-  }
-  const monthlyGoal = workWeeks >= 5 ? util.bcbaMonthlyBillableHours5Week : util.bcbaMonthlyBillableHours;
-
-  // One rollup per grid week, for the side ribbon.
-  const weekSummaries = Array.from({ length: weekRows }, (_, r) => {
-    const weekStart = days[r * 7];
-    return {
-      weekStart,
-      inMonth: days.slice(r * 7, r * 7 + 7).some(d => isSameMonth(d, monthStart)),
-      hours: rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens),
-    };
-  });
-  const monthHours = rollupHours(appointments, monthStart.getTime(), monthEnd.getTime() + 1, lens);
-
   // Collapse all rows when navigating to a different month.
   const monthKey = format(monthStart, 'yyyy-MM');
   useEffect(() => { setExpandedRows(new Set()); }, [monthKey]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as any, border: '1px solid #e5e7eb', borderRadius: 6 }}>
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 1,
@@ -387,16 +378,65 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
           })}
         </div>
       </div>
+  );
+}
 
-      <WeekRibbon
-        lens={lens}
-        weeks={weekSummaries}
-        weeklyTarget={weeklyTarget}
-        monthHours={monthHours}
-        monthlyGoal={lens === 'bcba' ? monthlyGoal : undefined}
-        monthWeeks={lens === 'bcba' ? workWeeks : inMonthWeeks}
-      />
-    </div>
+// ---------- Hours totals (BT direct / BCBA billable) ----------
+
+// Self-contained monthly hours summary: one card per grid week + a month total.
+// Computes its own rollups from the (unfiltered) appointments + lens so it can
+// be rendered either inline under the month grid (narrow screens) or docked in
+// the side pane (wide screens). rollupHours filters by lens internally.
+export function HoursSummary({ appointments, lens, settings, currentDate }: {
+  appointments: Appointment[];
+  lens: Lens;
+  settings?: CompanySettings;
+  currentDate: Date;
+}) {
+  const monthStart = startOfMonth(currentDate);
+  const monthEnd = endOfMonth(monthStart);
+  const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+  const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+  const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
+
+  const util = resolveUtilization(settings?.utilization);
+  const weeklyTarget = lens === 'bt' ? util.btWeeklyDirectHours : util.bcbaWeeklyBillableHours;
+
+  const weekRows = days.length / 7;
+  // Week rows that touch the month at all — drives the ribbon and the BT
+  // monthly denominator (weeks present × weekly target).
+  let inMonthWeeks = 0;
+  // "Work weeks" for the BCBA monthly goal: a row only counts as a full work
+  // week if it has 3+ of this month's weekdays. June 2026's trailing Mon/Tue
+  // (Jun 29–30) is a 2-weekday stub, so June is a 4-week month, not 5.
+  let workWeeks = 0;
+  for (let r = 0; r < weekRows; r++) {
+    const row = days.slice(r * 7, r * 7 + 7);
+    if (row.some(d => isSameMonth(d, monthStart))) inMonthWeeks++;
+    const weekdaysInMonth = row.filter(d => isSameMonth(d, monthStart) && getDay(d) >= 1 && getDay(d) <= 5).length;
+    if (weekdaysInMonth >= 3) workWeeks++;
+  }
+  const monthlyGoal = workWeeks >= 5 ? util.bcbaMonthlyBillableHours5Week : util.bcbaMonthlyBillableHours;
+
+  const weekSummaries = Array.from({ length: weekRows }, (_, r) => {
+    const weekStart = days[r * 7];
+    return {
+      weekStart,
+      inMonth: days.slice(r * 7, r * 7 + 7).some(d => isSameMonth(d, monthStart)),
+      hours: rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens),
+    };
+  });
+  const monthHours = rollupHours(appointments, monthStart.getTime(), monthEnd.getTime() + 1, lens);
+
+  return (
+    <WeekRibbon
+      lens={lens}
+      weeks={weekSummaries}
+      weeklyTarget={weeklyTarget}
+      monthHours={monthHours}
+      monthlyGoal={lens === 'bcba' ? monthlyGoal : undefined}
+      monthWeeks={lens === 'bcba' ? workWeeks : inMonthWeeks}
+    />
   );
 }
 

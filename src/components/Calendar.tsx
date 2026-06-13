@@ -3,6 +3,7 @@ import { Appointment, Technician, Client, CompanySettings } from '../types';
 import { DraftMark } from '../draft';
 import { rollupHours, resolveUtilization, HoursByStatus } from '../utilization';
 import { tileStyle, clientPastel, legendStripeStyle } from '../calendarColors';
+import { useMinWidth } from '../useMediaQuery';
 import {
   startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek,
   format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay,
@@ -32,7 +33,9 @@ type Lens = 'bcba' | 'bt';
 const VISIBLE_START_HOUR = 6;
 const VISIBLE_END_HOUR = 22;
 const HOUR_HEIGHT = 40;
+const HOUR_HEIGHT_WIDE = 56;      // roomier hour rows on iPad and up
 const TIME_AXIS_WIDTH = 52;
+const TIME_AXIS_WIDTH_WIDE = 64;
 // Snap drag movements to 15-minute slots — matches typical scheduling resolution.
 const SNAP_MINUTES = 15;
 
@@ -65,6 +68,10 @@ export default function Calendar({
   const [currentDate, setCurrentDate] = useState(new Date());
   const [pickedDay, setPickedDay] = useState<Date | null>(null);
   const isLandscape = useIsLandscape();
+  // iPad and up: roomier rows, wider time axis, richer tiles, taller month cells.
+  const roomy = useMinWidth(820);
+  const hourHeight = roomy ? HOUR_HEIGHT_WIDE : HOUR_HEIGHT;
+  const axisWidth = roomy ? TIME_AXIS_WIDTH_WIDE : TIME_AXIS_WIDTH;
 
   // From the month grid, tapping a day offers a jump to that day's week or day
   // view. Both set the anchor date first, then switch the view.
@@ -156,7 +163,7 @@ export default function Calendar({
       </div>
 
       {view === 'month' && (
-        <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} onSelectAppointment={onSelectAppointment} onPickDay={setPickedDay} draftMarks={draftMarks} />
+        <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} onSelectAppointment={onSelectAppointment} onPickDay={setPickedDay} draftMarks={draftMarks} roomy={roomy} />
       )}
       {view === 'week' && (
         <TimeGrid
@@ -166,6 +173,9 @@ export default function Calendar({
           onAppointmentChange={onAppointmentChange}
           dragEnabled={isLandscape}
           draftMarks={draftMarks}
+          hourHeight={hourHeight}
+          axisWidth={axisWidth}
+          roomy={roomy}
         />
       )}
       {view === 'day' && (
@@ -176,6 +186,9 @@ export default function Calendar({
           onAppointmentChange={onAppointmentChange}
           dragEnabled={isLandscape}
           draftMarks={draftMarks}
+          hourHeight={hourHeight}
+          axisWidth={axisWidth}
+          roomy={roomy}
         />
       )}
       {(view === 'week' || view === 'day') && !isLandscape && (
@@ -237,7 +250,7 @@ export default function Calendar({
 
 // ---------- Month View ----------
 
-function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment, onPickDay, draftMarks }: {
+function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment, onPickDay, draftMarks, roomy }: {
   currentDate: Date;
   appointments: Appointment[];
   lens: Lens;
@@ -245,7 +258,9 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
   onSelectAppointment: (a: Appointment) => void;
   onPickDay: (day: Date) => void;
   draftMarks?: Map<string, DraftMark>;
+  roomy?: boolean;
 }) {
+  const maxChips = roomy ? 6 : 3;
   // Which grid week-rows are expanded to reveal every appointment. Tapping a
   // cell's "+N more" expands the whole row downward (the CSS grid stretches
   // sibling cells to match), and a "Show less" control collapses it again.
@@ -306,7 +321,7 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
           {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
             <div key={d} style={{
               padding: '10px 8px', backgroundColor: '#f9f9f9',
-              fontWeight: 600, textAlign: 'center', fontSize: 13,
+              fontWeight: 600, textAlign: 'center', fontSize: roomy ? 15 : 13,
             }}>{d}</div>
           ))}
         </div>
@@ -328,25 +343,25 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
                 title="Open week or day view"
                 style={{
                   backgroundColor: inCurrentMonth ? '#ffffff' : '#f3f4f6',
-                  minHeight: 110, padding: 6, opacity: inCurrentMonth ? 1 : 0.5,
+                  minHeight: roomy ? 168 : 110, padding: roomy ? 8 : 6, opacity: inCurrentMonth ? 1 : 0.5,
                   cursor: 'pointer',
                 }}
               >
                 <div style={{
                   fontWeight: isToday ? 700 : 400,
-                  marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: 12,
+                  marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: roomy ? 15 : 12,
                 }}>{format(day, 'd')}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {(expanded ? dayAppts : dayAppts.slice(0, 3)).map(apt => (
+                  {(expanded ? dayAppts : dayAppts.slice(0, maxChips)).map(apt => (
                     <AppointmentChip key={apt.id} apt={apt} mark={draftMarks?.get(apt.id)} onClick={() => onSelectAppointment(apt)} />
                   ))}
-                  {dayAppts.length > 3 && !expanded && (
+                  {dayAppts.length > maxChips && !expanded && (
                     <div
                       onClick={e => { e.stopPropagation(); toggleRow(rowIdx); }}
                       style={{ fontSize: 10, color: '#3b82f6', fontWeight: 600, cursor: 'pointer' }}
-                    >+{dayAppts.length - 3} more ▾</div>
+                    >+{dayAppts.length - maxChips} more ▾</div>
                   )}
-                  {dayAppts.length > 3 && expanded && (
+                  {dayAppts.length > maxChips && expanded && (
                     <div
                       onClick={e => { e.stopPropagation(); toggleRow(rowIdx); }}
                       style={{ fontSize: 10, color: '#3b82f6', fontWeight: 600, cursor: 'pointer' }}
@@ -540,18 +555,21 @@ function Legend() {
 // Tiles are color-coded (client pastel background + staff diagonal stripes),
 // the time axis is frozen on side-scroll, and tapping a tile pops a small
 // dialog to view the session in the detail panel.
-function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks }: {
+function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks, hourHeight = HOUR_HEIGHT, axisWidth = TIME_AXIS_WIDTH, roomy = false }: {
   days: Date[];
   appointments: Appointment[];
   onSelectAppointment: (a: Appointment) => void;
   onAppointmentChange: (a: Appointment) => void;
   dragEnabled: boolean;
   draftMarks?: Map<string, DraftMark>;
+  hourHeight?: number;
+  axisWidth?: number;
+  roomy?: boolean;
 }) {
   const hours = Array.from({ length: VISIBLE_END_HOUR - VISIBLE_START_HOUR }, (_, i) => VISIBLE_START_HOUR + i);
-  const totalHeight = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * HOUR_HEIGHT;
+  const totalHeight = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * hourHeight;
   const today = new Date();
-  const minWidth = days.length > 1 ? 560 : undefined;
+  const minWidth = days.length > 1 ? (roomy ? 720 : 560) : undefined;
   // The tapped tile (shows a small "view session" dialog). Distinct from drag.
   const [tapped, setTapped] = useState<Appointment | null>(null);
 
@@ -573,7 +591,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
     if (!dragState) return;
     const onMove = (e: PointerEvent) => {
       const deltaY = e.clientY - dragState.startY;
-      const rawMin = (deltaY / HOUR_HEIGHT) * 60;
+      const rawMin = (deltaY / hourHeight) * 60;
       const snappedMin = Math.round(rawMin / SNAP_MINUTES) * SNAP_MINUTES;
       // Use elementFromPoint to detect which day column the cursor is over.
       // Each day column carries a data-day-iso attribute.
@@ -605,7 +623,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
     };
-  }, [dragState, onAppointmentChange]);
+  }, [dragState, onAppointmentChange, hourHeight]);
 
   const beginDrag = (apt: Appointment, e: React.PointerEvent) => {
     if (!dragEnabled) return;
@@ -623,7 +641,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
   // Sticky cells keep the time axis pinned to the left while day columns
   // scroll horizontally. Opaque background so columns don't show through.
   const stickyAxis: React.CSSProperties = {
-    width: TIME_AXIS_WIDTH, flexShrink: 0,
+    width: axisWidth, flexShrink: 0,
     position: 'sticky', left: 0, zIndex: 3, backgroundColor: 'white',
   };
 
@@ -655,7 +673,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
         <div style={{ ...stickyAxis, borderRight: '1px solid #e5e7eb' }}>
           {hours.map(h => (
             <div key={h} style={{
-              position: 'absolute', top: (h - VISIBLE_START_HOUR) * HOUR_HEIGHT,
+              position: 'absolute', top: (h - VISIBLE_START_HOUR) * hourHeight,
               fontSize: 10, color: '#6b7280', padding: '2px 4px', right: 4,
             }}>{formatHourLabel(h)}</div>
           ))}
@@ -676,19 +694,19 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
               }}>
               {/* Hour / half-hour / quarter-hour grid lines (decreasing weight). */}
               {hours.map(h => {
-                const base = (h - VISIBLE_START_HOUR) * HOUR_HEIGHT;
+                const base = (h - VISIBLE_START_HOUR) * hourHeight;
                 return (
                   <React.Fragment key={h}>
                     <GridLine top={base} color="#e5e7eb" />
-                    <GridLine top={base + HOUR_HEIGHT / 4} color="#f5f6f7" />
-                    <GridLine top={base + HOUR_HEIGHT / 2} color="#eef0f2" />
-                    <GridLine top={base + (HOUR_HEIGHT * 3) / 4} color="#f5f6f7" />
+                    <GridLine top={base + hourHeight / 4} color="#f5f6f7" />
+                    <GridLine top={base + hourHeight / 2} color="#eef0f2" />
+                    <GridLine top={base + (hourHeight * 3) / 4} color="#f5f6f7" />
                   </React.Fragment>
                 );
               })}
               {/* Appointments */}
               {laid.map(({ appt, lane, lanes }) => {
-                const layout = appointmentLayout(appt);
+                const layout = appointmentLayout(appt, hourHeight);
                 if (!layout) return null;
                 const widthPct = 100 / lanes;
                 const beingDragged = dragState?.apt.id === appt.id;
@@ -700,6 +718,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
                     key={appt.id}
                     apt={appt}
                     mark={mark}
+                    roomy={roomy}
                     onClick={() => setTapped(appt)}
                     onPointerDown={draggable ? (e) => beginDrag(appt, e) : undefined}
                     dragHandle={draggable}
@@ -948,13 +967,14 @@ function blockLook(apt: Appointment, mark?: DraftMark) {
   };
 }
 
-function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style }: {
+function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style, roomy }: {
   apt: Appointment;
   mark?: DraftMark;
   onClick: () => void;
   onPointerDown?: (e: React.PointerEvent) => void;
   dragHandle?: boolean;
   style: React.CSSProperties;
+  roomy?: boolean;
 }) {
   const look = blockLook(apt, mark);
   // When drag is enabled, suppress the click (click fires after pointerup
@@ -978,7 +998,7 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
         backgroundColor: look.backgroundColor,
         backgroundImage: look.backgroundImage,
         color: look.color,
-        padding: '4px 6px', borderRadius: 4, fontSize: 11,
+        padding: roomy ? '5px 8px' : '4px 6px', borderRadius: 4, fontSize: roomy ? 13 : 11,
         overflow: 'hidden', cursor: dragHandle ? 'grab' : 'pointer', boxSizing: 'border-box',
         border: look.border,
         opacity: look.opacity,
@@ -995,16 +1015,21 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
           </span>
         )}
       </div>
-      <div style={{ fontSize: 10, opacity: 0.85, marginTop: 2 }}>
+      <div style={{ fontSize: roomy ? 12 : 10, opacity: 0.85, marginTop: 2 }}>
         {format(new Date(apt.startTime), 'h:mm')}–{format(new Date(apt.endTime), 'h:mm a')}
       </div>
+      {roomy && (apt.client || apt.technician) && (
+        <div style={{ fontSize: 11, opacity: 0.8, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {[apt.client, apt.technician].filter(Boolean).join(' · ')}
+        </div>
+      )}
     </div>
   );
 }
 
 // Returns the {top, height} of an appointment in pixels within the week-view
 // time grid, or null if it falls entirely outside the visible hour range.
-function appointmentLayout(apt: Appointment): { top: number; height: number } | null {
+function appointmentLayout(apt: Appointment, hourHeight: number = HOUR_HEIGHT): { top: number; height: number } | null {
   const start = new Date(apt.startTime);
   const end = new Date(apt.endTime);
   if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
@@ -1013,8 +1038,8 @@ function appointmentLayout(apt: Appointment): { top: number; height: number } | 
   if (endHrs <= VISIBLE_START_HOUR || startHrs >= VISIBLE_END_HOUR) return null;
   const clampedStart = Math.max(startHrs, VISIBLE_START_HOUR);
   const clampedEnd = Math.min(endHrs, VISIBLE_END_HOUR);
-  const top = (clampedStart - VISIBLE_START_HOUR) * HOUR_HEIGHT;
-  const height = Math.max(20, (clampedEnd - clampedStart) * HOUR_HEIGHT);
+  const top = (clampedStart - VISIBLE_START_HOUR) * hourHeight;
+  const height = Math.max(20, (clampedEnd - clampedStart) * hourHeight);
   return { top, height };
 }
 

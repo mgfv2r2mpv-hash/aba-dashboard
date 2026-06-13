@@ -68,11 +68,11 @@ export class ConstraintValidator {
             }
             // Reassessment-report pacing (soft → warning when behind a near deadline).
             if (!cs.reassessment.paceOk) {
-                const due = cs.reassessment.internalClinicalDirectorDue || cs.reassessment.reportDraftDue;
+                const due = cs.reassessment.initialDraftDue;
                 conflicts.push({
                     type: 'scheduling-impossible',
                     severity: 'warning',
-                    message: `${client.name}: reassessment ${fmt(cs.reassessment.usedH)}/${fmt(cs.reassessment.blockH)}h with internal report due ${due || '?'} (${cs.reassessment.daysToInternalDue ?? '?'} day(s)) — pace the block`,
+                    message: `${client.name}: reassessment ${fmt(cs.reassessment.usedH)}/${fmt(cs.reassessment.blockH)}h with internal report due ${due || '?'} (${cs.reassessment.daysToInternalDue ?? '?'} day(s)). Pace the block.`,
                 });
             }
         }

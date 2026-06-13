@@ -1,8 +1,25 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState } from 'react';
-import { makeupCandidates } from '../authorization';
+import { makeupCandidates, findAuthFor } from '../authorization';
 import { v4 as uuidv4 } from 'uuid';
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+// HH:MM helpers for the start/end clock fields. Shifts stay within one day
+// (appointments never cross midnight).
+function clockToMin(clock) {
+    const [h, m] = clock.split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+}
+function minToClock(total) {
+    const clamped = Math.max(0, Math.min(23 * 60 + 59, Math.round(total)));
+    return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`;
+}
+// Maps an appointment type to the weekly authorized-rate key it draws from.
+const TYPE_TO_WEEKLY = {
+    'client-session': 'direct',
+    'supervision': 'supervision',
+    'parent-training': 'parentTraining',
+    'case-planning': 'casePlanning',
+};
 export default function AppointmentForm({ appointment, allAppointments, authorizations, technicians, clients, onSave, onDelete, onCancel, }) {
     const [title, setTitle] = useState(appointment?.title || '');
     const [description, setDescription] = useState(appointment?.description || '');
@@ -21,6 +38,57 @@ export default function AppointmentForm({ appointment, allAppointments, authoriz
     const [isBillable, setIsBillable] = useState(appointment?.isBillable ?? true);
     const [isMakeUp, setIsMakeUp] = useState(appointment?.isMakeUp ?? false);
     const [makeupForId, setMakeupForId] = useState(appointment?.makeupForId || '');
+    const isNew = !appointment?.id;
+    // "Move end time with start time": preserve the current duration when the
+    // start shifts. Default checked on every fresh open/select.
+    const [moveEndWithStart, setMoveEndWithStart] = useState(true);
+    // Whether the user has hand-edited the end time. Until they do, a new
+    // appointment auto-fills the end from the type's authorized weekly hours.
+    const [endManual, setEndManual] = useState(!!appointment?.endTime);
+    // Authorized weekly hours for the given type from the client's active auth
+    // (resolved by the chosen date). Used to default a new session's duration.
+    const authHoursForType = (typeArg, clientArg, dateArg) => {
+        if (!clientArg || !dateArg)
+            return undefined;
+        const key = TYPE_TO_WEEKLY[typeArg];
+        if (!key)
+            return undefined;
+        const auth = findAuthFor({ appointments: allAppointments || [], authorizations: authorizations || [], clients }, clientArg, dateArg);
+        const h = auth?.weekly?.[key];
+        return h && h > 0 ? h : undefined;
+    };
+    // Apply the auth-default duration for a new appointment when the end is still
+    // empty or auto-managed and we have a start + type + client.
+    const applyAuthDefaultEnd = (typeArg, clientArg, startArg, dateArg) => {
+        if (!isNew || endManual)
+            return;
+        if (!startArg)
+            return;
+        const h = authHoursForType(typeArg, clientArg, dateArg);
+        if (h === undefined)
+            return;
+        setEndClock(minToClock(clockToMin(startArg) + h * 60));
+    };
+    const handleStartChange = (newStart) => {
+        const prevDuration = startClock && endClock ? clockToMin(endClock) - clockToMin(startClock) : undefined;
+        setStartClock(newStart);
+        if (!newStart)
+            return;
+        // Move end with start: keep the existing duration.
+        if (moveEndWithStart && prevDuration !== undefined && prevDuration > 0) {
+            setEndClock(minToClock(clockToMin(newStart) + prevDuration));
+            return;
+        }
+        applyAuthDefaultEnd(type, clientId, newStart, date);
+    };
+    const handleTypeChange = (t) => {
+        setType(t);
+        applyAuthDefaultEnd(t, clientId, startClock, date);
+    };
+    const handleClientChange = (c) => {
+        setClientId(c);
+        applyAuthDefaultEnd(type, c, startClock, date);
+    };
     // Canceled, not-fully-made-up sessions for this client within the auth
     // covering the chosen date (same calendar month when no auth covers it).
     const makeupOptions = (isMakeUp && clientId && date)
@@ -262,7 +330,7 @@ export default function AppointmentForm({ appointment, allAppointments, authoriz
                 backgroundColor: 'white', borderRadius: '8px', padding: '20px',
                 width: '100%', maxWidth: 600, maxHeight: '100%', overflowY: 'auto',
                 boxSizing: 'border-box',
-            }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }, children: [_jsx("h2", { style: { fontSize: '20px', fontWeight: 'bold' }, children: appointment ? 'Edit Appointment' : 'Add Appointment' }), _jsx("button", { onClick: onCancel, style: { background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }, children: "\u2715" })] }), appointment && hasSeries && (_jsxs("div", { style: { marginBottom: 16 }, children: [_jsx("label", { style: { fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }, children: "Apply changes to" }), _jsx(ScopePicker, { value: editScope, onChange: setEditScope }), _jsxs("p", { style: { fontSize: 11, color: '#6b7280', marginTop: 6 }, children: [editScope === 'instance' && 'Only this occurrence will change.', editScope === 'following' && `This and ${siblings.filter(s => new Date(s.startTime).getTime() >= new Date(appointment.startTime).getTime()).length - 1} future occurrence(s) in the series will change. Time-of-day edits keep each occurrence's original date.`, editScope === 'all' && `All ${siblings.length} occurrences in the series will change. Time-of-day edits keep each occurrence's original date.`] })] })), _jsxs("div", { style: { display: 'grid', gap: '12px' }, children: [_jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Title *" }), _jsx("input", { value: title, onChange: (e) => setTitle(e.target.value), style: inputStyle })] }), _jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Description" }), _jsx("input", { value: description, onChange: (e) => setDescription(e.target.value), style: inputStyle })] }), _jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }, children: [_jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Type" }), _jsxs("select", { value: type, onChange: (e) => setType(e.target.value), style: inputStyle, children: [_jsx("option", { value: "client-session", children: "Client Session" }), _jsx("option", { value: "supervision", children: "Supervision" }), _jsx("option", { value: "parent-training", children: "Parent Training / Coord. of Care" }), _jsx("option", { value: "reassessment", children: "Reassessment" }), _jsx("option", { value: "case-planning", children: "Case Planning" }), _jsx("option", { value: "internal-task", children: "Internal Task" }), _jsx("option", { value: "other", children: "Other" })] })] }), _jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Recurrence" }), _jsxs("select", { value: recurrence, onChange: (e) => setRecurrence(e.target.value), style: inputStyle, children: [_jsx("option", { value: "none", children: "One-time" }), _jsx("option", { value: "weekly", children: "Weekly" }), _jsx("option", { value: "biweekly", children: "Every 2 weeks" }), _jsx("option", { value: "monthly", children: "Monthly" }), _jsx("option", { value: "custom-days", children: "Custom days of week" }), _jsx("option", { value: "custom-dates", children: "Specific dates" })] })] })] }), _jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }, children: [type !== 'supervision' && (_jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Technician" }), _jsxs("select", { value: technicianId, onChange: (e) => setTechnicianId(e.target.value), style: inputStyle, children: [_jsx("option", { value: "", children: "\u2014 None \u2014" }), technicians.map(t => _jsxs("option", { value: t.name, children: [t.name, t.isRBT ? ' (RBT)' : ''] }, t.id))] })] })), _jsxs("div", { children: [_jsxs("label", { style: labelStyle, children: ["Client ", type === 'supervision' && '*'] }), _jsxs("select", { value: clientId, onChange: (e) => setClientId(e.target.value), style: inputStyle, children: [_jsx("option", { value: "", children: "\u2014 None \u2014" }), clients.map(c => _jsx("option", { value: c.name, children: c.name }, c.id))] }), type === 'supervision' && (_jsx("p", { style: { fontSize: 11, color: '#6b7280', marginTop: 4 }, children: "Supervision is logged against the client only. The tech being supervised is whoever has a direct session with this client during this time; if no one does, this is BCBA-solo time and won't count toward compliance." }))] })] }), _jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Date *" }), _jsx("input", { type: "date", value: date, onChange: (e) => setDate(e.target.value), style: inputStyle })] }), _jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }, children: [_jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Start time *" }), _jsx("input", { type: "time", step: "900", value: startClock, onChange: (e) => setStartClock(e.target.value), style: inputStyle })] }), _jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "End time *" }), _jsx("input", { type: "time", step: "900", value: endClock, onChange: (e) => setEndClock(e.target.value), style: inputStyle })] })] }), recurrence === 'custom-days' && (_jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Days of week" }), _jsx("div", { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' }, children: DAYS.map(day => (_jsx("button", { type: "button", onClick: () => toggleDay(day), style: {
+            }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }, children: [_jsx("h2", { style: { fontSize: '20px', fontWeight: 'bold' }, children: appointment ? 'Edit Appointment' : 'Add Appointment' }), _jsx("button", { onClick: onCancel, style: { background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }, children: "\u2715" })] }), appointment && hasSeries && (_jsxs("div", { style: { marginBottom: 16 }, children: [_jsx("label", { style: { fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }, children: "Apply changes to" }), _jsx(ScopePicker, { value: editScope, onChange: setEditScope }), _jsxs("p", { style: { fontSize: 11, color: '#6b7280', marginTop: 6 }, children: [editScope === 'instance' && 'Only this occurrence will change.', editScope === 'following' && `This and ${siblings.filter(s => new Date(s.startTime).getTime() >= new Date(appointment.startTime).getTime()).length - 1} future occurrence(s) in the series will change. Time-of-day edits keep each occurrence's original date.`, editScope === 'all' && `All ${siblings.length} occurrences in the series will change. Time-of-day edits keep each occurrence's original date.`] })] })), _jsxs("div", { style: { display: 'grid', gap: '12px' }, children: [_jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Title *" }), _jsx("input", { value: title, onChange: (e) => setTitle(e.target.value), style: inputStyle })] }), _jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Description" }), _jsx("input", { value: description, onChange: (e) => setDescription(e.target.value), style: inputStyle })] }), _jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }, children: [_jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Type" }), _jsxs("select", { value: type, onChange: (e) => handleTypeChange(e.target.value), style: inputStyle, children: [_jsx("option", { value: "client-session", children: "Client Session" }), _jsx("option", { value: "supervision", children: "Supervision" }), _jsx("option", { value: "parent-training", children: "Parent Training / Coord. of Care" }), _jsx("option", { value: "reassessment", children: "Reassessment" }), _jsx("option", { value: "case-planning", children: "Case Planning" }), _jsx("option", { value: "internal-task", children: "Internal Task" }), _jsx("option", { value: "other", children: "Other" })] })] }), _jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Recurrence" }), _jsxs("select", { value: recurrence, onChange: (e) => setRecurrence(e.target.value), style: inputStyle, children: [_jsx("option", { value: "none", children: "One-time" }), _jsx("option", { value: "weekly", children: "Weekly" }), _jsx("option", { value: "biweekly", children: "Every 2 weeks" }), _jsx("option", { value: "monthly", children: "Monthly" }), _jsx("option", { value: "custom-days", children: "Custom days of week" }), _jsx("option", { value: "custom-dates", children: "Specific dates" })] })] })] }), _jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }, children: [type !== 'supervision' && (_jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Technician" }), _jsxs("select", { value: technicianId, onChange: (e) => setTechnicianId(e.target.value), style: inputStyle, children: [_jsx("option", { value: "", children: "\u2014 None \u2014" }), technicians.map(t => _jsxs("option", { value: t.name, children: [t.name, t.isRBT ? ' (RBT)' : ''] }, t.id))] })] })), _jsxs("div", { children: [_jsxs("label", { style: labelStyle, children: ["Client ", type === 'supervision' && '*'] }), _jsxs("select", { value: clientId, onChange: (e) => handleClientChange(e.target.value), style: inputStyle, children: [_jsx("option", { value: "", children: "\u2014 None \u2014" }), clients.map(c => _jsx("option", { value: c.name, children: c.name }, c.id))] }), type === 'supervision' && (_jsx("p", { style: { fontSize: 11, color: '#6b7280', marginTop: 4 }, children: "Supervision is logged against the client only. The tech being supervised is whoever has a direct session with this client during this time; if no one does, this is BCBA-solo time and won't count toward compliance." }))] })] }), _jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Date *" }), _jsx("input", { type: "date", value: date, onChange: (e) => setDate(e.target.value), style: inputStyle })] }), _jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }, children: [_jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Start time *" }), _jsx("input", { type: "time", step: "900", value: startClock, onChange: (e) => handleStartChange(e.target.value), style: inputStyle })] }), _jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "End time *" }), _jsx("input", { type: "time", step: "900", value: endClock, onChange: (e) => { setEndClock(e.target.value); setEndManual(true); }, style: inputStyle })] })] }), _jsxs("label", { style: { display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer', fontSize: 13 }, children: [_jsx("input", { type: "checkbox", checked: moveEndWithStart, onChange: (e) => setMoveEndWithStart(e.target.checked) }), _jsx("span", { children: "Move end time with start time" })] }), recurrence === 'custom-days' && (_jsxs("div", { children: [_jsx("label", { style: labelStyle, children: "Days of week" }), _jsx("div", { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' }, children: DAYS.map(day => (_jsx("button", { type: "button", onClick: () => toggleDay(day), style: {
                                             padding: '6px 10px',
                                             border: '1px solid #d1d5db',
                                             borderRadius: '4px',

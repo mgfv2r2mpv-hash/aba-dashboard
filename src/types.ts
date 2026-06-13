@@ -71,6 +71,13 @@ export const BACB_RBT_SUPERVISION_MIN_PERCENT = 5;
 
 export type TrainingPeriodUnit = 'week' | 'month' | 'sixMonths' | 'year';
 
+// A lead time expressed in days or weeks. Used for internal report submission
+// milestones computed back from an authorization's end date.
+export interface ReportLead {
+  value: number;
+  unit: 'days' | 'weeks';
+}
+
 // Billable / utilization targets. A BCBA tracks their own weekly billable hours
 // and the aggregate BT direct hours their caseload generates; both have
 // "fully-utilized" thresholds. The BCBA also carries a monthly billable goal
@@ -111,10 +118,13 @@ export interface CompanySettings {
   supervisionFloorPercent?: number;
   supervisionPreferredMinPercent?: number;
   supervisionPreferredMaxPercent?: number;
-  // Internal reassessment-report pacing lead times (weeks before the insurer
-  // due date): the final draft goes to the back office `reportLeadWeeksBackOffice`
-  // weeks out, and to the clinical director `reportLeadWeeksClinicalDirector`
-  // weeks before THAT. Defaults 4 and 1. Used only to pace the reassessment block.
+  // Internal report submission lead times, measured back from auth.endDate.
+  // The initial draft is due `reportDraftLead` ahead of the auth end; the final
+  // draft `reportFinalLead` ahead. Defaults: draft 4 weeks, final 2 weeks.
+  reportDraftLead?: ReportLead;
+  reportFinalLead?: ReportLead;
+  // Legacy fields (weeks before the old insurer due date). Kept so older saved
+  // schedules still parse; no longer surfaced or used for pacing.
   reportLeadWeeksBackOffice?: number;
   reportLeadWeeksClinicalDirector?: number;
   parentTraining: {

@@ -40,6 +40,10 @@ export interface Technician {
 }
 export declare const BACB_RBT_SUPERVISION_MIN_PERCENT = 5;
 export type TrainingPeriodUnit = 'week' | 'month' | 'sixMonths' | 'year';
+export interface ReportLead {
+    value: number;
+    unit: 'days' | 'weeks';
+}
 export interface UtilizationSettings {
     bcbaWeeklyBillableHours?: number;
     btWeeklyDirectHours?: number;
@@ -55,6 +59,8 @@ export interface CompanySettings {
     supervisionFloorPercent?: number;
     supervisionPreferredMinPercent?: number;
     supervisionPreferredMaxPercent?: number;
+    reportDraftLead?: ReportLead;
+    reportFinalLead?: ReportLead;
     reportLeadWeeksBackOffice?: number;
     reportLeadWeeksClinicalDirector?: number;
     parentTraining: {

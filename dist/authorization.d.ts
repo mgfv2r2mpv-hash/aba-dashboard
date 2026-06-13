@@ -1,4 +1,4 @@
-import { Appointment, Authorization, AuthBucketKey, Client, ScheduleData } from './types';
+import { Appointment, Authorization, AuthBucketKey, Client, CompanySettings, ScheduleData } from './types';
 export declare function bucketOfAppointment(a: Appointment): AuthBucketKey | null;
 export interface BucketUsage {
     authorized: number;
@@ -20,6 +20,11 @@ export interface AuthUsage {
     }[];
 }
 export declare function inAuthSpan(dateStr: string, auth: Authorization): boolean;
+export interface ReportDates {
+    initialDraftDue: string;
+    finalDraftDue: string;
+}
+export declare function computeReportDates(auth: Authorization, settings: CompanySettings): ReportDates;
 export declare function computeAuthUsage(data: ScheduleData, auth: Authorization, now?: Date): AuthUsage;
 export declare function findAuthFor(data: ScheduleData, clientRef: string, dateStr: string): Authorization | undefined;
 export interface MakeupCandidate {

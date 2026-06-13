@@ -4,7 +4,9 @@ import {
   AuthBucketKey,
   AUTH_BUCKETS,
   Client,
+  CompanySettings,
   ManualUsage,
+  ReportLead,
   ScheduleData,
 } from './types';
 
@@ -51,6 +53,42 @@ function matchesClient(ref: string | undefined, client: Client | undefined, clie
 export function inAuthSpan(dateStr: string, auth: Authorization): boolean {
   // YYYY-MM-DD strings compare lexicographically; endDate is inclusive.
   return dateStr >= auth.startDate && dateStr <= auth.endDate;
+}
+
+// Internal report submission milestones, computed back from the auth end date
+// using company policy. Both are internal back-office deadlines, not insurer
+// dates. A stored per-auth value (reportDraftDue / reportFinalDue) overrides
+// the computed date when present.
+export interface ReportDates {
+  initialDraftDue: string; // YYYY-MM-DD, the earlier milestone
+  finalDraftDue: string;   // YYYY-MM-DD
+}
+
+const DEFAULT_DRAFT_LEAD: ReportLead = { value: 4, unit: 'weeks' };
+const DEFAULT_FINAL_LEAD: ReportLead = { value: 2, unit: 'weeks' };
+
+function leadToDays(lead: ReportLead | undefined, fallback: ReportLead): number {
+  const l = lead ?? fallback;
+  return l.unit === 'weeks' ? l.value * 7 : l.value;
+}
+
+function ymdLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function minusDays(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() - days);
+  return ymdLocal(d);
+}
+
+export function computeReportDates(auth: Authorization, settings: CompanySettings): ReportDates {
+  const draftDays = leadToDays(settings.reportDraftLead, DEFAULT_DRAFT_LEAD);
+  const finalDays = leadToDays(settings.reportFinalLead, DEFAULT_FINAL_LEAD);
+  return {
+    initialDraftDue: auth.reportDraftDue || minusDays(auth.endDate, draftDays),
+    finalDraftDue: auth.reportFinalDue || minusDays(auth.endDate, finalDays),
+  };
 }
 
 export function computeAuthUsage(data: ScheduleData, auth: Authorization, now: Date = new Date()): AuthUsage {

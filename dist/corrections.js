@@ -19,7 +19,90 @@ export function analyzeCorrections(data, now = new Date()) {
     needs.sort((a, b) => a.priority - b.priority ||
         Number(b.hard) - Number(a.hard) ||
         (b.deficitHours ?? 0) - (a.deficitHours ?? 0));
-    return { monthLabel: period.label, needs, shaveRoom: computeShaveRoom(data, now) };
+    return {
+        monthLabel: period.label,
+        needs,
+        shaveRoom: computeShaveRoom(data, now),
+        flags: buildJointWindowFlags(data, needs, now),
+    };
+}
+// For each P1 supervision-overlap need, a BT + BCBA session is required. We
+// never propose moving someone off another client to create it (that would
+// "steal" a session) and never assume a BT is free when they're booked.
+// Instead we list the real open windows — client + BT + clinician all free —
+// for manual entry. findOpenSlots already treats existing bookings, blackouts,
+// and availability as hard constraints, so a window here never steals a slot.
+function buildJointWindowFlags(data, needs, now) {
+    const flags = [];
+    const seen = new Set();
+    for (const need of needs) {
+        if (need.priority !== 1)
+            continue;
+        if (need.kind !== 'supervision-floor' && need.kind !== 'bt-supervision-floor' && need.kind !== 'bacb-contacts')
+            continue;
+        // Resolve the client + tech pair that the joint session would serve.
+        let clientId = need.clientId;
+        let techId = need.techId;
+        if (clientId && !techId)
+            techId = servingTechId(data, clientId, now);
+        if (techId && !clientId)
+            clientId = servedClientId(data, techId, now);
+        if (!clientId || !techId)
+            continue;
+        const key = `${clientId}|${techId}`;
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        const client = data.clients.find(c => c.id === clientId);
+        const tech = data.technicians.find(t => t.id === techId);
+        if (!client || !tech)
+            continue;
+        const windows = findOpenSlots(data, {
+            durationMinutes: 60,
+            clientId, techId,
+            useClinicianAvailability: true,
+            fromDate: now,
+            throughDate: need.bindingDeadline,
+        }, 6);
+        const list = windows.length
+            ? windows.map(w => `${w.day} ${w.date} ${w.start}-${w.end}`).join('; ')
+            : 'no open windows found before the deadline';
+        flags.push({
+            clientId, techId,
+            concern: need.detail,
+            message: `To meet ${need.detail}, BT ${tech.name} and the BCBA would need a session in one of these windows in ${client.name}'s availability: ${list}. Enter it manually if a proposed override is possible.`,
+            windows,
+        });
+    }
+    return flags;
+}
+// A technician currently delivering direct service to this client this month.
+function servingTechId(data, clientId, now) {
+    const period = monthPeriod(now);
+    const client = data.clients.find(c => c.id === clientId);
+    if (!client)
+        return undefined;
+    const direct = data.appointments.find(a => a.type === 'client-session' && a.status !== 'canceled' && !a.isGhost && !!a.technician &&
+        (a.client === client.id || a.client === client.name) &&
+        new Date(a.startTime).getTime() >= period.start.getTime() &&
+        new Date(a.startTime).getTime() < period.end.getTime());
+    if (!direct?.technician)
+        return undefined;
+    return data.technicians.find(t => t.id === direct.technician || t.name === direct.technician)?.id;
+}
+// A client this technician currently delivers direct service to this month.
+function servedClientId(data, techId, now) {
+    const period = monthPeriod(now);
+    const tech = data.technicians.find(t => t.id === techId);
+    if (!tech)
+        return undefined;
+    const direct = data.appointments.find(a => a.type === 'client-session' && a.status !== 'canceled' && !a.isGhost && !!a.client &&
+        (a.technician === tech.id || a.technician === tech.name) &&
+        new Date(a.startTime).getTime() >= period.start.getTime() &&
+        new Date(a.startTime).getTime() < period.end.getTime());
+    if (!direct?.client)
+        return undefined;
+    return data.clients.find(c => c.id === direct.client || c.name === direct.client)?.id;
 }
 function caseNeeds(data, cs, now) {
     const out = [];
@@ -60,9 +143,9 @@ function caseNeeds(data, cs, now) {
             priority: 2, kind: 'reassessment-pace', hard: false,
             clientId: cs.client.id, subject: cs.client.name,
             deficitHours: Math.max(0, cs.reassessment.blockH - cs.reassessment.usedH),
-            bindingDeadline: cs.reassessment.internalClinicalDirectorDue || cs.reassessment.reportDraftDue,
+            bindingDeadline: cs.reassessment.initialDraftDue,
             bindingCliff: 'service-end',
-            detail: `${cs.client.name}: reassessment ${fmt(cs.reassessment.usedH)}/${fmt(cs.reassessment.blockH)}h done; internal due ${cs.reassessment.internalClinicalDirectorDue || cs.reassessment.reportDraftDue || '?'} (${cs.reassessment.daysToInternalDue ?? '?'} days)`,
+            detail: `${cs.client.name}: reassessment ${fmt(cs.reassessment.usedH)}/${fmt(cs.reassessment.blockH)}h done; internal due ${cs.reassessment.initialDraftDue || '?'} (${cs.reassessment.daysToInternalDue ?? '?'} days)`,
         });
     }
     // P3 — preferred supervision band
@@ -123,6 +206,8 @@ function caseCancelCause(data, client, now) {
 }
 // Room to trim each supervision session before a floor/contact would break.
 // A conservative, per-session estimate using the case it's tagged to.
+// Corrections operate on now-and-future only: a PAST supervision session is
+// never offered for trimming (we don't rewrite history to make numbers work).
 function computeShaveRoom(data, now) {
     const period = monthPeriod(now);
     const caseStates = new Map();
@@ -130,7 +215,7 @@ function computeShaveRoom(data, now) {
         caseStates.set(c.id, computeCaseState(data, c, now));
     return data.appointments
         .filter(a => a.type === 'supervision' && a.status !== 'canceled' && !a.isGhost &&
-        new Date(a.startTime).getTime() >= period.start.getTime() &&
+        new Date(a.startTime).getTime() >= Math.max(period.start.getTime(), now.getTime()) &&
         new Date(a.startTime).getTime() < period.end.getTime())
         .map(sup => {
         const client = data.clients.find(c => c.id === sup.client || c.name === sup.client);
@@ -159,6 +244,10 @@ export function findOpenSlots(data, q, limit = 8) {
     const client = q.clientId ? data.clients.find(c => c.id === q.clientId) : undefined;
     const tech = q.techId ? data.technicians.find(t => t.id === q.techId) : undefined;
     const out = [];
+    // Corrections operate on now-and-future only. Never propose a slot that has
+    // already begun today; the cursor itself only moves forward from `from`.
+    const fromMinToday = from.getHours() * 60 + from.getMinutes();
+    const todayStr = ymd(from);
     const cursor = new Date(from.getFullYear(), from.getMonth(), from.getDate());
     while (cursor.getTime() <= last.getTime() && out.length < limit) {
         const dow = cursor.getDay();
@@ -166,7 +255,13 @@ export function findOpenSlots(data, q, limit = 8) {
         const dateStr = ymd(cursor);
         const isWeekend = dow === 0 || dow === 6;
         if ((!isWeekend || q.weekendsOk) && !blackedOut(data, dateStr, client, tech)) {
-            const windows = intersectAvailability(data, day, client, tech, q.useClinicianAvailability);
+            let windows = intersectAvailability(data, day, client, tech, q.useClinicianAvailability);
+            // Trim any part of today's windows that lies in the past.
+            if (dateStr === todayStr) {
+                windows = windows
+                    .map(w => ({ start: Math.max(w.start, fromMinToday), end: w.end }))
+                    .filter(w => w.end > w.start);
+            }
             // When PT must coincide with a direct session, the client's own directs
             // are NOT treated as busy — parent-training is allowed to run alongside
             // them (the parent is present). Other appointments still block.

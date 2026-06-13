@@ -15,7 +15,7 @@ import {
   computeTechCompliance,
   computeTechContactDays,
 } from './compliance';
-import { computeAuthUsage, findAuthFor, inAuthSpan } from './authorization';
+import { computeAuthUsage, computeReportDates, findAuthFor, inAuthSpan } from './authorization';
 
 // ---------------------------------------------------------------------------
 // Time helpers
@@ -108,11 +108,9 @@ export interface CaseParentTrainingState {
 export interface CaseReassessmentState {
   blockH: number;           // authorized reassessment hours (buckets.reassessment)
   usedH: number;            // delivered reassessment hours in the auth span
-  reportFinalDue?: string;
-  reportDraftDue?: string;
-  internalBackOfficeDue?: string;       // reportFinalDue - leadWeeksBackOffice
-  internalClinicalDirectorDue?: string; // internalBackOfficeDue - leadWeeksClinicalDirector
-  daysToInternalDue?: number;           // to the earliest (clinical-director) milestone
+  initialDraftDue?: string; // internal initial-draft deadline (the earlier one)
+  finalDraftDue?: string;   // internal final-draft deadline
+  daysToInternalDue?: number;           // to the earliest (initial-draft) milestone
   paceOk: boolean;          // false when behind: block not done and a milestone is near/past
 }
 
@@ -252,31 +250,24 @@ function computeReassessment(
     ).reduce((s, m) => s + m.hours, 0);
   }
 
-  const finalDue = auth?.reportFinalDue;
-  const draftDue = auth?.reportDraftDue;
-  const leadBO = settings.reportLeadWeeksBackOffice ?? 4;
-  const leadCD = settings.reportLeadWeeksClinicalDirector ?? 1;
-
-  let internalBackOfficeDue: string | undefined;
-  let internalClinicalDirectorDue: string | undefined;
-  if (finalDue) {
-    const bo = new Date(`${finalDue}T00:00:00`);
-    bo.setDate(bo.getDate() - leadBO * 7);
-    internalBackOfficeDue = toYMD(bo);
-    const cd = new Date(bo);
-    cd.setDate(cd.getDate() - leadCD * 7);
-    internalClinicalDirectorDue = toYMD(cd);
+  // Both report milestones are internal, computed back from the auth end date
+  // using company policy (initial draft earlier than final draft).
+  let initialDraftDue: string | undefined;
+  let finalDraftDue: string | undefined;
+  if (auth) {
+    const dates = computeReportDates(auth, settings);
+    initialDraftDue = dates.initialDraftDue;
+    finalDraftDue = dates.finalDraftDue;
   }
 
-  const daysToInternalDue = daysUntil(internalClinicalDirectorDue || draftDue, now);
+  const daysToInternalDue = daysUntil(initialDraftDue, now);
   // Behind pace when there's an authorized block not fully delivered and the
   // earliest internal milestone is within ~3 weeks (or already passed).
   const paceOk = !(blockH > 0 && usedH < blockH - 0.01 && daysToInternalDue !== undefined && daysToInternalDue <= 21);
 
   return {
     blockH, usedH,
-    reportFinalDue: finalDue, reportDraftDue: draftDue,
-    internalBackOfficeDue, internalClinicalDirectorDue,
+    initialDraftDue, finalDraftDue,
     daysToInternalDue, paceOk,
   };
 }

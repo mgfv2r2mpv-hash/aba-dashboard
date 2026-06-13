@@ -1,7 +1,7 @@
 import { useMemo, CSSProperties } from 'react';
 import { ScheduleData } from '../types';
 import { computeCaseState, CaseState } from '../caseModel';
-import { analyzeCorrections, CorrectionNeed } from '../corrections';
+import { analyzeCorrections, CorrectionNeed, CorrectionFlag } from '../corrections';
 
 // At-a-glance caseload table mirroring the BCBA's tracking sheet: authorized
 // weekly direct vs ideal/actual (+75% flag), supervision % against the
@@ -18,7 +18,7 @@ export default function CaseloadView({ data, now = new Date() }: { data: Schedul
 
   return (
     <div style={{ padding: '8px 4px' }}>
-      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Caseload — {monthLabel}</h2>
+      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Caseload ({monthLabel})</h2>
       <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
         Weekly authorized direct vs. actual (75% staffing), monthly supervision against the floor/preferred band,
         cadence pacing, and the binding cliff per case.
@@ -47,13 +47,32 @@ export default function CaseloadView({ data, now = new Date() }: { data: Schedul
         Corrections to pace ({report.needs.length})
       </h3>
       {report.needs.length === 0 ? (
-        <p style={{ fontSize: 12, color: '#15803d' }}>Nothing flagged — floors met and targets on pace.</p>
+        <p style={{ fontSize: 12, color: '#15803d' }}>Nothing flagged. Floors met and targets on pace.</p>
       ) : (
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 6 }}>
           {report.needs.map((n, i) => <NeedRow key={i} n={n} />)}
         </ul>
       )}
+
+      {report.flags.length > 0 && (
+        <>
+          <h3 style={{ fontSize: 15, fontWeight: 700, margin: '20px 0 8px' }}>
+            Enter manually ({report.flags.length})
+          </h3>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 6 }}>
+            {report.flags.map((f, i) => <FlagRow key={i} f={f} />)}
+          </ul>
+        </>
+      )}
     </div>
+  );
+}
+
+function FlagRow({ f }: { f: CorrectionFlag }) {
+  return (
+    <li style={{ fontSize: 12, padding: '6px 10px', border: '1px solid #fde68a', borderLeft: '3px solid #d97706', borderRadius: 4, background: '#fffbeb', color: '#92400e' }}>
+      {f.message}
+    </li>
   );
 }
 

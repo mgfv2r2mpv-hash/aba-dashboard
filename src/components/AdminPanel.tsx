@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES } from '../types';
-import { computeAuthUsage } from '../authorization';
+import { computeAuthUsage, computeReportDates } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 import { resolveUtilization } from '../utilization';
 
@@ -974,13 +974,7 @@ function AuthsTab({ data, savingId, onUpsertAuth, onRemoveAuth, onUpsertUsage, o
 
   return (
     <div>
-      <h3 style={{ marginBottom: '8px', fontSize: '18px', fontWeight: 'bold' }}>Authorizations</h3>
-      <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '16px' }}>
-        Set the authorized <strong>weekly rates</strong> (direct / supervision / parent-training / case-planning) —
-        what the correction engine paces against; supervision ≈ 20% of direct is the insurer cap. Span-total
-        buckets below remain for tracking + the per-auth reassessment block. Use manual entries for hours
-        delivered before adopting this system (adopt-forward). The end date is the service / makeup cliff.
-      </p>
+      <h3 style={{ marginBottom: '16px', fontSize: '18px', fontWeight: 'bold' }}>Authorizations</h3>
       <div style={{ display: 'grid', gap: '16px' }}>
         {data.clients.map(client => {
           const clientAuths = auths.filter(a => a.clientId === client.id);
@@ -992,8 +986,10 @@ function AuthsTab({ data, savingId, onUpsertAuth, onRemoveAuth, onUpsertUsage, o
               </div>
               {clientAuths.length === 0 ? (
                 <p style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic', marginTop: 8 }}>No authorization on file.</p>
-              ) : clientAuths.map(auth => (
-                <AuthCard
+              ) : [...clientAuths]
+                  .sort((a, b) => b.startDate.localeCompare(a.startDate))
+                  .map(auth => (
+                <AuthRow
                   key={auth.id}
                   data={data}
                   auth={auth}
@@ -1015,7 +1011,7 @@ function AuthsTab({ data, savingId, onUpsertAuth, onRemoveAuth, onUpsertUsage, o
   );
 }
 
-function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRemoveUsage }: {
+interface AuthCardProps {
   data: ScheduleData;
   auth: Authorization;
   saving: boolean;
@@ -1023,7 +1019,37 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
   onRemove: () => void;
   onUpsertUsage: (u: ManualUsage) => void;
   onRemoveUsage: (id: string) => void;
-}) {
+}
+
+// Collapsible summary row. Collapsed by default: shows label/date-range, the
+// end-cliff date, and days-until-end. Expands to the full AuthCard editor.
+function AuthRow(props: AuthCardProps) {
+  const { data, auth } = props;
+  const [collapsed, setCollapsed] = useState(true);
+  const usage = computeAuthUsage(data, auth, new Date());
+  const cliffColor = usage.daysLeft < 0 ? '#9ca3af' : usage.daysLeft <= 21 ? '#b91c1c' : usage.daysLeft <= 45 ? '#b45309' : '#15803d';
+  const title = auth.label || `${auth.startDate} to ${auth.endDate}`;
+  return (
+    <div style={{ marginTop: 10, border: '1px solid #e5e7eb', borderRadius: 6, background: 'white' }}>
+      <div
+        onClick={() => setCollapsed(c => !c)}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', cursor: 'pointer', flexWrap: 'wrap' }}
+      >
+        <span style={{ fontSize: 12, color: '#6b7280', width: 12, flexShrink: 0 }}>{collapsed ? '▸' : '▾'}</span>
+        <span style={{ fontWeight: 600, fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {title}
+        </span>
+        <span style={{ fontSize: 12, color: '#6b7280', marginLeft: 'auto', whiteSpace: 'nowrap' }}>ends {auth.endDate}</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: cliffColor, whiteSpace: 'nowrap' }}>
+          {usage.daysLeft < 0 ? `expired ${-usage.daysLeft}d ago` : `${usage.daysLeft}d left`}
+        </span>
+      </div>
+      {!collapsed && <AuthCard {...props} />}
+    </div>
+  );
+}
+
+function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRemoveUsage }: AuthCardProps) {
   const [label, setLabel] = useState(auth.label || '');
   const [bucketDrafts, setBucketDrafts] = useState<{ [k in AuthBucketKey]?: string }>({});
   // Manual entry add form
@@ -1059,34 +1085,38 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
     setMHours(''); setMNote('');
   };
 
+  const reportDates = computeReportDates(auth, data.settings);
+
   return (
-    <div style={{ marginTop: 10, padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: 6, background: 'white' }}>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+    <div style={{ padding: '0 12px 12px', borderTop: '1px solid #f3f4f6' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 140px', minWidth: 0 }}>
           <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>Auth label / number</span>
           <input value={label} onChange={e => setLabel(e.target.value)}
             onBlur={() => { if (label !== (auth.label || '')) onChange({ label: label || undefined }); }}
             placeholder="optional" style={inputStyle} />
         </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 1 150px', minWidth: 120 }}>
           <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>Start</span>
           <input type="date" value={auth.startDate} onChange={e => onChange({ startDate: e.target.value })} style={inputStyle} />
         </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 1 150px', minWidth: 120 }}>
           <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>End (cliff)</span>
           <input type="date" value={auth.endDate} onChange={e => onChange({ endDate: e.target.value })} style={inputStyle} />
         </label>
-        <button onClick={onRemove} style={dangerBtn}>Remove</button>
       </div>
-      <p style={{ fontSize: 12, fontWeight: 600, color: cliffColor, marginTop: 6 }}>
-        {usage.daysLeft < 0 ? `Expired ${-usage.daysLeft} day(s) ago` : `${usage.daysLeft} day(s) until auth ends`}
-      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+        <p style={{ fontSize: 12, fontWeight: 600, color: cliffColor, margin: 0 }}>
+          {usage.daysLeft < 0 ? `Expired ${-usage.daysLeft} day(s) ago` : `${usage.daysLeft} day(s) until auth ends`}
+        </p>
+        <button onClick={onRemove} style={{ ...dangerBtn, marginLeft: 'auto' }}>Remove</button>
+      </div>
       {saving && <p style={{ fontSize: 11, color: '#3b82f6' }}>Saving…</p>}
 
       {/* Per-week authorized rates — what the correction engine reasons over. */}
       <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #e5e7eb' }}>
         <p style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>
-          Authorized weekly rates <span style={{ fontWeight: 400, color: '#9ca3af' }}>(supervision ≈ 20% of direct = the cap)</span>
+          Authorized weekly rates <span style={{ fontWeight: 400, color: '#9ca3af' }}>(supervision cap ≈ 20% of direct)</span>
         </p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {([['direct', 'Direct'], ['supervision', 'Supervision'], ['parentTraining', 'Parent trng'], ['casePlanning', 'Case plan']] as const).map(([key, lbl]) => (
@@ -1106,17 +1136,15 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
             </label>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 10, color: '#6b7280' }}>Report final due (insurer)</span>
-            <input type="date" value={auth.reportFinalDue || ''}
-              onChange={e => onChange({ reportFinalDue: e.target.value || undefined })} style={{ ...inputStyle, width: 150 }} />
-          </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 10, color: '#6b7280' }}>Report draft due (internal)</span>
-            <input type="date" value={auth.reportDraftDue || ''}
-              onChange={e => onChange({ reportDraftDue: e.target.value || undefined })} style={{ ...inputStyle, width: 150 }} />
-          </label>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 10, color: '#6b7280' }}>Initial draft due (internal)</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{reportDates.initialDraftDue}</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 10, color: '#6b7280' }}>Final draft due (internal)</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{reportDates.finalDraftDue}</span>
+          </div>
         </div>
       </div>
 
@@ -1148,12 +1176,12 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
 
       {/* Manual (outside-system) hours */}
       <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #e5e7eb' }}>
-        <p style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Manual hours (delivered outside this system)</p>
+        <p style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Prior hours used in auth (prior / outside SAssi, and not imported)</p>
         {manualInSpan.map(u => (
           <div key={u.id} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, marginBottom: 4, flexWrap: 'wrap' }}>
             <span style={{ color: '#6b7280', whiteSpace: 'nowrap' }}>{u.date}</span>
             <span style={{ flex: '1 1 120px', minWidth: 0 }}>
-              {AUTH_BUCKETS.find(b => b.key === u.bucket)?.label || u.bucket} — <strong>{u.hours}h</strong>
+              {AUTH_BUCKETS.find(b => b.key === u.bucket)?.label || u.bucket}: <strong>{u.hours}h</strong>
               {u.note ? <span style={{ color: '#9ca3af' }}> · {u.note}</span> : null}
             </span>
             <button onClick={() => onRemoveUsage(u.id)} style={{ ...dangerBtn, padding: '2px 8px', fontSize: 11 }}>×</button>
@@ -1360,8 +1388,10 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
   const [floorPct, setFloorPct] = useState(s(settings.supervisionFloorPercent ?? 10));
   const [prefMinPct, setPrefMinPct] = useState(s(settings.supervisionPreferredMinPercent ?? 15));
   const [prefMaxPct, setPrefMaxPct] = useState(s(settings.supervisionPreferredMaxPercent ?? 20));
-  const [leadBO, setLeadBO] = useState(s(settings.reportLeadWeeksBackOffice ?? 4));
-  const [leadCD, setLeadCD] = useState(s(settings.reportLeadWeeksClinicalDirector ?? 1));
+  const [draftLeadVal, setDraftLeadVal] = useState(s(settings.reportDraftLead?.value ?? 4));
+  const [draftLeadUnit, setDraftLeadUnit] = useState<'days' | 'weeks'>(settings.reportDraftLead?.unit ?? 'weeks');
+  const [finalLeadVal, setFinalLeadVal] = useState(s(settings.reportFinalLead?.value ?? 2));
+  const [finalLeadUnit, setFinalLeadUnit] = useState<'days' | 'weeks'>(settings.reportFinalLead?.unit ?? 'weeks');
 
   const num = (str: string, fallback: number) => {
     const n = parseFloat(str);
@@ -1400,8 +1430,8 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
       supervisionFloorPercent: num(floorPct, 10),
       supervisionPreferredMinPercent: num(prefMinPct, 15),
       supervisionPreferredMaxPercent: num(prefMaxPct, 20),
-      reportLeadWeeksBackOffice: num(leadBO, 4),
-      reportLeadWeeksClinicalDirector: num(leadCD, 1),
+      reportDraftLead: { value: num(draftLeadVal, 4), unit: draftLeadUnit },
+      reportFinalLead: { value: num(finalLeadVal, 2), unit: finalLeadUnit },
     };
     onSave(next);
   };
@@ -1414,22 +1444,22 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
       </div>
 
       <SettingsSection title="Supervision targets">
-        <NumField label="Per-case — % of direct client hours" value={directPct} onChange={setDirectPct} suffix="%" />
-        <NumField label="Per-RBT — % of that RBT's direct hours" value={rbtPct} onChange={setRbtPct} suffix="%" hint="BACB floor is 5%." />
-        <NumField label="Per non-RBT tech — % of hours (optional)" value={techPct} onChange={setTechPct} suffix="%" placeholder="—" />
-        <NumField label="RBT — min supervision contact days per month" value={minContacts} onChange={setMinContacts} suffix="days" hint="BACB cadence: distinct days with observed supervision. Default 2." />
-        <NumField label="Insurer cap — max supervision:direct ratio (optional)" value={maxPct} onChange={setMaxPct} suffix="%" placeholder="—" hint="Over-cap ratios show as a warning; they don't change green/yellow/red status." />
+        <NumField label="Per-case (% of direct client hours)" value={directPct} onChange={setDirectPct} suffix="%" />
+        <NumField label="Per-RBT (% of that RBT's direct hours)" value={rbtPct} onChange={setRbtPct} suffix="%" hint="BACB floor is 5%." />
+        <NumField label="Per non-RBT tech (% of hours, optional)" value={techPct} onChange={setTechPct} suffix="%" placeholder="—" />
+        <NumField label="RBT min supervision contact days per month" value={minContacts} onChange={setMinContacts} suffix="days" hint="BACB cadence: distinct days with observed supervision. Default 2." />
+        <NumField label="Insurer cap on supervision:direct ratio (optional)" value={maxPct} onChange={setMaxPct} suffix="%" placeholder="—" hint="Over-cap ratios show as a warning; they don't change green/yellow/red status." />
       </SettingsSection>
 
-      <SettingsSection title="Correction engine — supervision band">
-        <NumField label="Floor — minimum % that must always be met" value={floorPct} onChange={setFloorPct} suffix="%" hint="The engine never proposes shaving a case/BT below this. Default 10." />
-        <NumField label="Preferred min — % the BCBA aims for" value={prefMinPct} onChange={setPrefMinPct} suffix="%" hint="Default 15." />
-        <NumField label="Preferred max / cap — % ceiling" value={prefMaxPct} onChange={setPrefMaxPct} suffix="%" hint="Doubles as the cap when no insurer cap is set. Default 20." />
+      <SettingsSection title="Correction engine supervision band">
+        <NumField label="Floor (minimum % that must always be met)" value={floorPct} onChange={setFloorPct} suffix="%" hint="The engine never proposes shaving a case/BT below this. Default 10." />
+        <NumField label="Preferred min (% the BCBA aims for)" value={prefMinPct} onChange={setPrefMinPct} suffix="%" hint="Default 15." />
+        <NumField label="Preferred max / cap (% ceiling)" value={prefMaxPct} onChange={setPrefMaxPct} suffix="%" hint="Doubles as the cap when no insurer cap is set. Default 20." />
       </SettingsSection>
 
-      <SettingsSection title="Reassessment report pacing">
-        <NumField label="Final draft to back office — weeks before insurer due" value={leadBO} onChange={setLeadBO} suffix="wks" hint="Default 4." />
-        <NumField label="To clinical director — weeks before that" value={leadCD} onChange={setLeadCD} suffix="wks" hint="Default 1 (so 5 weeks before the insurer due date)." />
+      <SettingsSection title="Report due dates (before auth end)">
+        <LeadField label="Initial draft due" value={draftLeadVal} unit={draftLeadUnit} onChangeValue={setDraftLeadVal} onChangeUnit={setDraftLeadUnit} />
+        <LeadField label="Final draft due" value={finalLeadVal} unit={finalLeadUnit} onChangeValue={setFinalLeadVal} onChangeUnit={setFinalLeadUnit} />
       </SettingsSection>
 
       <SettingsSection title="Parent training">
@@ -1453,10 +1483,10 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
       </SettingsSection>
 
       <SettingsSection title="Billable / utilization targets">
-        <NumField label="BCBA — fully-utilized weekly billables" value={bcbaWeekly} onChange={setBcbaWeekly} suffix="h/wk" />
-        <NumField label="BT — fully-utilized weekly direct hours" value={btWeekly} onChange={setBtWeekly} suffix="h/wk" hint="Aggregate BT direct hours your caseload generates." />
-        <NumField label="BCBA — monthly goal (4-week month)" value={bcbaMonthly} onChange={setBcbaMonthly} suffix="h/mo" />
-        <NumField label="BCBA — monthly goal (5-week month)" value={bcbaMonthly5} onChange={setBcbaMonthly5} suffix="h/mo" hint="Used when the month spans 5+ weeks." />
+        <NumField label="BCBA fully-utilized weekly billables" value={bcbaWeekly} onChange={setBcbaWeekly} suffix="h/wk" />
+        <NumField label="BT fully-utilized weekly direct hours" value={btWeekly} onChange={setBtWeekly} suffix="h/wk" hint="Aggregate BT direct hours your caseload generates." />
+        <NumField label="BCBA monthly goal (4-week month)" value={bcbaMonthly} onChange={setBcbaMonthly} suffix="h/mo" />
+        <NumField label="BCBA monthly goal (5-week month)" value={bcbaMonthly5} onChange={setBcbaMonthly5} suffix="h/mo" hint="Used when the month spans 5+ weeks." />
       </SettingsSection>
 
       <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
@@ -1525,6 +1555,33 @@ function NumField({ label, value, onChange, suffix, hint, placeholder }: {
         {suffix && <span style={{ fontSize: '12px', color: '#6b7280' }}>{suffix}</span>}
       </div>
       {hint && <span style={{ fontSize: '11px', color: '#9ca3af' }}>{hint}</span>}
+    </div>
+  );
+}
+
+// A lead time before the auth end date: a number plus a days/weeks unit.
+function LeadField({ label, value, unit, onChangeValue, onChangeUnit }: {
+  label: string;
+  value: string;
+  unit: 'days' | 'weeks';
+  onChangeValue: (v: string) => void;
+  onChangeUnit: (u: 'days' | 'weeks') => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <input
+          type="number" step="1" min="0" inputMode="decimal"
+          value={value} onChange={e => onChangeValue(e.target.value)}
+          style={{ ...inputStyle, width: '80px' }}
+        />
+        <select value={unit} onChange={e => onChangeUnit(e.target.value as 'days' | 'weeks')} style={{ ...inputStyle, width: 'auto' }}>
+          <option value="weeks">weeks</option>
+          <option value="days">days</option>
+        </select>
+        <span style={{ fontSize: '12px', color: '#6b7280' }}>before auth end</span>
+      </div>
     </div>
   );
 }

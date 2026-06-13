@@ -42,14 +42,19 @@ export class ClaudeScheduler {
     buildPrompt(appointment, conflicts) {
         const anonAppt = anonymizeAppointment(appointment, this.anonMap);
         const endOfMonth = this.getEndOfMonth(appointment.startTime);
+        const nowIso = new Date().toISOString();
         // Scrub conflicts: replace any names that snuck into messages.
         const scrubbedConflicts = conflicts.map(c => scrubText(c, this.data, this.anonMap));
         return `
 You are a scheduling expert for an ABA (Applied Behavior Analysis) clinic. Resolve a scheduling conflict while maintaining regulatory compliance.
 
-All people are referenced by opaque tokens (CLIENT_n, TECH_n, APT_n). Use these tokens in your response — do NOT invent names.
+All people are referenced by opaque tokens (CLIENT_n, TECH_n, APT_n). Use these tokens in your response. Do NOT invent names.
+
+CURRENT DATETIME: ${nowIso}
 
 CONSTRAINTS:
+- Compliance is fixed going forward only. NEVER change, complete, or reschedule an appointment that starts before the current datetime. Only adjust appointments at or after now.
+- Never move a technician off another client's session to staff a different client, and never assume a technician is free during a block where they are already booked. If a requirement cannot be met within genuinely open availability, do NOT propose moving an existing session; instead state that it needs a manual entry.
 - Supervision requirement: ${this.data.settings.supervisionDirectHoursPercent}% of direct hours + ${this.data.settings.supervisionRBTHoursPercent}% of RBT hours
 - Parent training requirement: minimum ${this.data.settings.parentTraining.minimumHours} hours per ${this.data.settings.parentTraining.periodUnit} (target ${this.data.settings.parentTraining.targetMinHours}-${this.data.settings.parentTraining.targetMaxHours})
 - Items marked "Fixed" cannot be moved

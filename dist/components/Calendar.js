@@ -1,6 +1,7 @@
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import React, { useState, useEffect } from 'react';
 import { rollupHours, resolveUtilization } from '../utilization';
+import { tileStyle, clientPastel, legendStripeStyle } from '../calendarColors';
 import { startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay, } from 'date-fns';
 const VISIBLE_START_HOUR = 6;
 const VISIBLE_END_HOUR = 22;
@@ -42,7 +43,7 @@ export default function Calendar({ appointments, technicians: _technicians, clie
             const d = new Date(a.startTime);
             return view === 'month'
                 ? isSameMonth(d, currentDate)
-                : d >= startOfWeek(currentDate) && d <= endOfWeek(currentDate);
+                : d >= startOfWeek(currentDate, { weekStartsOn: 1 }) && d <= endOfWeek(currentDate, { weekStartsOn: 1 });
         });
         if (inRange)
             return;
@@ -54,32 +55,36 @@ export default function Calendar({ appointments, technicians: _technicians, clie
             setCurrentDate(earliest);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [appointments, view]);
-    const goPrev = () => setCurrentDate(view === 'month' ? subMonths(currentDate, 1) : subWeeks(currentDate, 1));
-    const goNext = () => setCurrentDate(view === 'month' ? addMonths(currentDate, 1) : addWeeks(currentDate, 1));
+    const goPrev = () => setCurrentDate(view === 'month' ? subMonths(currentDate, 1)
+        : view === 'week' ? subWeeks(currentDate, 1)
+            : addDays(currentDate, -1));
+    const goNext = () => setCurrentDate(view === 'month' ? addMonths(currentDate, 1)
+        : view === 'week' ? addWeeks(currentDate, 1)
+            : addDays(currentDate, 1));
     const goToday = () => setCurrentDate(new Date());
     const headerLabel = view === 'month'
         ? format(currentDate, 'MMMM yyyy')
-        : (() => {
-            const ws = startOfWeek(currentDate);
-            const we = endOfWeek(currentDate);
-            const sameMonth = isSameMonth(ws, we);
-            return sameMonth
-                ? `${format(ws, 'MMM d')}–${format(we, 'd, yyyy')}`
-                : `${format(ws, 'MMM d')} – ${format(we, 'MMM d, yyyy')}`;
-        })();
+        : view === 'day'
+            ? format(currentDate, 'EEEE, MMM d, yyyy')
+            : (() => {
+                const ws = startOfWeek(currentDate, { weekStartsOn: 1 });
+                const we = endOfWeek(currentDate, { weekStartsOn: 1 });
+                const sameMonth = isSameMonth(ws, we);
+                return sameMonth
+                    ? `${format(ws, 'MMM d')} to ${format(we, 'd, yyyy')}`
+                    : `${format(ws, 'MMM d')} to ${format(we, 'MMM d, yyyy')}`;
+            })();
     return (_jsxs("div", { style: { padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: {
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     marginBottom: 16, gap: 8, flexWrap: 'wrap',
-                }, children: [_jsxs("div", { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }, children: [_jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: view === 'month', onClick: () => setView('month'), children: "Month" }), _jsx(ViewBtn, { active: view === 'week', onClick: () => setView('week'), children: "Week" })] }), _jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: lens === 'bcba', onClick: () => setLens('bcba'), children: "BCBA" }), _jsx(ViewBtn, { active: lens === 'bt', onClick: () => setLens('bt'), children: "BT" })] })] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] }), _jsx("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }, children: headerLabel })] }), view === 'month'
-                ? _jsx(MonthView, { currentDate: currentDate, appointments: lensAppts, lens: lens, settings: settings, onSelectAppointment: onSelectAppointment, draftMarks: draftMarks })
-                : _jsx(WeekView, { currentDate: currentDate, appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks }), view === 'week' && !isLandscape && (_jsx("p", { style: { fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }, children: "Rotate to landscape to drag appointments to a new time." }))] }));
+                }, children: [_jsxs("div", { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }, children: [_jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: view === 'month', onClick: () => setView('month'), children: "Month" }), _jsx(ViewBtn, { active: view === 'week', onClick: () => setView('week'), children: "Week" }), _jsx(ViewBtn, { active: view === 'day', onClick: () => setView('day'), children: "Day" })] }), _jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: lens === 'bcba', onClick: () => setLens('bcba'), children: "BCBA" }), _jsx(ViewBtn, { active: lens === 'bt', onClick: () => setLens('bt'), children: "BT" })] })] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] }), _jsx("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }, children: headerLabel })] }), view === 'month' && (_jsx(MonthView, { currentDate: currentDate, appointments: lensAppts, lens: lens, settings: settings, onSelectAppointment: onSelectAppointment, draftMarks: draftMarks })), view === 'week' && (_jsx(TimeGrid, { days: Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(currentDate, { weekStartsOn: 1 }), i)), appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks })), view === 'day' && (_jsx(TimeGrid, { days: [currentDate], appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks })), (view === 'week' || view === 'day') && !isLandscape && (_jsx("p", { style: { fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }, children: "Rotate to landscape to drag appointments to a new time." }))] }));
 }
 // ---------- Month View ----------
 function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment, draftMarks }) {
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(monthStart);
-    const calendarStart = startOfWeek(monthStart);
-    const calendarEnd = endOfWeek(monthEnd);
+    const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+    const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
     const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
     const util = resolveUtilization(settings?.utilization);
     const weeklyTarget = lens === 'bt' ? util.btWeeklyDirectHours : util.bcbaWeeklyBillableHours;
@@ -113,7 +118,7 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
     return (_jsxs("div", { style: { display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }, children: [_jsxs("div", { style: { flex: '1 1 260px', minWidth: 0 }, children: [_jsx("div", { style: {
                             display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1,
                             backgroundColor: '#e5e7eb', marginBottom: 1,
-                        }, children: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (_jsx("div", { style: {
+                        }, children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (_jsx("div", { style: {
                                 padding: '10px 8px', backgroundColor: '#f9f9f9',
                                 fontWeight: 600, textAlign: 'center', fontSize: 13,
                             }, children: d }, d))) }), _jsx("div", { style: {
@@ -122,15 +127,15 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
                             const dayAppts = appointmentsOn(appointments, day);
                             const inCurrentMonth = isSameMonth(day, monthStart);
                             const isToday = isSameDay(day, new Date());
-                            const dow = getDay(day); // 0 = Sun
-                            const weekStart = startOfWeek(day);
+                            const dow = getDay(day); // 0 = Sun (now the rightmost column)
+                            const weekStart = startOfWeek(day, { weekStartsOn: 1 });
                             return (_jsxs("div", { style: {
                                     backgroundColor: inCurrentMonth ? '#ffffff' : '#f3f4f6',
                                     minHeight: 110, padding: 6, opacity: inCurrentMonth ? 1 : 0.5,
                                 }, children: [_jsx("div", { style: {
                                             fontWeight: isToday ? 700 : 400,
                                             marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: 12,
-                                        }, children: format(day, 'd') }), _jsxs("div", { style: { display: 'flex', flexDirection: 'column', gap: 2 }, children: [dayAppts.slice(0, 3).map(apt => (_jsx(AppointmentChip, { apt: apt, mark: draftMarks?.get(apt.id), onClick: () => onSelectAppointment(apt) }, apt.id))), dayAppts.length > 3 && (_jsxs("div", { style: { fontSize: 10, color: '#9ca3af' }, children: ["+", dayAppts.length - 3, " more"] }))] }), inCurrentMonth && dow === 0 && (_jsx(SundayTotal, { lens: lens, hours: rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens), target: weeklyTarget }))] }, format(day, 'yyyy-MM-dd')));
+                                        }, children: format(day, 'd') }), _jsxs("div", { style: { display: 'flex', flexDirection: 'column', gap: 2 }, children: [dayAppts.slice(0, 3).map(apt => (_jsx(AppointmentChip, { apt: apt, mark: draftMarks?.get(apt.id), onClick: () => onSelectAppointment(apt) }, apt.id))), dayAppts.length > 3 && (_jsxs("div", { style: { fontSize: 10, color: '#9ca3af' }, children: ["+", dayAppts.length - 3, " more"] }))] }), dow === 0 && (_jsx(SundayTotal, { lens: lens, hours: rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens), target: weeklyTarget }))] }, format(day, 'yyyy-MM-dd')));
                         }) })] }), _jsx(WeekRibbon, { lens: lens, weeks: weekSummaries, weeklyTarget: weeklyTarget, monthHours: monthHours, monthlyGoal: lens === 'bcba' ? monthlyGoal : undefined, monthWeeks: lens === 'bcba' ? workWeeks : inMonthWeeks })] }));
 }
 // Round to ≤1 decimal, dropping a trailing .0.
@@ -194,13 +199,18 @@ function Legend() {
     ];
     return (_jsxs("div", { style: { display: 'flex', flexWrap: 'wrap', gap: '4px 10px', fontSize: 10, color: '#6b7280', marginTop: 2 }, children: [items.map(it => (_jsxs("span", { style: { display: 'inline-flex', alignItems: 'center', gap: 4 }, children: [_jsx("span", { style: { width: 9, height: 9, borderRadius: 2, background: it.c, display: 'inline-block' } }), it.label] }, it.label))), _jsxs("span", { style: { display: 'inline-flex', alignItems: 'center', gap: 4 }, children: [_jsx("span", { style: { width: 2, height: 11, background: '#111827', display: 'inline-block' } }), "Scheduled cap"] })] }));
 }
-// ---------- Week View ----------
-function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks }) {
-    const weekStart = startOfWeek(currentDate);
-    const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+// ---------- Time grid (Week + Day views) ----------
+// Shared columned timeline used by both Week (7 days) and Day (1 day) views.
+// Tiles are color-coded (client pastel background + staff diagonal stripes),
+// the time axis is frozen on side-scroll, and tapping a tile pops a small
+// dialog to view the session in the detail panel.
+function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks }) {
     const hours = Array.from({ length: VISIBLE_END_HOUR - VISIBLE_START_HOUR }, (_, i) => VISIBLE_START_HOUR + i);
     const totalHeight = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * HOUR_HEIGHT;
     const today = new Date();
+    const minWidth = days.length > 1 ? 560 : undefined;
+    // The tapped tile (shows a small "view session" dialog). Distinct from drag.
+    const [tapped, setTapped] = useState(null);
     // Active drag — only one appointment moves at a time. dragState tracks
     // the snapped delta so we can show a floating preview tooltip and apply
     // the change on pointer release.
@@ -261,7 +271,13 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
             targetDayISO: day, cursorX: e.clientX, cursorY: e.clientY,
         });
     };
-    return (_jsxs("div", { style: { overflowX: 'auto' }, children: [_jsxs("div", { style: { display: 'flex', minWidth: 560, borderBottom: '1px solid #e5e7eb' }, children: [_jsx("div", { style: { width: TIME_AXIS_WIDTH, flexShrink: 0 } }), days.map(day => {
+    // Sticky cells keep the time axis pinned to the left while day columns
+    // scroll horizontally. Opaque background so columns don't show through.
+    const stickyAxis = {
+        width: TIME_AXIS_WIDTH, flexShrink: 0,
+        position: 'sticky', left: 0, zIndex: 3, backgroundColor: 'white',
+    };
+    return (_jsxs("div", { style: { overflowX: 'auto' }, children: [_jsxs("div", { style: { display: 'flex', minWidth, borderBottom: '1px solid #e5e7eb' }, children: [_jsx("div", { style: { ...stickyAxis, borderRight: '1px solid #e5e7eb' } }), days.map(day => {
                         const isToday = isSameDay(day, today);
                         return (_jsxs("div", { style: {
                                 flex: 1, textAlign: 'center', padding: '8px 4px',
@@ -270,7 +286,7 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
                                 backgroundColor: isToday ? '#eff6ff' : 'transparent',
                                 borderLeft: '1px solid #f3f4f6',
                             }, children: [_jsx("div", { children: format(day, 'EEE') }), _jsx("div", { style: { fontSize: 16 }, children: format(day, 'd') })] }, day.toISOString()));
-                    })] }), _jsxs("div", { style: { display: 'flex', minWidth: 560, height: totalHeight, position: 'relative' }, children: [_jsx("div", { style: { width: TIME_AXIS_WIDTH, flexShrink: 0, position: 'relative', borderRight: '1px solid #e5e7eb' }, children: hours.map(h => (_jsx("div", { style: {
+                    })] }), _jsxs("div", { style: { display: 'flex', minWidth, height: totalHeight, position: 'relative' }, children: [_jsx("div", { style: { ...stickyAxis, borderRight: '1px solid #e5e7eb' }, children: hours.map(h => (_jsx("div", { style: {
                                 position: 'absolute', top: (h - VISIBLE_START_HOUR) * HOUR_HEIGHT,
                                 fontSize: 10, color: '#6b7280', padding: '2px 4px', right: 4,
                             }, children: formatHourLabel(h) }, h))) }), days.map(day => {
@@ -281,10 +297,10 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
                         return (_jsxs("div", { "data-day-iso": dayISO, style: {
                                 flex: 1, position: 'relative', borderLeft: '1px solid #f3f4f6',
                                 backgroundColor: isToday ? '#fafbff' : 'transparent',
-                            }, children: [hours.map(h => (_jsx("div", { style: {
-                                        position: 'absolute', top: (h - VISIBLE_START_HOUR) * HOUR_HEIGHT,
-                                        left: 0, right: 0, borderTop: '1px solid #f3f4f6',
-                                    } }, h))), laid.map(({ appt, lane, lanes }) => {
+                            }, children: [hours.map(h => {
+                                    const base = (h - VISIBLE_START_HOUR) * HOUR_HEIGHT;
+                                    return (_jsxs(React.Fragment, { children: [_jsx(GridLine, { top: base, color: "#e5e7eb" }), _jsx(GridLine, { top: base + HOUR_HEIGHT / 4, color: "#f5f6f7" }), _jsx(GridLine, { top: base + HOUR_HEIGHT / 2, color: "#eef0f2" }), _jsx(GridLine, { top: base + (HOUR_HEIGHT * 3) / 4, color: "#f5f6f7" })] }, h));
+                                }), laid.map(({ appt, lane, lanes }) => {
                                     const layout = appointmentLayout(appt);
                                     if (!layout)
                                         return null;
@@ -293,7 +309,7 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
                                     const mark = draftMarks?.get(appt.id);
                                     const draggable = dragEnabled && appt.status !== 'canceled' && appt.status !== 'completed'
                                         && !appt.isGhost && mark !== 'remove';
-                                    return (_jsx(AppointmentBlock, { apt: appt, mark: mark, onClick: () => onSelectAppointment(appt), onPointerDown: draggable ? (e) => beginDrag(appt, e) : undefined, dragHandle: draggable, style: {
+                                    return (_jsx(AppointmentBlock, { apt: appt, mark: mark, onClick: () => setTapped(appt), onPointerDown: draggable ? (e) => beginDrag(appt, e) : undefined, dragHandle: draggable, style: {
                                             position: 'absolute',
                                             top: layout.top,
                                             height: layout.height,
@@ -302,7 +318,19 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
                                             opacity: beingDragged ? 0.4 : 1,
                                         } }, appt.id));
                                 })] }, dayISO));
-                    })] }), dragState && (() => {
+                    })] }), _jsx(TileLegend, { appointments: appointments.filter(a => days.some(d => isSameDay(d, new Date(a.startTime)))) }), tapped && (_jsx("div", { onClick: () => setTapped(null), style: {
+                    position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.35)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400, padding: 16,
+                }, children: _jsxs("div", { onClick: e => e.stopPropagation(), style: {
+                        background: 'white', borderRadius: 8, padding: 16, maxWidth: 320, width: '100%',
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+                    }, children: [_jsx("div", { style: { fontWeight: 700, fontSize: 15, marginBottom: 4 }, children: tapped.title }), _jsxs("div", { style: { fontSize: 12, color: '#6b7280', marginBottom: 12 }, children: [format(new Date(tapped.startTime), 'EEE M/d, h:mm'), "\u2013", format(new Date(tapped.endTime), 'h:mm a'), tapped.client && _jsxs(_Fragment, { children: [" \u00B7 ", tapped.client] }), tapped.technician && _jsxs(_Fragment, { children: [" \u00B7 ", tapped.technician] })] }), _jsxs("div", { style: { display: 'flex', gap: 8, justifyContent: 'flex-end' }, children: [_jsx("button", { onClick: () => setTapped(null), style: {
+                                        padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: 6,
+                                        background: 'white', cursor: 'pointer', fontSize: 13,
+                                    }, children: "Close" }), _jsx("button", { onClick: () => { const a = tapped; setTapped(null); onSelectAppointment(a); }, style: {
+                                        padding: '6px 12px', border: 'none', borderRadius: 6,
+                                        background: '#3b82f6', color: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                                    }, children: "Select / View" })] })] }) })), dragState && (() => {
                 const newStart = computeDraggedStart(dragState.apt, dragState.deltaMin, dragState.targetDayISO);
                 const d = new Date(newStart);
                 return (_jsx("div", { style: {
@@ -315,6 +343,19 @@ function WeekView({ currentDate, appointments, onSelectAppointment, onAppointmen
                         whiteSpace: 'nowrap',
                     }, children: format(d, 'EEE M/d, h:mm a') }));
             })()] }));
+}
+// A single horizontal grid line at `top` px.
+function GridLine({ top, color }) {
+    return (_jsx("div", { style: { position: 'absolute', top, left: 0, right: 0, borderTop: `1px solid ${color}` } }));
+}
+// Legend mapping client background colors (solid squares) and staff stripe
+// colors (diagonal stripes on white) for the sessions currently in view.
+function TileLegend({ appointments }) {
+    const clients = Array.from(new Set(appointments.map(a => a.client).filter((c) => !!c)));
+    const staff = Array.from(new Set(appointments.map(a => a.technician).filter((t) => !!t)));
+    if (clients.length === 0 && staff.length === 0)
+        return null;
+    return (_jsxs("div", { style: { display: 'flex', flexWrap: 'wrap', gap: '6px 14px', fontSize: 11, color: '#374151', marginTop: 10 }, children: [clients.map(c => (_jsxs("span", { style: { display: 'inline-flex', alignItems: 'center', gap: 5 }, children: [_jsx("span", { style: { width: 12, height: 12, borderRadius: 3, backgroundColor: clientPastel(c), border: '1px solid rgba(0,0,0,0.1)', display: 'inline-block' } }), c] }, `c-${c}`))), staff.map(t => (_jsxs("span", { style: { display: 'inline-flex', alignItems: 'center', gap: 5 }, children: [_jsx("span", { style: { width: 12, height: 12, borderRadius: 3, border: '1px solid rgba(0,0,0,0.1)', display: 'inline-block', ...legendStripeStyle(t) } }), t] }, `t-${t}`)))] }));
 }
 // Returns the new ISO startTime if we apply the snapped time delta and the
 // targeted day column. Preserves the original time-of-day baseline + applies
@@ -410,8 +451,57 @@ function AppointmentChip({ apt, mark, onClick }) {
             boxSizing: 'border-box',
         }, title: apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), children: [look.prefix, apt.title, look.statusIcon && (_jsx("span", { style: { position: 'absolute', top: 1, right: 3, fontSize: 10, fontWeight: 700, color: look.statusColor, lineHeight: 1 }, children: look.statusIcon }))] }));
 }
+// Status / draft coding for a time-grid tile. The CLIENT pastel + STAFF stripe
+// coding is the base; status (completed / canceled / ghost / draft) is folded
+// into the border, opacity, strike, and a corner icon rather than overriding
+// the color, so client/staff stay identifiable at a glance.
+function blockLook(apt, mark) {
+    const canceled = apt.status === 'canceled';
+    const completed = apt.status === 'completed';
+    const tile = tileStyle(apt.client, apt.technician);
+    let border = '1px solid rgba(0,0,0,0.15)';
+    let opacity = 1;
+    let strike = false;
+    let prefix = '';
+    let statusIcon = null;
+    if (completed) {
+        border = '2px solid #16a34a';
+        statusIcon = '✓';
+    }
+    else if (canceled) {
+        border = `2px solid ${apt.cancellation?.source === 'family' ? '#f97316' : '#dc2626'}`;
+        opacity = 0.55;
+        strike = true;
+        statusIcon = '✕';
+    }
+    if (apt.isGhost) {
+        border = '1px dashed #9ca3af';
+        opacity = 0.5;
+        prefix = '👻 ';
+    }
+    else if (mark) {
+        if (mark === 'remove') {
+            border = '1px dashed #fca5a5';
+            opacity = 0.6;
+            strike = true;
+            prefix = '🗑 ';
+        }
+        else {
+            border = '1px dashed #2563eb';
+            prefix = mark === 'add' ? '＋ ' : mark === 'shorten' ? '✂ ' : '✎ ';
+        }
+    }
+    return {
+        canceled, completed,
+        backgroundColor: tile.backgroundColor,
+        backgroundImage: tile.backgroundImage,
+        border, opacity, strike, prefix, statusIcon,
+        color: '#1f2937',
+        statusColor: 'rgba(0,0,0,0.65)',
+    };
+}
 function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style }) {
-    const look = appointmentLook(apt, mark);
+    const look = blockLook(apt, mark);
     // When drag is enabled, suppress the click (click fires after pointerup
     // and would re-open the detail panel after a drag). Track whether the
     // pointer moved meaningfully between down and up to distinguish tap vs drag.
@@ -427,7 +517,9 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
             onClick();
         }, style: {
             ...style,
-            background: look.background, color: look.color,
+            backgroundColor: look.backgroundColor,
+            backgroundImage: look.backgroundImage,
+            color: look.color,
             padding: '4px 6px', borderRadius: 4, fontSize: 11,
             overflow: 'hidden', cursor: dragHandle ? 'grab' : 'pointer', boxSizing: 'border-box',
             border: look.border,

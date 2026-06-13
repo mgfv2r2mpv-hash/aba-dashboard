@@ -1,0 +1,1343 @@
+{
+  "id": "3694879f-a429-457b-a265-a2d93a166814",
+  "version": 2,
+  "clients": [
+    {
+      "id": "f192eb37-ff8e-42e9-a5be-3c7a742cd358",
+      "name": "AA",
+      "availabilityWindows": {
+        "Monday": [
+          {
+            "start": "16:00",
+            "end": "19:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "16:00",
+            "end": "19:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "16:00",
+            "end": "19:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "16:00",
+            "end": "19:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "6069e893-806c-4f62-aaff-baf2af751813",
+      "name": "AB",
+      "availabilityWindows": {
+        "Monday": [
+          {
+            "start": "10:00",
+            "end": "15:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "10:00",
+            "end": "15:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "10:00",
+            "end": "15:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "10:00",
+            "end": "15:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "10:00",
+            "end": "15:00"
+          }
+        ],
+        "Saturday": [
+          {
+            "start": "10:00",
+            "end": "15:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "0be8b1c8-93f8-4241-80b1-040cff827d56",
+      "name": "BW",
+      "availabilityWindows": {
+        "Monday": [
+          {
+            "start": "17:30",
+            "end": "19:30"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "17:30",
+            "end": "19:30"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "17:30",
+            "end": "19:30"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "17:30",
+            "end": "19:30"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "17:30",
+            "end": "19:30"
+          }
+        ]
+      }
+    },
+    {
+      "id": "eec7d8cf-af78-4b7b-8500-6f629dc522dd",
+      "name": "CL",
+      "availabilityWindows": {
+        "Monday": [
+          {
+            "start": "10:45",
+            "end": "12:45"
+          },
+          {
+            "start": "15:00",
+            "end": "17:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "10:45",
+            "end": "12:45"
+          },
+          {
+            "start": "15:00",
+            "end": "17:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "10:45",
+            "end": "12:45"
+          },
+          {
+            "start": "15:00",
+            "end": "17:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "10:45",
+            "end": "12:45"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "10:45",
+            "end": "12:45"
+          },
+          {
+            "start": "15:00",
+            "end": "17:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b213db1a-1ffd-4a15-9ce2-e03ea5278dac",
+      "name": "DL",
+      "availabilityWindows": {
+        "Monday": [
+          {
+            "start": "08:45",
+            "end": "12:15"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "08:45",
+            "end": "12:15"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "08:45",
+            "end": "12:15"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "08:45",
+            "end": "12:15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "2bc45c0c-f40e-4873-970c-2481933c6878",
+      "name": "EC",
+      "availabilityWindows": {
+        "Monday": [
+          {
+            "start": "09:00",
+            "end": "12:15"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "08:45",
+            "end": "12:15"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "08:45",
+            "end": "12:15"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "08:45",
+            "end": "12:15"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "08:45",
+            "end": "12:15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "e5b62e37-2db5-456c-babe-038a7e56647f",
+      "name": "EG",
+      "availabilityWindows": {
+        "Monday": [
+          {
+            "start": "14:15",
+            "end": "17:00"
+          },
+          {
+            "start": "18:00",
+            "end": "20:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "14:15",
+            "end": "17:00"
+          },
+          {
+            "start": "18:00",
+            "end": "20:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "14:15",
+            "end": "17:00"
+          },
+          {
+            "start": "18:00",
+            "end": "20:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "14:15",
+            "end": "17:00"
+          },
+          {
+            "start": "18:00",
+            "end": "20:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "14:15",
+            "end": "17:00"
+          },
+          {
+            "start": "18:00",
+            "end": "20:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "e974f1b4-1d24-4fe4-a182-1dc27a87e359",
+      "name": "GR",
+      "availabilityWindows": {
+        "Monday": [
+          {
+            "start": "11:00",
+            "end": "13:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "15:00",
+            "end": "17:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "15:00",
+            "end": "17:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "15:00",
+            "end": "17:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "15:00",
+            "end": "17:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "fde03985-4e38-4875-b854-bce009d7f63c",
+      "name": "JO",
+      "availabilityWindows": {
+        "Monday": [
+          {
+            "start": "15:30",
+            "end": "19:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "15:30",
+            "end": "19:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "15:30",
+            "end": "19:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "15:30",
+            "end": "19:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "15:30",
+            "end": "19:00"
+          }
+        ],
+        "Saturday": [
+          {
+            "start": "10:00",
+            "end": "14:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "8c046cf6-18e4-43a4-9804-c78f7e798661",
+      "name": "JT",
+      "availabilityWindows": {
+        "Monday": [
+          {
+            "start": "08:00",
+            "end": "12:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "08:00",
+            "end": "12:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "08:00",
+            "end": "12:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "08:00",
+            "end": "12:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "08:00",
+            "end": "12:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "458834bf-669f-4baa-b306-1cb87b139eb3",
+      "name": "MR",
+      "availabilityWindows": {
+        "Monday": [
+          {
+            "start": "15:00",
+            "end": "17:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "e3e494e9-cc01-48a1-a08a-5e3df265123e",
+      "name": "SB",
+      "availabilityWindows": {
+        "Monday": [
+          {
+            "start": "17:00",
+            "end": "19:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "17:00",
+            "end": "19:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "17:00",
+            "end": "19:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "17:00",
+            "end": "19:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "17:00",
+            "end": "19:00"
+          }
+        ]
+      }
+    }
+  ],
+  "technicians": [
+    {
+      "id": "605b4db3-1c7d-42c0-8074-a024ef42b9cf",
+      "name": "Chen",
+      "isRBT": false,
+      "assignments": [
+        {
+          "clientId": "EC",
+          "hoursPerWeek": 7,
+          "billable": true
+        }
+      ],
+      "availability": {
+        "Monday": [
+          {
+            "start": "08:45",
+            "end": "11:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "08:45",
+            "end": "11:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "08:45",
+            "end": "11:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "08:45",
+            "end": "11:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "08:45",
+            "end": "11:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "08854fa8-4969-4c2f-92f4-ca4aa8b4e73f",
+      "name": "Chinazo",
+      "isRBT": false,
+      "assignments": [
+        {
+          "clientId": "SB",
+          "hoursPerWeek": 10,
+          "billable": true
+        }
+      ],
+      "availability": {
+        "Monday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "e11d51be-a73f-489f-b1d6-d487c99b9376",
+      "name": "Hannah",
+      "isRBT": false,
+      "assignments": [
+        {
+          "clientId": "EC",
+          "hoursPerWeek": 7,
+          "billable": true
+        },
+        {
+          "clientId": "DL",
+          "hoursPerWeek": 12.5,
+          "billable": true
+        }
+      ],
+      "availability": {
+        "Monday": [
+          {
+            "start": "08:00",
+            "end": "19:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "08:00",
+            "end": "19:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "08:00",
+            "end": "19:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "08:00",
+            "end": "19:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "08:00",
+            "end": "19:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "2cf5705e-e773-49b3-9de1-d89f6dd6081b",
+      "name": "John",
+      "isRBT": false,
+      "assignments": [
+        {
+          "clientId": "JO",
+          "hoursPerWeek": 6,
+          "billable": true
+        }
+      ],
+      "availability": {
+        "Monday": [
+          {
+            "start": "16:00",
+            "end": "19:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "16:00",
+            "end": "19:00"
+          }
+        ],
+        "Saturday": [
+          {
+            "start": "10:00",
+            "end": "14:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "9e071395-b01b-471c-8698-4fabb2eba05b",
+      "name": "Julianna",
+      "isRBT": false,
+      "assignments": [
+        {
+          "clientId": "EG",
+          "hoursPerWeek": 0,
+          "billable": true
+        }
+      ],
+      "availability": {
+        "Monday": [
+          {
+            "start": "13:00",
+            "end": "17:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "13:00",
+            "end": "17:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "13:00",
+            "end": "17:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "13:00",
+            "end": "17:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "13:00",
+            "end": "17:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4c2b5298-d2f3-466a-bede-738670dfbb44",
+      "name": "Kaseem",
+      "isRBT": false,
+      "assignments": [
+        {
+          "clientId": "BW",
+          "hoursPerWeek": 10,
+          "billable": true
+        }
+      ],
+      "availability": {
+        "Monday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "15:00",
+            "end": "19:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "6a37d697-6d20-49e4-b136-0ca61a440468",
+      "name": "Sidiatu",
+      "isRBT": false,
+      "assignments": [
+        {
+          "clientId": "AB",
+          "hoursPerWeek": 16,
+          "billable": true
+        }
+      ],
+      "availability": {
+        "Monday": [
+          {
+            "start": "10:00",
+            "end": "15:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "10:00",
+            "end": "15:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "10:00",
+            "end": "15:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "10:00",
+            "end": "15:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "10:00",
+            "end": "15:00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "6c8956a8-7c19-4de8-a9e3-19e5fb10becb",
+      "name": "Toniel",
+      "isRBT": false,
+      "assignments": [
+        {
+          "clientId": "JO",
+          "hoursPerWeek": 6,
+          "billable": true
+        }
+      ],
+      "availability": {
+        "Monday": [
+          {
+            "start": "15:30",
+            "end": "19:00"
+          }
+        ],
+        "Tuesday": [
+          {
+            "start": "15:30",
+            "end": "19:00"
+          }
+        ],
+        "Wednesday": [
+          {
+            "start": "15:30",
+            "end": "19:00"
+          }
+        ],
+        "Thursday": [
+          {
+            "start": "15:30",
+            "end": "19:00"
+          }
+        ],
+        "Friday": [
+          {
+            "start": "15:30",
+            "end": "19:00"
+          }
+        ]
+      }
+    }
+  ],
+  "settings": {
+    "supervisionDirectHoursPercent": 10,
+    "supervisionRBTHoursPercent": 10,
+    "parentTraining": {
+      "minimumHours": 1.5,
+      "targetMinHours": 2,
+      "targetMaxHours": 4,
+      "periodUnit": "month"
+    },
+    "clinicianAvailability": {
+      "Monday": [
+        {
+          "start": "08:00",
+          "end": "14:00"
+        },
+        {
+          "start": "15:00",
+          "end": "19:00"
+        }
+      ],
+      "Tuesday": [
+        {
+          "start": "08:00",
+          "end": "14:00"
+        },
+        {
+          "start": "15:00",
+          "end": "19:00"
+        }
+      ],
+      "Wednesday": [
+        {
+          "start": "08:00",
+          "end": "14:00"
+        },
+        {
+          "start": "15:00",
+          "end": "19:00"
+        }
+      ],
+      "Thursday": [
+        {
+          "start": "08:00",
+          "end": "14:00"
+        },
+        {
+          "start": "15:00",
+          "end": "19:00"
+        }
+      ],
+      "Friday": [
+        {
+          "start": "08:00",
+          "end": "14:00"
+        },
+        {
+          "start": "15:00",
+          "end": "19:00"
+        }
+      ],
+      "Saturday": [
+        {
+          "start": "10:00",
+          "end": "14:00"
+        }
+      ]
+    }
+  },
+  "appointments": [
+    {
+      "id": "c4f33f78-7510-4ed3-b1b5-7fcf5e342526",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-01T08:45:00",
+      "endTime": "2026-06-01T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "41f8a519-11f5-4fac-8975-47515199096b",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-03T08:45:00",
+      "endTime": "2026-06-03T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "f03c70a1-92fc-4fa1-a831-f9198d8cee93",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-05T08:45:00",
+      "endTime": "2026-06-05T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "77b7beef-0140-4ce4-9eb6-93d404b0a91f",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-08T08:45:00",
+      "endTime": "2026-06-08T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "f55bcb1f-d846-496f-bc77-2b510087c1f9",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-10T08:45:00",
+      "endTime": "2026-06-10T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "a1a3bbd3-ecca-4bca-802c-88d414dc894e",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-12T08:45:00",
+      "endTime": "2026-06-12T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "11be6d4e-0bdc-4d9a-b1c1-1056f3f09456",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-15T08:45:00",
+      "endTime": "2026-06-15T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "f4951d7b-ed8a-4c01-87e2-3d6fbd88f280",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-17T08:45:00",
+      "endTime": "2026-06-17T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "141718b1-4379-4186-b0c5-4b92f6c13951",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-19T08:45:00",
+      "endTime": "2026-06-19T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "d8ff5fb6-af6f-4a61-84fa-bec4cb27acf2",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-22T08:45:00",
+      "endTime": "2026-06-22T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "ce6bbbba-4bfe-4b56-8138-be0a8edfa3a4",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-24T08:45:00",
+      "endTime": "2026-06-24T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "4b6c6613-29a1-40aa-886b-71c18bfa9de0",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-26T08:45:00",
+      "endTime": "2026-06-26T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "c5a04a2f-a163-4c4f-8d72-51448349161c",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-06-29T08:45:00",
+      "endTime": "2026-06-29T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "397d65f8-05bd-43b5-9403-ea9ea4519028",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-01T08:45:00",
+      "endTime": "2026-07-01T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "763a236c-0f48-4bbf-9c26-f42b9e1f3b23",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-03T08:45:00",
+      "endTime": "2026-07-03T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "2c1e8a34-9559-4004-976d-8aeba9aaf8e4",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-06T08:45:00",
+      "endTime": "2026-07-06T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "9928eeed-a398-4dd5-bd6b-dc8c4da1b8d7",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-08T08:45:00",
+      "endTime": "2026-07-08T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "dec17796-748f-4b82-ac9c-4c565cc0be8f",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-10T08:45:00",
+      "endTime": "2026-07-10T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "66ae4829-2942-4346-bd53-7743ae3da44e",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-13T08:45:00",
+      "endTime": "2026-07-13T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "ebf3754c-44c2-4d2b-aab5-eadbef962a67",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-15T08:45:00",
+      "endTime": "2026-07-15T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "fab364e2-81a5-494f-a73f-82173d7d407a",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-17T08:45:00",
+      "endTime": "2026-07-17T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "c06260b9-f5c8-4c57-ab35-dd870b39048f",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-20T08:45:00",
+      "endTime": "2026-07-20T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "555eefc4-7dc5-4a30-b4d5-443e12f62443",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-22T08:45:00",
+      "endTime": "2026-07-22T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "9ac7761d-eda5-4af3-abe1-6fa0ea083c6f",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-24T08:45:00",
+      "endTime": "2026-07-24T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "90d371f1-8431-4e60-a719-7b36a99cf3e5",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-27T08:45:00",
+      "endTime": "2026-07-27T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "cd5fa09a-f55b-4630-85bc-95868f833ea2",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-29T08:45:00",
+      "endTime": "2026-07-29T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "3b8727ac-16d4-4666-ad7e-a35e1d6b2c49",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-07-31T08:45:00",
+      "endTime": "2026-07-31T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "f41b99f0-04b4-4852-9a20-1634a5a85fc2",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-08-03T08:45:00",
+      "endTime": "2026-08-03T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "65358987-a904-4dc6-9605-0e835c45547d",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-08-05T08:45:00",
+      "endTime": "2026-08-05T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "56ec8570-d917-468c-8c86-26a76e077d79",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-08-07T08:45:00",
+      "endTime": "2026-08-07T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "62629255-ec8a-4fa1-b2dd-ecaf9f714379",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-08-10T08:45:00",
+      "endTime": "2026-08-10T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    },
+    {
+      "id": "2aa6b091-af77-4dcf-bf8d-d51a6a76f657",
+      "title": "DL / HS",
+      "technician": "Hannah",
+      "client": "DL",
+      "startTime": "2026-08-12T08:45:00",
+      "endTime": "2026-08-12T12:15:00",
+      "isFixed": false,
+      "isBillable": true,
+      "type": "client-session",
+      "isRecurring": true,
+      "recurringPattern": "custom",
+      "seriesId": "f62a31a0-1e5f-4f5c-a292-a1fcf8d4ec0d"
+    }
+  ],
+  "blackouts": [],
+  "authorizations": [],
+  "manualUsage": [],
+  "lastModified": "2026-06-13T19:13:46.679Z"
+}

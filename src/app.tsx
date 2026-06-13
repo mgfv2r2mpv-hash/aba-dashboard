@@ -21,7 +21,9 @@ import SetupWizard from './components/SetupWizard';
 import CancellationDialog from './components/CancellationDialog';
 import DayReview from './components/DayReview';
 import CompleteTimePrompt from './components/CompleteTimePrompt';
+import AgendaRail from './components/AgendaRail';
 import ImportPreview from './components/ImportPreview';
+import { useMinWidth } from './useMediaQuery';
 import LockScreen from './components/LockScreen';
 import PasswordPrompt from './components/PasswordPrompt';
 import {
@@ -169,6 +171,11 @@ export default function App() {
 
   // Past-dated sessions still marked scheduled — the day-review queue.
   const pendingReview = scheduleData ? pastIncompleteAppointments(scheduleData) : [];
+
+  // Wide screens (iPad landscape and up) keep the context pane permanently
+  // docked beside the calendar, so the extra width shows the selected session /
+  // draft / conflicts, or an at-a-glance agenda when nothing is selected.
+  const dockPane = useMinWidth(1000);
 
   // Draft sandbox derivations. The Sched view renders the PREVIEW (staged ops
   // applied) with per-appointment marks; the status badge grades it.
@@ -847,10 +854,10 @@ export default function App() {
                     draftMarks={calendarMarks}
                   />
                 </div>
-                {(draftActive || conflicts.length > 0 || solutions.length > 0 || selectedAppointment) && (
+                {(dockPane || draftActive || conflicts.length > 0 || solutions.length > 0 || selectedAppointment) && (
                   <div ref={detailPanelRef} style={{
                     flex: '0 0 auto',
-                    width: 'min(350px, 100%)',
+                    width: dockPane ? 380 : 'min(350px, 100%)',
                     borderLeft: '1px solid #e5e7eb',
                     display: 'flex',
                     flexDirection: 'column',
@@ -998,6 +1005,13 @@ export default function App() {
                         </div>
                       );
                     })()}
+                    {dockPane && !draftActive && conflicts.length === 0 && solutions.length === 0 && !selectedAppointment && (
+                      <AgendaRail
+                        appointments={scheduleData.appointments}
+                        date={viewDate}
+                        onSelect={setSelectedAppointment}
+                      />
+                    )}
                   </div>
                 )}
               </>

@@ -114,6 +114,9 @@ export default function App() {
   const [showWizard, setShowWizard] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
+  // Whether the selected appointment's detail panel is expanded into its inline
+  // edit form (slide-up), replacing the old edit modal on the schedule view.
+  const [inlineEdit, setInlineEdit] = useState(false);
   const [loading, setLoading] = useState(false);
   const [aiSettings, setAiSettings] = useState<AISettings>(loadSessionSettings);
   const [debugMsg, setDebugMsg] = useState<string | null>(null);
@@ -175,10 +178,12 @@ export default function App() {
   // Past-dated sessions still marked scheduled — the day-review queue.
   const pendingReview = scheduleData ? pastIncompleteAppointments(scheduleData) : [];
 
-  // Wide screens (iPad landscape and up) keep the context pane permanently
-  // docked beside the calendar, so the extra width shows the selected session /
-  // draft / conflicts, or an at-a-glance agenda when nothing is selected.
-  const dockPane = useMinWidth(1000);
+  // iPad (portrait and up) keeps the context pane permanently docked beside the
+  // calendar: hours totals on top, conflicts/agenda filling the middle, and the
+  // selected session sliding up from the bottom. 768px is the classic tablet
+  // breakpoint so iPad portrait gets the split too (phones fall back to the
+  // single-column layout with a slide-up bottom sheet for the detail).
+  const dockPane = useMinWidth(768);
   // Wide screens in the schedule view get a two-pane split with independent
   // scrolling (calendar | bounded context pane). Other views and narrow screens
   // keep the single page-scroll layout.
@@ -206,6 +211,10 @@ export default function App() {
       detailPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [selectedAppointment]);
+
+  // A new selection (or clearing it) always starts on the read-only detail, not
+  // mid-edit, so the panel collapses back from any prior expanded edit form.
+  useEffect(() => { setInlineEdit(false); }, [selectedAppointment?.id]);
 
   // Keep conflicts in sync with the schedule AND the viewed month. Admin edits
   // (availability, blackouts, add/remove people) flow through setScheduleData
@@ -650,6 +659,7 @@ export default function App() {
     stageOps(ops);
     setShowAddAppointment(false);
     setEditingAppointment(null);
+    setInlineEdit(false);
   };
 
   // Delete → stage remove op(s) (a tombstone shows in the preview until commit).
@@ -658,6 +668,7 @@ export default function App() {
     stageOps(ids.map(id => newRemoveOp(id)));
     if (selectedAppointment && ids.includes(selectedAppointment.id)) setSelectedAppointment(null);
     setEditingAppointment(null);
+    setInlineEdit(false);
   };
 
   const handleDeleteAppointment = (id: string) => handleDeleteAppointments([id]);
@@ -844,7 +855,7 @@ export default function App() {
         ) : (
         <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
           <button
-            onClick={() => !locked && setEditingAppointment(a)}
+            onClick={() => !locked && setInlineEdit(true)}
             disabled={locked}
             title={locked ? 'Reopen to edit' : undefined}
             style={{
@@ -885,6 +896,29 @@ export default function App() {
         )}
       </div>
     );
+  };
+
+  // The bottom region of the context panel: the read-only detail, or — once the
+  // user taps Edit — the inline edit form (same component as the add modal, just
+  // rendered to fill the expanded panel instead of a popup).
+  const renderDetailOrEdit = (a: Appointment) => {
+    const locked = a.status === 'canceled' || a.status === 'completed';
+    if (inlineEdit && !locked && scheduleData) {
+      return (
+        <AppointmentForm
+          variant="inline"
+          appointment={a}
+          allAppointments={scheduleData.appointments}
+          authorizations={scheduleData.authorizations}
+          technicians={scheduleData.technicians}
+          clients={scheduleData.clients}
+          onSave={handleSaveAppointments}
+          onDelete={handleDeleteAppointments}
+          onCancel={() => setInlineEdit(false)}
+        />
+      );
+    }
+    return renderSelectedDetail(a);
   };
 
   return (
@@ -984,8 +1018,10 @@ export default function App() {
                     draftMarks={calendarMarks}
                   />
                 </div>
-                {(dockPane || draftActive || conflicts.length > 0 || solutions.length > 0 || selectedAppointment) && (() => {
-                  const detail = selectedAppointment ? renderSelectedDetail(selectedAppointment) : null;
+                {(() => {
+                  // Draft tray / conflicts / AI options / idle agenda — the
+                  // middle of the docked pane (and the only content of the narrow
+                  // in-flow pane; the selected appointment is a slide-up sheet there).
                   const middle = (
                     <>
                     {draftActive && draftStatus && (
@@ -1031,9 +1067,11 @@ export default function App() {
                     </>
                   );
 
-                  // Wide: a bounded, internally-scrolling pane — totals pinned at
-                  // top, violations/agenda filling the middle, and the selected
-                  // appointment opening below by shrinking the middle to fit.
+                  // Wide: a frozen, full-height pane. Totals pinned to the top
+                  // (~15%), conflicts/agenda filling the middle, and the selected
+                  // appointment sliding up from the bottom — 30% for the read-only
+                  // detail, expanding to ~80% (shrinking the middle) for inline
+                  // edits, all animated.
                   if (splitView) {
                     return (
                       <div ref={detailPanelRef} style={{
@@ -1041,34 +1079,62 @@ export default function App() {
                         display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%',
                       }}>
                         {!draftActive && (
-                          <div style={{ flexShrink: 0, maxHeight: '45%', overflowY: 'auto', padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
+                          <div style={{ flexShrink: 0, maxHeight: '15%', overflowY: 'auto', padding: '10px 14px', borderBottom: '1px solid #e5e7eb', WebkitOverflowScrolling: 'touch' as any }}>
                             <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} currentDate={viewDate} />
                           </div>
                         )}
                         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
                           {middle}
                         </div>
-                        {detail && (
-                          <div style={{ flexShrink: 0, maxHeight: '55%', overflowY: 'auto' }}>
-                            {detail}
+                        <div style={{
+                          flexShrink: 0, overflow: 'hidden',
+                          display: 'flex', flexDirection: 'column',
+                          borderTop: selectedAppointment ? '1px solid #e5e7eb' : 'none',
+                          maxHeight: selectedAppointment ? (inlineEdit ? '80%' : '30%') : 0,
+                          transition: 'max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        }}>
+                          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
+                            {selectedAppointment && renderDetailOrEdit(selectedAppointment)}
                           </div>
-                        )}
+                        </div>
                       </div>
                     );
                   }
 
-                  // Narrow: the on-demand pane that flows under the calendar in
-                  // the single page-scroll layout.
-                  return (
-                    <div ref={detailPanelRef} style={{
-                      flex: '0 0 auto', width: 'min(350px, 100%)', borderLeft: '1px solid #e5e7eb',
-                      display: 'flex', flexDirection: 'column',
-                    }}>
-                      {middle}
-                      {detail}
-                    </div>
-                  );
+                  // Narrow: issues flow under the calendar (the selected
+                  // appointment is handled by the slide-up sheet below).
+                  if (draftActive || conflicts.length > 0 || solutions.length > 0) {
+                    return (
+                      <div ref={detailPanelRef} style={{
+                        flex: '0 0 auto', width: 'min(350px, 100%)', borderLeft: '1px solid #e5e7eb',
+                        display: 'flex', flexDirection: 'column',
+                      }}>
+                        {middle}
+                      </div>
+                    );
+                  }
+                  return null;
                 })()}
+
+                {/* Narrow: the selected appointment's detail / inline edit as a
+                    slide-up bottom sheet (replaces the old edit modal on phones).
+                    Kept mounted so it animates in and out. */}
+                {!splitView && (
+                  <div style={{
+                    position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1050,
+                    background: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16,
+                    boxShadow: selectedAppointment ? '0 -6px 24px rgba(0,0,0,0.18)' : 'none',
+                    display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                    maxHeight: selectedAppointment ? (inlineEdit ? '92vh' : '60vh') : 0,
+                    transform: selectedAppointment ? 'translateY(0)' : 'translateY(100%)',
+                    transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    paddingBottom: 'env(safe-area-inset-bottom)',
+                  }}>
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
+                      {selectedAppointment && renderDetailOrEdit(selectedAppointment)}
+                    </div>
+                  </div>
+                )}
               </>
             )}
             {view === 'admin' && (

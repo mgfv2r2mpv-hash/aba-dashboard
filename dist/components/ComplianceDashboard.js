@@ -19,7 +19,7 @@ export default function ComplianceDashboard({ data, cache, onMarkComplete, onReq
     const goPrev = () => setPeriodRef(new Date(periodRef.getFullYear(), periodRef.getMonth() - 1, 1));
     const goNext = () => setPeriodRef(new Date(periodRef.getFullYear(), periodRef.getMonth() + 1, 1));
     const goToday = () => setPeriodRef(new Date());
-    return (_jsxs("div", { style: { flex: 1, padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }, children: [_jsxs("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0 }, children: ["Compliance \u2014 ", period.label] }), _jsxs("div", { style: { display: 'flex', gap: 6 }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] })] }), _jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginBottom: 16 }, children: ["Supervision target: ", _jsxs("strong", { children: [targetPct, "%"] }), " of direct hours per client. Counted as overlap minutes between a supervision tagged with the client and any direct session for that client (any tech). A supervision with no overlapping direct (BCBA solo with the client) consumes BCBA time but contributes 0 to compliance."] }), pastIncomplete.length > 0 && (_jsx(PastIncomplete, { items: pastIncomplete, onMarkComplete: onMarkComplete, onRequestCancel: onRequestCancel, onSelect: onSelectAppointment })), _jsx(SectionHeader, { children: "Per client" }), _jsxs("div", { style: { display: 'grid', gap: 12, marginBottom: 24 }, children: [clientReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No clients yet. Add clients in Admin to start tracking compliance." })), clientReports.map(r => _jsx(ClientCard, { report: r, targetPct: targetPct, maxPct: maxPct }, r.client.id))] }), _jsx(SectionHeader, { children: "Per technician" }), _jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginTop: -8, marginBottom: 8 }, children: ["RBTs must hit BACB ", _jsxs("strong", { children: [BACB_RBT_SUPERVISION_MIN_PERCENT, "%"] }), " AND the company target (", data.settings.supervisionRBTHoursPercent, "%). Non-RBT techs follow the company-only target (", techTargetPct, "%). Numerator counts supervision time overlapping that tech's direct sessions regardless of which client the supervision was tagged with."] }), _jsxs("div", { style: { display: 'grid', gap: 12 }, children: [techReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No technicians yet." })), techReports.map(r => _jsx(TechCard, { report: r, maxPct: maxPct }, r.tech.id))] })] }));
+    return (_jsxs("div", { style: { flex: 1, padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }, children: [_jsxs("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0 }, children: ["Compliance (", period.label, ")"] }), _jsxs("div", { style: { display: 'flex', gap: 6 }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] })] }), _jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginBottom: 16 }, children: ["Supervision target: ", _jsxs("strong", { children: [targetPct, "%"] }), " of direct hours per client. Counted as overlap minutes between a supervision tagged with the client and any direct session for that client (any tech). A supervision with no overlapping direct (BCBA solo with the client) consumes BCBA time but contributes 0 to compliance."] }), pastIncomplete.length > 0 && (_jsx(PastIncomplete, { items: pastIncomplete, onMarkComplete: onMarkComplete, onRequestCancel: onRequestCancel, onSelect: onSelectAppointment })), _jsx(SectionHeader, { children: "Per client" }), _jsxs("div", { style: { display: 'grid', gap: 12, marginBottom: 24 }, children: [clientReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No clients yet. Add clients in Admin to start tracking compliance." })), clientReports.map(r => _jsx(ClientCard, { report: r, targetPct: targetPct, maxPct: maxPct }, r.client.id))] }), _jsx(SectionHeader, { children: "Per technician" }), _jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginTop: -8, marginBottom: 8 }, children: ["RBTs must hit BACB ", _jsxs("strong", { children: [BACB_RBT_SUPERVISION_MIN_PERCENT, "%"] }), " AND the company target (", data.settings.supervisionRBTHoursPercent, "%). Non-RBT techs follow the company-only target (", techTargetPct, "%). Numerator counts supervision time overlapping that tech's direct sessions regardless of which client the supervision was tagged with."] }), _jsxs("div", { style: { display: 'grid', gap: 12 }, children: [techReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No technicians yet." })), techReports.map(r => _jsx(TechCard, { report: r, maxPct: maxPct }, r.tech.id))] })] }));
 }
 function SectionHeader({ children }) {
     return (_jsx("h3", { style: {
@@ -38,14 +38,34 @@ function PastIncomplete({ items, onMarkComplete, onRequestCancel, onSelect }) {
                     fontSize: 14, fontWeight: 700, color: '#92400e', padding: 0,
                     display: 'flex', alignItems: 'center', gap: 6, width: '100%',
                     justifyContent: 'space-between',
-                }, children: [_jsxs("span", { children: ["Past sessions to review (", items.length, ")"] }), _jsx("span", { children: collapsed ? '▸' : '▾' })] }), !collapsed && (_jsxs("div", { style: { marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }, children: [_jsx("p", { style: { fontSize: 11, color: '#92400e', margin: 0, marginBottom: 4 }, children: "These count toward Actual compliance as if they happened. Mark each so the actual roll matches reality." }), items.map(a => (_jsxs("div", { style: {
-                            backgroundColor: 'white', borderRadius: 6, padding: 8,
-                            display: 'flex', flexDirection: 'column', gap: 6,
-                        }, children: [_jsx("button", { onClick: () => onSelect(a), style: {
-                                    background: 'none', border: 'none', padding: 0, textAlign: 'left',
-                                    fontSize: 13, fontWeight: 600, color: '#1d4ed8', cursor: 'pointer',
-                                    textDecoration: 'underline',
-                                }, children: a.title }), _jsxs("div", { style: { fontSize: 11, color: '#6b7280' }, children: [new Date(a.startTime).toLocaleString(), " \u2192 ", new Date(a.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), a.client && _jsxs(_Fragment, { children: [" \u00B7 ", a.client] }), a.technician && _jsxs(_Fragment, { children: [" \u00B7 ", a.technician] })] }), _jsxs("div", { style: { display: 'flex', gap: 6 }, children: [_jsx("button", { onClick: () => onMarkComplete(a), style: completeBtn, children: "\u2713 Complete" }), _jsx("button", { onClick: () => onRequestCancel(a), style: cancelBtn, children: "\u2715 Cancel" })] })] }, a.id)))] }))] }));
+                }, children: [_jsxs("span", { children: ["Past sessions to review (", items.length, ")"] }), _jsx("span", { children: collapsed ? '▸' : '▾' })] }), !collapsed && (_jsxs("div", { style: { marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }, children: [_jsx("p", { style: { fontSize: 11, color: '#92400e', margin: 0, marginBottom: 4 }, children: "Incomplete past appointments count toward compliance until canceled or deleted. Convert these in a timely manner for most accurate compliance tracking." }), items.map(a => (_jsx(PastIncompleteRow, { a: a, onMarkComplete: onMarkComplete, onRequestCancel: onRequestCancel, onSelect: onSelect }, a.id)))] }))] }));
+}
+// A single past-incomplete row. ✓ Complete opens an inline editor prefilled
+// with the scheduled start/end so the user nudges them to the actual rendered
+// times before accepting (one tap accepts unchanged). Speed matters: this is
+// the high-frequency path for matching the roll to delivered minutes.
+function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }) {
+    const [editing, setEditing] = useState(false);
+    const [startClock, setStartClock] = useState(a.startTime.slice(11, 16));
+    const [endClock, setEndClock] = useState(a.endTime.slice(11, 16));
+    const accept = () => {
+        const date = a.startTime.slice(0, 10);
+        const newStart = `${date}T${startClock}:00`;
+        const newEnd = `${date}T${endClock}:00`;
+        if (newEnd <= newStart) {
+            alert('End time must be after the start time.');
+            return;
+        }
+        onMarkComplete({ ...a, startTime: newStart, endTime: newEnd });
+    };
+    return (_jsxs("div", { style: {
+            backgroundColor: 'white', borderRadius: 6, padding: 8,
+            display: 'flex', flexDirection: 'column', gap: 6,
+        }, children: [_jsx("button", { onClick: () => onSelect(a), style: {
+                    background: 'none', border: 'none', padding: 0, textAlign: 'left',
+                    fontSize: 13, fontWeight: 600, color: '#1d4ed8', cursor: 'pointer',
+                    textDecoration: 'underline',
+                }, children: a.title }), _jsxs("div", { style: { fontSize: 11, color: '#6b7280' }, children: [new Date(a.startTime).toLocaleString(), " \u2192 ", new Date(a.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), a.client && _jsxs(_Fragment, { children: [" \u00B7 ", a.client] }), a.technician && _jsxs(_Fragment, { children: [" \u00B7 ", a.technician] })] }), editing ? (_jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }, children: [_jsxs("label", { style: { fontSize: 11, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }, children: ["Start", _jsx("input", { type: "time", step: "900", value: startClock, onChange: e => setStartClock(e.target.value), style: timeInput })] }), _jsxs("label", { style: { fontSize: 11, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }, children: ["End", _jsx("input", { type: "time", step: "900", value: endClock, onChange: e => setEndClock(e.target.value), style: timeInput })] }), _jsx("button", { onClick: accept, style: completeBtn, children: "Accept" }), _jsx("button", { onClick: () => setEditing(false), style: ghostBtn, children: "Cancel" })] })) : (_jsxs("div", { style: { display: 'flex', gap: 6 }, children: [_jsx("button", { onClick: () => setEditing(true), style: completeBtn, children: "\u2713 Complete" }), _jsx("button", { onClick: () => onRequestCancel(a), style: cancelBtn, children: "\u2715 Cancel" })] }))] }));
 }
 // ---------- Per-client card ----------
 function ClientCard({ report, targetPct, maxPct }) {
@@ -93,7 +113,7 @@ function TechCard({ report, maxPct }) {
                             fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
                             color: 'white', backgroundColor: accent,
                             padding: '2px 8px', borderRadius: 10,
-                        }, children: statusLabel(status) })] }), noDirect ? (_jsx("p", { style: { fontSize: 12, color: '#6b7280', margin: 0 }, children: "No direct sessions this period \u2014 nothing to supervise." })) : (_jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }, children: [_jsx(TechMetric, { title: "Actual", m: actual, accent: accent, isRBT: tech.isRBT, maxPct: maxPct }), _jsx(TechMetric, { title: "Projected", m: projected, accent: accent, isRBT: tech.isRBT, maxPct: maxPct })] }))] }));
+                        }, children: statusLabel(status) })] }), noDirect ? (_jsx("p", { style: { fontSize: 12, color: '#6b7280', margin: 0 }, children: "No direct sessions this period. Nothing to supervise." })) : (_jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }, children: [_jsx(TechMetric, { title: "Actual", m: actual, accent: accent, isRBT: tech.isRBT, maxPct: maxPct }), _jsx(TechMetric, { title: "Projected", m: projected, accent: accent, isRBT: tech.isRBT, maxPct: maxPct })] }))] }));
 }
 function TechMetric({ title, m, accent, isRBT, maxPct }) {
     // Bar fills against whichever requirement is HIGHER (the binding one) so the
@@ -178,5 +198,15 @@ const cancelBtn = {
     backgroundColor: '#fee2e2', color: '#b91c1c',
     border: '1px solid #fca5a5', borderRadius: 4,
     cursor: 'pointer', fontSize: 12, fontWeight: 600,
+};
+const ghostBtn = {
+    padding: '5px 9px',
+    backgroundColor: 'white', color: '#6b7280',
+    border: '1px solid #d1d5db', borderRadius: 4,
+    cursor: 'pointer', fontSize: 12, fontWeight: 600,
+};
+const timeInput = {
+    fontSize: 12, padding: '3px 6px',
+    border: '1px solid #d1d5db', borderRadius: 4,
 };
 //# sourceMappingURL=ComplianceDashboard.js.map

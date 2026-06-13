@@ -40,10 +40,8 @@ export interface CaseParentTrainingState {
 export interface CaseReassessmentState {
     blockH: number;
     usedH: number;
-    reportFinalDue?: string;
-    reportDraftDue?: string;
-    internalBackOfficeDue?: string;
-    internalClinicalDirectorDue?: string;
+    initialDraftDue?: string;
+    finalDraftDue?: string;
     daysToInternalDue?: number;
     paceOk: boolean;
 }

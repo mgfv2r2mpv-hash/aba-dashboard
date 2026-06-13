@@ -47,7 +47,7 @@ export default function ComplianceDashboard({ data, cache, onMarkComplete, onReq
   return (
     <div style={{ flex: 1, padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Compliance — {period.label}</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Compliance ({period.label})</h2>
         <div style={{ display: 'flex', gap: 6 }}>
           <NavBtn onClick={goPrev}>←</NavBtn>
           <NavBtn onClick={goToday}>Today</NavBtn>
@@ -140,33 +140,85 @@ function PastIncomplete({ items, onMarkComplete, onRequestCancel, onSelect }: {
       {!collapsed && (
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <p style={{ fontSize: 11, color: '#92400e', margin: 0, marginBottom: 4 }}>
-            These count toward Actual compliance as if they happened. Mark each
-            so the actual roll matches reality.
+            Incomplete past appointments count toward compliance until canceled
+            or deleted. Convert these in a timely manner for most accurate
+            compliance tracking.
           </p>
           {items.map(a => (
-            <div key={a.id} style={{
-              backgroundColor: 'white', borderRadius: 6, padding: 8,
-              display: 'flex', flexDirection: 'column', gap: 6,
-            }}>
-              <button
-                onClick={() => onSelect(a)}
-                style={{
-                  background: 'none', border: 'none', padding: 0, textAlign: 'left',
-                  fontSize: 13, fontWeight: 600, color: '#1d4ed8', cursor: 'pointer',
-                  textDecoration: 'underline',
-                }}
-              >{a.title}</button>
-              <div style={{ fontSize: 11, color: '#6b7280' }}>
-                {new Date(a.startTime).toLocaleString()} → {new Date(a.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                {a.client && <> · {a.client}</>}
-                {a.technician && <> · {a.technician}</>}
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={() => onMarkComplete(a)} style={completeBtn}>✓ Complete</button>
-                <button onClick={() => onRequestCancel(a)} style={cancelBtn}>✕ Cancel</button>
-              </div>
-            </div>
+            <PastIncompleteRow
+              key={a.id}
+              a={a}
+              onMarkComplete={onMarkComplete}
+              onRequestCancel={onRequestCancel}
+              onSelect={onSelect}
+            />
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A single past-incomplete row. ✓ Complete opens an inline editor prefilled
+// with the scheduled start/end so the user nudges them to the actual rendered
+// times before accepting (one tap accepts unchanged). Speed matters: this is
+// the high-frequency path for matching the roll to delivered minutes.
+function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }: {
+  a: Appointment;
+  onMarkComplete: (a: Appointment) => void;
+  onRequestCancel: (a: Appointment) => void;
+  onSelect: (a: Appointment) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [startClock, setStartClock] = useState(a.startTime.slice(11, 16));
+  const [endClock, setEndClock] = useState(a.endTime.slice(11, 16));
+
+  const accept = () => {
+    const date = a.startTime.slice(0, 10);
+    const newStart = `${date}T${startClock}:00`;
+    const newEnd = `${date}T${endClock}:00`;
+    if (newEnd <= newStart) {
+      alert('End time must be after the start time.');
+      return;
+    }
+    onMarkComplete({ ...a, startTime: newStart, endTime: newEnd });
+  };
+
+  return (
+    <div style={{
+      backgroundColor: 'white', borderRadius: 6, padding: 8,
+      display: 'flex', flexDirection: 'column', gap: 6,
+    }}>
+      <button
+        onClick={() => onSelect(a)}
+        style={{
+          background: 'none', border: 'none', padding: 0, textAlign: 'left',
+          fontSize: 13, fontWeight: 600, color: '#1d4ed8', cursor: 'pointer',
+          textDecoration: 'underline',
+        }}
+      >{a.title}</button>
+      <div style={{ fontSize: 11, color: '#6b7280' }}>
+        {new Date(a.startTime).toLocaleString()} → {new Date(a.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+        {a.client && <> · {a.client}</>}
+        {a.technician && <> · {a.technician}</>}
+      </div>
+      {editing ? (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ fontSize: 11, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }}>
+            Start
+            <input type="time" step="900" value={startClock} onChange={e => setStartClock(e.target.value)} style={timeInput} />
+          </label>
+          <label style={{ fontSize: 11, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }}>
+            End
+            <input type="time" step="900" value={endClock} onChange={e => setEndClock(e.target.value)} style={timeInput} />
+          </label>
+          <button onClick={accept} style={completeBtn}>Accept</button>
+          <button onClick={() => setEditing(false)} style={ghostBtn}>Cancel</button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => setEditing(true)} style={completeBtn}>✓ Complete</button>
+          <button onClick={() => onRequestCancel(a)} style={cancelBtn}>✕ Cancel</button>
         </div>
       )}
     </div>
@@ -252,7 +304,7 @@ function TechCard({ report, maxPct }: { report: TechCompliance; maxPct?: number 
 
       {noDirect ? (
         <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
-          No direct sessions this period — nothing to supervise.
+          No direct sessions this period. Nothing to supervise.
         </p>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
@@ -435,4 +487,14 @@ const cancelBtn: React.CSSProperties = {
   backgroundColor: '#fee2e2', color: '#b91c1c',
   border: '1px solid #fca5a5', borderRadius: 4,
   cursor: 'pointer', fontSize: 12, fontWeight: 600,
+};
+const ghostBtn: React.CSSProperties = {
+  padding: '5px 9px',
+  backgroundColor: 'white', color: '#6b7280',
+  border: '1px solid #d1d5db', borderRadius: 4,
+  cursor: 'pointer', fontSize: 12, fontWeight: 600,
+};
+const timeInput: React.CSSProperties = {
+  fontSize: 12, padding: '3px 6px',
+  border: '1px solid #d1d5db', borderRadius: 4,
 };

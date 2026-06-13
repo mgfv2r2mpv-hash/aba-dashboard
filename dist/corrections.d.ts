@@ -21,10 +21,18 @@ export interface ShaveEntry {
     shaveMinutes: number;
     limitedBy: 'case-floor' | 'bt-floor' | 'bacb-contact' | 'none';
 }
+export interface CorrectionFlag {
+    clientId?: string;
+    techId?: string;
+    concern: string;
+    message: string;
+    windows: SlotCandidate[];
+}
 export interface CorrectionReport {
     monthLabel: string;
     needs: CorrectionNeed[];
     shaveRoom: ShaveEntry[];
+    flags: CorrectionFlag[];
 }
 export declare function analyzeCorrections(data: ScheduleData, now?: Date): CorrectionReport;
 export interface SlotQuery {

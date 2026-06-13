@@ -1,6 +1,6 @@
 import { SUPERVISION_CADENCES, BACB_RBT_SUPERVISION_MIN_PERCENT, } from './types';
 import { monthPeriod, computeClientCompliance, computeTechCompliance, computeTechContactDays, } from './compliance';
-import { findAuthFor, inAuthSpan } from './authorization';
+import { computeReportDates, findAuthFor, inAuthSpan } from './authorization';
 // The Sunday-based calendar week containing `ref` (matches the validator's
 // weekly parent-training period boundary).
 export function weekRange(ref) {
@@ -121,28 +121,22 @@ function computeReassessment(data, client, auth, settings, now) {
             inAuthSpan(a.startTime.slice(0, 10), auth)).reduce((s, a) => s + durationHours(a), 0);
         usedH += (data.manualUsage || []).filter(m => m.clientId === auth.clientId && m.bucket === 'reassessment' && inAuthSpan(m.date, auth)).reduce((s, m) => s + m.hours, 0);
     }
-    const finalDue = auth?.reportFinalDue;
-    const draftDue = auth?.reportDraftDue;
-    const leadBO = settings.reportLeadWeeksBackOffice ?? 4;
-    const leadCD = settings.reportLeadWeeksClinicalDirector ?? 1;
-    let internalBackOfficeDue;
-    let internalClinicalDirectorDue;
-    if (finalDue) {
-        const bo = new Date(`${finalDue}T00:00:00`);
-        bo.setDate(bo.getDate() - leadBO * 7);
-        internalBackOfficeDue = toYMD(bo);
-        const cd = new Date(bo);
-        cd.setDate(cd.getDate() - leadCD * 7);
-        internalClinicalDirectorDue = toYMD(cd);
+    // Both report milestones are internal, computed back from the auth end date
+    // using company policy (initial draft earlier than final draft).
+    let initialDraftDue;
+    let finalDraftDue;
+    if (auth) {
+        const dates = computeReportDates(auth, settings);
+        initialDraftDue = dates.initialDraftDue;
+        finalDraftDue = dates.finalDraftDue;
     }
-    const daysToInternalDue = daysUntil(internalClinicalDirectorDue || draftDue, now);
+    const daysToInternalDue = daysUntil(initialDraftDue, now);
     // Behind pace when there's an authorized block not fully delivered and the
     // earliest internal milestone is within ~3 weeks (or already passed).
     const paceOk = !(blockH > 0 && usedH < blockH - 0.01 && daysToInternalDue !== undefined && daysToInternalDue <= 21);
     return {
         blockH, usedH,
-        reportFinalDue: finalDue, reportDraftDue: draftDue,
-        internalBackOfficeDue, internalClinicalDirectorDue,
+        initialDraftDue, finalDraftDue,
         daysToInternalDue, paceOk,
     };
 }

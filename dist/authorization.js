@@ -25,6 +25,28 @@ export function inAuthSpan(dateStr, auth) {
     // YYYY-MM-DD strings compare lexicographically; endDate is inclusive.
     return dateStr >= auth.startDate && dateStr <= auth.endDate;
 }
+const DEFAULT_DRAFT_LEAD = { value: 4, unit: 'weeks' };
+const DEFAULT_FINAL_LEAD = { value: 2, unit: 'weeks' };
+function leadToDays(lead, fallback) {
+    const l = lead ?? fallback;
+    return l.unit === 'weeks' ? l.value * 7 : l.value;
+}
+function ymdLocal(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function minusDays(dateStr, days) {
+    const d = new Date(`${dateStr}T00:00:00`);
+    d.setDate(d.getDate() - days);
+    return ymdLocal(d);
+}
+export function computeReportDates(auth, settings) {
+    const draftDays = leadToDays(settings.reportDraftLead, DEFAULT_DRAFT_LEAD);
+    const finalDays = leadToDays(settings.reportFinalLead, DEFAULT_FINAL_LEAD);
+    return {
+        initialDraftDue: auth.reportDraftDue || minusDays(auth.endDate, draftDays),
+        finalDraftDue: auth.reportFinalDue || minusDays(auth.endDate, finalDays),
+    };
+}
 export function computeAuthUsage(data, auth, now = new Date()) {
     const client = data.clients.find(c => c.id === auth.clientId);
     const manual = (data.manualUsage || []).filter(m => m.clientId === auth.clientId && inAuthSpan(m.date, auth));

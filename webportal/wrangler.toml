@@ -1,0 +1,9 @@
+name = "aba-dashboard-portal"
+pages_build_output_dir = "dist"
+
+# Cloudflare Pages dashboard settings (set these when connecting GitHub):
+#   Framework preset : None
+#   Build command    : npm install && npm run build
+#   Build output dir : dist
+#   Root directory   : webportal
+#   Node version     : 20

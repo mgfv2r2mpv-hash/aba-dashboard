@@ -37,6 +37,29 @@ ask before each merge.
   the empty-state footer; useful for confirming the device isn't running a
   stale `ios/App/App/public/` copy.
 
+## App lock & at-rest persistence (native only)
+
+- On native, the app locks on **cold launch only** (no background/foreground
+  re-lock — deliberately the simplest behavior). Web has no lock.
+- A numeric PIN is the gate. The PIN is **never stored**: both the `pin.verifier`
+  blob (a known constant) and the `schedule.enc` blob (the whole `ScheduleData`)
+  are AES-GCM, key PBKDF2-derived from the PIN via `clientCrypto`. A correct PIN
+  is the one that decrypts them. See `src/appLock.ts` + `src/secureStore.ts`
+  (blobs live in `Directory.Data`, namespaced `lock_*`).
+- First launch with no verifier → LockScreen "create" mode (a PIN is mandatory
+  on native, so the at-rest key always exists before any save). The schedule is
+  re-encrypted on every change (debounced 400ms in `app.tsx`) and restored on
+  unlock — this is the ONLY cross-launch persistence (there's no GET on mount).
+- **Face ID is wired but dormant.** `src/biometric.ts` reaches the plugin via
+  `registerPlugin('BiometricAuth')` (no static import, so the web build needs no
+  package). It reports unavailable until the owner, on the Mac:
+  `npm i @aparajita/capacitor-biometric-auth` → `npx cap sync ios` → add
+  `NSFaceIDUsageDescription` to `ios/App/App/Info.plist`. Opting in stashes the
+  PIN under app-constant obfuscation (`pin.stash`) so a biometric success can
+  recover it — a deliberate convenience/strength tradeoff, off by default.
+- The schedule-decrypt prompt is a real `<form>` (`PasswordPrompt.tsx`,
+  `autocomplete="current-password"`) not `window.prompt`, so iOS offers AutoFill.
+
 ## Compliance rules (BCBA-confirmed; do not re-derive)
 
 - Supervision appointments carry CLIENT only — no technician field. The tech

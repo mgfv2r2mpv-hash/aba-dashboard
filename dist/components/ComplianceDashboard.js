@@ -2,11 +2,16 @@ import { jsxs as _jsxs, jsx as _jsx, Fragment as _Fragment } from "react/jsx-run
 import { useState, useMemo } from 'react';
 import { computeClientCompliance, computeTechCompliance, pastIncompleteAppointments, monthPeriod, } from '../compliance';
 import { BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
-export default function ComplianceDashboard({ data, onMarkComplete, onRequestCancel, onSelectAppointment }) {
+export default function ComplianceDashboard({ data, cache, onMarkComplete, onRequestCancel, onSelectAppointment }) {
     const [periodRef, setPeriodRef] = useState(new Date());
     const period = useMemo(() => monthPeriod(periodRef), [periodRef]);
-    const clientReports = useMemo(() => computeClientCompliance(data, period), [data, period]);
-    const techReports = useMemo(() => computeTechCompliance(data, period), [data, period]);
+    const usingCache = !!cache && cache.period.start.getTime() === period.start.getTime();
+    const clientReports = useMemo(() => usingCache
+        ? data.clients.map(c => cache.clients.get(c.id)).filter((r) => !!r)
+        : computeClientCompliance(data, period), [data, period, cache, usingCache]);
+    const techReports = useMemo(() => usingCache
+        ? data.technicians.map(t => cache.techs.get(t.id)).filter((r) => !!r)
+        : computeTechCompliance(data, period), [data, period, cache, usingCache]);
     const pastIncomplete = useMemo(() => pastIncompleteAppointments(data), [data]);
     const targetPct = data.settings.supervisionDirectHoursPercent || 5;
     const techTargetPct = data.settings.supervisionTechHoursPercent ?? 0;

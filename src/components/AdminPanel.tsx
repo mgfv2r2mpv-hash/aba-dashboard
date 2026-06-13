@@ -9,12 +9,15 @@ import { resolveUtilization } from '../utilization';
 interface AdminPanelProps {
   data: ScheduleData;
   onDataChange: (data: ScheduleData) => void;
+  // Data-lifecycle actions surfaced at the bottom of the Settings tab.
+  onImportFile?: () => void;
+  onRerunWizard?: () => void;
 }
 
 const API_BASE = '/api';
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
+export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWizard }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'auths' | 'blackouts' | 'settings'>('technicians');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -378,6 +381,8 @@ export default function AdminPanel({ data, onDataChange }: AdminPanelProps) {
             settings={data.settings}
             saving={savingId === 'settings'}
             onSave={persistSettings}
+            onImportFile={onImportFile}
+            onRerunWizard={onRerunWizard}
           />
         )}
       </div>
@@ -1328,10 +1333,12 @@ function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemo
   );
 }
 
-function SettingsEditor({ settings, saving, onSave }: {
+function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard }: {
   settings: CompanySettings;
   saving: boolean;
   onSave: (next: CompanySettings) => void;
+  onImportFile?: () => void;
+  onRerunWizard?: () => void;
 }) {
   const s = (n: number | undefined) => (n === undefined ? '' : String(n));
   const [directPct, setDirectPct] = useState(s(settings.supervisionDirectHoursPercent));
@@ -1455,6 +1462,36 @@ function SettingsEditor({ settings, saving, onSave }: {
       <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
         Clinician availability is still configured in the Setup Wizard.
       </p>
+
+      {(onImportFile || onRerunWizard) && (
+        <SettingsSection title="Data">
+          <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+            Re-run the wizard to edit company settings, clients, and technicians
+            (your appointments are kept), or load a different schedule file.
+            Neither replaces your current data until you confirm.
+          </p>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {onRerunWizard && (
+              <button
+                onClick={onRerunWizard}
+                style={{
+                  padding: '8px 14px', backgroundColor: '#8b5cf6', color: 'white',
+                  border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                }}
+              >Re-run wizard</button>
+            )}
+            {onImportFile && (
+              <button
+                onClick={onImportFile}
+                style={{
+                  padding: '8px 14px', backgroundColor: '#3b82f6', color: 'white',
+                  border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                }}
+              >Upload schedule…</button>
+            )}
+          </div>
+        </SettingsSection>
+      )}
     </div>
   );
 }

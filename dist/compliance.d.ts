@@ -33,7 +33,10 @@ export interface CompliancePeriod {
 }
 export declare function monthPeriod(ref: Date): CompliancePeriod;
 export declare function computeClientCompliance(data: ScheduleData, period: CompliancePeriod, now?: Date): ClientCompliance[];
+export declare function computeOneClientCompliance(data: ScheduleData, client: Client, period: CompliancePeriod, now?: Date): ClientCompliance;
 export declare function computeTechCompliance(data: ScheduleData, period: CompliancePeriod, now?: Date): TechCompliance[];
+export declare function computeOneTechCompliance(data: ScheduleData, tech: Technician, period: CompliancePeriod, now?: Date): TechCompliance;
 export declare function computeTechContactDays(data: ScheduleData, tech: Technician, period: CompliancePeriod, scope: 'actual' | 'projected', now?: Date): number;
 export declare function pastIncompleteAppointments(data: ScheduleData, now?: Date): Appointment[];
+export declare function overlapHours(a: Appointment, b: Appointment): number;
 //# sourceMappingURL=compliance.d.ts.map

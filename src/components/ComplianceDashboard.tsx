@@ -5,20 +5,36 @@ import {
   computeClientCompliance, computeTechCompliance,
   pastIncompleteAppointments, monthPeriod,
 } from '../compliance';
+import { ComplianceCache } from '../complianceCache';
 import { BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
 
 interface Props {
   data: ScheduleData;
+  // Live per-entity cache for the current month, maintained incrementally by
+  // App. When the viewed period is the cached one, read from it (instant +
+  // consistent with the header badge); other months compute on demand.
+  cache?: ComplianceCache | null;
   onMarkComplete: (a: Appointment) => void;
   onRequestCancel: (a: Appointment) => void;
   onSelectAppointment: (a: Appointment) => void;
 }
 
-export default function ComplianceDashboard({ data, onMarkComplete, onRequestCancel, onSelectAppointment }: Props) {
+export default function ComplianceDashboard({ data, cache, onMarkComplete, onRequestCancel, onSelectAppointment }: Props) {
   const [periodRef, setPeriodRef] = useState(new Date());
   const period = useMemo(() => monthPeriod(periodRef), [periodRef]);
-  const clientReports = useMemo(() => computeClientCompliance(data, period), [data, period]);
-  const techReports = useMemo(() => computeTechCompliance(data, period), [data, period]);
+  const usingCache = !!cache && cache.period.start.getTime() === period.start.getTime();
+  const clientReports = useMemo(
+    () => usingCache
+      ? data.clients.map(c => cache!.clients.get(c.id)).filter((r): r is ClientCompliance => !!r)
+      : computeClientCompliance(data, period),
+    [data, period, cache, usingCache],
+  );
+  const techReports = useMemo(
+    () => usingCache
+      ? data.technicians.map(t => cache!.techs.get(t.id)).filter((r): r is TechCompliance => !!r)
+      : computeTechCompliance(data, period),
+    [data, period, cache, usingCache],
+  );
   const pastIncomplete = useMemo(() => pastIncompleteAppointments(data), [data]);
   const targetPct = data.settings.supervisionDirectHoursPercent || 5;
   const techTargetPct = data.settings.supervisionTechHoursPercent ?? 0;

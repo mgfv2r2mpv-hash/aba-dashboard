@@ -76,11 +76,23 @@ export function computeClientCompliance(
   period: CompliancePeriod,
   now: Date = new Date(),
 ): ClientCompliance[] {
-  return data.clients.map(client => ({
+  return data.clients.map(client => computeOneClientCompliance(data, client, period, now));
+}
+
+// Single-client compliance — the unit the incremental cache recomputes when an
+// appointment touching this client changes. `computeClientCompliance` is just a
+// map over this, so the two can never drift.
+export function computeOneClientCompliance(
+  data: ScheduleData,
+  client: Client,
+  period: CompliancePeriod,
+  now: Date = new Date(),
+): ClientCompliance {
+  return {
     client,
     actual: computeMetrics(data, client, period, 'actual', now),
     projected: computeMetrics(data, client, period, 'projected', now),
-  }));
+  };
 }
 
 function computeMetrics(
@@ -149,11 +161,22 @@ export function computeTechCompliance(
   period: CompliancePeriod,
   now: Date = new Date(),
 ): TechCompliance[] {
-  return data.technicians.map(tech => ({
+  return data.technicians.map(tech => computeOneTechCompliance(data, tech, period, now));
+}
+
+// Single-technician compliance — the per-entity unit the incremental cache
+// recomputes. `computeTechCompliance` maps over this.
+export function computeOneTechCompliance(
+  data: ScheduleData,
+  tech: Technician,
+  period: CompliancePeriod,
+  now: Date = new Date(),
+): TechCompliance {
+  return {
     tech,
     actual: computeTechMetrics(data, tech, period, 'actual', now),
     projected: computeTechMetrics(data, tech, period, 'projected', now),
-  }));
+  };
 }
 
 function computeTechMetrics(
@@ -281,7 +304,7 @@ function duration(a: Appointment): number {
   return (new Date(a.endTime).getTime() - new Date(a.startTime).getTime()) / 3_600_000;
 }
 
-function overlapHours(a: Appointment, b: Appointment): number {
+export function overlapHours(a: Appointment, b: Appointment): number {
   const aS = new Date(a.startTime).getTime();
   const aE = new Date(a.endTime).getTime();
   const bS = new Date(b.startTime).getTime();

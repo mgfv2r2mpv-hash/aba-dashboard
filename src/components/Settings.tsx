@@ -49,11 +49,27 @@ export default function Settings({ settings, onSave, onClose, onClearKey, lock }
   const [apiKey, setApiKey] = useState(settings.apiKey);
   const [model, setModel] = useState<ClaudeModel>(settings.model);
   const [showKey, setShowKey] = useState(false);
-  const [schedulePassword, setSchedulePassword] = useState(settings.schedulePassword || '');
-  const [showSchedulePw, setShowSchedulePw] = useState(false);
+
+  // Schedule (file) password. Once set it is never shown again — changing it
+  // requires the current password, since it's the only key to already-exported
+  // encrypted files. A wrong "current" would orphan that data, so we gate it.
+  const hasExistingPw = !!settings.schedulePassword;
+  const [changingPw, setChangingPw] = useState(!hasExistingPw);
+  const [currentPw, setCurrentPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
 
   const handleSave = () => {
-    onSave({ apiKey: apiKey.trim(), model, schedulePassword: schedulePassword.trim() || undefined });
+    let schedulePassword = settings.schedulePassword;
+    if (changingPw) {
+      if (hasExistingPw && currentPw !== settings.schedulePassword) {
+        setPwError('Current password is incorrect.');
+        return;
+      }
+      schedulePassword = newPw.trim() || undefined;
+    }
+    onSave({ apiKey: apiKey.trim(), model, schedulePassword });
     onClose();
   };
 
@@ -191,32 +207,61 @@ export default function Settings({ settings, onSave, onClose, onClearKey, lock }
             in this app on another device — requires this password. Leave blank to
             download a normal, readable file.
           </p>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <input
-              type={showSchedulePw ? 'text' : 'password'}
-              placeholder="Leave blank for no encryption"
-              value={schedulePassword}
-              onChange={(e) => setSchedulePassword(e.target.value)}
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: '6px',
-              }}
-            />
-            <button
-              onClick={() => setShowSchedulePw(!showSchedulePw)}
-              style={{
-                padding: '8px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: '6px',
-                background: 'white',
-                cursor: 'pointer',
-              }}
-            >
-              {showSchedulePw ? 'Hide' : 'Show'}
-            </button>
-          </div>
+
+          {hasExistingPw && !changingPw ? (
+            // Never re-display a set password. Offer a guarded change instead.
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '13px', color: '#374151' }}>🔒 Password is set.</span>
+              <button
+                onClick={() => { setChangingPw(true); setPwError(null); }}
+                style={{
+                  padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                  background: 'white', cursor: 'pointer', fontSize: '13px',
+                }}
+              >
+                Change…
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {hasExistingPw && (
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  placeholder="Current password"
+                  value={currentPw}
+                  onChange={(e) => { setCurrentPw(e.target.value); setPwError(null); }}
+                  autoComplete="off"
+                  style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px' }}
+                />
+              )}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  placeholder={hasExistingPw ? 'New password (blank to remove)' : 'Leave blank for no encryption'}
+                  value={newPw}
+                  onChange={(e) => { setNewPw(e.target.value); setPwError(null); }}
+                  autoComplete="off"
+                  style={{ flex: 1, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px' }}
+                />
+                <button
+                  onClick={() => setShowPw(!showPw)}
+                  style={{
+                    padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                    background: 'white', cursor: 'pointer',
+                  }}
+                >
+                  {showPw ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              {hasExistingPw && (
+                <p style={{ fontSize: '11px', color: '#b45309', margin: 0 }}>
+                  Changing this won't re-encrypt files already exported with the old
+                  password — keep the old one to open those.
+                </p>
+              )}
+              {pwError && <p style={{ fontSize: '12px', color: '#dc2626', margin: 0 }}>{pwError}</p>}
+            </div>
+          )}
         </div>
 
         {/* App lock (native only) */}

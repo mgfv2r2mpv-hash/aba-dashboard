@@ -21,6 +21,14 @@ import SetupWizard from './components/SetupWizard';
 import CancellationDialog from './components/CancellationDialog';
 import DayReview from './components/DayReview';
 import ImportPreview from './components/ImportPreview';
+import LockScreen from './components/LockScreen';
+import PasswordPrompt from './components/PasswordPrompt';
+import {
+  hasPin, setPin, verifyPin, changePin,
+  saveSchedule, loadSchedule,
+  isFaceIdEnabled, enableFaceId, disableFaceId, recoverPinViaBiometric,
+} from './appLock';
+import { isBiometricAvailable, biometricAuthenticate } from './biometric';
 import { pastIncompleteAppointments } from './compliance';
 import {
   ComplianceCache, ComplianceSummary, ApptChange,
@@ -125,6 +133,35 @@ export default function App() {
   const [pendingImport, setPendingImport] = useState<{ bytes: Uint8Array; fileName: string; data: ScheduleData; embeddedConfig?: string } | null>(null);
   const detailPanelRef = React.useRef<HTMLDivElement | null>(null);
   const importInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  // ---- App lock (native only) ----------------------------------------------
+  // On a cold launch a PIN gates the app; the schedule is restored from an
+  // at-rest blob encrypted under that PIN. `lockReady` gates the first render so
+  // the main UI never flashes before we know whether to lock.
+  const isNative = Capacitor.isNativePlatform();
+  const [lockReady, setLockReady] = useState(!isNative);
+  const [locked, setLocked] = useState(false);
+  const [lockMode, setLockMode] = useState<'create' | 'unlock'>('unlock');
+  const [changingPin, setChangingPin] = useState(false);
+  const [faceIdAvailable, setFaceIdAvailable] = useState(false);
+  const [faceIdEnabled, setFaceIdEnabled] = useState(false);
+  // The unlocked PIN, kept in memory only, so we can re-encrypt on each change.
+  const unlockedPinRef = React.useRef<string | null>(null);
+
+  // Schedule-decrypt password modal (replaces window.prompt for AutoFill).
+  const [pwPrompt, setPwPrompt] = useState<{ title: string; message: string } | null>(null);
+  const pwResolverRef = React.useRef<((pw: string | null) => void) | null>(null);
+  const askPassword = (title: string, message: string) =>
+    new Promise<string | null>((resolve) => {
+      pwResolverRef.current = resolve;
+      setPwPrompt({ title, message });
+    });
+  const resolvePassword = (pw: string | null) => {
+    setPwPrompt(null);
+    const r = pwResolverRef.current;
+    pwResolverRef.current = null;
+    r?.(pw);
+  };
 
   const compSummary: ComplianceSummary | null =
     scheduleData && compCache ? summarize(compCache, scheduleData) : null;
@@ -239,6 +276,84 @@ export default function App() {
     setCompCache(buildCache(next));
   };
 
+  // Decide the cold-launch lock state. Native always lands locked: into "create"
+  // mode if no PIN exists yet (first run), otherwise "unlock". Web has no lock.
+  useEffect(() => {
+    if (!isNative) return;
+    (async () => {
+      const has = await hasPin();
+      setLockMode(has ? 'unlock' : 'create');
+      setFaceIdAvailable(await isBiometricAvailable());
+      setFaceIdEnabled(await isFaceIdEnabled());
+      setLocked(true);
+      setLockReady(true);
+    })();
+  }, [isNative]);
+
+  // Restore the at-rest schedule with the just-entered PIN and drop the gate.
+  const unlockWith = async (pin: string) => {
+    unlockedPinRef.current = pin;
+    const restored = await loadSchedule(pin);
+    if (restored) {
+      setNativeStore(restored);
+      commitFull(restored);
+    }
+    setLocked(false);
+  };
+
+  const handleCreatePin = async (pin: string) => {
+    await setPin(pin);
+    unlockedPinRef.current = pin;
+    setLockMode('unlock');
+    setLocked(false);
+  };
+
+  const handleVerifyPin = async (pin: string): Promise<boolean> => {
+    if (!(await verifyPin(pin))) return false;
+    await unlockWith(pin);
+    return true;
+  };
+
+  const handleBiometricUnlock = async (): Promise<boolean> => {
+    if (!(await biometricAuthenticate('Unlock ABA Schedule'))) return false;
+    const pin = await recoverPinViaBiometric();
+    if (!pin) return false;
+    await unlockWith(pin);
+    return true;
+  };
+
+  // Re-key to a new PIN from inside the app (already authenticated by being in).
+  const handleChangePin = async (pin: string) => {
+    await changePin(pin, scheduleData);
+    unlockedPinRef.current = pin;
+    setChangingPin(false);
+  };
+
+  const handleToggleFaceId = async (on: boolean) => {
+    if (on) {
+      const pin = unlockedPinRef.current;
+      if (!pin) return;
+      if (!(await biometricAuthenticate('Enable Face ID for ABA Schedule'))) return;
+      await enableFaceId(pin);
+      setFaceIdEnabled(true);
+    } else {
+      await disableFaceId();
+      setFaceIdEnabled(false);
+    }
+  };
+
+  // Persist the schedule (encrypted under the unlocked PIN) on every change, so
+  // the next cold launch restores exactly this state. Native + unlocked only.
+  // Debounced so a burst of edits (e.g. a calendar drag) coalesces into one
+  // PBKDF2 + encrypt pass rather than one per keystroke.
+  useEffect(() => {
+    if (!isNative || locked) return;
+    const pin = unlockedPinRef.current;
+    if (!pin || !scheduleData) return;
+    const t = setTimeout(() => { void saveSchedule(scheduleData, pin); }, 400);
+    return () => clearTimeout(t);
+  }, [scheduleData, locked, isNative]);
+
   // Apply an already-parsed import as the working schedule. On native we prime
   // the in-memory store nativeApi serves from; on web we POST the (decrypted,
   // plain) bytes so the Express server's store is the source of truth.
@@ -267,7 +382,9 @@ export default function App() {
       // owner's password decrypts it. Prefer the session password, else prompt.
       if (isEncryptedSchedule(bytes)) {
         const password = aiSettings.schedulePassword
-          || prompt('This schedule is password-protected. Enter the schedule password to open it:') || '';
+          || (await askPassword(
+            'Schedule is password-protected',
+            'Enter the schedule password to open this file.')) || '';
         if (!password) { setLoading(false); return; }
         try {
           bytes = await decryptBytes(bytes, password);
@@ -599,6 +716,24 @@ export default function App() {
     </button>
   );
 
+  // Brief dark splash while we decide whether to lock — avoids flashing the
+  // (empty) main UI before the gate appears on native.
+  if (!lockReady) {
+    return <div style={{ position: 'fixed', inset: 0, backgroundColor: '#1f2937' }} />;
+  }
+
+  if (locked) {
+    return (
+      <LockScreen
+        mode={lockMode}
+        onCreate={handleCreatePin}
+        onVerify={handleVerifyPin}
+        onBiometric={lockMode === 'unlock' && faceIdEnabled && faceIdAvailable ? handleBiometricUnlock : undefined}
+        biometricAuto
+      />
+    );
+  }
+
   return (
     <div style={{
       display: 'flex', height: '100vh', maxWidth: '100vw',
@@ -898,6 +1033,12 @@ export default function App() {
           onSave={handleAISettingsSave}
           onClose={() => setShowSettings(false)}
           onClearKey={handleClearKey}
+          lock={isNative ? {
+            faceIdAvailable,
+            faceIdEnabled,
+            onChangePin: () => { setShowSettings(false); setChangingPin(true); },
+            onToggleFaceId: handleToggleFaceId,
+          } : undefined}
         />
       )}
 
@@ -973,6 +1114,20 @@ export default function App() {
           onRequestCancel={(a) => setCancelTarget(a)}
           onClose={() => setShowDayReview(false)}
         />
+      )}
+
+      {pwPrompt && (
+        <PasswordPrompt
+          title={pwPrompt.title}
+          message={pwPrompt.message}
+          onSubmit={(pw) => resolvePassword(pw)}
+          onCancel={() => resolvePassword(null)}
+        />
+      )}
+
+      {/* Re-key flow launched from Settings → App Lock. */}
+      {changingPin && (
+        <LockScreen mode="create" onCreate={handleChangePin} />
       )}
     </div>
   );

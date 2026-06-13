@@ -11,11 +11,20 @@ export interface AISettings {
   schedulePassword?: string;
 }
 
+// App-lock controls, passed only on native platforms.
+export interface LockControls {
+  faceIdAvailable: boolean;
+  faceIdEnabled: boolean;
+  onChangePin: () => void;
+  onToggleFaceId: (on: boolean) => void;
+}
+
 interface SettingsProps {
   settings: AISettings;
   onSave: (settings: AISettings) => void;
   onClose: () => void;
   onClearKey: () => void;
+  lock?: LockControls;
 }
 
 const MODEL_OPTIONS: { value: ClaudeModel; label: string; description: string }[] = [
@@ -36,7 +45,7 @@ const MODEL_OPTIONS: { value: ClaudeModel; label: string; description: string }[
   },
 ];
 
-export default function Settings({ settings, onSave, onClose, onClearKey }: SettingsProps) {
+export default function Settings({ settings, onSave, onClose, onClearKey, lock }: SettingsProps) {
   const [apiKey, setApiKey] = useState(settings.apiKey);
   const [model, setModel] = useState<ClaudeModel>(settings.model);
   const [showKey, setShowKey] = useState(false);
@@ -209,6 +218,38 @@ export default function Settings({ settings, onSave, onClose, onClearKey }: Sett
             </button>
           </div>
         </div>
+
+        {/* App lock (native only) */}
+        {lock && (
+          <div style={{ marginBottom: '24px', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
+            <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+              App Lock
+            </label>
+            <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '12px' }}>
+              A PIN locks the app on launch and encrypts your schedule on this
+              device. There is no recovery if you forget it.
+            </p>
+            <button
+              onClick={lock.onChangePin}
+              style={{
+                padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                background: 'white', cursor: 'pointer', fontSize: '13px',
+              }}
+            >
+              Change PIN
+            </button>
+            {lock.faceIdAvailable && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={lock.faceIdEnabled}
+                  onChange={(e) => lock.onToggleFaceId(e.target.checked)}
+                />
+                <span style={{ fontSize: '13px' }}>Unlock with Face ID</span>
+              </label>
+            )}
+          </div>
+        )}
 
         {/* Actions */}
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>

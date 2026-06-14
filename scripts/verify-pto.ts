@@ -7,10 +7,13 @@ import { computePtoBalances, accruedForRule, activeBuckets, canonicalBucket, res
 
 // A completed (or scheduled) BCBA billable session — no technician = BCBA lens.
 let aseq = 0;
+const pad = (n: number) => String(n).padStart(2, '0');
+const isoLocal = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
 function bcbaAppt(date: string, hours: number, status: 'completed' | 'scheduled'): Appointment {
-  const end = new Date(`${date}T10:00:00`); end.setHours(10 + hours);
+  const start = new Date(`${date}T08:00:00`);
+  const end = new Date(start.getTime() + hours * 3_600_000);
   return {
-    id: `ap${++aseq}`, title: 'PT', startTime: `${date}T10:00:00`, endTime: `${date}T${String(10 + hours).padStart(2, '0')}:00:00`,
+    id: `ap${++aseq}`, title: 'PT', startTime: isoLocal(start), endTime: isoLocal(end),
     isFixed: false, isBillable: true, type: 'parent-training', status,
   };
 }
@@ -60,9 +63,37 @@ console.log('per-converted (hours-based) accrual');
   check('perConvertedHours: floor(converted/per) * hours', accruedForRule(rule, null, new Date(2026, 2, 1), 65) === 2);
   check('perConvertedHours: 0 converted → 0', accruedForRule(rule, null, new Date(2026, 2, 1), 0) === 0);
 
-  const bonus = { id: 'b', kind: 'perConvertedBonus' as const, bucket: 'vacation' as const, hours: 1, perHours: 30, bonusHours: 5, bonusPerExtraHours: 60 };
-  check('perConvertedBonus: base + bonus once threshold cleared', accruedForRule(bonus, null, new Date(2026, 2, 1), 65) === 7); // floor(65/30)=2 + 5
-  check('perConvertedBonus: base only below threshold', accruedForRule(bonus, null, new Date(2026, 2, 1), 50) === 1); // floor(50/30)=1, 50<60
+}
+
+console.log('perConvertedBonus: consecutive-interval streak');
+{
+  // 4 completed weeks from a Monday anchor (Jun 1 2026 is a Monday). One BCBA
+  // session per week: 10h,10h,10h,5h converted. Criterion = converted ≥ 10h/week,
+  // M = 3 consecutive, Z = 2. Weeks 1–3 qualify → pay 2 once (then reset); week 4
+  // is below → no further. Base off (perHours unset).
+  const since = new Date(2026, 5, 1), asOf = new Date(2026, 5, 29);
+  const appts = [bcbaAppt('2026-06-02', 10, 'completed'), bcbaAppt('2026-06-09', 10, 'completed'), bcbaAppt('2026-06-16', 10, 'completed'), bcbaAppt('2026-06-23', 5, 'completed')];
+  const rule = { id: 'b', kind: 'perConvertedBonus' as const, bucket: 'vacation' as const, hours: 0, bonusHours: 2, bonusInterval: 'week' as const, bonusConsecutiveIntervals: 3, bonusCriterion: 'hours' as const, bonusPerExtraHours: 10 };
+  check('streak of 3 at-criterion weeks → Z once', accruedForRule(rule, since, asOf, 0, appts) === 2);
+
+  // Six qualifying weeks, M=3 → two non-overlapping payouts = 4.
+  const six = ['2026-06-02', '2026-06-09', '2026-06-16', '2026-06-23', '2026-06-30', '2026-07-07'].map(d => bcbaAppt(d, 10, 'completed'));
+  check('two completed streaks → 2 * Z', accruedForRule(rule, since, new Date(2026, 6, 13), 0, six) === 4);
+
+  // A gap resets the streak: weeks 10,10,5,10,10 with M=3 → never 3 in a row → 0.
+  const gappy = [bcbaAppt('2026-06-02', 10, 'completed'), bcbaAppt('2026-06-09', 10, 'completed'), bcbaAppt('2026-06-16', 5, 'completed'), bcbaAppt('2026-06-23', 10, 'completed'), bcbaAppt('2026-06-30', 10, 'completed')];
+  check('a below-criterion week resets the streak', accruedForRule(rule, since, new Date(2026, 6, 6), 0, gappy) === 0);
+}
+
+console.log('perConvertedBonus: percent-above-goal criterion');
+{
+  // "5% above the 25h goal for 3 consecutive weeks → 2 hours." Threshold = 26.25.
+  const since = new Date(2026, 5, 1), asOf = new Date(2026, 5, 22);
+  const appts = [bcbaAppt('2026-06-02', 27, 'completed'), bcbaAppt('2026-06-09', 27, 'completed'), bcbaAppt('2026-06-16', 27, 'completed')];
+  const rule = { id: 'p', kind: 'perConvertedBonus' as const, bucket: 'vacation' as const, hours: 0, bonusHours: 2, bonusInterval: 'week' as const, bonusConsecutiveIntervals: 3, bonusCriterion: 'percentAboveGoal' as const, bonusPercentAboveGoal: 5 };
+  check('27h ≥ 25*1.05 for 3 weeks → Z', accruedForRule(rule, since, asOf, 0, appts, { week: 25 }) === 2);
+  check('26h < 26.25 threshold → no bonus', accruedForRule(rule, since, asOf, 0, [bcbaAppt('2026-06-02', 26, 'completed'), bcbaAppt('2026-06-09', 26, 'completed'), bcbaAppt('2026-06-16', 26, 'completed')], { week: 25 }) === 0);
+  check('percent criterion with no goal supplied → 0', accruedForRule(rule, since, asOf, 0, appts, undefined) === 0);
 }
 
 console.log('convertedBcbaHours + balances react to completion/reopen');

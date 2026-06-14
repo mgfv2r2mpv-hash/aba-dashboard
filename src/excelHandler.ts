@@ -387,7 +387,11 @@ function parsePtoConfig(workbook: XLSX.WorkBook, settingsRow: any): PtoConfig | 
       if (!isBlank(r.anchor)) rule.anchor = normalizeDateString(r.anchor);
       const perHours = num(r.perHours); if (perHours !== undefined) rule.perHours = perHours;
       const bonusHours = num(r.bonusHours); if (bonusHours !== undefined) rule.bonusHours = bonusHours;
+      const bonusInterval = text(r.bonusInterval); if (bonusInterval === 'week' || bonusInterval === 'month') rule.bonusInterval = bonusInterval;
+      const bonusConsec = num(r.bonusConsecutiveIntervals); if (bonusConsec !== undefined) rule.bonusConsecutiveIntervals = bonusConsec;
+      const bonusCriterion = text(r.bonusCriterion); if (bonusCriterion === 'hours' || bonusCriterion === 'percentAboveGoal') rule.bonusCriterion = bonusCriterion;
       const bonusPer = num(r.bonusPerExtraHours); if (bonusPer !== undefined) rule.bonusPerExtraHours = bonusPer;
+      const bonusPct = num(r.bonusPercentAboveGoal); if (bonusPct !== undefined) rule.bonusPercentAboveGoal = bonusPct;
       const enabled = bool3(r.enabled); if (enabled !== undefined) rule.enabled = enabled;
       return rule;
     });
@@ -555,10 +559,13 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
   // PTO accrual rules + opening balances (Upgrade 2). One row each; absent =
   // unlimited mode with no balances.
   add('PtoAccruals',
-    ['id', 'kind', 'bucket', 'hours', 'everyWeeks', 'weekday', 'anchor', 'perHours', 'bonusHours', 'bonusPerExtraHours', 'enabled'],
+    ['id', 'kind', 'bucket', 'hours', 'everyWeeks', 'weekday', 'anchor', 'perHours',
+      'bonusHours', 'bonusInterval', 'bonusConsecutiveIntervals', 'bonusCriterion',
+      'bonusPerExtraHours', 'bonusPercentAboveGoal', 'enabled'],
     (data.settings.pto?.accruals || []).map(r => [
-      r.id, r.kind, r.bucket, r.hours, W(r.everyWeeks), W(r.weekday), W(r.anchor),
-      W(r.perHours), W(r.bonusHours), W(r.bonusPerExtraHours), r.enabled === undefined ? '' : WB(r.enabled),
+      r.id, r.kind, r.bucket, r.hours, W(r.everyWeeks), W(r.weekday), W(r.anchor), W(r.perHours),
+      W(r.bonusHours), W(r.bonusInterval), W(r.bonusConsecutiveIntervals), W(r.bonusCriterion),
+      W(r.bonusPerExtraHours), W(r.bonusPercentAboveGoal), r.enabled === undefined ? '' : WB(r.enabled),
     ]));
   add('PtoOpeningBalances', ['bucket', 'hours', 'asOf'],
     (data.settings.pto?.openingBalances || []).map(b => [b.bucket, b.hours, b.asOf]));

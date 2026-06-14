@@ -1412,8 +1412,10 @@ function TimeOffTab({ timeOff, settings, appointments, savingId, onAdd, onRemove
   const cfg = resolvePtoConfig(settings.pto);
   const buckets = activeBuckets(cfg);
   // Pass appointments so per-converted accrual reflects completed billable hours
-  // live — completing or reopening a session moves the balance.
-  const balances = computePtoBalances(cfg, timeOff, appointments);
+  // live — completing or reopening a session moves the balance. Goals feed the
+  // "percent above goal" bonus criterion.
+  const u = resolveUtilization(settings.utilization);
+  const balances = computePtoBalances(cfg, timeOff, appointments, new Date(), { week: u.bcbaWeeklyBillableHours, month: u.bcbaMonthlyBillableHours });
   // A multi-day vacation is entered as a date range and expanded to one entry
   // per weekday so each lands in the right ISO week. Single day = same start/end.
   const [start, setStart] = useState(todayStr());
@@ -1708,18 +1710,44 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
                     {r.kind === 'perConvertedBonus' && (
                       <>
                         <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
-                          <span style={{ fontSize: '11px', color: '#6b7280' }}>Bonus hrs</span>
+                          <span style={{ fontSize: '11px', color: '#6b7280' }}>Bonus hrs (Z)</span>
                           <input type="number" min="0" step="0.25" value={String(r.bonusHours ?? 0)} onChange={e => updateRule(r.id, { bonusHours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
                         </label>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 150px' }}>
-                          <span style={{ fontSize: '11px', color: '#6b7280' }}>…once converted ≥</span>
-                          <input type="number" min="0" step="1" value={String(r.bonusPerExtraHours ?? 0)} onChange={e => updateRule(r.id, { bonusPerExtraHours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 100px' }}>
+                          <span style={{ fontSize: '11px', color: '#6b7280' }}>Per</span>
+                          <select value={r.bonusInterval ?? 'week'} onChange={e => updateRule(r.id, { bonusInterval: e.target.value as 'week' | 'month' })} style={inputStyle}>
+                            <option value="week">week</option>
+                            <option value="month">month</option>
+                          </select>
                         </label>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 120px' }}>
+                          <span style={{ fontSize: '11px', color: '#6b7280' }}>Consecutive (M)</span>
+                          <input type="number" min="1" step="1" value={String(r.bonusConsecutiveIntervals ?? 1)} onChange={e => updateRule(r.id, { bonusConsecutiveIntervals: Math.max(1, parseInt(e.target.value) || 1) })} style={inputStyle} />
+                        </label>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 140px' }}>
+                          <span style={{ fontSize: '11px', color: '#6b7280' }}>At criterion when</span>
+                          <select value={r.bonusCriterion ?? 'hours'} onChange={e => updateRule(r.id, { bonusCriterion: e.target.value as 'hours' | 'percentAboveGoal' })} style={inputStyle}>
+                            <option value="hours">converted ≥ hours</option>
+                            <option value="percentAboveGoal">% above goal</option>
+                          </select>
+                        </label>
+                        {(r.bonusCriterion ?? 'hours') === 'hours' ? (
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 110px' }}>
+                            <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours (Y′)</span>
+                            <input type="number" min="0" step="1" value={String(r.bonusPerExtraHours ?? 0)} onChange={e => updateRule(r.id, { bonusPerExtraHours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                          </label>
+                        ) : (
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 110px' }}>
+                            <span style={{ fontSize: '11px', color: '#6b7280' }}>% above goal</span>
+                            <input type="number" min="0" step="1" value={String(r.bonusPercentAboveGoal ?? 0)} onChange={e => updateRule(r.id, { bonusPercentAboveGoal: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                          </label>
+                        )}
                       </>
                     )}
                     {(r.kind === 'perConvertedHours' || r.kind === 'perConvertedBonus') && (
                       <span style={{ fontSize: '11px', color: '#6b7280', flex: '1 1 100%' }}>
-                        "Converted" = your completed billable hours since the opening-balance date; the balance moves as sessions are completed or reopened.
+                        "Converted" = your completed billable hours since the opening-balance date; balances move as sessions are completed or reopened.
+                        {r.kind === 'perConvertedBonus' && ' Bonus pays out each time you string together M at-criterion intervals (then the streak resets).'}
                       </span>
                     )}
                     <button onClick={() => removeRule(r.id)} style={dangerBtn}>Remove</button>

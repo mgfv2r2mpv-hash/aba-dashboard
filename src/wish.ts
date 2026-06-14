@@ -33,12 +33,15 @@ export function summarizeWish(w: WishRequest): string {
     case 'addRecurring':
       base = `Add a recurring ${w.newType || 'session'}${w.client ? ` for ${w.client}` : ''} around ${w.weekday || 'a weekday'} ${fmtTime(w.windowStart)}${w.durationMins ? ` (${w.durationMins} min)` : ''}${horizon}, juggling the schedule to fit it with minimal disruption.`;
       break;
+    case 'shaveDown':
+      base = `Trim over-served supervision sessions toward the compliance minimum${horizon} to free up capacity, without dropping below required floors.`;
+      break;
     case 'freeform':
     default:
       base = w.note?.trim() || 'Rework the schedule as described.';
       break;
   }
-  return base + shave;
+  return base + (w.kind !== 'shaveDown' ? shave : '');
 }
 
 // Pull the first JSON object out of a model reply that may be fenced or prefaced

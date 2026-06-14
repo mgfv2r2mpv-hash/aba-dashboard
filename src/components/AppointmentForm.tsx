@@ -15,6 +15,8 @@ interface AppointmentFormProps {
   // Company settings — supplies the BCBA session-length defaults used to auto-fill
   // a new appointment's end time when its type is chosen.
   settings?: CompanySettings;
+  // Pre-select a type on new appointments (e.g. based on the calendar lens).
+  initialType?: Appointment['type'];
   // Save can affect more than one record when editing with scope > instance;
   // signature returns the full list of upserts to apply.
   onSave: (appointments: Appointment[]) => void;
@@ -56,6 +58,7 @@ export default function AppointmentForm({
   technicians,
   clients,
   settings,
+  initialType,
   onSave,
   onDelete,
   onCancel,
@@ -63,7 +66,7 @@ export default function AppointmentForm({
 }: AppointmentFormProps) {
   const [title, setTitle] = useState(appointment?.title || '');
   const [description, setDescription] = useState(appointment?.description || '');
-  const [type, setType] = useState<Appointment['type']>(appointment?.type || 'client-session');
+  const [type, setType] = useState<Appointment['type']>(appointment?.type || initialType || 'client-session');
   // Parent-training / case-planning can be caregiver-only sessions, so they carry
   // an OPTIONAL "supervised BT" — the technician field names the BT being observed
   // (not a provider), and the overlap with that BT's direct earns supervision.
@@ -443,13 +446,13 @@ export default function AppointmentForm({
             <div>
               <label style={labelStyle}>Type</label>
               <select value={type} onChange={(e) => handleTypeChange(e.target.value as Appointment['type'])} style={inputStyle}>
-                <option value="client-session">Client Session</option>
+                <option value="client-session">Direct Service</option>
                 <option value="supervision">Supervision</option>
                 <option value="parent-training">Parent Training / Coord. of Care</option>
                 <option value="reassessment">Reassessment</option>
                 <option value="case-planning">Case Planning</option>
-                <option value="internal-task">Internal Task</option>
-                <option value="other">Other</option>
+                <option value="internal-task">Admin Work</option>
+                <option value="other">Meeting</option>
               </select>
             </div>
             <div>
@@ -468,7 +471,9 @@ export default function AppointmentForm({
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
             {type !== 'supervision' && (
               <div>
-                <label style={labelStyle}>{needsSupervisedBt ? 'Supervised BT (optional)' : 'Technician'}</label>
+                <label style={labelStyle}>
+                  {needsSupervisedBt ? 'Supervised BT (optional)' : 'Technician (Optional)'}
+                </label>
                 <select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} style={inputStyle}>
                   <option value="">— None —</option>
                   {technicians.map(t => <option key={t.id} value={t.name}>{t.name}{t.isRBT ? ' (RBT)' : ''}</option>)}
@@ -496,7 +501,7 @@ export default function AppointmentForm({
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '16px' }}>
             <div>
               <label style={labelStyle}>Start time *</label>
               <input type="time" step="900" value={startClock} onChange={(e) => handleStartChange(e.target.value)} style={inputStyle} />

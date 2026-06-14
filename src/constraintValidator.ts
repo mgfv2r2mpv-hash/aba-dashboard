@@ -61,6 +61,9 @@ export class ConstraintValidator {
     const conflicts: ScheduleConflict[] = [];
     const fmt = (n: number) => (Math.round(n * 10) / 10).toString();
 
+    const isUnstaffed = (clientId: string): boolean =>
+      !this.data.technicians.some(t => t.assignments.some(a => a.clientId === clientId));
+
     for (const client of this.data.clients) {
       const cs = computeCaseState(this.data, client, this.now);
       if (!cs.auth) continue;
@@ -72,13 +75,22 @@ export class ConstraintValidator {
           severity: 'warning',
           message: `${client.name}: ${fmt(cs.direct.actualThisWk)}h direct scheduled this week vs ${fmt(cs.direct.authPerWk)}h authorized/week — overage is unbillable`,
         });
-      } else if (cs.direct.below75) {
-        // 75% staffing is a soft target.
-        conflicts.push({
-          type: 'scheduling-impossible',
-          severity: 'info',
-          message: `${client.name}: direct ${fmt(cs.direct.actualThisWk)}h is ${Math.round(cs.direct.pctOfAuth)}% of the ${fmt(cs.direct.authPerWk)}h/wk authorization (below the 75% staffing target)`,
-        });
+      } else if (cs.direct.belowTarget) {
+        if (isUnstaffed(client.id)) {
+          // Suppress utilization violation; emit a staff issue instead.
+          conflicts.push({
+            type: 'scheduling-impossible',
+            severity: 'info',
+            message: `${client.name}: no BT assigned — direct service hours not tracked`,
+          });
+        } else {
+          const targetPct = client.directUtilizationTarget ?? 75;
+          conflicts.push({
+            type: 'scheduling-impossible',
+            severity: 'info',
+            message: `${client.name}: direct ${fmt(cs.direct.actualThisWk)}h is ${Math.round(cs.direct.pctOfAuth)}% of the ${fmt(cs.direct.authPerWk)}h/wk authorization (below ${targetPct}% targeted utilization)`,
+          });
+        }
       }
 
       // Supervision pacing cadence (soft).
@@ -171,6 +183,17 @@ export class ConstraintValidator {
             affectedTechnicians: [tc.tech.id],
           });
         }
+      } else if (tc.projected.directHours > 0) {
+        // Non-RBT BTs with direct sessions need at least 1 supervision contact per month.
+        const projContacts = computeTechContactDays(this.data, tc.tech, period, 'projected', this.now);
+        if (projContacts < 1) {
+          conflicts.push({
+            type: 'supervision-violation',
+            severity: 'warning',
+            message: `${tc.tech.name}: no supervision contact days projected for ${period.label} — at least 1 supervised observation required`,
+            affectedTechnicians: [tc.tech.id],
+          });
+        }
       }
     }
 
@@ -222,7 +245,9 @@ export class ConstraintValidator {
 
     // Per-client validation: minimum/target are company-wide defaults, but the
     // per-case max (Client.parentTrainingMaxHours) overrides them when lower.
+    // Clients with disablePTRequirements are fully exempted.
     this.data.clients.forEach(client => {
+      if (client.disablePTRequirements) return;
       const caseMax = client.parentTrainingMaxHours;
       // If a case max is set and is below the target floor, the case max becomes
       // the effective minimum too (we don't fault a client for being below target

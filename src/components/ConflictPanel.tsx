@@ -1,8 +1,6 @@
 import React from 'react';
 import { ScheduleConflict, Appointment, PartyAvailability } from '../types';
 
-// "16:30" → "4:30 PM". Availability windows and slot times are stored as 24h
-// HH:MM; render them 12h to match the rest of the app's locale formatting.
 function fmt12(hhmm: string): string {
   const [hStr, mStr] = hhmm.split(':');
   const h = Number(hStr);
@@ -27,28 +25,104 @@ function windowsText(p: PartyAvailability): string {
   return p.windows.map(w => `${fmt12(w.start)} – ${fmt12(w.end)}`).join(', ');
 }
 
-// A stable per-instance key for a conflict. Includes the message and (for
-// availability conflicts) the date, so a mute/dismiss applies ONLY to that exact
-// instance — the same kind of conflict in a future month has a different date /
-// message and is therefore NOT muted automatically.
 export function conflictKey(c: ScheduleConflict): string {
   const appts = (c.affectedAppointments || []).join(',');
   const date = c.availabilityDetail?.date || '';
   return `${c.type}|${c.severity}|${appts}|${date}|${c.message}`;
 }
 
+// Human-readable title derived from conflict type + message content.
+export function conflictTitle(c: ScheduleConflict): string {
+  const msg = c.message.toLowerCase();
+  switch (c.type) {
+    case 'availability-conflict':
+      return 'Availability Conflict';
+    case 'training-violation':
+      if (msg.includes('below') || msg.includes('minimum') || msg.includes('too low') || msg.includes('under'))
+        return 'PT Below Minimum';
+      if (msg.includes('above') || msg.includes('maximum') || msg.includes('exceeds') || msg.includes('over'))
+        return 'PT Over Maximum';
+      return 'Parent Training Issue';
+    case 'supervision-violation':
+      if (msg.includes('contact') || msg.includes('count'))
+        return 'Supervision Contact Shortfall';
+      if (msg.includes('percent') || msg.includes('%'))
+        return 'Supervision % Gap';
+      return 'Supervision Gap';
+    case 'scheduling-impossible':
+      if (msg.includes('no bt') || msg.includes('not assigned') || msg.includes('unstaff'))
+        return 'No BT Assigned';
+      if (msg.includes('utilization') || msg.includes('below') && msg.includes('%'))
+        return 'Below Targeted Utilization';
+      if (msg.includes('authorization') && (msg.includes('over') || msg.includes('exceed')))
+        return 'Over Authorization';
+      if (msg.includes('billable') && msg.includes('minimum'))
+        return 'Below Billable Minimum';
+      if (msg.includes('reassessment'))
+        return 'Reassessment Pacing';
+      if (msg.includes('double') || msg.includes('concurrent'))
+        return 'Concurrent Booking';
+      return 'Scheduling Issue';
+    default:
+      return c.type.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  }
+}
+
+// Per-type ordering weight for sorting within a severity bucket.
+function typeWeight(c: ScheduleConflict): number {
+  switch (c.type) {
+    case 'availability-conflict': return 0;
+    case 'supervision-violation': return 1;
+    case 'training-violation': return 2;
+    case 'scheduling-impossible': {
+      const msg = c.message.toLowerCase();
+      if (msg.includes('no bt') || msg.includes('unstaff')) return 4;
+      return 3;
+    }
+    default: return 5;
+  }
+}
+
+function severityWeight(c: ScheduleConflict): number {
+  switch (c.severity) {
+    case 'error': return 0;
+    case 'warning': return 1;
+    default: return 2;
+  }
+}
+
+function sortConflicts(cs: ScheduleConflict[]): ScheduleConflict[] {
+  return [...cs].sort((a, b) => {
+    const sw = severityWeight(a) - severityWeight(b);
+    if (sw !== 0) return sw;
+    const tw = typeWeight(a) - typeWeight(b);
+    if (tw !== 0) return tw;
+    // More affected appointments = larger problem = first
+    return (b.affectedAppointments?.length ?? 0) - (a.affectedAppointments?.length ?? 0);
+  });
+}
+
+// Background color for each conflict type / sub-type.
+function cardBackground(c: ScheduleConflict): string {
+  if (c.type === 'training-violation') {
+    const msg = c.message.toLowerCase();
+    if (msg.includes('below') || msg.includes('minimum') || msg.includes('too low') || msg.includes('under'))
+      return '#fff7ed'; // light orange for PT below minimum
+    return '#fee2e2';   // light red for PT over maximum
+  }
+  if (c.severity === 'error') return '#fee2e2';
+  if (c.severity === 'warning') return '#fef3c7';
+  // Info — check sub-type
+  const msg = c.message.toLowerCase();
+  if (msg.includes('no bt') || msg.includes('unstaff')) return '#fefce8'; // light yellow
+  return '#eff6ff'; // default info: light blue
+}
+
 interface ConflictPanelProps {
   conflicts: ScheduleConflict[];
   appointments?: Appointment[];
   onSelectAppointment?: (a: Appointment) => void;
-  // Docked-pane mode: stretch to the full height of the scroll region so the
-  // issues list fills to the bottom of the frozen pane (and scrolls when long)
-  // instead of ending partway and leaving dead space. Narrow layout omits this.
   fill?: boolean;
-  // Per-instance mute/dismiss. Muted conflicts drop into a minimized bin at the
-  // bottom; "confirm & dismiss" removes a (non-error) conflict outright. Keys
-  // come from conflictKey(); the parent owns the sets so both ConflictPanel
-  // instances (schedule pane + compliance tab) stay consistent.
   mutedKeys?: string[];
   onMute?: (key: string) => void;
   onUnmute?: (key: string) => void;
@@ -58,40 +132,34 @@ interface ConflictPanelProps {
 export default function ConflictPanel({ conflicts, appointments = [], onSelectAppointment, fill, mutedKeys, onMute, onUnmute, onConfirmDismiss }: ConflictPanelProps) {
   const [showMuted, setShowMuted] = React.useState(false);
   const muted = new Set(mutedKeys || []);
-  const active = conflicts.filter(c => !muted.has(conflictKey(c)));
+  const active = sortConflicts(conflicts.filter(c => !muted.has(conflictKey(c))));
   const mutedConflicts = conflicts.filter(c => muted.has(conflictKey(c)));
   const errorCount = active.filter(c => c.severity === 'error').length;
   const warningCount = active.filter(c => c.severity === 'warning').length;
 
   const getIcon = (severity: string) => {
     switch (severity) {
-      case 'error':
-        return '❌';
-      case 'warning':
-        return '⚠️';
-      default:
-        return 'ℹ️';
+      case 'error': return '❌';
+      case 'warning': return '⚠️';
+      default: return 'ℹ️';
     }
   };
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case 'error':
-        return '#dc2626';
-      case 'warning':
-        return '#f59e0b';
-      default:
-        return '#3b82f6';
+      case 'error': return '#dc2626';
+      case 'warning': return '#f59e0b';
+      default: return '#3b82f6';
     }
   };
 
   const renderCard = (conflict: ScheduleConflict, idx: number, isMuted: boolean) => {
     const key = conflictKey(conflict);
+    const title = conflictTitle(conflict);
+    const bg = cardBackground(conflict);
     const affectedAppts = (conflict.affectedAppointments || [])
       .map(id => appointments.find(a => a.id === id))
       .filter((a): a is Appointment => Boolean(a));
-    // "Confirm & dismiss" is for warnings/info (e.g. an out-of-window session
-    // the BCBA has decided is fine) — errors must be resolved, not dismissed.
     const canDismiss = !!onConfirmDismiss && conflict.severity !== 'error';
     return (
       <div
@@ -99,18 +167,18 @@ export default function ConflictPanel({ conflicts, appointments = [], onSelectAp
         style={{
           padding: '12px',
           marginBottom: '8px',
-          backgroundColor: conflict.severity === 'error' ? '#fee2e2' : '#fef3c7',
+          backgroundColor: bg,
           border: `1px solid ${getSeverityColor(conflict.severity)}`,
           borderRadius: '6px',
           fontSize: '12px',
           opacity: isMuted ? 0.7 : 1,
         }}
       >
-        <div style={{ marginBottom: '4px', fontWeight: 'bold', display: 'flex', gap: '4px' }}>
+        <div style={{ marginBottom: '4px', fontWeight: 'bold', display: 'flex', gap: '6px', alignItems: 'center' }}>
           <span>{getIcon(conflict.severity)}</span>
-          <span>{conflict.type}</span>
+          <span style={{ color: '#1f2937' }}>{title}</span>
         </div>
-        <p style={{ color: '#374151' }}>{conflict.message}</p>
+        <p style={{ color: '#374151', margin: '4px 0' }}>{conflict.message}</p>
         {conflict.availabilityDetail && (() => {
           const d = conflict.availabilityDetail;
           return (
@@ -164,7 +232,7 @@ export default function ConflictPanel({ conflicts, appointments = [], onSelectAp
               ? (onUnmute && <button onClick={() => onUnmute(key)} style={actionBtn}>Unmute</button>)
               : (
                 <>
-                  {canDismiss && <button onClick={() => onConfirmDismiss!(key)} style={confirmBtn}>✓ Confirm &amp; dismiss</button>}
+                  {canDismiss && <button onClick={() => onConfirmDismiss!(key)} style={confirmBtn}>✓ Confirm &amp; Dismiss</button>}
                   {onMute && <button onClick={() => onMute(key)} style={actionBtn}>🔇 Mute</button>}
                 </>
               )}
@@ -177,19 +245,13 @@ export default function ConflictPanel({ conflicts, appointments = [], onSelectAp
   return (
     <div style={{
       padding: '16px', boxSizing: 'border-box',
-      // Fill the pane to the bottom when docked; otherwise a divider under the
-      // (page-flow) list in the narrow layout.
       ...(fill ? { minHeight: '100%' } : { borderBottom: '1px solid #e5e7eb' }),
     }}>
       <h3 style={{ marginBottom: '12px', display: 'flex', gap: '8px', alignItems: 'center' }}>
         Issues Found
-        {errorCount > 0 && <span style={{ color: '#dc2626', fontWeight: 'bold' }}>({errorCount} errors)</span>}
-        {warningCount > 0 && <span style={{ color: '#f59e0b', fontWeight: 'bold' }}>({warningCount} warnings)</span>}
+        {errorCount > 0 && <span style={{ color: '#dc2626', fontWeight: 'bold' }}>({errorCount} error{errorCount !== 1 ? 's' : ''})</span>}
+        {warningCount > 0 && <span style={{ color: '#f59e0b', fontWeight: 'bold' }}>({warningCount} warning{warningCount !== 1 ? 's' : ''})</span>}
       </h3>
-      {/* No height cap: in the docked frozen pane this list fills the space left
-          by the hours summary and the slide-up appointment, and overflow scrolls
-          in the pane's own scroll region; in the narrow single-column layout the
-          page scrolls. The old 300px cap kept it stuck "very short" either way. */}
       <div>
         {active.length === 0 && mutedConflicts.length > 0 && (
           <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 8px' }}>No active issues — all muted below.</p>
@@ -197,7 +259,6 @@ export default function ConflictPanel({ conflicts, appointments = [], onSelectAp
         {active.map((conflict, idx) => renderCard(conflict, idx, false))}
       </div>
 
-      {/* Muted bin — minimized by default, pinned to the bottom of the list. */}
       {mutedConflicts.length > 0 && (
         <div style={{ marginTop: 8, borderTop: '1px dashed #d1d5db', paddingTop: 8 }}>
           <button

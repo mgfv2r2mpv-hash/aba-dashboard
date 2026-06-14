@@ -50,6 +50,11 @@ export interface Client {
   // Free-text anticipated discharge note/date (e.g. EI transition at age 3).
   anticipatedDischarge?: string;
   notes?: string;
+  // When true, skips all PT-minimum validation for this client (absolute override).
+  disablePTRequirements?: boolean;
+  // Per-case direct utilization floor (%). Default 75. If direct hours fall below
+  // this % of authorization, a "Below Targeted Utilization" issue is emitted.
+  directUtilizationTarget?: number;
 }
 
 export interface Technician {
@@ -516,6 +521,9 @@ export interface ScheduleData {
   // backward compatibility; treat absent as [].
   authorizations?: Authorization[];
   manualUsage?: ManualUsage[];
+  // Per-instance conflict keys that the user has confirmed & dismissed. Stored in
+  // the schedule so dismissals survive page reload and round-trip through Excel.
+  confirmedConflicts?: string[];
   lastModified: string; // ISO 8601
 }
 
@@ -579,6 +587,7 @@ export type WishKind =
   | 'vacation'      // block off a date range (reschedule my sessions out of it)
   | 'clearWindow'   // free up a recurring weekday/time window, going forward
   | 'addRecurring'  // add a recurring session into a tight schedule
+  | 'shaveDown'     // trim over-served supervision to free capacity
   | 'freeform';     // anything else, described in the note
 
 export interface WishRequest {
@@ -634,6 +643,9 @@ export interface FixItOptions {
   excludedClientIds: string[];
   // Forward horizon in weeks (default handled by the composer).
   horizonWeeks?: number;
+  // Weighting hints passed to the AI prompt.
+  prioritizeBtSupervision?: boolean;
+  prioritizeParentTraining?: boolean;
 }
 
 export const DEFAULT_FIXIT_OPTIONS: FixItOptions = {

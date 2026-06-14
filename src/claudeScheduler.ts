@@ -15,7 +15,7 @@ import { allowedStrategies } from './fixit';
 import { computeClientCompliance, computeTechCompliance, monthPeriod } from './compliance';
 import { resolveUtilization } from './utilization';
 
-export type ClaudeModel = 'claude-opus-4-7' | 'claude-sonnet-4-6' | 'claude-haiku-4-5';
+export type ClaudeModel = 'claude-opus-4-8' | 'claude-sonnet-4-6' | 'claude-haiku-4-5-20251001';
 
 export const DEFAULT_MODEL: ClaudeModel = 'claude-sonnet-4-6';
 
@@ -107,7 +107,7 @@ export class ClaudeScheduler {
     return parseWishSolutions(content.text, token => this.anonMap.reverse.get(token));
   }
 
-  private buildFixItPrompt(options: FixItOptions, conflicts: string[]): string {
+  buildFixItPrompt(options: FixItOptions, conflicts: string[]): string {
     const now = new Date();
     const horizonWeeks = options.horizonWeeks && options.horizonWeeks > 0 ? options.horizonWeeks : 4;
     const horizonEnd = new Date(now.getTime() + horizonWeeks * 7 * 86400000);
@@ -172,6 +172,8 @@ HARD RULES:
 - Respect technician and client availability windows; never double-book a person; never move a technician off another client's session.
 - ${billableRule}
 - Prefer the fewest, smallest additions that close the gaps. Don't over-serve past the target.
+${options.prioritizeBtSupervision ? '- PRIORITY: Prefer solutions that add or maintain BT supervision coverage (supervised direct sessions with a named BT).' : ''}
+${options.prioritizeParentTraining ? '- PRIORITY: Prefer solutions that include parent training sessions.' : ''}
 
 APPOINTMENTS IN SCOPE (JSON): ${JSON.stringify(inScope)}
 CLIENTS (JSON): ${JSON.stringify(anon.clients)}

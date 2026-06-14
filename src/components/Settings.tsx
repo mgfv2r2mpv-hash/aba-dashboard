@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 
-export type ClaudeModel = 'claude-opus-4-7' | 'claude-sonnet-4-6' | 'claude-haiku-4-5';
+export type ClaudeModel = 'claude-opus-4-8' | 'claude-sonnet-4-6' | 'claude-haiku-4-5-20251001';
 
 export interface AISettings {
   apiKey: string;
@@ -35,8 +35,8 @@ interface SettingsProps {
 
 const MODEL_OPTIONS: { value: ClaudeModel; label: string; description: string }[] = [
   {
-    value: 'claude-opus-4-7',
-    label: 'Opus 4.7',
+    value: 'claude-opus-4-8',
+    label: 'Opus 4.8',
     description: 'Best for complex multi-week scheduling. Slower, more expensive.',
   },
   {
@@ -45,7 +45,7 @@ const MODEL_OPTIONS: { value: ClaudeModel; label: string; description: string }[
     description: 'Balanced quality, speed, and cost. Recommended for most cases.',
   },
   {
-    value: 'claude-haiku-4-5',
+    value: 'claude-haiku-4-5-20251001',
     label: 'Haiku 4.5',
     description: 'Fastest and cheapest. Good for simple single-week conflicts.',
   },
@@ -54,6 +54,14 @@ const MODEL_OPTIONS: { value: ClaudeModel; label: string; description: string }[
 export default function Settings({ settings, onSave, onClose, onClearKey, onRequestUnlock, lock }: SettingsProps) {
   const [model, setModel] = useState<ClaudeModel>(settings.model);
   const [showKey, setShowKey] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [atBottom, setAtBottom] = useState(false);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setAtBottom(el.scrollTop + el.clientHeight >= el.scrollHeight - 40);
+  };
 
   // The API key mirrors the schedule-password UX: once set it is never shown
   // again (it is sealed under the app PIN at rest). Replacing it requires
@@ -120,22 +128,29 @@ export default function Settings({ settings, onSave, onClose, onClearKey, onRequ
       <div style={{
         backgroundColor: 'white',
         borderRadius: '8px',
-        padding: '20px',
         width: '100%',
         maxWidth: 500,
         maxHeight: '100%',
-        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
         boxSizing: 'border-box',
+        position: 'relative',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2 style={{ fontSize: '20px', fontWeight: 'bold' }}>AI Settings</h2>
-          <button
-            onClick={onClose}
-            style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}
-          >
-            ✕
-          </button>
+        {/* Fixed header */}
+        <div style={{ padding: '20px 20px 0', flexShrink: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 'bold' }}>Settings</h2>
+            <button
+              onClick={onClose}
+              style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}
+            >
+              ✕
+            </button>
+          </div>
         </div>
+
+        {/* Scrollable body */}
+        <div ref={scrollRef} onScroll={handleScroll} style={{ padding: '0 20px 80px', overflowY: 'auto', flex: 1 }}>
 
         {/* Model Toggle */}
         <div style={{ marginBottom: '24px' }}>
@@ -347,34 +362,31 @@ export default function Settings({ settings, onSave, onClose, onClearKey, onRequ
           </div>
         )}
 
-        {/* Actions */}
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <button
-            onClick={onClose}
-            style={{
-              padding: '8px 16px',
-              border: '1px solid #d1d5db',
-              borderRadius: '6px',
-              background: 'white',
-              cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            style={{
-              padding: '8px 16px',
-              backgroundColor: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-            }}
-          >
-            Save
-          </button>
-        </div>
+        </div>{/* end scrollable body */}
+
+        {/* Floating Save button — slides from bottom-right to top-right as user scrolls to bottom */}
+        <button
+          onClick={handleSave}
+          style={{
+            position: 'absolute',
+            right: 16,
+            top: atBottom ? 16 : undefined,
+            bottom: atBottom ? undefined : 16,
+            padding: '10px 20px',
+            backgroundColor: '#3b82f6',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: 600,
+            fontSize: 14,
+            boxShadow: '0 2px 8px rgba(59,130,246,0.4)',
+            transition: 'top 0.3s ease, bottom 0.3s ease',
+            zIndex: 10,
+          }}
+        >
+          Save
+        </button>
       </div>
     </div>
   );

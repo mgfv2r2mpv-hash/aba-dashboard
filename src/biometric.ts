@@ -1,42 +1,54 @@
 // Face ID / Touch ID wiring.
 //
-// We use the plugin's own exported `BiometricAuth` proxy rather than a
-// hand-rolled registerPlugin(): the native bridge registers under the name
-// "BiometricAuthNative" (with an `internalAuthenticate` method) and the package
-// wraps it with JS-side logic, so calling registerPlugin('BiometricAuth')
-// ourselves binds to nothing native and always reports unavailable. The package
-// ships a web implementation that reports unavailable, and every call here is
-// guarded by Capacitor.isNativePlatform() first, so the web build is a no-op
-// (web has no lock).
+// We bind directly to the plugin's *native* bridge via registerPlugin(), rather
+// than importing @aparajita/capacitor-biometric-auth's JS wrapper. The wrapper
+// pulls in @capacitor/app (an app-resume listener) and lazy-loaded chunks at
+// startup, which crashed the iOS WebView on launch. The native plugin registers
+// as "BiometricAuthNative" with two methods — `checkBiometry` and
+// `internalAuthenticate` — and that's all we need. The npm package stays a
+// dependency only so `cap sync ios` includes that native pod in the build.
 //
-// Device requirement: add NSFaceIDUsageDescription to ios/App/App/Info.plist —
-// iOS crashes the first Face ID prompt without it (Touch ID needs no key).
+// Every call is guarded by Capacitor.isNativePlatform(), so the web build is a
+// no-op (web has no lock). On a real device, add NSFaceIDUsageDescription to
+// ios/App/App/Info.plist — iOS crashes the first Face ID prompt without it
+// (Touch ID needs no key).
 
-import { Capacitor } from '@capacitor/core';
-import { BiometricAuth, BiometryType } from '@aparajita/capacitor-biometric-auth';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 
-// iOS biometryType → user-facing label, so the lock screen and Settings name
-// the actual hardware instead of always saying "Face ID".
+// iOS biometryType values: 1 = Touch ID, 2 = Face ID.
+const TOUCH_ID = 1;
+const FACE_ID = 2;
+
+interface BiometricAuthNativePlugin {
+  checkBiometry(): Promise<{ isAvailable: boolean; biometryType: number }>;
+  internalAuthenticate(options: { reason?: string; cancelTitle?: string }): Promise<void>;
+}
+
+// Bind to the native plugin name exposed by the pod (see CAP_PLUGIN in the
+// package's ios/Plugin/Plugin.m).
+const Native = registerPlugin<BiometricAuthNativePlugin>('BiometricAuthNative');
+
+// User-facing label for whatever biometry the device exposes, for UI copy.
 export type BiometryLabel = 'Face ID' | 'Touch ID' | 'biometric unlock';
 
 export async function isBiometricAvailable(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return false;
   try {
-    const res = await BiometricAuth.checkBiometry();
-    return !!res.isAvailable;
+    const res = await Native.checkBiometry();
+    return !!res?.isAvailable;
   } catch {
     return false;
   }
 }
 
-// Friendly name for whatever biometry the device exposes, for UI copy. Falls
-// back to a generic phrase when the type is unknown or unavailable.
+// Names the actual hardware so the lock screen and Settings say "Touch ID" /
+// "Face ID" instead of always "Face ID". Falls back to a generic phrase.
 export async function getBiometryLabel(): Promise<BiometryLabel> {
   if (!Capacitor.isNativePlatform()) return 'biometric unlock';
   try {
-    const res = await BiometricAuth.checkBiometry();
-    if (res.biometryType === BiometryType.touchId) return 'Touch ID';
-    if (res.biometryType === BiometryType.faceId) return 'Face ID';
+    const res = await Native.checkBiometry();
+    if (res?.biometryType === TOUCH_ID) return 'Touch ID';
+    if (res?.biometryType === FACE_ID) return 'Face ID';
     return 'biometric unlock';
   } catch {
     return 'biometric unlock';
@@ -48,7 +60,7 @@ export async function getBiometryLabel(): Promise<BiometryLabel> {
 export async function biometricAuthenticate(reason: string): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return false;
   try {
-    await BiometricAuth.authenticate({ reason, cancelTitle: 'Use PIN' });
+    await Native.internalAuthenticate({ reason, cancelTitle: 'Use PIN' });
     return true;
   } catch {
     return false;

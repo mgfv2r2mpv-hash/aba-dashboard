@@ -7,10 +7,11 @@ import { Share } from '@capacitor/share';
 import { parseWorkbook } from './excelHandler';
 import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
-import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, Cancellation, cancellationReasonLabel } from './types';
+import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, Cancellation, cancellationReasonLabel } from './types';
 import Calendar, { HoursSummary } from './components/Calendar';
 import ConflictPanel from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
+import WishComposer from './components/WishComposer';
 import AdminPanel from './components/AdminPanel';
 import ComplianceDashboard from './components/ComplianceDashboard';
 import CaseloadView from './components/CaseloadView';
@@ -46,6 +47,7 @@ import {
 import { solveDraft, DraftStatus, PrioritizationChoice } from './draftSolver';
 import DraftTray from './components/DraftTray';
 import { ClaudeScheduler } from './claudeScheduler';
+import { applyWishSolution, wishSolutionToDraft } from './wish';
 
 // Route axios /api/* calls through an in-memory store on iOS/Android,
 // since the Express server isn't reachable from inside the WebView.
@@ -113,6 +115,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
+  const [showWish, setShowWish] = useState(false);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   // Whether the selected appointment's detail panel is expanded into its inline
   // edit form (slide-up), replacing the old edit modal on the schedule view.
@@ -569,6 +572,23 @@ export default function App() {
 
   const rejectAiSet = () => setSolutions([]);
 
+  // Wish It: Accept applies the whole solution (ops + any blackouts); Customize
+  // loads the appointment ops into the editable draft (and commits any blackouts,
+  // which aren't editable in the tray) so the BCBA can tweak before accepting.
+  const acceptWish = async (sol: WishSolution) => {
+    if (!scheduleData) return;
+    await commitScheduleData(applyWishSolution(scheduleData, sol));
+    setShowWish(false); setSelectedAppointment(null);
+  };
+
+  const customizeWish = (sol: WishSolution) => {
+    if (!scheduleData) return;
+    const { ops, blackouts } = wishSolutionToDraft(sol, scheduleData);
+    if (blackouts.length) commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] });
+    stageOps(ops);
+    setShowWish(false);
+  };
+
   // Refuse and log: commit the staged ADD requests as ghosts (visible reminders)
   // and discard the rest of the draft.
   const logAddsAsGhosts = async () => {
@@ -963,6 +983,7 @@ export default function App() {
             ) : (
               <>
                 {compactBtn('+', 'Add appointment', () => setShowAddAppointment(true), '#3b82f6')}
+                {compactBtn('✨', 'Wish It — AI schedule rework', () => setShowWish(true), '#7c3aed')}
                 <ViewTabs view={view} onChange={setView} compSummary={compSummary} />
                 {compactBtn('↓', 'Download', handleDownload, '#10b981')}
               </>
@@ -1270,6 +1291,16 @@ export default function App() {
           onSave={handleSaveAppointments}
           onDelete={handleDeleteAppointments}
           onCancel={() => setEditingAppointment(null)}
+        />
+      )}
+
+      {showWish && scheduleData && (
+        <WishComposer
+          data={scheduleData}
+          aiSettings={aiSettings}
+          onAccept={acceptWish}
+          onCustomize={customizeWish}
+          onClose={() => setShowWish(false)}
         />
       )}
 

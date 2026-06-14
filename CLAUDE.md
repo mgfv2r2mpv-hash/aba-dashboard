@@ -127,3 +127,20 @@ ask before each merge.
 - Phase B — compliance dashboard with per-client + per-tech: done
 - Phase C — "find a spot" suggestion engine: not started
 - Phase D — fieldwork hours tracking: deferred
+
+## AI scheduling — "Fix It" vs "Wish It"
+
+- **Fix It** (existing): `ClaudeScheduler.generateSolutions(changedAppt, conflicts)`
+  resolves a conflict the user already created; returns `ScheduleSolution[]`
+  (moves only), text-parsed.
+- **Wish It** (Change 3, `src/wish.ts` + `WishComposer.tsx`): goal-driven rework.
+  A structured NL composer (`WishRequest`: vacation / clearWindow / addRecurring /
+  freeform + fields) keeps the prompt compact. `ClaudeScheduler.generateWishSolutions`
+  sends the anonymized in-horizon schedule and asks for **strict JSON** ops
+  (move/add/remove/blackout); `parseWishSolutions` de-anonymizes via the reverse
+  map **per-field** (never string-replacing the whole reply — that would mangle
+  ISO timestamps). A chosen `WishSolution` → `wishSolutionToDraft` (draft ops +
+  blackouts): **Accept** applies all via `applyWishSolution`+commit; **Customize**
+  stages the appointment ops into the draft tray (blackouts commit immediately).
+  Pure logic unit-tested in `scripts/verify-wish.ts`. The live Anthropic call is
+  unrunnable without an API key, so all risk lives in the tested pure functions.

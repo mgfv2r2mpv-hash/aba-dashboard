@@ -48,10 +48,15 @@ ask before each merge.
   grader (`draftSolver`). Bucket/accrual config is `Settings.pto{Mode,Buckets,
   UnpaidEnabled}` cols + `PtoAccruals` + `PtoOpeningBalances` sheets; logic lives
   in `src/pto.ts` (`computePtoBalances`, `accruedForRule`). Mode `unlimited`
-  (default) tracks used-only; `accrual` reports opening+accrued−used. Only the
-  date-based accrual kinds (`semimonthly`,`everyNWeeks`) are computed — the
-  `perConverted*` kinds round-trip but are deferred (accrue 0). Round-trip +
-  logic covered by `scripts/verify-excel.ts` and `scripts/verify-pto.ts`.
+  (default) tracks used-only; `accrual` reports opening+accrued−used. All four
+  accrual kinds compute: date-based (`semimonthly`,`everyNWeeks`) and hours-based
+  (`perConvertedHours`,`perConvertedBonus`), where **converted = completed
+  billable BCBA hours** (`convertedBcbaHours` via `rollupHours(...).completed`) so
+  balances move as sessions are completed/reopened. `computePtoBalances` takes
+  `appointments` for this. The bonus is a simple threshold (`bonusHours` once
+  converted ≥ `bonusPerExtraHours`); the interval/"M consecutive" cadence is a
+  later refinement. Round-trip + logic covered by `scripts/verify-excel.ts` and
+  `scripts/verify-pto.ts`.
 - **Normalized, relational sheets:** `Clients`/`Technicians` hold scalars only;
   availability lives in one `Availability` sheet (`ownerType client|technician|
   clinician, ownerId, ownerName, day, start, end`, one row per window — this also

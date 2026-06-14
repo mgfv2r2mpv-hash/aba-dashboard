@@ -4,15 +4,25 @@
 //   'unlimited' — the app only tallies leave TAKEN (used hours); no accrual, no
 //                 remaining balance, never blocks. The safe default, and the home
 //                 for anyone whose real accrual rule isn't supported yet.
-//   'accrual'   — also accrues hours over time (date-based rules in Phase 1) and
-//                 reports remaining = opening + accrued − used.
+//   'accrual'   — also accrues hours over time and reports remaining = opening +
+//                 accrued − used.
 //
-// Phase 1 computes the two DATE-based accrual kinds (semimonthly, everyNWeeks).
-// The hours-based kinds (perConvertedHours / perConvertedBonus) round-trip and
-// show in the editor but are reported as "deferred" until Phase 2 — they accrue 0
-// for now rather than silently mis-counting.
+// Accrual kinds, all computed:
+//   semimonthly       — fixed hours on the 1st and 15th of every month.
+//   everyNWeeks       — fixed hours every N weeks on a weekday, from an anchor.
+//   perConvertedHours — `hours` per `perHours` of CONVERTED billable hours, where
+//                       "converted" = the BCBA's COMPLETED billable hours (a
+//                       scheduled session that was delivered/billed). Balances
+//                       therefore move as sessions are completed or reopened
+//                       (unconverted).
+//   perConvertedBonus — the per-converted base PLUS a bonus `bonusHours` once the
+//                       converted total since the opening date clears the
+//                       `bonusPerExtraHours` threshold. (A transparent reading of
+//                       the "extra hours" reward; the interval/"M consecutive"
+//                       cadence variant is a later refinement.)
 
-import { PtoConfig, PtoBucket, AccrualRule, TimeOff, DEFAULT_PTO_CONFIG, DATE_BASED_ACCRUALS, DayOfWeek } from './types';
+import { PtoConfig, PtoBucket, AccrualRule, TimeOff, Appointment, DEFAULT_PTO_CONFIG, DATE_BASED_ACCRUALS, DayOfWeek } from './types';
+import { rollupHours } from './utilization';
 
 export function resolvePtoConfig(c?: PtoConfig): PtoConfig {
   if (!c) return { ...DEFAULT_PTO_CONFIG };
@@ -58,12 +68,38 @@ const WEEKDAY_INDEX: Record<DayOfWeek, number> = {
   Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6,
 };
 
-// Hours a single rule grants in (since, asOf]. Date-based kinds are computed;
-// hours-based kinds return 0 (Phase 2).
-export function accruedForRule(rule: AccrualRule, since: Date | null, asOf: Date): number {
+// The BCBA's CONVERTED hours in (since, asOf] — completed billable BCBA hours
+// (a delivered/billed session). Drives the per-converted accrual kinds, so the
+// number rises when a session is completed and falls when it's reopened.
+export function convertedBcbaHours(appointments: Appointment[] | undefined, since: Date | null, asOf: Date): number {
+  if (!appointments?.length) return 0;
+  const sinceMs = since ? since.getTime() : -8.64e15; // ~ -Infinity, but a real ms
+  return rollupHours(appointments, sinceMs, asOf.getTime(), 'bcba').completed;
+}
+
+// Hours a single rule grants in (since, asOf]. Date-based kinds use the calendar;
+// the per-converted kinds use `convertedHours` (completed billable BCBA hours in
+// the same window) supplied by the caller.
+export function accruedForRule(rule: AccrualRule, since: Date | null, asOf: Date, convertedHours = 0): number {
   if (rule.enabled === false) return 0;
-  if (!DATE_BASED_ACCRUALS.includes(rule.kind)) return 0; // perConverted* deferred
   const hours = Number(rule.hours);
+
+  if (!DATE_BASED_ACCRUALS.includes(rule.kind)) {
+    // perConvertedHours / perConvertedBonus.
+    const per = Number(rule.perHours);
+    let granted = (Number.isFinite(hours) && hours > 0 && Number.isFinite(per) && per > 0)
+      ? Math.floor(convertedHours / per) * hours
+      : 0;
+    if (rule.kind === 'perConvertedBonus') {
+      const bonus = Number(rule.bonusHours);
+      const threshold = Number(rule.bonusPerExtraHours);
+      if (Number.isFinite(bonus) && bonus > 0 && Number.isFinite(threshold) && threshold > 0 && convertedHours >= threshold) {
+        granted += bonus;
+      }
+    }
+    return granted;
+  }
+
   if (!Number.isFinite(hours) || hours <= 0) return 0;
   const sinceMs = since ? since.getTime() : -Infinity;
   const asOfMs = asOf.getTime();
@@ -108,12 +144,18 @@ export interface BucketBalance {
   opening?: number;             // accrual mode only
   accrued?: number;             // accrual mode only
   remaining?: number;           // opening + accrued − used (accrual mode only)
-  hasDeferredRule?: boolean;    // a Phase-2 rule feeds this bucket but isn't computed yet
 }
 
 // Per-bucket balances as of `asOf` (defaults to now). In unlimited mode only
 // `used` is populated; in accrual mode opening/accrued/remaining are too.
-export function computePtoBalances(config: PtoConfig | undefined, timeOff: TimeOff[] | undefined, asOf: Date = new Date()): BucketBalance[] {
+// `appointments` feeds the per-converted accrual kinds (completed billable BCBA
+// hours), so balances react to sessions being completed/reopened.
+export function computePtoBalances(
+  config: PtoConfig | undefined,
+  timeOff: TimeOff[] | undefined,
+  appointments?: Appointment[],
+  asOf: Date = new Date(),
+): BucketBalance[] {
   const c = resolvePtoConfig(config);
   const buckets = activeBuckets(c);
   const entries = timeOff || [];
@@ -138,15 +180,14 @@ export function computePtoBalances(config: PtoConfig | undefined, timeOff: TimeO
       .map(o => parseDay(o.asOf))
       .filter((d): d is Date => !!d)
       .sort((a, b) => b.getTime() - a.getTime())[0] || null;
+    const converted = convertedBcbaHours(appointments, since, asOf);
 
     const rules = (c.accruals || []).filter(r => r.bucket === bucket);
-    const accrued = rules.reduce((s, r) => s + accruedForRule(r, since, asOf), 0);
-    const hasDeferredRule = rules.some(r => r.enabled !== false && !DATE_BASED_ACCRUALS.includes(r.kind));
+    const accrued = rules.reduce((s, r) => s + accruedForRule(r, since, asOf, converted), 0);
 
     out.opening = opening;
     out.accrued = accrued;
     out.remaining = opening + accrued - used;
-    if (hasDeferredRule) out.hasDeferredRule = true;
     return out;
   });
 }

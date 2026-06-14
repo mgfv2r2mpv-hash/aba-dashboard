@@ -157,6 +157,21 @@ console.log('past-only drafts');
   const nonBillableOverlap = appt({ type: 'internal-task', technician: 'T1', date: PAST, start: '11:00', end: '13:00', isBillable: false });
   s = solveDraft(makeData([existing]), [newAddOp(nonBillableOverlap)], NOW, baseSettings);
   check('past add, billable+nonbillable overlap → green (allowed)', s.grade === 'green', `${s.grade}/${s.label}`);
+
+  // BCBA concurrent care: a no-tech billable session (coordination-of-care /
+  // parent-training / supervision) overlapping a BT direct session is legitimate —
+  // the BCBA bills alongside the direct — so it must NOT be a double-book.
+  for (const t of ['case-planning', 'parent-training', 'supervision'] as const) {
+    const bcbaConcurrent = appt({ type: t, client: 'C1', date: PAST, start: '11:00', end: '13:00', isBillable: true });
+    const r = solveDraft(makeData([existing]), [newAddOp(bcbaConcurrent)], NOW, baseSettings);
+    check(`past add, BCBA ${t} overlapping a direct → green (concurrent care)`, r.grade === 'green', `${r.grade}/${r.label}`);
+  }
+
+  // But two BCBA (no-tech) billable sessions at once is still the BCBA double-booked.
+  const bcbaA = appt({ type: 'case-planning', client: 'C1', date: PAST, start: '14:00', end: '15:00', isBillable: true });
+  const bcbaB = appt({ type: 'parent-training', client: 'C1', date: PAST, start: '14:30', end: '15:30', isBillable: true });
+  s = solveDraft(makeData([bcbaA]), [newAddOp(bcbaB)], NOW, baseSettings);
+  check('past add, two BCBA billable overlap → red (BCBA double-booked)', s.grade === 'red' && s.label.includes('two billable'), `${s.grade}/${s.label}`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

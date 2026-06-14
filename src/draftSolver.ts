@@ -50,11 +50,6 @@ function toMin(hhmm: string): number { const [h, m] = hhmm.split(':').map(Number
 function dateStrOf(iso: string): string { return iso.slice(0, 10); }
 function durationMin(a: Appointment): number { return Math.round((ms(a.endTime) - ms(a.startTime)) / 60000); }
 
-// A session occupies the CLIENT's presence (so two can't overlap) unless it's
-// supervision (which is meant to overlap a direct) or an internal task.
-function occupiesClient(a: Appointment): boolean {
-  return a.type !== 'supervision' && a.type !== 'internal-task';
-}
 function isActive(a: Appointment): boolean {
   return a.status !== 'canceled' && !a.isGhost;
 }
@@ -88,14 +83,21 @@ function focusedConflicts(data: ScheduleData, weekStartMs: number[]): Conflict[]
   const sessions = data.appointments.filter(a => isActive(a) && inAffectedWeek(a));
   const conflicts: Conflict[] = [];
 
-  // Pairwise double-booking (same tech, or same client for client-occupying types).
+  // Pairwise double-booking — keyed on the PROVIDER, not the client. A single
+  // technician can't be in two overlapping sessions, and the lone BCBA can't be
+  // in two overlapping BILLABLE no-tech sessions (supervision / parent-training /
+  // coordination-of-care, etc.). A BCBA (no-tech) session overlapping a BT direct
+  // session is legitimate CONCURRENT care — that's how supervision and in-session
+  // parent training work — so it is NOT a conflict, even for the same client.
+  // (The all-billable filter in the past-only path still lets a non-billable task
+  // share a tech's slot.)
   for (let i = 0; i < sessions.length; i++) {
     for (let j = i + 1; j < sessions.length; j++) {
       const a = sessions[i], b = sessions[j];
       if (overlapHours(a, b) <= 0) continue;
       const sameTech = !!a.technician && (a.technician === b.technician);
-      const sameClient = !!a.client && (a.client === b.client);
-      if (sameTech || (sameClient && occupiesClient(a) && occupiesClient(b))) {
+      const bothBcbaBillable = bucketOf(a) === 'bcba' && bucketOf(b) === 'bcba';
+      if (sameTech || bothBcbaBillable) {
         conflicts.push({ ids: [a.id, b.id], kind: 'double-book' });
       }
     }

@@ -176,14 +176,16 @@ export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWi
     }
   };
 
-  const persistSettings = async (next: CompanySettings) => {
+  const persistSettings = async (next: CompanySettings): Promise<boolean> => {
     setSavingId('settings');
     setError(null);
     try {
       const res = await axios.post(`${API_BASE}/admin/settings`, next);
       onDataChange({ ...data, settings: res.data.settings });
+      return true;
     } catch (e: any) {
       setError(e.response?.data?.error || e.message);
+      return false;
     } finally {
       setSavingId(null);
     }
@@ -1342,9 +1344,11 @@ function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemo
         Sessions scheduled on a blackout day are flagged as conflicts, and the reason is kept here for review.
       </p>
 
-      {/* Add form */}
-      <div style={{ ...cardStyle, marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'flex-end' }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 180px', minWidth: 0 }}>
+      {/* Add form. Each field gets minWidth:0 so it shrinks instead of overflowing
+          into its neighbor (the iOS date control has a wide intrinsic size), and a
+          generous row/column gap keeps them from crowding when wrapped. */}
+      <div style={{ ...cardStyle, marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '14px 16px', alignItems: 'flex-end' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 200px', minWidth: 0 }}>
           <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Who</span>
           <select value={entityKey} onChange={e => setEntityKey(e.target.value)} style={inputStyle}>
             <option value="">— Pick staff or client —</option>
@@ -1360,11 +1364,11 @@ function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemo
             )}
           </select>
         </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 150px' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 150px', minWidth: 0 }}>
           <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Date</span>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
         </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 180px', minWidth: 0 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '2 1 200px', minWidth: 0 }}>
           <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Reason (optional)</span>
           <input
             type="text" value={reason} onChange={e => setReason(e.target.value)}
@@ -1372,7 +1376,7 @@ function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemo
             onKeyDown={e => { if (e.key === 'Enter') submit(); }}
           />
         </label>
-        <button onClick={submit} style={primaryBtn} disabled={!entityKey || !date}>+ Add blackout</button>
+        <button onClick={submit} style={{ ...primaryBtn, flex: '0 0 auto' }} disabled={!entityKey || !date}>+ Add blackout</button>
       </div>
 
       {blackouts.length === 0 ? (
@@ -1479,11 +1483,22 @@ function TimeOffTab({ timeOff, settings, appointments, savingId, onAdd, onRemove
   return (
     <div>
       <h3 style={{ marginBottom: '8px', fontSize: '18px', fontWeight: 'bold' }}>BCBA Time Off</h3>
-      <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '16px' }}>
-        Log your leave. Each day's hours lower that week's billable requirement by{' '}
+      <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '12px' }}>
+        Log your leave below. Each day's hours lower that week's billable requirement by{' '}
         <strong>{fmtHours(ratio)}h per PTO hour</strong> (so {fmtHours(8)}h off ={' '}
-        −{fmtHours(8 * ratio)}h). Change the ratio in <strong>Settings → Time off</strong>.
+        −{fmtHours(8 * ratio)}h).
       </p>
+
+      {/* Where the setup lives — this tab shows balances + logs leave; the rules,
+          buckets, mode, and ratio are configured under Settings. */}
+      <div style={{ ...cardStyle, marginBottom: '16px', padding: '10px 12px', background: '#f5f3ff', borderColor: '#ddd6fe' }}>
+        <div style={{ fontSize: '12px', color: '#5b21b6' }}>
+          <strong>Accrual setup is in Admin → Settings → "Time off."</strong> There you choose the
+          mode ({cfg.mode === 'accrual' ? 'currently Accrual' : 'currently Unlimited'}), buckets, the
+          deduction ratio, and—in accrual mode—your accrual rules and opening balances. This tab is
+          where you log leave and read the resulting balances.
+        </div>
+      </div>
 
       {/* Balances per bucket. Unlimited mode shows leave taken; accrual mode adds
           opening + accrued − remaining. */}
@@ -1514,27 +1529,28 @@ function TimeOffTab({ timeOff, settings, appointments, savingId, onAdd, onRemove
         )}
       </div>
 
-      {/* Add form */}
-      <div style={{ ...cardStyle, marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'flex-end' }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 150px' }}>
+      {/* Add form. minWidth:0 on every field so the wide iOS date control shrinks
+          instead of crowding its neighbor; generous row/column gap when wrapped. */}
+      <div style={{ ...cardStyle, marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '14px 16px', alignItems: 'flex-end' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 150px', minWidth: 0 }}>
           <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>From</span>
           <input type="date" value={start} onChange={e => { setStart(e.target.value); if (end < e.target.value) setEnd(e.target.value); }} style={inputStyle} />
         </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 150px' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 150px', minWidth: 0 }}>
           <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>To</span>
           <input type="date" value={end} min={start} onChange={e => setEnd(e.target.value)} style={inputStyle} />
         </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 120px' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 120px', minWidth: 0 }}>
           <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Hours / day</span>
           <input type="number" min="0" step="0.25" value={hours} onChange={e => setHours(e.target.value)} style={inputStyle} />
         </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 150px' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 150px', minWidth: 0 }}>
           <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Bucket</span>
           <select value={bucket} onChange={e => setBucket(e.target.value as PtoBucket)} style={inputStyle}>
             {buckets.map(b => <option key={b} value={b}>{ptoBucketLabel(b)}</option>)}
           </select>
         </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 180px', minWidth: 0 }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '2 1 180px', minWidth: 0 }}>
           <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Note (optional)</span>
           <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. beach trip" style={inputStyle}
             onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
@@ -1543,7 +1559,7 @@ function TimeOffTab({ timeOff, settings, appointments, savingId, onAdd, onRemove
           <input type="checkbox" checked={skipWeekends} onChange={e => setSkipWeekends(e.target.checked)} />
           Skip weekends
         </label>
-        <button onClick={submit} style={primaryBtn} disabled={!start || !end || !(perDay > 0) || end < start}>+ Add time off</button>
+        <button onClick={submit} style={{ ...primaryBtn, flex: '0 0 auto' }} disabled={!start || !end || !(perDay > 0) || end < start}>+ Add time off</button>
       </div>
 
       {timeOff.length === 0 ? (
@@ -1798,10 +1814,11 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
 function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard }: {
   settings: CompanySettings;
   saving: boolean;
-  onSave: (next: CompanySettings) => void;
+  onSave: (next: CompanySettings) => void | Promise<boolean | void>;
   onImportFile?: () => void;
   onRerunWizard?: () => void;
 }) {
+  const [justSaved, setJustSaved] = useState(false);
   const s = (n: number | undefined) => (n === undefined ? '' : String(n));
   const [directPct, setDirectPct] = useState(s(settings.supervisionDirectHoursPercent));
   const [rbtPct, setRbtPct] = useState(s(settings.supervisionRBTHoursPercent));
@@ -1842,7 +1859,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
     return Number.isFinite(n) ? n : undefined;
   };
 
-  const save = () => {
+  const save = async () => {
     const next: CompanySettings = {
       ...settings, // preserve clinicianAvailability + any legacy fields
       supervisionDirectHoursPercent: num(directPct, settings.supervisionDirectHoursPercent),
@@ -1875,14 +1892,27 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
       ptoBillableDeductionRatio: num(ptoRatio, DEFAULT_PTO_DEDUCTION_RATIO),
       pto: ptoCfg,
     };
-    onSave(next);
+    setJustSaved(false);
+    const ok = await onSave(next);
+    if (ok !== false) { setJustSaved(true); window.setTimeout(() => setJustSaved(false), 2500); }
   };
+
+  // Shared save control — rendered at the top AND bottom so the long form can be
+  // saved without scrolling back up, with an inline confirmation (the global
+  // error banner sits at the top of the panel, easy to miss when scrolled down).
+  const saveBar = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <button onClick={save} style={primaryBtn} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
+      {justSaved && <span style={{ color: '#15803d', fontWeight: 600, fontSize: 13 }}>✓ Saved</span>}
+      <span style={{ fontSize: 12, color: '#9ca3af' }}>Saves everything on this tab, including cancellation codes &amp; time-off rules.</span>
+    </div>
+  );
 
   return (
     <div style={{ maxWidth: 640 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: 8, flexWrap: 'wrap' }}>
         <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Company Settings</h3>
-        <button onClick={save} style={primaryBtn} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
+        {saveBar}
       </div>
 
       <SettingsSection title="Supervision targets">
@@ -1936,6 +1966,9 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
       </SettingsSection>
 
       <SettingsSection title="Cancellation reason codes">
+        <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 4px' }}>
+          Added, edited, or retired codes apply to the cancel dialog once you press <strong>Save settings</strong>.
+        </p>
         <CancellationCodesEditor codes={codes} onChange={setCodes} />
       </SettingsSection>
 
@@ -1979,6 +2012,10 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
           </div>
         </SettingsSection>
       )}
+
+      <div style={{ marginTop: '8px', paddingTop: '12px', borderTop: '1px solid #e5e7eb' }}>
+        {saveBar}
+      </div>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Appointment, ScheduleData } from '../types';
+import { Appointment, ScheduleData, ScheduleConflict, WishSolution } from '../types';
 import {
   ClientCompliance, TechCompliance, TechComplianceMetrics,
   computeClientCompliance, computeTechCompliance,
@@ -8,6 +8,9 @@ import {
 import { ComplianceCache } from '../complianceCache';
 import { BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
 import CompleteTimePrompt from './CompleteTimePrompt';
+import ConflictPanel from './ConflictPanel';
+import FixItPanel from './FixItPanel';
+import { AISettings } from './Settings';
 
 interface Props {
   data: ScheduleData;
@@ -15,12 +18,27 @@ interface Props {
   // App. When the viewed period is the cached one, read from it (instant +
   // consistent with the header badge); other months compute on demand.
   cache?: ComplianceCache | null;
+  // Calendar-scoped schedule warnings (errors/warnings), shown in a collapsible
+  // area so the Compliance tab is the one place to see everything that needs
+  // attention. May be omitted (treated as none).
+  conflicts?: ScheduleConflict[];
+  aiSettings?: AISettings;
+  // Conflict triage (mute / confirm-dismiss), owned by App and threaded to the
+  // warnings ConflictPanel so it stays consistent with the schedule view's.
+  mutedConflictKeys?: string[];
+  onMuteConflict?: (key: string) => void;
+  onUnmuteConflict?: (key: string) => void;
+  onConfirmDismissConflict?: (key: string) => void;
   onMarkComplete: (a: Appointment) => void;
   onRequestCancel: (a: Appointment) => void;
   onSelectAppointment: (a: Appointment) => void;
+  // "Fix It" actions — accept applies a proposed solution; customize stages it
+  // into the editable draft. Optional (the panel hides its buttons without them).
+  onAcceptFix?: (sol: WishSolution) => void | Promise<void>;
+  onCustomizeFix?: (sol: WishSolution) => void;
 }
 
-export default function ComplianceDashboard({ data, cache, onMarkComplete, onRequestCancel, onSelectAppointment }: Props) {
+export default function ComplianceDashboard({ data, cache, conflicts = [], aiSettings, mutedConflictKeys, onMuteConflict, onUnmuteConflict, onConfirmDismissConflict, onMarkComplete, onRequestCancel, onSelectAppointment, onAcceptFix, onCustomizeFix }: Props) {
   const [periodRef, setPeriodRef] = useState(new Date());
   const period = useMemo(() => monthPeriod(periodRef), [periodRef]);
   const usingCache = !!cache && cache.period.start.getTime() === period.start.getTime();
@@ -64,6 +82,28 @@ export default function ComplianceDashboard({ data, cache, onMarkComplete, onReq
         contributes 0 to compliance.
       </p>
 
+      {aiSettings && onAcceptFix && onCustomizeFix && (
+        <FixItPanel
+          data={data}
+          aiSettings={aiSettings}
+          conflicts={conflicts}
+          onAccept={onAcceptFix}
+          onCustomize={onCustomizeFix}
+        />
+      )}
+
+      {conflicts.length > 0 && (
+        <ScheduleWarnings
+          conflicts={conflicts}
+          appointments={data.appointments}
+          onSelect={onSelectAppointment}
+          mutedConflictKeys={mutedConflictKeys}
+          onMuteConflict={onMuteConflict}
+          onUnmuteConflict={onUnmuteConflict}
+          onConfirmDismissConflict={onConfirmDismissConflict}
+        />
+      )}
+
       {pastIncomplete.length > 0 && (
         <PastIncomplete
           items={pastIncomplete}
@@ -99,6 +139,47 @@ export default function ComplianceDashboard({ data, cache, onMarkComplete, onReq
         )}
         {techReports.map(r => <TechCard key={r.tech.id} report={r} maxPct={maxPct} />)}
       </div>
+    </div>
+  );
+}
+
+// The calendar's schedule warnings, surfaced on the Compliance tab in a
+// collapsible area (collapsed by default so the compliance cards lead). Reuses
+// ConflictPanel — which carries the per-conflict confirm/mute controls.
+function ScheduleWarnings({ conflicts, appointments, onSelect, mutedConflictKeys, onMuteConflict, onUnmuteConflict, onConfirmDismissConflict }: {
+  conflicts: ScheduleConflict[];
+  appointments: Appointment[];
+  onSelect: (a: Appointment) => void;
+  mutedConflictKeys?: string[];
+  onMuteConflict?: (key: string) => void;
+  onUnmuteConflict?: (key: string) => void;
+  onConfirmDismissConflict?: (key: string) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(true);
+  return (
+    <div style={{ marginBottom: 16, border: '1px solid #fcd34d', borderRadius: 8, overflow: 'hidden' }}>
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        style={{
+          width: '100%', background: '#fffbeb', border: 'none', cursor: 'pointer',
+          fontSize: 14, fontWeight: 700, color: '#92400e', padding: '10px 12px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+        }}
+      >
+        <span>⚠️ Schedule warnings ({conflicts.length})</span>
+        <span>{collapsed ? '▸' : '▾'}</span>
+      </button>
+      {!collapsed && (
+        <ConflictPanel
+          conflicts={conflicts}
+          appointments={appointments}
+          onSelectAppointment={onSelect}
+          mutedKeys={mutedConflictKeys}
+          onMute={onMuteConflict}
+          onUnmute={onUnmuteConflict}
+          onConfirmDismiss={onConfirmDismissConflict}
+        />
+      )}
     </div>
   );
 }

@@ -173,9 +173,35 @@ export interface CompanySettings {
   // PTO buckets / accrual / balances (Upgrade 2). Absent = DEFAULT_PTO_CONFIG
   // (unlimited mode, one combined pool, no balances).
   pto?: PtoConfig;
+  // Preselected default session lengths for BCBA (non-direct) appointment types.
+  // Absent = DEFAULT_BCBA_SESSION_DEFAULTS. Drives the auto-filled end time of a
+  // new appointment in AppointmentForm. See BcbaSessionDefaults.
+  bcbaSessionDefaults?: BcbaSessionDefaults;
 }
 
 export const DEFAULT_PTO_DEDUCTION_RATIO = 1;
+
+// Default session lengths for BCBA (non-direct) appointment types, used to
+// auto-fill a NEW appointment's end time the moment its type is chosen. Supervision
+// is special: it's a percentage of the client's authed weekly direct hours (a
+// per-case figure), so it's stored as a percent rather than a fixed length; the
+// rest are fixed hour counts. Direct (client-session) is unaffected — it keeps
+// drawing its duration from the client's authorized weekly direct rate.
+export interface BcbaSessionDefaults {
+  supervisionPercentOfWeeklyDirect: number; // supervision = this % of weekly direct
+  reassessmentHours: number;
+  casePlanningHours: number;
+  parentTrainingHours: number;
+  otherHours: number;
+}
+
+export const DEFAULT_BCBA_SESSION_DEFAULTS: BcbaSessionDefaults = {
+  supervisionPercentOfWeeklyDirect: 20,
+  reassessmentHours: 2,
+  casePlanningHours: 1,
+  parentTrainingHours: 1,
+  otherHours: 1,
+};
 
 export const DEFAULT_CANCELLATION_NOTICE = {
   unplannedHoursThreshold: 24,
@@ -573,7 +599,53 @@ export interface WishRequest {
   // How far forward the rework applies (weeks from today). Bounds the AI's scope
   // and the token budget. Default handled by the composer.
   horizonWeeks?: number;
+  // "Shave down sessions where I can": when set, the AI is invited to trim
+  // over-served supervision sessions from the preferred-max band down toward the
+  // largest of (preferred min, company floor, BACB 5% for RBTs) to free capacity,
+  // never dropping below that binding minimum. See claudeScheduler.buildWishPrompt.
+  shaveDown?: boolean;
 }
+
+// ── "Fix It" — AI-assisted compliance remediation ───────────────────────────
+// The wrench flow: the BCBA hands the AI their current compliance concerns and
+// schedule warnings and asks for up to 3 ways to close the gaps. The toggles
+// below tell the model which clinical tools it may reach for (and the excluded
+// clients tell it whom to leave out), so the prompt stays parsimonious and the
+// proposals stay within the BCBA's stated comfort zone. Output reuses the
+// WishSolution op shape (move/add/remove/blackout), so the same apply/customize
+// plumbing handles both flows.
+export interface FixItOptions {
+  // Propose supervision sessions that overlap a BT's direct (earns credit).
+  includeBtSupervision: boolean;
+  // Allow BCBA-solo supervision (no BT overlap) — does not earn supervision
+  // credit, but can be paired with a direct to make it count.
+  includeNoBtSupervision: boolean;
+  // Parent-training that overlaps (runs inside) a direct session — earns credit
+  // when it names the observed BT.
+  includeInSessionParentTraining: boolean;
+  // Parent-training scheduled outside any direct session (caregiver-only).
+  includeOutSessionParentTraining: boolean;
+  // Case-planning / coordination-of-care sessions.
+  includeCasePlanning: boolean;
+  // Permit proposals that drop the BCBA's weekly billable below the configured
+  // minimum (otherwise the minimum is a hard constraint on the proposals).
+  softenBillableMinimum: boolean;
+  // Client ids to leave OUT of consideration (their gaps are ignored).
+  excludedClientIds: string[];
+  // Forward horizon in weeks (default handled by the composer).
+  horizonWeeks?: number;
+}
+
+export const DEFAULT_FIXIT_OPTIONS: FixItOptions = {
+  includeBtSupervision: true,
+  includeNoBtSupervision: false,
+  includeInSessionParentTraining: true,
+  includeOutSessionParentTraining: false,
+  includeCasePlanning: true,
+  softenBillableMinimum: false,
+  excludedClientIds: [],
+  horizonWeeks: 4,
+};
 
 // One change the AI proposes. Tokens (APT_n/CLIENT_n/TECH_n) are de-anonymized to
 // real ids/names before this struct is built (see src/wish.ts).

@@ -21,17 +21,24 @@ function fmtTime(hhmm?: string): string { return hhmm || '—'; }
 // so we don't pay tokens for prose.
 export function summarizeWish(w: WishRequest): string {
   const horizon = w.horizonWeeks ? ` over the next ${w.horizonWeeks} weeks` : '';
+  const shave = w.shaveDown ? ' Also shave over-served supervision sessions down toward the minimum to free up capacity.' : '';
+  let base: string;
   switch (w.kind) {
     case 'vacation':
-      return `Block off ${w.dateStart || '?'}–${w.dateEnd || '?'} for time away and reschedule any of my sessions in that range while staying compliant.`;
+      base = `Block off ${w.dateStart || '?'}–${w.dateEnd || '?'} for time away and reschedule any of my sessions in that range while staying compliant.`;
+      break;
     case 'clearWindow':
-      return `Keep ${w.weekday || 'a chosen day'} ${fmtTime(w.windowStart)}–${fmtTime(w.windowEnd)}${w.everyOtherWeek ? ' (every other week)' : ''} free${horizon}, moving any sessions there elsewhere with minimal week-to-week change.`;
+      base = `Keep ${w.weekday || 'a chosen day'} ${fmtTime(w.windowStart)}–${fmtTime(w.windowEnd)}${w.everyOtherWeek ? ' (every other week)' : ''} free${horizon}, moving any sessions there elsewhere with minimal week-to-week change.`;
+      break;
     case 'addRecurring':
-      return `Add a recurring ${w.newType || 'session'}${w.client ? ` for ${w.client}` : ''} around ${w.weekday || 'a weekday'} ${fmtTime(w.windowStart)}${w.durationMins ? ` (${w.durationMins} min)` : ''}${horizon}, juggling the schedule to fit it with minimal disruption.`;
+      base = `Add a recurring ${w.newType || 'session'}${w.client ? ` for ${w.client}` : ''} around ${w.weekday || 'a weekday'} ${fmtTime(w.windowStart)}${w.durationMins ? ` (${w.durationMins} min)` : ''}${horizon}, juggling the schedule to fit it with minimal disruption.`;
+      break;
     case 'freeform':
     default:
-      return w.note?.trim() || 'Rework the schedule as described.';
+      base = w.note?.trim() || 'Rework the schedule as described.';
+      break;
   }
+  return base + shave;
 }
 
 // Pull the first JSON object out of a model reply that may be fenced or prefaced

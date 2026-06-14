@@ -9,7 +9,7 @@ import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
 import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, Cancellation, cancellationReasonLabel } from './types';
 import Calendar, { HoursSummary } from './components/Calendar';
-import ConflictPanel from './components/ConflictPanel';
+import ConflictPanel, { conflictKey } from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
 import WishComposer from './components/WishComposer';
 import AdminPanel from './components/AdminPanel';
@@ -109,6 +109,12 @@ function blobToBase64(blob: Blob): Promise<string> {
 export default function App() {
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
   const [conflicts, setConflicts] = useState<ScheduleConflict[]>([]);
+  // Per-instance conflict triage (session-scoped). A muted conflict drops into
+  // the minimized bin at the bottom of the issues list; a confirmed-and-dismissed
+  // one is hidden outright. Keyed by conflictKey() so each applies only to that
+  // exact instance (a future month's same-shaped conflict has a different key).
+  const [mutedConflicts, setMutedConflicts] = useState<string[]>([]);
+  const [dismissedConflicts, setDismissedConflicts] = useState<string[]>([]);
   const [solutions, setSolutions] = useState<ScheduleSolution[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [view, setView] = useState<'schedule' | 'admin' | 'compliance' | 'caseload'>('schedule');
@@ -177,6 +183,27 @@ export default function App() {
 
   const compSummary: ComplianceSummary | null =
     scheduleData && compCache ? summarize(compCache, scheduleData) : null;
+
+  // Conflict triage applied: dismissed are hidden everywhere; muted move to the
+  // bin (still passed through, the panel sorts them out via mutedConflicts).
+  const dismissedSet = new Set(dismissedConflicts);
+  const mutedSet = new Set(mutedConflicts);
+  const visibleConflicts = conflicts.filter(c => !dismissedSet.has(conflictKey(c)));
+  const activeConflicts = visibleConflicts.filter(c => !mutedSet.has(conflictKey(c)));
+
+  const muteConflict = (key: string) =>
+    setMutedConflicts(prev => (prev.includes(key) ? prev : [...prev, key]));
+  const unmuteConflict = (key: string) =>
+    setMutedConflicts(prev => prev.filter(k => k !== key));
+  const confirmDismissConflict = (key: string) =>
+    setDismissedConflicts(prev => (prev.includes(key) ? prev : [...prev, key]));
+
+  // "Fix It" is actionable when there's anything to fix — active calendar
+  // conflicts (errors/warnings, minus muted/dismissed) and/or compliance
+  // attention (clients/techs behind target). The wrench disables when 0.
+  const attentionCount = compSummary ? compSummary.red + compSummary.yellow : 0;
+  const issueCount = activeConflicts.length + attentionCount;
+  const hasIssues = issueCount > 0;
 
   // Past-dated sessions still marked scheduled — the day-review queue.
   const pendingReview = scheduleData ? pastIncompleteAppointments(scheduleData) : [];
@@ -589,6 +616,38 @@ export default function App() {
     setShowWish(false);
   };
 
+  // "Fix It" produces WishSolutions too, so accept/customize reuse the Wish
+  // plumbing — but they live on the Compliance tab, so after staging we jump to
+  // the Schedule view where the draft tray (Customize) or the committed change
+  // (Accept) is visible.
+  const acceptFix = async (sol: WishSolution) => {
+    if (!scheduleData) return;
+    await commitScheduleData(applyWishSolution(scheduleData, sol));
+    setView('schedule');
+  };
+
+  const customizeFix = (sol: WishSolution) => {
+    if (!scheduleData) return;
+    const { ops, blackouts } = wishSolutionToDraft(sol, scheduleData);
+    if (blackouts.length) commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] });
+    stageOps(ops);
+    setView('schedule');
+  };
+
+  // "Clear loaded data" (Admin → Settings). Drops the working schedule from the
+  // UI and returns to the upload/wizard empty state. The user is nudged to
+  // download first since this is destructive for unsaved changes.
+  const handleClearData = () => {
+    if (!confirm('Clear all loaded schedule data from the app? Download your schedule first if you haven\'t saved it — this cannot be undone.')) return;
+    setScheduleData(null);
+    setCompCache(null);
+    setConflicts([]);
+    setSolutions([]);
+    setDraftOps([]);
+    setSelectedAppointment(null);
+    setView('schedule');
+  };
+
   // Refuse and log: commit the staged ADD requests as ghosts (visible reminders)
   // and discard the rest of the draft.
   const logAddsAsGhosts = async () => {
@@ -770,22 +829,24 @@ export default function App() {
     }
   };
 
-  const compactBtn = (label: string, ariaLabel: string, onClick: () => void, color = '#374151') => (
+  const compactBtn = (label: string, ariaLabel: string, onClick: () => void, color = '#374151', disabled = false) => (
     <button
       onClick={onClick}
       aria-label={ariaLabel}
       title={ariaLabel}
+      disabled={disabled}
       style={{
         padding: '5px 9px',
-        backgroundColor: color,
-        color: 'white',
+        backgroundColor: disabled ? '#4b5563' : color,
+        color: disabled ? '#9ca3af' : 'white',
         border: 'none',
         borderRadius: 5,
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
         fontSize: 13,
         fontWeight: 600,
         whiteSpace: 'nowrap',
         lineHeight: 1.2,
+        opacity: disabled ? 0.6 : 1,
       }}
     >
       {label}
@@ -936,6 +997,7 @@ export default function App() {
           authorizations={scheduleData.authorizations}
           technicians={scheduleData.technicians}
           clients={scheduleData.clients}
+          settings={scheduleData.settings}
           onSave={handleSaveAppointments}
           onDelete={handleDeleteAppointments}
           onCancel={() => setInlineEdit(false)}
@@ -974,7 +1036,6 @@ export default function App() {
                 backgroundColor: '#10b981', display: 'inline-block',
               }} />
             )}
-            {compactBtn('⚙', 'Settings', () => setShowSettings(true))}
             {!scheduleData ? (
               <>
                 {compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6')}
@@ -983,9 +1044,15 @@ export default function App() {
             ) : (
               <>
                 {compactBtn('+', 'Add appointment', () => setShowAddAppointment(true), '#3b82f6')}
+                {compactBtn(
+                  '🔧',
+                  hasIssues ? `Fix It — ${issueCount} issue${issueCount === 1 ? '' : 's'} to resolve` : 'Fix It — no issues found',
+                  () => setView('compliance'),
+                  '#ea580c',
+                  !hasIssues,
+                )}
                 {compactBtn('✨', 'Wish It — AI schedule rework', () => setShowWish(true), '#7c3aed')}
                 <ViewTabs view={view} onChange={setView} compSummary={compSummary} />
-                {compactBtn('↓', 'Download', handleDownload, '#10b981')}
               </>
             )}
           </div>
@@ -1067,12 +1134,16 @@ export default function App() {
                         onLogGhosts={logAddsAsGhosts}
                       />
                     )}
-                    {!draftActive && conflicts.length > 0 && (
+                    {!draftActive && visibleConflicts.length > 0 && (
                       <ConflictPanel
-                        conflicts={conflicts}
+                        conflicts={visibleConflicts}
                         appointments={scheduleData?.appointments}
                         onSelectAppointment={setSelectedAppointment}
                         fill={splitView && solutions.length === 0}
+                        mutedKeys={mutedConflicts}
+                        onMute={muteConflict}
+                        onUnmute={unmuteConflict}
+                        onConfirmDismiss={confirmDismissConflict}
                       />
                     )}
                     {solutions.length > 0 && (
@@ -1084,7 +1155,7 @@ export default function App() {
                         onReject={rejectAiSet}
                       />
                     )}
-                    {!draftActive && conflicts.length === 0 && solutions.length === 0 && !selectedAppointment && (
+                    {!draftActive && visibleConflicts.length === 0 && solutions.length === 0 && !selectedAppointment && (
                       <AgendaRail
                         appointments={scheduleData.appointments}
                         date={viewDate}
@@ -1131,7 +1202,7 @@ export default function App() {
 
                   // Narrow: issues flow under the calendar (the selected
                   // appointment is handled by the slide-up sheet below).
-                  if (draftActive || conflicts.length > 0 || solutions.length > 0) {
+                  if (draftActive || visibleConflicts.length > 0 || solutions.length > 0) {
                     return (
                       <div ref={detailPanelRef} style={{
                         flex: '0 0 auto', width: 'min(350px, 100%)', borderLeft: '1px solid #e5e7eb',
@@ -1171,15 +1242,26 @@ export default function App() {
                 onDataChange={commitFull}
                 onImportFile={triggerImportPicker}
                 onRerunWizard={() => setShowWizard(true)}
+                onDownload={handleDownload}
+                onClearData={handleClearData}
+                onOpenAISettings={() => setShowSettings(true)}
               />
             )}
             {view === 'compliance' && (
               <ComplianceDashboard
                 data={scheduleData}
                 cache={compCache}
+                conflicts={visibleConflicts}
+                aiSettings={aiSettings}
+                mutedConflictKeys={mutedConflicts}
+                onMuteConflict={muteConflict}
+                onUnmuteConflict={unmuteConflict}
+                onConfirmDismissConflict={confirmDismissConflict}
                 onMarkComplete={handleMarkComplete}
                 onRequestCancel={(a) => setCancelTarget(a)}
                 onSelectAppointment={(a) => { setView('schedule'); setSelectedAppointment(a); }}
+                onAcceptFix={acceptFix}
+                onCustomizeFix={customizeFix}
               />
             )}
             {view === 'caseload' && (
@@ -1277,6 +1359,7 @@ export default function App() {
           authorizations={scheduleData.authorizations}
           technicians={scheduleData.technicians}
           clients={scheduleData.clients}
+          settings={scheduleData.settings}
           onSave={handleSaveAppointments}
           onCancel={() => setShowAddAppointment(false)}
         />
@@ -1289,6 +1372,7 @@ export default function App() {
           authorizations={scheduleData.authorizations}
           technicians={scheduleData.technicians}
           clients={scheduleData.clients}
+          settings={scheduleData.settings}
           onSave={handleSaveAppointments}
           onDelete={handleDeleteAppointments}
           onCancel={() => setEditingAppointment(null)}

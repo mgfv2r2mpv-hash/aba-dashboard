@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, Appointment } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, Appointment } from '../types';
 import { resolvePtoConfig, activeBuckets, ptoBucketLabel, computePtoBalances } from '../pto';
 import { computeAuthUsage, computeReportDates } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
@@ -13,12 +13,18 @@ interface AdminPanelProps {
   // Data-lifecycle actions surfaced at the bottom of the Settings tab.
   onImportFile?: () => void;
   onRerunWizard?: () => void;
+  // Download the current schedule (moved here from the top bar).
+  onDownload?: () => void;
+  // Clear the loaded schedule from the app (confirmed before wiping).
+  onClearData?: () => void;
+  // Open the AI Settings modal (moved here from the top-bar gear).
+  onOpenAISettings?: () => void;
 }
 
 const API_BASE = '/api';
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWizard }: AdminPanelProps) {
+export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'auths' | 'blackouts' | 'timeoff' | 'settings'>('technicians');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -425,6 +431,9 @@ export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWi
             onSave={persistSettings}
             onImportFile={onImportFile}
             onRerunWizard={onRerunWizard}
+            onDownload={onDownload}
+            onClearData={onClearData}
+            onOpenAISettings={onOpenAISettings}
           />
         )}
       </div>
@@ -1811,12 +1820,15 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
   );
 }
 
-function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard }: {
+function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings }: {
   settings: CompanySettings;
   saving: boolean;
   onSave: (next: CompanySettings) => void | Promise<boolean | void>;
   onImportFile?: () => void;
   onRerunWizard?: () => void;
+  onDownload?: () => void;
+  onClearData?: () => void;
+  onOpenAISettings?: () => void;
 }) {
   const [justSaved, setJustSaved] = useState(false);
   const s = (n: number | undefined) => (n === undefined ? '' : String(n));
@@ -1848,6 +1860,13 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
   const [codes, setCodes] = useState<CancellationCode[]>(() => resolveCancellationCodes(settings).map(c => ({ ...c })));
   const [ptoRatio, setPtoRatio] = useState(s(settings.ptoBillableDeductionRatio ?? DEFAULT_PTO_DEDUCTION_RATIO));
   const [ptoCfg, setPtoCfg] = useState<PtoConfig>(() => resolvePtoConfig(settings.pto));
+  // BCBA (non-direct) session-length defaults — auto-fill a new appointment's end.
+  const bsd = settings.bcbaSessionDefaults || DEFAULT_BCBA_SESSION_DEFAULTS;
+  const [supPct, setSupPct] = useState(s(bsd.supervisionPercentOfWeeklyDirect));
+  const [reassessHrs, setReassessHrs] = useState(s(bsd.reassessmentHours));
+  const [casePlanHrs, setCasePlanHrs] = useState(s(bsd.casePlanningHours));
+  const [parentTrainHrs, setParentTrainHrs] = useState(s(bsd.parentTrainingHours));
+  const [otherHrs, setOtherHrs] = useState(s(bsd.otherHours));
 
   const num = (str: string, fallback: number) => {
     const n = parseFloat(str);
@@ -1891,6 +1910,13 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
       cancellationReasons: codes,
       ptoBillableDeductionRatio: num(ptoRatio, DEFAULT_PTO_DEDUCTION_RATIO),
       pto: ptoCfg,
+      bcbaSessionDefaults: {
+        supervisionPercentOfWeeklyDirect: num(supPct, DEFAULT_BCBA_SESSION_DEFAULTS.supervisionPercentOfWeeklyDirect),
+        reassessmentHours: num(reassessHrs, DEFAULT_BCBA_SESSION_DEFAULTS.reassessmentHours),
+        casePlanningHours: num(casePlanHrs, DEFAULT_BCBA_SESSION_DEFAULTS.casePlanningHours),
+        parentTrainingHours: num(parentTrainHrs, DEFAULT_BCBA_SESSION_DEFAULTS.parentTrainingHours),
+        otherHours: num(otherHrs, DEFAULT_BCBA_SESSION_DEFAULTS.otherHours),
+      },
     };
     setJustSaved(false);
     const ok = await onSave(next);
@@ -1979,11 +2005,43 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
         <NumField label="BCBA monthly goal (5-week month)" value={bcbaMonthly5} onChange={setBcbaMonthly5} suffix="h/mo" hint="Used when the month spans 5+ weeks." />
       </SettingsSection>
 
+      <SettingsSection title="BCBA session-length defaults">
+        <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 4px' }}>
+          Auto-fills a new appointment's end time the moment you pick its type. Direct
+          (client) sessions still draw their length from the client's authorized weekly
+          direct rate.
+        </p>
+        <NumField label="Supervision (% of weekly direct hours)" value={supPct} onChange={setSupPct} suffix="%" hint="Default 20%. Computed per case from the client's authorized weekly direct hours." />
+        <NumField label="Reassessment" value={reassessHrs} onChange={setReassessHrs} suffix="h" />
+        <NumField label="Case planning" value={casePlanHrs} onChange={setCasePlanHrs} suffix="h" />
+        <NumField label="Parent training / coordination of care" value={parentTrainHrs} onChange={setParentTrainHrs} suffix="h" />
+        <NumField label="Other" value={otherHrs} onChange={setOtherHrs} suffix="h" />
+      </SettingsSection>
+
+      {onOpenAISettings && (
+        <SettingsSection title="AI">
+          <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+            Your Claude API key and model power "Fix It" and "Wish It". The key stays
+            in this browser session and rides inside downloaded schedules, lightly
+            obfuscated.
+          </p>
+          <div>
+            <button
+              onClick={onOpenAISettings}
+              style={{
+                padding: '8px 14px', backgroundColor: '#374151', color: 'white',
+                border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+              }}
+            >⚙ AI Settings</button>
+          </div>
+        </SettingsSection>
+      )}
+
       <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
         Clinician availability is still configured in the Setup Wizard.
       </p>
 
-      {(onImportFile || onRerunWizard) && (
+      {(onImportFile || onRerunWizard || onDownload || onClearData) && (
         <SettingsSection title="Data">
           <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
             Re-run the wizard to edit company settings, clients, and technicians
@@ -2009,7 +2067,43 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
                 }}
               >Upload schedule…</button>
             )}
+            {onDownload && (
+              <button
+                onClick={onDownload}
+                style={{
+                  padding: '8px 14px', backgroundColor: '#10b981', color: 'white',
+                  border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                }}
+              >↓ Download schedule</button>
+            )}
           </div>
+
+          {onClearData && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #e5e7eb' }}>
+              <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 8px' }}>
+                Clearing wipes the schedule loaded in the app. If you haven't saved
+                your work, <strong>download it first</strong> — this can't be undone.
+              </p>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {onDownload && (
+                  <button
+                    onClick={onDownload}
+                    style={{
+                      padding: '8px 14px', backgroundColor: '#10b981', color: 'white',
+                      border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                    }}
+                  >↓ Download schedule first (recommended)</button>
+                )}
+                <button
+                  onClick={onClearData}
+                  style={{
+                    padding: '8px 14px', backgroundColor: '#fee2e2', color: '#b91c1c',
+                    border: '1px solid #fca5a5', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                  }}
+                >Clear loaded data</button>
+              </div>
+            </div>
+          )}
         </SettingsSection>
       )}
 

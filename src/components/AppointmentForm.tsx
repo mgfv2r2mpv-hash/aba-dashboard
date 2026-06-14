@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Appointment, Technician, Client, DayOfWeek, Authorization, ScheduleData } from '../types';
+import { Appointment, Technician, Client, DayOfWeek, Authorization, ScheduleData, CompanySettings, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS } from '../types';
 import { makeupCandidates, findAuthFor } from '../authorization';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -12,6 +12,9 @@ interface AppointmentFormProps {
   authorizations?: Authorization[];
   technicians: Technician[];
   clients: Client[];
+  // Company settings — supplies the BCBA session-length defaults used to auto-fill
+  // a new appointment's end time when its type is chosen.
+  settings?: CompanySettings;
   // Save can affect more than one record when editing with scope > instance;
   // signature returns the full list of upserts to apply.
   onSave: (appointments: Appointment[]) => void;
@@ -46,20 +49,13 @@ function minToClock(total: number): string {
   return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`;
 }
 
-// Maps an appointment type to the weekly authorized-rate key it draws from.
-const TYPE_TO_WEEKLY: Partial<Record<Appointment['type'], 'direct' | 'supervision' | 'parentTraining' | 'casePlanning'>> = {
-  'client-session': 'direct',
-  'supervision': 'supervision',
-  'parent-training': 'parentTraining',
-  'case-planning': 'casePlanning',
-};
-
 export default function AppointmentForm({
   appointment,
   allAppointments,
   authorizations,
   technicians,
   clients,
+  settings,
   onSave,
   onDelete,
   onCancel,
@@ -96,27 +92,47 @@ export default function AppointmentForm({
   // appointment auto-fills the end from the type's authorized weekly hours.
   const [endManual, setEndManual] = useState(!!appointment?.endTime);
 
-  // Authorized weekly hours for the given type from the client's active auth
-  // (resolved by the chosen date). Used to default a new session's duration.
-  const authHoursForType = (typeArg: Appointment['type'], clientArg: string, dateArg: string): number | undefined => {
+  // BCBA session-length defaults (preselected in Admin → Settings).
+  const bcbaDefaults: BcbaSessionDefaults = settings?.bcbaSessionDefaults || DEFAULT_BCBA_SESSION_DEFAULTS;
+
+  // The client's authorized weekly DIRECT hours for the chosen date (drives both
+  // the direct-session default duration and the supervision % default).
+  const weeklyDirectHours = (clientArg: string, dateArg: string): number | undefined => {
     if (!clientArg || !dateArg) return undefined;
-    const key = TYPE_TO_WEEKLY[typeArg];
-    if (!key) return undefined;
     const auth = findAuthFor(
       { appointments: allAppointments || [], authorizations: authorizations || [], clients } as unknown as ScheduleData,
       clientArg, dateArg,
     );
-    const h = auth?.weekly?.[key];
+    const h = auth?.weekly?.direct;
     return h && h > 0 ? h : undefined;
   };
 
-  // Apply the auth-default duration for a new appointment when the end is still
-  // empty or auto-managed and we have a start + type + client.
+  // Default duration (hours) for a new session by type. Direct draws from the
+  // client's authorized weekly direct rate; BCBA (non-direct) types use the
+  // preselected defaults — supervision as a % of weekly direct, the rest fixed.
+  const defaultHoursForType = (typeArg: Appointment['type'], clientArg: string, dateArg: string): number | undefined => {
+    switch (typeArg) {
+      case 'client-session':
+        return weeklyDirectHours(clientArg, dateArg);
+      case 'supervision': {
+        const wk = weeklyDirectHours(clientArg, dateArg);
+        return wk !== undefined ? (wk * bcbaDefaults.supervisionPercentOfWeeklyDirect) / 100 : undefined;
+      }
+      case 'reassessment': return bcbaDefaults.reassessmentHours;
+      case 'case-planning': return bcbaDefaults.casePlanningHours;
+      case 'parent-training': return bcbaDefaults.parentTrainingHours;
+      case 'other': return bcbaDefaults.otherHours;
+      default: return undefined; // internal-task: no auto default
+    }
+  };
+
+  // Apply the default duration for a new appointment when the end is still empty
+  // or auto-managed and we have a start + type (+ client for the auth-based types).
   const applyAuthDefaultEnd = (typeArg: Appointment['type'], clientArg: string, startArg: string, dateArg: string) => {
     if (!isNew || endManual) return;
     if (!startArg) return;
-    const h = authHoursForType(typeArg, clientArg, dateArg);
-    if (h === undefined) return;
+    const h = defaultHoursForType(typeArg, clientArg, dateArg);
+    if (h === undefined || h <= 0) return;
     setEndClock(minToClock(clockToMin(startArg) + h * 60));
   };
 
@@ -457,14 +473,6 @@ export default function AppointmentForm({
                   <option value="">— None —</option>
                   {technicians.map(t => <option key={t.id} value={t.name}>{t.name}{t.isRBT ? ' (RBT)' : ''}</option>)}
                 </select>
-                {needsSupervisedBt && (
-                  <p style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
-                    Optional — pick the BT you're observing (e.g. a caregiver session running
-                    alongside that BT's direct). Stays BCBA billable; the time it overlaps that
-                    BT's direct counts toward supervision (partial overlap counts partially).
-                    Leave “None” and it won't count.
-                  </p>
-                )}
               </div>
             )}
             <div>

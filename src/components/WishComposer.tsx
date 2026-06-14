@@ -150,6 +150,16 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
             weeks
           </label>
 
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, color: '#374151' }}>
+            <input type="checkbox" checked={!!wish.shaveDown} onChange={e => upd({ shaveDown: e.target.checked })} style={{ marginTop: 2 }} />
+            <span>
+              Shave down sessions where I can
+              <span style={{ display: 'block', fontWeight: 400, color: '#6b7280', fontSize: 12 }}>
+                Trim over-served supervision from the preferred max toward the minimum to free up capacity.
+              </span>
+            </span>
+          </label>
+
           <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 6, padding: '8px 10px', fontSize: 12, color: '#5b21b6' }}>
             <strong>Wish:</strong> {summarizeWish(wish)}
           </div>

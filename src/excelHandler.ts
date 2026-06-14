@@ -3,6 +3,7 @@ import {
   ScheduleData, Appointment, Technician, Client, CompanySettings, DayOfWeek,
   Blackout, Authorization, ManualUsage, Cancellation, CancellationCode, AUTH_BUCKETS, TimeOff,
   PtoConfig, AccrualRule, AccrualKind, PtoBucket, PtoOpeningBalance,
+  BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS,
 } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -303,6 +304,19 @@ function parseSettings(
   const pto = parsePtoConfig(workbook, row);
   if (pto) settings.pto = pto;
 
+  // BCBA session-length defaults (own columns). Only attach when any are present,
+  // backfilling the rest from the defaults so a partial file still round-trips.
+  const bsd: Partial<BcbaSessionDefaults> = {};
+  const bsdMap: [string, keyof BcbaSessionDefaults][] = [
+    ['bcbaSupervisionPctOfDirect', 'supervisionPercentOfWeeklyDirect'],
+    ['bcbaReassessmentHours', 'reassessmentHours'],
+    ['bcbaCasePlanningHours', 'casePlanningHours'],
+    ['bcbaParentTrainingHours', 'parentTrainingHours'],
+    ['bcbaOtherHours', 'otherHours'],
+  ];
+  for (const [col, key] of bsdMap) { const v = num(row[col]); if (v !== undefined) bsd[key] = v; }
+  if (Object.keys(bsd).length) settings.bcbaSessionDefaults = { ...DEFAULT_BCBA_SESSION_DEFAULTS, ...bsd };
+
   // Custom cancellation reason codes (own child sheet).
   const codeRows = rowsOf(workbook, 'CancellationCodes').filter(r => r && !isBlank(r.value));
   if (codeRows.length) {
@@ -509,7 +523,9 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
       'bcbaMonthlyBillableHours5Week', 'bcbaWeeklyBillableMin',
       'cancellationUnplannedHoursThreshold', 'cancellationPlannedDaysThreshold',
       'reportDraftLeadValue', 'reportDraftLeadUnit', 'reportFinalLeadValue', 'reportFinalLeadUnit',
-      'ptoBillableDeductionRatio', 'ptoMode', 'ptoBuckets', 'ptoUnpaidEnabled'],
+      'ptoBillableDeductionRatio', 'ptoMode', 'ptoBuckets', 'ptoUnpaidEnabled',
+      'bcbaSupervisionPctOfDirect', 'bcbaReassessmentHours', 'bcbaCasePlanningHours',
+      'bcbaParentTrainingHours', 'bcbaOtherHours'],
     [[
       s.supervisionDirectHoursPercent, s.supervisionRBTHoursPercent, W(s.supervisionTechHoursPercent),
       W(s.supervisionMaxHoursPercent), W(s.supervisionFloorPercent), W(s.supervisionPreferredMinPercent),
@@ -520,6 +536,9 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
       W(cn?.unplannedHoursThreshold), W(cn?.plannedDaysThreshold),
       W(s.reportDraftLead?.value), W(s.reportDraftLead?.unit), W(s.reportFinalLead?.value), W(s.reportFinalLead?.unit),
       W(s.ptoBillableDeductionRatio), W(s.pto?.mode), W(s.pto?.buckets), WB(s.pto?.unpaidEnabled),
+      W(s.bcbaSessionDefaults?.supervisionPercentOfWeeklyDirect), W(s.bcbaSessionDefaults?.reassessmentHours),
+      W(s.bcbaSessionDefaults?.casePlanningHours), W(s.bcbaSessionDefaults?.parentTrainingHours),
+      W(s.bcbaSessionDefaults?.otherHours),
     ]]);
 
   // Appointments (cancellation columns split out).

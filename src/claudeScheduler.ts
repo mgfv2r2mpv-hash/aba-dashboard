@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ScheduleData, ScheduleSolution, Appointment, WishRequest, WishSolution } from './types';
+import { ScheduleData, ScheduleSolution, Appointment, WishRequest, WishSolution, FixItOptions } from './types';
 import { v4 as uuidv4 } from 'uuid';
 import {
   buildAnonymizationMap,
@@ -11,6 +11,9 @@ import {
 } from './anonymizer';
 import { summarizeWish } from './wish';
 import { parseWishSolutions } from './wish';
+import { allowedStrategies } from './fixit';
+import { computeClientCompliance, computeTechCompliance, monthPeriod } from './compliance';
+import { resolveUtilization } from './utilization';
 
 export type ClaudeModel = 'claude-opus-4-7' | 'claude-sonnet-4-6' | 'claude-haiku-4-5';
 
@@ -86,6 +89,103 @@ export class ClaudeScheduler {
     return parseWishSolutions(content.text, token => this.anonMap.reverse.get(token));
   }
 
+  // "Fix It": compliance remediation. Hands the model the under-target cases and
+  // techs plus the BCBA's chosen strategies, and asks for up to 3 compliant ways
+  // to close the gaps. Output reuses the WishSolution op shape.
+  async generateFixSolutions(options: FixItOptions, conflicts: string[]): Promise<WishSolution[]> {
+    const prompt = this.buildFixItPrompt(options, conflicts);
+    if (this.containsRawNames(prompt)) {
+      throw new Error('Anonymization check failed: prompt would leak PII. Aborting Claude call.');
+    }
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: 3000,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const content = response.content[0];
+    if (!content || content.type !== 'text') return [];
+    return parseWishSolutions(content.text, token => this.anonMap.reverse.get(token));
+  }
+
+  private buildFixItPrompt(options: FixItOptions, conflicts: string[]): string {
+    const now = new Date();
+    const horizonWeeks = options.horizonWeeks && options.horizonWeeks > 0 ? options.horizonWeeks : 4;
+    const horizonEnd = new Date(now.getTime() + horizonWeeks * 7 * 86400000);
+    const period = monthPeriod(now);
+    const anon = anonymizeSchedule(this.data, this.anonMap);
+    const s = this.data.settings;
+    const u = resolveUtilization(s.utilization);
+
+    // Per-case gaps (clients below their supervision target this month), minus the
+    // excluded ones. We send the gap so the model knows how much to close.
+    const excluded = new Set(options.excludedClientIds);
+    const clientGaps = computeClientCompliance(this.data, period)
+      .filter(r => !excluded.has(r.client.id))
+      .filter(r => r.projected.hoursToGo > 0 || r.actual.hoursToGo > 0)
+      .map(r => {
+        const token = this.anonMap.clients.get(r.client.id) || this.anonMap.clients.get(r.client.name) || 'CLIENT_?';
+        return `${token}: direct ${r.actual.directHours.toFixed(1)}h, supervision ${r.actual.supervisionHours.toFixed(1)}h, needs ~${r.projected.hoursToGo.toFixed(1)}h more supervision`;
+      });
+
+    // Per-tech gaps (BACB + company supervision floors).
+    const techGaps = computeTechCompliance(this.data, period)
+      .filter(r => r.projected.companyHoursToGo > 0 || (r.projected.bacbHoursToGo ?? 0) > 0)
+      .map(r => {
+        const token = this.anonMap.technicians.get(r.tech.id) || this.anonMap.technicians.get(r.tech.name) || 'TECH_?';
+        const bacb = r.projected.bacbHoursToGo ? ` (BACB to-go ${r.projected.bacbHoursToGo.toFixed(1)}h)` : '';
+        return `${token}: direct ${r.actual.directHours.toFixed(1)}h, supervision ${r.actual.supervisionHours.toFixed(1)}h, company to-go ${r.projected.companyHoursToGo.toFixed(1)}h${bacb}`;
+      });
+
+    // Only future, still-scheduled appointments inside the horizon (token budget).
+    const inScope = anon.appointments.filter((a: any) => {
+      const t = new Date(a.startTime).getTime();
+      return t >= now.getTime() && t <= horizonEnd.getTime();
+    });
+
+    const strategies = allowedStrategies(options);
+    const scrubbedConflicts = conflicts.map(c => scrubText(c, this.data, this.anonMap));
+    const billableMin = u.bcbaWeeklyBillableMin ?? u.bcbaWeeklyBillableHours;
+    const billableRule = options.softenBillableMinimum
+      ? `The BCBA's weekly billable minimum (${billableMin ?? 'n/a'}h) MAY be relaxed if it's the only way to close a gap — note it when you do.`
+      : `Keep the BCBA's weekly billable at/above ${billableMin ?? 'their requirement'}h.`;
+
+    return `
+You are an expert ABA (Applied Behavior Analysis) compliance assistant helping a BCBA close supervision and parent-training gaps while staying clinically compliant.
+
+All people are opaque tokens (CLIENT_n, TECH_n, APT_n). Use these exact tokens in your reply. Do NOT invent names.
+
+CURRENT DATETIME: ${now.toISOString()}
+HORIZON: only add or change appointments from now through ${horizonEnd.toISOString().slice(0, 10)}.
+
+COMPLIANCE GAPS TO CLOSE:
+Per case (client): supervision target ${s.supervisionDirectHoursPercent}% of direct hours.
+${clientGaps.length ? clientGaps.map(g => `- ${g}`).join('\n') : '- (no case gaps)'}
+Per technician: company target ${s.supervisionRBTHoursPercent}% (RBTs also have a BACB 5% floor).
+${techGaps.length ? techGaps.map(g => `- ${g}`).join('\n') : '- (no tech gaps)'}
+
+${scrubbedConflicts.length ? `EXISTING SCHEDULE WARNINGS:\n${scrubbedConflicts.map(c => `- ${c}`).join('\n')}\n` : ''}
+ALLOWED STRATEGIES (use ONLY these — the BCBA turned the rest off):
+${strategies.length ? strategies.map(t => `- ${t}`).join('\n') : '- (none selected — return one option whose ops are empty, explaining nothing can be proposed)'}
+
+HARD RULES:
+- Never change, complete, or move any appointment that starts before CURRENT DATETIME.
+- Respect technician and client availability windows; never double-book a person; never move a technician off another client's session.
+- ${billableRule}
+- Prefer the fewest, smallest additions that close the gaps. Don't over-serve past the target.
+
+APPOINTMENTS IN SCOPE (JSON): ${JSON.stringify(inScope)}
+CLIENTS (JSON): ${JSON.stringify(anon.clients)}
+TECHNICIANS (JSON): ${JSON.stringify(anon.technicians)}
+
+Produce UP TO 3 distinct options. Reply with STRICT JSON only (no prose, no markdown fence), shaped exactly:
+{"solutions":[{"summary":"short title","reasoning":"one or two sentences","ops":[
+  {"op":"add","title":"...","type":"supervision|parent-training|case-planning|client-session","client":"CLIENT_n|null","tech":"TECH_n|null","start":"ISO","end":"ISO","recurring":true,"pattern":"weekly|biweekly"},
+  {"op":"move","apt":"APT_n","start":"ISO","end":"ISO"},
+  {"op":"remove","apt":"APT_n"}
+]}]}
+Use only the op shapes above. ISO times must be local (no timezone suffix), e.g. 2026-06-19T17:00:00. If no compliant option exists within the allowed strategies, return a single option whose reasoning explains why and whose ops are an empty array.`;
+  }
+
   private buildWishPrompt(wish: WishRequest): string {
     const now = new Date();
     const horizonWeeks = wish.horizonWeeks && wish.horizonWeeks > 0 ? wish.horizonWeeks : 8;
@@ -121,6 +221,7 @@ HARD RULES:
 - Keep the BCBA's weekly billable hours at/above their requirement; supervision ${s.supervisionDirectHoursPercent}% of direct + ${s.supervisionRBTHoursPercent}% of RBT hours; parent training >= ${s.parentTraining.minimumHours}h per ${s.parentTraining.periodUnit}.
 - Prefer minimal week-to-week change: move as few sessions as possible and keep recurring slots stable.
 - Never double-book a person; never move a technician off another client's session.
+${wish.shaveDown ? `- SHAVE DOWN: where a case or RBT is OVER-served on supervision (above the preferred band), you may shorten or trim those supervision sessions toward the binding minimum — the LARGEST of preferred-min ${s.supervisionPreferredMinPercent ?? 15}%, company floor ${s.supervisionFloorPercent ?? 10}%, and (for RBTs) the BACB 5% floor — to free capacity for the wish. Never trim below that binding minimum.` : ''}
 
 BCBA (clinician) availability: ${clinicianAvail}
 

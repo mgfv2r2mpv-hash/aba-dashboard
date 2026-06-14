@@ -1,4 +1,13 @@
-import { Appointment, Client, ScheduleData, Technician, BACB_RBT_SUPERVISION_MIN_PERCENT } from './types';
+import { Appointment, Client, ScheduleData, Technician, BACB_RBT_SUPERVISION_MIN_PERCENT, countsAsSupervision } from './types';
+
+// Resolve a technician reference (id OR name, as stored on appointments) to a
+// stable id so a supervision session and a direct session that name the same BT
+// in different forms still match.
+function makeTechResolver(data: ScheduleData): (ref?: string) => string | undefined {
+  const byId = new Map(data.technicians.map(t => [t.id, t.id]));
+  const byName = new Map(data.technicians.map(t => [t.name, t.id]));
+  return (ref?: string) => (ref ? (byId.get(ref) ?? byName.get(ref) ?? ref) : undefined);
+}
 
 export interface ClientComplianceMetrics {
   directHours: number;
@@ -52,25 +61,25 @@ export function monthPeriod(ref: Date): CompliancePeriod {
 //   projected = actual + future scheduled sessions (everything !canceled)
 //
 // Data model (BCBA-confirmed):
-//   - Supervision appointments carry CLIENT only — no technician field.
-//   - Who is being supervised is inferred from whichever direct
-//     (client-session) appointments for that client overlap the
-//     supervision's time window.
-//   - "BCBA solo with the client" = supervision with no overlapping direct
-//     for that client. Consumes BCBA hours; counts as 0 toward compliance.
+//   - Supervision-counting sessions are supervision, parent-training, and
+//     case-planning (coordination). Each NAMES the BT being observed in its
+//     technician field (the supervisee — these stay BCBA billable). Other types
+//     never count toward supervision.
+//   - A session only earns supervision credit when it names a BT AND that BT's
+//     direct (client-session) overlaps it in time. Credit = the overlapping
+//     hours (partial overlap → partial credit; e.g. the BT leaves and parent
+//     training continues). No BT named, or no overlap → 0 credit.
 //
 // Per-client (case) compliance — implemented here:
 //   denominator = direct hours for the client in period
-//   numerator   = sum of supervision-vs-direct overlap hours for that
-//                 client, capped at each supervision's own duration so
-//                 multiple overlapping directs can't double-count.
+//   numerator   = for each supervision-counting session tagged with this client,
+//                 its overlap with the NAMED BT's directs FOR THIS CLIENT, capped
+//                 at the session's own duration.
 //
-// Per-RBT (BACB 5%) compliance — DEFERRED, but the rule is locked in:
+// Per-RBT compliance:
 //   denominator = ALL of that RBT's direct hours in period (any client)
-//   numerator   = supervision time overlapping any of THIS RBT's direct
-//                 sessions (the supervision's tagged client may differ
-//                 from the direct's client; that's a data-quality
-//                 question we'll surface separately when we add this).
+//   numerator   = overlap of the sessions that name THIS RBT with that RBT's
+//                 own direct sessions.
 export function computeClientCompliance(
   data: ScheduleData,
   period: CompliancePeriod,
@@ -117,24 +126,26 @@ function computeMetrics(
   };
   const matches = (a: Appointment) =>
     a.client === client.id || a.client === client.name;
+  const resolveTech = makeTechResolver(data);
 
   const direct = data.appointments.filter(a =>
     matches(a) && a.type === 'client-session' && inPeriod(a) && inScope(a)
   );
   const supervision = data.appointments.filter(a =>
-    matches(a) && a.type === 'supervision' && inPeriod(a) && inScope(a)
+    matches(a) && countsAsSupervision(a) && inPeriod(a) && inScope(a)
   );
 
   const directHours = direct.reduce((s, a) => s + duration(a), 0);
 
-  // For each supervision tagged with this client, sum overlap with this
-  // client's directs. Cap at the supervision's own length. If the
-  // supervision overlaps no directs (BCBA solo with client), it contributes
-  // nothing — which falls out of the math without an explicit guard since
-  // ov === 0 in that case.
+  // For each supervision-counting session tagged with this client, credit its
+  // overlap with the NAMED BT's direct sessions for this client (capped at the
+  // session's own length so multiple overlapping directs can't double-count). A
+  // session that names no BT — or whose BT isn't in a direct then — earns 0.
   const supervisionHours = supervision.reduce((s, sup) => {
     const supDur = duration(sup);
-    const ov = direct.reduce((acc, d) => acc + overlapHours(sup, d), 0);
+    const supTech = resolveTech(sup.technician);
+    const ov = direct.reduce((acc, d) =>
+      acc + (resolveTech(d.technician) === supTech ? overlapHours(sup, d) : 0), 0);
     return s + Math.min(ov, supDur);
   }, 0);
 
@@ -197,14 +208,16 @@ function computeTechMetrics(
     const t = new Date(a.startTime).getTime();
     return t >= startMs && t < endMs;
   };
-  const matchesTech = (a: Appointment) =>
-    a.technician === tech.id || a.technician === tech.name;
+  const resolveTech = makeTechResolver(data);
+  const techId = tech.id;
+  const matchesTech = (a: Appointment) => resolveTech(a.technician) === techId;
 
   const direct = data.appointments.filter(a =>
     matchesTech(a) && a.type === 'client-session' && inPeriod(a) && inScope(a)
   );
+  // Supervision-counting sessions that name THIS tech as the observee.
   const supervisions = data.appointments.filter(a =>
-    a.type === 'supervision' && inPeriod(a) && inScope(a)
+    countsAsSupervision(a) && matchesTech(a) && inPeriod(a) && inScope(a)
   );
 
   const directHours = direct.reduce((s, a) => s + duration(a), 0);
@@ -263,14 +276,15 @@ export function computeTechContactDays(
     const t = new Date(a.startTime).getTime();
     return t >= startMs && t < endMs;
   };
-  const matchesTech = (a: Appointment) =>
-    a.technician === tech.id || a.technician === tech.name;
+  const resolveTech = makeTechResolver(data);
+  const techId = tech.id;
+  const matchesTech = (a: Appointment) => resolveTech(a.technician) === techId;
 
   const direct = data.appointments.filter(a =>
     matchesTech(a) && a.type === 'client-session' && inPeriod(a) && inScope(a)
   );
   const supervisions = data.appointments.filter(a =>
-    a.type === 'supervision' && inPeriod(a) && inScope(a)
+    countsAsSupervision(a) && matchesTech(a) && inPeriod(a) && inScope(a)
   );
 
   const days = new Set<string>();

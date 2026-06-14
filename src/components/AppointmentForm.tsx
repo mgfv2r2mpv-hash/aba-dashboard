@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Appointment, Technician, Client, DayOfWeek, Authorization, ScheduleData } from '../types';
+import { Appointment, Technician, Client, DayOfWeek, Authorization, ScheduleData, SUPERVISION_COUNTING_TYPES } from '../types';
 import { makeupCandidates, findAuthFor } from '../authorization';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -68,6 +68,10 @@ export default function AppointmentForm({
   const [title, setTitle] = useState(appointment?.title || '');
   const [description, setDescription] = useState(appointment?.description || '');
   const [type, setType] = useState<Appointment['type']>(appointment?.type || 'client-session');
+  // Supervision / parent-training / case-planning: the technician field names the
+  // BT being observed (the supervisee), not a provider — so it's optional and the
+  // dropdown is relabeled accordingly.
+  const isSupervisionType = SUPERVISION_COUNTING_TYPES.includes(type);
   const [technicianId, setTechnicianId] = useState(appointment?.technician || '');
   const [clientId, setClientId] = useState(appointment?.client || '');
   // An appointment is a single calendar day plus a start and end clock time —
@@ -204,7 +208,7 @@ export default function AppointmentForm({
         title,
         description,
         type,
-        technician: type === 'supervision' ? '' : technicianId,
+        technician: technicianId,
         client: clientId,
         isBillable,
         startTime: formatLocalISO(updatedStart),
@@ -445,28 +449,26 @@ export default function AppointmentForm({
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-            {type !== 'supervision' && (
-              <div>
-                <label style={labelStyle}>Technician</label>
-                <select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} style={inputStyle}>
-                  <option value="">— None —</option>
-                  {technicians.map(t => <option key={t.id} value={t.name}>{t.name}{t.isRBT ? ' (RBT)' : ''}</option>)}
-                </select>
-              </div>
-            )}
+            <div>
+              <label style={labelStyle}>{isSupervisionType ? 'Supervised BT (optional)' : 'Technician'}</label>
+              <select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} style={inputStyle}>
+                <option value="">— None —</option>
+                {technicians.map(t => <option key={t.id} value={t.name}>{t.name}{t.isRBT ? ' (RBT)' : ''}</option>)}
+              </select>
+              {isSupervisionType && (
+                <p style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+                  Pick the BT you're observing. This stays BCBA billable; the time it
+                  overlaps that BT's direct session counts toward supervision (partial
+                  overlap counts partially). Leave as “None” and it won't count.
+                </p>
+              )}
+            </div>
             <div>
               <label style={labelStyle}>Client {type === 'supervision' && '*'}</label>
               <select value={clientId} onChange={(e) => handleClientChange(e.target.value)} style={inputStyle}>
                 <option value="">— None —</option>
                 {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
               </select>
-              {type === 'supervision' && (
-                <p style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
-                  Supervision is logged against the client only. The tech being supervised
-                  is whoever has a direct session with this client during this time;
-                  if no one does, this is BCBA-solo time and won't count toward compliance.
-                </p>
-              )}
             </div>
           </div>
 

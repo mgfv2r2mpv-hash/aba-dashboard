@@ -113,16 +113,23 @@ ask before each merge.
 
 ## Compliance rules (BCBA-confirmed; do not re-derive)
 
-- Supervision appointments carry CLIENT only — no technician field. The tech
-  being supervised is inferred from overlapping client-sessions.
-- Per-client compliance: supervision counts when it (a) is tagged with the
-  client AND (b) time-overlaps any direct session for that client by any tech.
-  BCBA-solo-with-client (no overlap) consumes BCBA hours but contributes 0.
-- Per-RBT compliance (currently in `src/compliance.ts` as
-  `computeTechCompliance`): denominator = ALL of that RBT's direct hours across
-  clients; numerator = supervision time overlapping any of that RBT's directs.
-  RBTs must hit BOTH the BACB 5% floor and the company target. Non-RBT BTs
-  follow company target only.
+- **Supervision is provider-attributed (not inferred).** Only supervision,
+  parent-training, and case-planning can count (`SUPERVISION_COUNTING_TYPES` /
+  `countsAsSupervision`), and ONLY when they NAME the observed BT in the
+  `technician` field AND that BT's direct (client-session) overlaps in time.
+  Credit = the overlapping hours (partial overlap → partial credit, e.g. the BT
+  leaves and parent training continues). No BT named, wrong BT, or no overlap → 0.
+  These sessions stay **BCBA billable** — `bucketOf` keys the BT/BCBA split on
+  TYPE (BCBA session types are never BT direct hours), so a supervised BT named on
+  them doesn't leak into BT direct totals. A BCBA session overlapping a BT direct
+  is legitimate concurrent care, never a double-book (`draftSolver`).
+- Per-client compliance: numerator = each supervision-counting session tagged with
+  the client × its overlap with the NAMED BT's directs for that client (capped at
+  the session's duration); denominator = the client's direct hours.
+- Per-RBT compliance (`src/compliance.ts` `computeTechCompliance`): denominator =
+  ALL of that RBT's direct hours across clients; numerator = overlap of the
+  sessions that NAME this RBT with that RBT's own directs. RBTs must hit BOTH the
+  BACB 5% floor and the company target. Non-RBT BTs follow company target only.
 - Insurer cap (`supervisionMaxHoursPercent`, typically 20%) is a display-only
   warning — over-cap ratios render in orange but don't change green/yellow/red
   status, since min and max are orthogonal axes.

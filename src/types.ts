@@ -318,7 +318,13 @@ export interface Appointment {
   id: string;
   title: string;
   description?: string;
-  technician?: string; // technician ID or name
+  technician?: string; // technician ID or name. On a DIRECT (client-session)
+                       // appointment this is the BT delivering the service. On a
+                       // supervision-counting BCBA session (supervision / parent-
+                       // training / case-planning) it instead names the BT being
+                       // OBSERVED — the supervisee — so the overlap can be credited
+                       // to that tech. Either way these BCBA sessions remain BCBA
+                       // billable (see bucketOf), since the BCBA runs them.
   client?: string;     // client ID or name
   startTime: string;   // ISO 8601 format
   endTime: string;     // ISO 8601 format
@@ -346,6 +352,19 @@ export interface Appointment {
   // EXCLUDED from every computation — compliance, conflicts, utilization, and
   // slot search all treat a ghost as if it weren't there.
   isGhost?: boolean;
+}
+
+// Session types that can count toward BT supervision — supervision, parent
+// training, and coordination-of-care (case planning) — but ONLY when a supervised
+// BT is named (Appointment.technician) and that BT's direct session overlaps in
+// time. Other types never count toward supervision/compliance.
+export const SUPERVISION_COUNTING_TYPES: readonly Appointment['type'][] = ['supervision', 'parent-training', 'case-planning'];
+
+// True for a session that should be credited as supervision of its named BT
+// (a supervision-counting type WITH a technician/supervisee selected). The actual
+// credited hours are the time-overlap with that BT's direct session(s).
+export function countsAsSupervision(a: Pick<Appointment, 'type' | 'technician'>): boolean {
+  return SUPERVISION_COUNTING_TYPES.includes(a.type) && !!a.technician;
 }
 
 // A single-day "no session" marker for a technician or client. Unlike the

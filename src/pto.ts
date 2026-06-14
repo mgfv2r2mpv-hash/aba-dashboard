@@ -15,11 +15,11 @@
 //                       scheduled session that was delivered/billed). Balances
 //                       therefore move as sessions are completed or reopened
 //                       (unconverted).
-//   perConvertedBonus — the per-converted base PLUS a bonus `bonusHours` once the
-//                       converted total since the opening date clears the
-//                       `bonusPerExtraHours` threshold. (A transparent reading of
-//                       the "extra hours" reward; the interval/"M consecutive"
-//                       cadence variant is a later refinement.)
+//   perConvertedBonus — the per-converted base PLUS Z=`bonusHours` for each
+//                       interval that completes a run of M=`bonusConsecutiveIntervals`
+//                       consecutive `bonusInterval`s (week/month) in which the BCBA
+//                       converted at least Y'=`bonusPerExtraHours` hours. Interval
+//                       unit, Y', and M are all user inputs (not computed).
 
 import { PtoConfig, PtoBucket, AccrualRule, TimeOff, Appointment, DEFAULT_PTO_CONFIG, DATE_BASED_ACCRUALS, DayOfWeek } from './types';
 import { rollupHours } from './utilization';
@@ -77,10 +77,86 @@ export function convertedBcbaHours(appointments: Appointment[] | undefined, sinc
   return rollupHours(appointments, sinceMs, asOf.getTime(), 'bcba').completed;
 }
 
+// Completed intervals of `unit` between `anchor` and `asOf` — [start,end) windows
+// whose END is at/before asOf (an in-progress interval doesn't earn a bonus yet).
+// Weeks start on Monday; months on the 1st.
+function enumerateIntervals(anchor: Date, asOf: Date, unit: 'week' | 'month'): { start: Date; end: Date }[] {
+  const out: { start: Date; end: Date }[] = [];
+  const asOfMs = asOf.getTime();
+  if (unit === 'week') {
+    const d = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+    const back = (d.getDay() + 6) % 7;        // 0 = Monday
+    let start = new Date(d.getTime() - back * DAY_MS);
+    for (let guard = 0; guard < 1000; guard++) {
+      const end = new Date(start.getTime() + 7 * DAY_MS);
+      if (end.getTime() > asOfMs) break;
+      out.push({ start, end });
+      start = end;
+    }
+  } else {
+    let start = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+    for (let guard = 0; guard < 600; guard++) {
+      const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+      if (end.getTime() > asOfMs) break;
+      out.push({ start, end });
+      start = end;
+    }
+  }
+  return out;
+}
+
+function earliestStart(appointments?: Appointment[]): Date | null {
+  let min = Infinity;
+  for (const a of appointments || []) {
+    const t = new Date(a.startTime).getTime();
+    if (!isNaN(t) && t < min) min = t;
+  }
+  return min === Infinity ? null : new Date(min);
+}
+
+// Per-interval billable goal, used by the 'percentAboveGoal' criterion.
+export interface PtoGoalHours { week?: number; month?: number }
+
+// Streak bonus: Z (`bonusHours`) each time the BCBA completes a run of M
+// (`bonusConsecutiveIntervals`) consecutive intervals that are each "at criterion"
+// — then the streak resets ("2 hours after the third consecutive week"). Criterion
+// is either a converted-hours total per interval, or converted >= goal*(1+pct/100).
+// Intervals are anchored at the opening date (or the earliest appointment).
+function bonusForRule(rule: AccrualRule, since: Date | null, asOf: Date, appointments?: Appointment[], goals?: PtoGoalHours): number {
+  const Z = Number(rule.bonusHours);
+  const M = Math.max(1, Math.floor(Number(rule.bonusConsecutiveIntervals) || 1));
+  if (!(Z > 0)) return 0;
+  const anchor = since || earliestStart(appointments);
+  if (!anchor) return 0;
+  const unit = rule.bonusInterval === 'month' ? 'month' : 'week';
+
+  // Threshold a single interval's converted hours must reach to be "at criterion".
+  let threshold: number;
+  if (rule.bonusCriterion === 'percentAboveGoal') {
+    const goal = unit === 'month' ? Number(goals?.month) : Number(goals?.week);
+    const pct = Number(rule.bonusPercentAboveGoal);
+    if (!(goal > 0) || !Number.isFinite(pct)) return 0; // need a goal to measure against
+    threshold = goal * (1 + pct / 100);
+  } else {
+    threshold = Number(rule.bonusPerExtraHours);
+    if (!(threshold > 0)) return 0;
+  }
+
+  let bonus = 0, streak = 0;
+  for (const iv of enumerateIntervals(anchor, asOf, unit)) {
+    if (convertedBcbaHours(appointments, iv.start, iv.end) >= threshold) {
+      if (++streak === M) { bonus += Z; streak = 0; } // pay out and reset
+    } else {
+      streak = 0;
+    }
+  }
+  return bonus;
+}
+
 // Hours a single rule grants in (since, asOf]. Date-based kinds use the calendar;
 // the per-converted kinds use `convertedHours` (completed billable BCBA hours in
 // the same window) supplied by the caller.
-export function accruedForRule(rule: AccrualRule, since: Date | null, asOf: Date, convertedHours = 0): number {
+export function accruedForRule(rule: AccrualRule, since: Date | null, asOf: Date, convertedHours = 0, appointments?: Appointment[], goals?: PtoGoalHours): number {
   if (rule.enabled === false) return 0;
   const hours = Number(rule.hours);
 
@@ -90,13 +166,7 @@ export function accruedForRule(rule: AccrualRule, since: Date | null, asOf: Date
     let granted = (Number.isFinite(hours) && hours > 0 && Number.isFinite(per) && per > 0)
       ? Math.floor(convertedHours / per) * hours
       : 0;
-    if (rule.kind === 'perConvertedBonus') {
-      const bonus = Number(rule.bonusHours);
-      const threshold = Number(rule.bonusPerExtraHours);
-      if (Number.isFinite(bonus) && bonus > 0 && Number.isFinite(threshold) && threshold > 0 && convertedHours >= threshold) {
-        granted += bonus;
-      }
-    }
+    if (rule.kind === 'perConvertedBonus') granted += bonusForRule(rule, since, asOf, appointments, goals);
     return granted;
   }
 
@@ -155,6 +225,7 @@ export function computePtoBalances(
   timeOff: TimeOff[] | undefined,
   appointments?: Appointment[],
   asOf: Date = new Date(),
+  goals?: PtoGoalHours,
 ): BucketBalance[] {
   const c = resolvePtoConfig(config);
   const buckets = activeBuckets(c);
@@ -183,7 +254,7 @@ export function computePtoBalances(
     const converted = convertedBcbaHours(appointments, since, asOf);
 
     const rules = (c.accruals || []).filter(r => r.bucket === bucket);
-    const accrued = rules.reduce((s, r) => s + accruedForRule(r, since, asOf, converted), 0);
+    const accrued = rules.reduce((s, r) => s + accruedForRule(r, since, asOf, converted, appointments, goals), 0);
 
     out.opening = opening;
     out.accrued = accrued;

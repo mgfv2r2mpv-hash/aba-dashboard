@@ -37,6 +37,7 @@ const data: ScheduleData = {
       accruals: [
         { id: 'AC1', kind: 'semimonthly', bucket: 'vacation', hours: 4 },
         { id: 'AC2', kind: 'everyNWeeks', bucket: 'sick', hours: 2, everyWeeks: 2, weekday: 'Friday', anchor: '2026-01-02', enabled: true },
+        { id: 'AC3', kind: 'perConvertedBonus', bucket: 'vacation', hours: 1, perHours: 30, bonusHours: 2, bonusInterval: 'week', bonusConsecutiveIntervals: 3, bonusCriterion: 'percentAboveGoal', bonusPercentAboveGoal: 5 },
       ],
       openingBalances: [{ bucket: 'vacation', hours: 10, asOf: '2026-01-01' }],
     },
@@ -91,7 +92,10 @@ check('timeOff + pto deduction ratio',
   && st.ptoBillableDeductionRatio === 0.625);
 check('pto config (mode/buckets/unpaid/accruals/openings)',
   st.pto?.mode === 'accrual' && st.pto?.buckets === 'separate' && st.pto?.unpaidEnabled === true
-  && st.pto?.accruals?.length === 2 && st.pto?.accruals?.[1].weekday === 'Friday' && st.pto?.accruals?.[1].everyWeeks === 2
+  && st.pto?.accruals?.length === 3 && st.pto?.accruals?.[1].weekday === 'Friday' && st.pto?.accruals?.[1].everyWeeks === 2
+  && st.pto?.accruals?.[2].kind === 'perConvertedBonus' && st.pto?.accruals?.[2].bonusInterval === 'week'
+  && st.pto?.accruals?.[2].bonusConsecutiveIntervals === 3 && st.pto?.accruals?.[2].bonusCriterion === 'percentAboveGoal'
+  && st.pto?.accruals?.[2].bonusPercentAboveGoal === 5
   && st.pto?.openingBalances?.[0].hours === 10 && st.pto?.openingBalances?.[0].asOf === '2026-01-01');
 
 // Full structural round-trip (ignoring volatile lastModified).

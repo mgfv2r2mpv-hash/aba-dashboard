@@ -53,10 +53,12 @@ ask before each merge.
   (`perConvertedHours`,`perConvertedBonus`), where **converted = completed
   billable BCBA hours** (`convertedBcbaHours` via `rollupHours(...).completed`) so
   balances move as sessions are completed/reopened. `computePtoBalances` takes
-  `appointments` for this. The bonus is a simple threshold (`bonusHours` once
-  converted ≥ `bonusPerExtraHours`); the interval/"M consecutive" cadence is a
-  later refinement. Round-trip + logic covered by `scripts/verify-excel.ts` and
-  `scripts/verify-pto.ts`.
+  `appointments` (and optional goal hours) for this. `perConvertedBonus` pays
+  `bonusHours` each time `bonusConsecutiveIntervals` consecutive `bonusInterval`s
+  (week/month) are each "at criterion", then the streak resets; criterion is
+  user-chosen — either converted ≥ `bonusPerExtraHours`, or converted ≥ the
+  billable goal × (1 + `bonusPercentAboveGoal`/100). Round-trip + logic covered by
+  `scripts/verify-excel.ts` and `scripts/verify-pto.ts`.
 - **Normalized, relational sheets:** `Clients`/`Technicians` hold scalars only;
   availability lives in one `Availability` sheet (`ownerType client|technician|
   clinician, ownerId, ownerName, day, start, end`, one row per window — this also

@@ -395,10 +395,19 @@ export interface AccrualRule {
   everyWeeks?: number;     // cadence in weeks (>=1)
   weekday?: DayOfWeek;     // which day the grant lands on
   anchor?: string;         // YYYY-MM-DD the cadence counts from
-  // perConvertedHours / bonus (Phase 2):
+  // perConvertedHours / perConvertedBonus:
   perHours?: number;       // grant `hours` per this many converted billable hours
-  bonusHours?: number;     // extra hours when the bonus condition holds
-  bonusPerExtraHours?: number;
+  // perConvertedBonus adds Z=`bonusHours` each time the BCBA strings together M=
+  // `bonusConsecutiveIntervals` consecutive `bonusInterval`s (week/month) that are
+  // each "at criterion" (the streak resets after paying out). The criterion is
+  // either an absolute converted-hours total per interval, or a percent above the
+  // billable goal for that interval — user's choice. All values user-supplied.
+  bonusHours?: number;                // Z — bonus hours granted per completed streak
+  bonusInterval?: 'week' | 'month';
+  bonusConsecutiveIntervals?: number; // M — consecutive at-criterion intervals required
+  bonusCriterion?: 'hours' | 'percentAboveGoal';  // default 'hours'
+  bonusPerExtraHours?: number;        // Y' — converted hours/interval to be at criterion ('hours')
+  bonusPercentAboveGoal?: number;     // e.g. 5 → converted >= goal*1.05 ('percentAboveGoal')
   enabled?: boolean;       // default true; lets a rule be parked without deleting
 }
 

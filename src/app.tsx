@@ -23,7 +23,7 @@ import DayReview from './components/DayReview';
 import CompleteTimePrompt from './components/CompleteTimePrompt';
 import AgendaRail from './components/AgendaRail';
 import ImportPreview from './components/ImportPreview';
-import { useMinWidth } from './useMediaQuery';
+import { useMinWidth, useIsTablet } from './useMediaQuery';
 import LockScreen from './components/LockScreen';
 import PasswordPrompt from './components/PasswordPrompt';
 import {
@@ -180,13 +180,14 @@ export default function App() {
 
   // iPad (portrait and up) keeps the context pane permanently docked beside the
   // calendar: hours totals on top, conflicts/agenda filling the middle, and the
-  // selected session sliding up from the bottom. 744px is the iPad mini's
-  // portrait CSS width — the classic 768 tablet breakpoint excluded it, leaving
-  // the mini stuck on the phone fallback (billable hours under the calendar, a
-  // modal edit popup). 744 pulls every iPad portrait into the split; phones
-  // (≤ ~430 portrait, ~430–740 landscape on the small ones) still fall back to
-  // the single-column layout with a slide-up bottom sheet for the detail.
-  const dockPane = useMinWidth(744);
+  // selected session sliding up from the bottom. Belt-and-suspenders: any tablet
+  // docks regardless of width (`isTablet`, fused from the native Device plugin +
+  // a UA/touch heuristic), AND any window ≥744px docks — so the width query still
+  // drives web, rotation and iPad multitasking, while real iPad hardware (incl. a
+  // hypothetical narrow one, or an iPad mini's 744 portrait) never falls through
+  // to the phone shell. Phones in portrait keep the single-column slide-up sheet.
+  const isTablet = useIsTablet();
+  const dockPane = useMinWidth(744) || isTablet;
   // Wide screens in the schedule view get a two-pane split with independent
   // scrolling (calendar | bounded context pane). Other views and narrow screens
   // keep the single page-scroll layout.

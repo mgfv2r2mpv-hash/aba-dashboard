@@ -1,13 +1,16 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ScheduleData, ScheduleSolution, Appointment } from './types';
+import { ScheduleData, ScheduleSolution, Appointment, WishRequest, WishSolution } from './types';
 import { v4 as uuidv4 } from 'uuid';
 import {
   buildAnonymizationMap,
   anonymizeAppointment,
+  anonymizeSchedule,
   scrubText,
   deAnonymizeText,
   AnonymizationMap,
 } from './anonymizer';
+import { summarizeWish } from './wish';
+import { parseWishSolutions } from './wish';
 
 export type ClaudeModel = 'claude-opus-4-7' | 'claude-sonnet-4-6' | 'claude-haiku-4-5';
 
@@ -62,6 +65,79 @@ export class ClaudeScheduler {
     // De-anonymize tokens in the reply before parsing structured fields.
     const deanon = deAnonymizeText(content.text, this.anonMap);
     return this.parseSolutions(deanon, changedAppointment);
+  }
+
+  // "Wish It": a goal-driven rework. Returns up to 3 WishSolutions whose ops
+  // (move/add/remove/blackout) the caller stages into the draft or applies.
+  async generateWishSolutions(wish: WishRequest): Promise<WishSolution[]> {
+    const prompt = this.buildWishPrompt(wish);
+    if (this.containsRawNames(prompt)) {
+      throw new Error('Anonymization check failed: prompt would leak PII. Aborting Claude call.');
+    }
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: 3000,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const content = response.content[0];
+    if (!content || content.type !== 'text') return [];
+    // Parse tokens out of the JSON via the reverse map (don't string-replace the
+    // whole reply — that would corrupt ISO timestamps that contain digits).
+    return parseWishSolutions(content.text, token => this.anonMap.reverse.get(token));
+  }
+
+  private buildWishPrompt(wish: WishRequest): string {
+    const now = new Date();
+    const horizonWeeks = wish.horizonWeeks && wish.horizonWeeks > 0 ? wish.horizonWeeks : 8;
+    const horizonEnd = new Date(now.getTime() + horizonWeeks * 7 * 86400000);
+    const anon = anonymizeSchedule(this.data, this.anonMap);
+
+    // Token budget: only future, still-scheduled appointments inside the horizon.
+    const inScope = anon.appointments.filter((a: any) => {
+      const t = new Date(a.startTime).getTime();
+      return t >= now.getTime() && t <= horizonEnd.getTime();
+    });
+
+    const s = this.data.settings;
+    const clinicianAvail = s.clinicianAvailability
+      ? Object.entries(s.clinicianAvailability).map(([d, ws]) => `${d}: ${(ws as any[]).map(w => `${w.start}-${w.end}`).join(', ')}`).join('; ')
+      : 'not specified';
+
+    return `
+You are an expert ABA (Applied Behavior Analysis) scheduler helping a BCBA reshape their own schedule to honor a goal while staying clinically compliant.
+
+All people are opaque tokens (CLIENT_n, TECH_n, APT_n). Use these exact tokens in your reply. Do NOT invent names.
+
+CURRENT DATETIME: ${now.toISOString()}
+HORIZON: only change appointments from now through ${horizonEnd.toISOString().slice(0, 10)}.
+
+THE WISH:
+${summarizeWish(wish)}
+${wish.note ? `Extra detail: ${scrubText(wish.note, this.data, this.anonMap)}` : ''}
+
+HARD RULES:
+- Never change, complete, or move any appointment that starts before CURRENT DATETIME.
+- Items marked fixed cannot be moved. Respect technician and client availability windows.
+- Keep the BCBA's weekly billable hours at/above their requirement; supervision ${s.supervisionDirectHoursPercent}% of direct + ${s.supervisionRBTHoursPercent}% of RBT hours; parent training >= ${s.parentTraining.minimumHours}h per ${s.parentTraining.periodUnit}.
+- Prefer minimal week-to-week change: move as few sessions as possible and keep recurring slots stable.
+- Never double-book a person; never move a technician off another client's session.
+
+BCBA (clinician) availability: ${clinicianAvail}
+
+APPOINTMENTS IN SCOPE (JSON):
+${JSON.stringify(inScope)}
+
+CLIENTS (JSON): ${JSON.stringify(anon.clients)}
+TECHNICIANS (JSON): ${JSON.stringify(anon.technicians)}
+
+Produce UP TO 3 distinct options. Reply with STRICT JSON only (no prose, no markdown fence), shaped exactly:
+{"solutions":[{"summary":"short title","reasoning":"one or two sentences","ops":[
+  {"op":"move","apt":"APT_n","start":"ISO","end":"ISO"},
+  {"op":"remove","apt":"APT_n"},
+  {"op":"add","title":"...","type":"parent-training|supervision|client-session|case-planning|reassessment|internal-task|other","client":"CLIENT_n|null","tech":"TECH_n|null","start":"ISO","end":"ISO","recurring":true,"pattern":"weekly|biweekly"},
+  {"op":"blackout","entityType":"client|technician","entity":"CLIENT_n|TECH_n","date":"YYYY-MM-DD","reason":"..."}
+]}]}
+Use only the op shapes above. ISO times must be local (no timezone suffix), e.g. 2026-06-19T17:00:00. Omit an op array entry rather than guessing. If the wish can't be met compliantly, return a single option whose reasoning explains why and whose ops are an empty array.`;
   }
 
   private buildPrompt(appointment: Appointment, conflicts: string[]): string {

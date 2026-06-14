@@ -504,3 +504,50 @@ export interface ScheduleSolution {
   reasoning: string;
   violatesConstraints: boolean;
 }
+
+// ── "Wish It" — goal-driven AI schedule rework (Change 3) ────────────────────
+// Unlike "Fix It" (resolve a conflict the user already created), "Wish It" takes
+// a forward-looking GOAL and asks the AI for up to 3 ways to reshape the schedule
+// to honor it while staying compliant. The composer is a natural-language box
+// that's STRUCTURED — the kind + fields below capture the details the model needs
+// so the prompt stays compact (fewer tokens) and the parse is reliable.
+export type WishKind =
+  | 'vacation'      // block off a date range (reschedule my sessions out of it)
+  | 'clearWindow'   // free up a recurring weekday/time window, going forward
+  | 'addRecurring'  // add a recurring session into a tight schedule
+  | 'freeform';     // anything else, described in the note
+
+export interface WishRequest {
+  kind: WishKind;
+  note?: string;                 // free-text detail (always allowed)
+  // vacation / general scope:
+  dateStart?: string;            // YYYY-MM-DD
+  dateEnd?: string;              // YYYY-MM-DD
+  // clearWindow / addRecurring:
+  weekday?: DayOfWeek;
+  windowStart?: string;          // HH:MM (24h)
+  windowEnd?: string;            // HH:MM
+  everyOtherWeek?: boolean;      // e.g. "every other Friday"
+  // addRecurring specifics:
+  newType?: Appointment['type'];
+  client?: string;               // client id/name the new session is for (optional)
+  durationMins?: number;
+  // How far forward the rework applies (weeks from today). Bounds the AI's scope
+  // and the token budget. Default handled by the composer.
+  horizonWeeks?: number;
+}
+
+// One change the AI proposes. Tokens (APT_n/CLIENT_n/TECH_n) are de-anonymized to
+// real ids/names before this struct is built (see src/wish.ts).
+export type WishOp =
+  | { op: 'move'; appointmentId: string; start: string; end: string }
+  | { op: 'remove'; appointmentId: string }
+  | { op: 'add'; title?: string; type: Appointment['type']; client?: string; technician?: string; start: string; end: string; recurring?: boolean; pattern?: 'weekly' | 'biweekly' | 'monthly' }
+  | { op: 'blackout'; entityType: 'client' | 'technician'; entity: string; date: string; reason?: string };
+
+export interface WishSolution {
+  id: string;
+  summary: string;
+  reasoning: string;
+  ops: WishOp[];
+}

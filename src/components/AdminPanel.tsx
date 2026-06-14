@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, DEFAULT_PTO_DEDUCTION_RATIO } from '../types';
 import { computeAuthUsage, computeReportDates } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 import { resolveUtilization } from '../utilization';
@@ -18,7 +18,7 @@ const API_BASE = '/api';
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWizard }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'auths' | 'blackouts' | 'settings'>('technicians');
+  const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'auths' | 'blackouts' | 'timeoff' | 'settings'>('technicians');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reordering, setReordering] = useState<null | 'clients' | 'technicians'>(null);
@@ -148,6 +148,33 @@ export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWi
     }
   };
 
+  const addTimeOff = async (t: TimeOff) => {
+    setSavingId(t.id);
+    setError(null);
+    try {
+      const res = await axios.post(`${API_BASE}/admin/time-off`, t);
+      const saved: TimeOff = res.data.timeOff || t;
+      onDataChange({ ...data, timeOff: [...(data.timeOff || []), saved] });
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const removeTimeOff = async (id: string) => {
+    setSavingId(id);
+    setError(null);
+    try {
+      await axios.delete(`${API_BASE}/admin/time-off/${id}`);
+      onDataChange({ ...data, timeOff: (data.timeOff || []).filter(t => t.id !== id) });
+    } catch (e: any) {
+      setError(e.response?.data?.error || e.message);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   const persistSettings = async (next: CompanySettings) => {
     setSavingId('settings');
     setError(null);
@@ -262,6 +289,7 @@ export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWi
         <button onClick={() => setActiveTab('clients')} style={tabStyle(activeTab === 'clients')}>Clients</button>
         <button onClick={() => setActiveTab('auths')} style={tabStyle(activeTab === 'auths')}>Auths</button>
         <button onClick={() => setActiveTab('blackouts')} style={tabStyle(activeTab === 'blackouts')}>Blackouts</button>
+        <button onClick={() => setActiveTab('timeoff')} style={tabStyle(activeTab === 'timeoff')}>Time Off</button>
         <button onClick={() => setActiveTab('settings')} style={tabStyle(activeTab === 'settings')}>Settings</button>
       </div>
 
@@ -373,6 +401,16 @@ export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWi
             savingId={savingId}
             onAdd={addBlackout}
             onRemove={removeBlackout}
+          />
+        )}
+
+        {activeTab === 'timeoff' && (
+          <TimeOffTab
+            timeOff={data.timeOff || []}
+            settings={data.settings}
+            savingId={savingId}
+            onAdd={addTimeOff}
+            onRemove={removeTimeOff}
           />
         )}
 
@@ -1361,6 +1399,172 @@ function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemo
   );
 }
 
+const PTO_BUCKETS: { value: PtoBucket; label: string }[] = [
+  { value: 'combined', label: 'PTO (combined)' },
+  { value: 'vacation', label: 'Vacation' },
+  { value: 'sick', label: 'Sick' },
+  { value: 'unpaid', label: 'Unpaid' },
+];
+
+function TimeOffTab({ timeOff, settings, savingId, onAdd, onRemove }: {
+  timeOff: TimeOff[];
+  settings: CompanySettings;
+  savingId: string | null;
+  onAdd: (t: TimeOff) => void;
+  onRemove: (id: string) => void;
+}) {
+  // A multi-day vacation is entered as a date range and expanded to one entry
+  // per weekday so each lands in the right ISO week. Single day = same start/end.
+  const [start, setStart] = useState(todayStr());
+  const [end, setEnd] = useState(todayStr());
+  const [hours, setHours] = useState('8');
+  const [bucket, setBucket] = useState<PtoBucket>('combined');
+  const [note, setNote] = useState('');
+  const [skipWeekends, setSkipWeekends] = useState(true);
+
+  const ratio = settings.ptoBillableDeductionRatio ?? DEFAULT_PTO_DEDUCTION_RATIO;
+  const perDay = Number(hours);
+
+  const submit = () => {
+    const h = Number(hours);
+    if (!start || !end || !(h > 0) || end < start) return;
+    const days = eachDateInclusive(start, end).filter(d => !skipWeekends || !isWeekendStr(d));
+    if (days.length === 0) return;
+    const now = new Date().toISOString();
+    for (const d of days) {
+      onAdd({ id: uuidv4(), date: d, hours: h, bucket, note: note.trim() || undefined, createdAt: now });
+    }
+    setNote('');
+  };
+
+  const today = todayStr();
+  const sorted = [...timeOff].sort((a, b) => a.date.localeCompare(b.date));
+  const upcoming = sorted.filter(t => t.date >= today);
+  const past = sorted.filter(t => t.date < today).reverse();
+  const bucketLabel = (b?: PtoBucket) => PTO_BUCKETS.find(x => x.value === (b || 'combined'))?.label || 'PTO';
+
+  const renderRow = (t: TimeOff, dim: boolean) => (
+    <div key={t.id} style={{
+      display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
+      border: '1px solid #e5e7eb', borderRadius: '6px', backgroundColor: dim ? '#f9fafb' : 'white',
+      opacity: dim ? 0.75 : 1, flexWrap: 'wrap',
+    }}>
+      <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: '14px', color: '#111827' }}>
+          {formatBlackoutDate(t.date)} · {fmtHours(t.hours)}h
+          <span style={{ color: '#7c3aed', fontWeight: 600 }}> (−{fmtHours(t.hours * ratio)}h req.)</span>
+        </div>
+        <div style={{ fontSize: '13px', color: '#374151', marginTop: '2px' }}>
+          <span style={{
+            fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', padding: '1px 6px',
+            borderRadius: '8px', marginRight: '6px', backgroundColor: '#ede9fe', color: '#5b21b6',
+          }}>{bucketLabel(t.bucket)}</span>
+          {t.note && <span style={{ color: '#6b7280', fontStyle: 'italic' }}>{t.note}</span>}
+        </div>
+      </div>
+      <button onClick={() => onRemove(t.id)} style={dangerBtn} disabled={savingId === t.id}>
+        {savingId === t.id ? '…' : 'Remove'}
+      </button>
+    </div>
+  );
+
+  return (
+    <div>
+      <h3 style={{ marginBottom: '8px', fontSize: '18px', fontWeight: 'bold' }}>BCBA Time Off</h3>
+      <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '16px' }}>
+        Log your leave. Each day's hours lower that week's billable requirement by{' '}
+        <strong>{fmtHours(ratio)}h per PTO hour</strong> (so {fmtHours(8)}h off ={' '}
+        −{fmtHours(8 * ratio)}h). Change the ratio in <strong>Settings → Time off</strong>.
+      </p>
+
+      {/* Add form */}
+      <div style={{ ...cardStyle, marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'flex-end' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 150px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>From</span>
+          <input type="date" value={start} onChange={e => { setStart(e.target.value); if (end < e.target.value) setEnd(e.target.value); }} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 150px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>To</span>
+          <input type="date" value={end} min={start} onChange={e => setEnd(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 120px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Hours / day</span>
+          <input type="number" min="0" step="0.25" value={hours} onChange={e => setHours(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 150px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Bucket</span>
+          <select value={bucket} onChange={e => setBucket(e.target.value as PtoBucket)} style={inputStyle}>
+            {PTO_BUCKETS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+          </select>
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 180px', minWidth: 0 }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Note (optional)</span>
+          <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. beach trip" style={inputStyle}
+            onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '0 1 auto', fontSize: '13px', color: '#374151' }}>
+          <input type="checkbox" checked={skipWeekends} onChange={e => setSkipWeekends(e.target.checked)} />
+          Skip weekends
+        </label>
+        <button onClick={submit} style={primaryBtn} disabled={!start || !end || !(perDay > 0) || end < start}>+ Add time off</button>
+      </div>
+
+      {timeOff.length === 0 ? (
+        <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>No time off recorded.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {upcoming.length > 0 && (
+            <div>
+              <p style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '8px' }}>
+                Upcoming ({upcoming.length})
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {upcoming.map(t => renderRow(t, false))}
+              </div>
+            </div>
+          )}
+          {past.length > 0 && (
+            <div>
+              <p style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '8px' }}>
+                Past ({past.length})
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {past.map(t => renderRow(t, true))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Inclusive list of YYYY-MM-DD strings between two dates (local calendar days).
+function eachDateInclusive(start: string, end: string): string[] {
+  const out: string[] = [];
+  const s = parseLocalDate(start);
+  const e = parseLocalDate(end);
+  if (!s || !e) return out;
+  for (let d = s; d.getTime() <= e.getTime(); d.setDate(d.getDate() + 1)) {
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+  }
+  return out;
+}
+function parseLocalDate(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+}
+function isWeekendStr(s: string): boolean {
+  const d = parseLocalDate(s);
+  if (!d) return false;
+  const day = d.getDay();
+  return day === 0 || day === 6;
+}
+function fmtHours(n: number): string {
+  const r = Math.round(n * 100) / 100;
+  return Number.isInteger(r) ? String(r) : String(r);
+}
+
 function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard }: {
   settings: CompanySettings;
   saving: boolean;
@@ -1395,6 +1599,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
   // Cancellation reason codes — seeded from the company's set (or the built-in
   // defaults). Saved with the rest of the settings via the "Save settings" button.
   const [codes, setCodes] = useState<CancellationCode[]>(() => resolveCancellationCodes(settings).map(c => ({ ...c })));
+  const [ptoRatio, setPtoRatio] = useState(s(settings.ptoBillableDeductionRatio ?? DEFAULT_PTO_DEDUCTION_RATIO));
 
   const num = (str: string, fallback: number) => {
     const n = parseFloat(str);
@@ -1436,6 +1641,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
       reportDraftLead: { value: num(draftLeadVal, 4), unit: draftLeadUnit },
       reportFinalLead: { value: num(finalLeadVal, 2), unit: finalLeadUnit },
       cancellationReasons: codes,
+      ptoBillableDeductionRatio: num(ptoRatio, DEFAULT_PTO_DEDUCTION_RATIO),
     };
     onSave(next);
   };
@@ -1459,6 +1665,16 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
         <NumField label="Floor (minimum % that must always be met)" value={floorPct} onChange={setFloorPct} suffix="%" hint="The engine never proposes shaving a case/BT below this. Default 10." />
         <NumField label="Preferred min (% the BCBA aims for)" value={prefMinPct} onChange={setPrefMinPct} suffix="%" hint="Default 15." />
         <NumField label="Preferred max / cap (% ceiling)" value={prefMaxPct} onChange={setPrefMaxPct} suffix="%" hint="Doubles as the cap when no insurer cap is set. Default 20." />
+      </SettingsSection>
+
+      <SettingsSection title="Time off">
+        <NumField
+          label="Billable requirement removed per PTO hour"
+          value={ptoRatio}
+          onChange={setPtoRatio}
+          suffix="h / PTO h"
+          hint={`1 = every leave hour drops the week's requirement by an hour. Set 0.625 if an 8h day should remove 5 billable hours (~3 non-billable hours/day assumed). Currently 8h off = −${(() => { const r = parseFloat(ptoRatio); return Number.isFinite(r) ? Math.round(8 * r * 100) / 100 : 8; })()}h.`}
+        />
       </SettingsSection>
 
       <SettingsSection title="Report due dates (before auth end)">

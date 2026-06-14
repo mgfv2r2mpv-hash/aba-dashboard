@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Appointment, Technician, Client, CompanySettings } from '../types';
+import { Appointment, Technician, Client, CompanySettings, TimeOff } from '../types';
 import { DraftMark } from '../draft';
-import { rollupHours, resolveUtilization, HoursByStatus } from '../utilization';
+import { rollupHours, resolveUtilization, HoursByStatus, ptoHoursInRange, reduceRequirementForPto } from '../utilization';
 import { tileStyle, clientPastel, legendStripeStyle } from '../calendarColors';
 import { useMinWidth } from '../useMediaQuery';
 import {
@@ -14,6 +14,9 @@ interface CalendarProps {
   technicians: Technician[];
   clients: Client[];
   settings?: CompanySettings;
+  // BCBA leave; reduces the BCBA weekly/monthly billable requirement shown in
+  // the hours ribbon and the in-grid Sunday total (Upgrade 1).
+  timeOff?: TimeOff[];
   onAppointmentChange: (appointment: Appointment) => void;
   onSelectAppointment: (appointment: Appointment | null) => void;
   // Reports the currently-viewed date (month/week anchor) so the parent can
@@ -64,6 +67,7 @@ export default function Calendar({
   technicians: _technicians,
   clients: _clients,
   settings,
+  timeOff,
   onAppointmentChange,
   onSelectAppointment,
   onViewDateChange,
@@ -177,11 +181,11 @@ export default function Calendar({
       </div>
 
       {view === 'month' && (
-        <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} onSelectAppointment={onSelectAppointment} onPickDay={setPickedDay} draftMarks={draftMarks} roomy={roomy} />
+        <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} timeOff={timeOff} onSelectAppointment={onSelectAppointment} onPickDay={setPickedDay} draftMarks={draftMarks} roomy={roomy} />
       )}
       {view === 'month' && !hideTotals && (
         <div style={{ marginTop: 16 }}>
-          <HoursSummary appointments={appointments} lens={lens} settings={settings} currentDate={currentDate} />
+          <HoursSummary appointments={appointments} lens={lens} settings={settings} timeOff={timeOff} currentDate={currentDate} />
         </div>
       )}
       {view === 'week' && (
@@ -269,11 +273,12 @@ export default function Calendar({
 
 // ---------- Month View ----------
 
-function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment, onPickDay, draftMarks, roomy }: {
+function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelectAppointment, onPickDay, draftMarks, roomy }: {
   currentDate: Date;
   appointments: Appointment[];
   lens: Lens;
   settings?: CompanySettings;
+  timeOff?: TimeOff[];
   onSelectAppointment: (a: Appointment) => void;
   onPickDay: (day: Date) => void;
   draftMarks?: Map<string, DraftMark>;
@@ -370,7 +375,9 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
                   <SundayTotal
                     lens={lens}
                     hours={rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens)}
-                    target={weeklyTarget}
+                    target={lens === 'bcba'
+                      ? reduceRequirementForPto(weeklyTarget, ptoHoursInRange(timeOff, weekStart.getTime(), addDays(weekStart, 7).getTime()), settings?.ptoBillableDeductionRatio)
+                      : weeklyTarget}
                   />
                 )}
               </div>
@@ -387,10 +394,11 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
 // Computes its own rollups from the (unfiltered) appointments + lens so it can
 // be rendered either inline under the month grid (narrow screens) or docked in
 // the side pane (wide screens). rollupHours filters by lens internally.
-export function HoursSummary({ appointments, lens, settings, currentDate }: {
+export function HoursSummary({ appointments, lens, settings, timeOff, currentDate }: {
   appointments: Appointment[];
   lens: Lens;
   settings?: CompanySettings;
+  timeOff?: TimeOff[];
   currentDate: Date;
 }) {
   const monthStart = startOfMonth(currentDate);
@@ -416,7 +424,14 @@ export function HoursSummary({ appointments, lens, settings, currentDate }: {
     const weekdaysInMonth = row.filter(d => isSameMonth(d, monthStart) && getDay(d) >= 1 && getDay(d) <= 5).length;
     if (weekdaysInMonth >= 3) workWeeks++;
   }
-  const monthlyGoal = workWeeks >= 5 ? util.bcbaMonthlyBillableHours5Week : util.bcbaMonthlyBillableHours;
+  const monthlyGoalBase = workWeeks >= 5 ? util.bcbaMonthlyBillableHours5Week : util.bcbaMonthlyBillableHours;
+  // BCBA leave taken within the month proper shaves the monthly goal too, by the
+  // same ratio. BT direct hours are unaffected by the BCBA's PTO.
+  const ptoRatio = settings?.ptoBillableDeductionRatio;
+  const monthPtoHours = ptoHoursInRange(timeOff, monthStart.getTime(), monthEnd.getTime() + 1);
+  const monthlyGoal = lens === 'bcba'
+    ? reduceRequirementForPto(monthlyGoalBase, monthPtoHours, ptoRatio)
+    : monthlyGoalBase;
 
   const weekSummaries = Array.from({ length: weekRows }, (_, r) => {
     const weekStart = days[r * 7];
@@ -433,6 +448,8 @@ export function HoursSummary({ appointments, lens, settings, currentDate }: {
       lens={lens}
       weeks={weekSummaries}
       weeklyTarget={weeklyTarget}
+      timeOff={timeOff}
+      ptoRatio={ptoRatio}
       monthHours={monthHours}
       monthlyGoal={lens === 'bcba' ? monthlyGoal : undefined}
       monthWeeks={lens === 'bcba' ? workWeeks : inMonthWeeks}
@@ -505,10 +522,12 @@ function CapBar({ hours, target }: { hours: HoursByStatus; target: number }) {
 type WeekSummary = { weekStart: Date; inMonth: boolean; hours: HoursByStatus };
 
 // Vertical ribbon beside the grid: one row per in-month week + a month total.
-function WeekRibbon({ lens, weeks, weeklyTarget, monthHours, monthlyGoal, monthWeeks }: {
+function WeekRibbon({ lens, weeks, weeklyTarget, timeOff, ptoRatio, monthHours, monthlyGoal, monthWeeks }: {
   lens: Lens;
   weeks: WeekSummary[];
   weeklyTarget: number;
+  timeOff?: TimeOff[];
+  ptoRatio?: number;
   monthHours: HoursByStatus;
   monthlyGoal?: number;       // BCBA only
   monthWeeks: number;
@@ -520,17 +539,21 @@ function WeekRibbon({ lens, weeks, weeklyTarget, monthHours, monthlyGoal, monthW
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }}>
       {weeks.filter(w => w.inMonth).map((w, i) => {
-        const color = trackColor(w.hours, weeklyTarget);
+        // BCBA leave this week lowers the requirement; BT direct is unaffected.
+        const ptoH = lens === 'bcba' ? ptoHoursInRange(timeOff, w.weekStart.getTime(), addDays(w.weekStart, 7).getTime()) : 0;
+        const target = reduceRequirementForPto(weeklyTarget, ptoH, ptoRatio);
+        const color = trackColor(w.hours, target);
         const live = w.hours.completed + w.hours.scheduled;
         return (
           <div key={i} style={{ flex: '1 1 200px', minWidth: 180, border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 8px', background: '#fff' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>Wk {format(w.weekStart, 'M/d')}</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color }}>{fmtH(live)}/{fmtH(weeklyTarget)}h</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color }}>{fmtH(live)}/{fmtH(target)}h</span>
             </div>
-            <CapBar hours={w.hours} target={weeklyTarget} />
+            <CapBar hours={w.hours} target={target} />
             <div style={{ fontSize: 10, color: '#6b7280', marginTop: 3 }}>
               ✓{fmtH(w.hours.completed)} · ◻{fmtH(w.hours.scheduled)}{w.hours.canceled > 0 ? ` · ✕${fmtH(w.hours.canceled)}` : ''}
+              {ptoH > 0 && <span style={{ color: '#7c3aed', fontWeight: 600 }}> · 🌴{fmtH(ptoH)}h PTO −{fmtH(weeklyTarget - target)}h</span>}
             </div>
           </div>
         );

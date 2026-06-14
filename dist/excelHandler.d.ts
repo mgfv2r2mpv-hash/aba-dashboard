@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { ScheduleData } from './types';
+export declare const SCHEMA_VERSION = 2;
 export interface ParsedSchedule {
     data: ScheduleData;
     embeddedConfig?: string;

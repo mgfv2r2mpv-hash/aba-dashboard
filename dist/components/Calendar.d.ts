@@ -1,15 +1,26 @@
-import { Appointment, Technician, Client, CompanySettings } from '../types';
+import { Appointment, Technician, Client, CompanySettings, TimeOff } from '../types';
 import { DraftMark } from '../draft';
 interface CalendarProps {
     appointments: Appointment[];
     technicians: Technician[];
     clients: Client[];
     settings?: CompanySettings;
+    timeOff?: TimeOff[];
     onAppointmentChange: (appointment: Appointment) => void;
     onSelectAppointment: (appointment: Appointment | null) => void;
     onViewDateChange?: (date: Date) => void;
+    onLensChange?: (lens: 'bcba' | 'bt') => void;
+    hideTotals?: boolean;
     draftMarks?: Map<string, DraftMark>;
 }
-export default function Calendar({ appointments, technicians: _technicians, clients: _clients, settings, onAppointmentChange, onSelectAppointment, onViewDateChange, draftMarks, }: CalendarProps): import("react/jsx-runtime").JSX.Element;
+type Lens = 'bcba' | 'bt';
+export default function Calendar({ appointments, technicians: _technicians, clients: _clients, settings, timeOff, onAppointmentChange, onSelectAppointment, onViewDateChange, onLensChange, hideTotals, draftMarks, }: CalendarProps): any;
+export declare function HoursSummary({ appointments, lens, settings, timeOff, currentDate }: {
+    appointments: Appointment[];
+    lens: Lens;
+    settings?: CompanySettings;
+    timeOff?: TimeOff[];
+    currentDate: Date;
+}): any;
 export {};
 //# sourceMappingURL=Calendar.d.ts.map

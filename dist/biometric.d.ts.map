@@ -1,0 +1,1 @@
+{"version":3,"file":"biometric.d.ts","sourceRoot":"","sources":["../src/biometric.ts"],"names":[],"mappings":"AA+BA,MAAM,MAAM,aAAa,GAAG,SAAS,GAAG,UAAU,GAAG,kBAAkB,CAAC;AAExE,wBAAsB,oBAAoB,IAAI,OAAO,CAAC,OAAO,CAAC,CAQ7D;AAID,wBAAsB,gBAAgB,IAAI,OAAO,CAAC,aAAa,CAAC,CAU/D;AAID,wBAAsB,qBAAqB,CAAC,MAAM,EAAE,MAAM,GAAG,OAAO,CAAC,OAAO,CAAC,CAQ5E"}

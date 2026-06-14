@@ -1,4 +1,5 @@
 import { jsx as _jsx, Fragment as _Fragment, jsxs as _jsxs } from "react/jsx-runtime";
+import React from 'react';
 import { diffSchedule, isEmptyDiff } from '../scheduleDiff';
 // Modal shown after a user picks a different Excel file from Admin → Settings.
 // It does NOT replace the loaded schedule until the user confirms — so an

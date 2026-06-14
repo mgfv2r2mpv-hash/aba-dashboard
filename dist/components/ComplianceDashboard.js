@@ -1,9 +1,13 @@
-import { jsxs as _jsxs, jsx as _jsx, Fragment as _Fragment } from "react/jsx-runtime";
-import { useState, useMemo } from 'react';
-import { computeClientCompliance, computeTechCompliance, pastIncompleteAppointments, monthPeriod, } from '../compliance';
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
+import React, { useState, useMemo } from 'react';
+import { computeClientCompliance, computeTechCompliance, computeTechContactDays, pastIncompleteAppointments, monthPeriod, } from '../compliance';
 import { BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
-export default function ComplianceDashboard({ data, cache, onMarkComplete, onRequestCancel, onSelectAppointment }) {
+import CompleteTimePrompt from './CompleteTimePrompt';
+import ConflictPanel from './ConflictPanel';
+import FixItPanel from './FixItPanel';
+export default function ComplianceDashboard({ data, cache, conflicts = [], aiSettings, mutedConflictKeys, onMuteConflict, onUnmuteConflict, onConfirmDismissConflict, onMarkComplete, onRequestCancel, onSelectAppointment, onAcceptFix, onCustomizeFix }) {
     const [periodRef, setPeriodRef] = useState(new Date());
+    const [compView, setCompView] = useState('case');
     const period = useMemo(() => monthPeriod(periodRef), [periodRef]);
     const usingCache = !!cache && cache.period.start.getTime() === period.start.getTime();
     const clientReports = useMemo(() => usingCache
@@ -12,6 +16,17 @@ export default function ComplianceDashboard({ data, cache, onMarkComplete, onReq
     const techReports = useMemo(() => usingCache
         ? data.technicians.map(t => cache.techs.get(t.id)).filter((r) => !!r)
         : computeTechCompliance(data, period), [data, period, cache, usingCache]);
+    const techContactDays = useMemo(() => {
+        const map = new Map();
+        for (const tech of data.technicians) {
+            map.set(tech.id, {
+                actual: computeTechContactDays(data, tech, period, 'actual'),
+                projected: computeTechContactDays(data, tech, period, 'projected'),
+            });
+        }
+        return map;
+    }, [data, period]);
+    const rbtMinContacts = data.settings.rbtMinContactsPerMonth ?? 2;
     const pastIncomplete = useMemo(() => pastIncompleteAppointments(data), [data]);
     const targetPct = data.settings.supervisionDirectHoursPercent || 5;
     const techTargetPct = data.settings.supervisionTechHoursPercent ?? 0;
@@ -19,7 +34,24 @@ export default function ComplianceDashboard({ data, cache, onMarkComplete, onReq
     const goPrev = () => setPeriodRef(new Date(periodRef.getFullYear(), periodRef.getMonth() - 1, 1));
     const goNext = () => setPeriodRef(new Date(periodRef.getFullYear(), periodRef.getMonth() + 1, 1));
     const goToday = () => setPeriodRef(new Date());
-    return (_jsxs("div", { style: { flex: 1, padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }, children: [_jsxs("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0 }, children: ["Compliance (", period.label, ")"] }), _jsxs("div", { style: { display: 'flex', gap: 6 }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] })] }), _jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginBottom: 16 }, children: ["Supervision target: ", _jsxs("strong", { children: [targetPct, "%"] }), " of direct hours per client. Counted as overlap minutes between a supervision tagged with the client and any direct session for that client (any tech). A supervision with no overlapping direct (BCBA solo with the client) consumes BCBA time but contributes 0 to compliance."] }), pastIncomplete.length > 0 && (_jsx(PastIncomplete, { items: pastIncomplete, onMarkComplete: onMarkComplete, onRequestCancel: onRequestCancel, onSelect: onSelectAppointment })), _jsx(SectionHeader, { children: "Per client" }), _jsxs("div", { style: { display: 'grid', gap: 12, marginBottom: 24 }, children: [clientReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No clients yet. Add clients in Admin to start tracking compliance." })), clientReports.map(r => _jsx(ClientCard, { report: r, targetPct: targetPct, maxPct: maxPct }, r.client.id))] }), _jsx(SectionHeader, { children: "Per technician" }), _jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginTop: -8, marginBottom: 8 }, children: ["RBTs must hit BACB ", _jsxs("strong", { children: [BACB_RBT_SUPERVISION_MIN_PERCENT, "%"] }), " AND the company target (", data.settings.supervisionRBTHoursPercent, "%). Non-RBT techs follow the company-only target (", techTargetPct, "%). Numerator counts supervision time overlapping that tech's direct sessions regardless of which client the supervision was tagged with."] }), _jsxs("div", { style: { display: 'grid', gap: 12 }, children: [techReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No technicians yet." })), techReports.map(r => _jsx(TechCard, { report: r, maxPct: maxPct }, r.tech.id))] })] }));
+    const tabBtn = (v, label) => (_jsx("button", { onClick: () => setCompView(v), style: {
+            padding: '5px 14px', border: 'none', borderRadius: 5, cursor: 'pointer',
+            fontSize: 13, fontWeight: 600,
+            background: compView === v ? '#1d4ed8' : 'transparent',
+            color: compView === v ? 'white' : '#374151',
+        }, children: label }));
+    return (_jsxs("div", { style: { flex: 1, padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }, children: [_jsxs("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0 }, children: ["Compliance (", period.label, ")"] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsxs("div", { style: { display: 'flex', background: '#f3f4f6', borderRadius: 6, padding: 2, marginRight: 4 }, children: [tabBtn('case', 'Cases'), tabBtn('staff', 'Staff')] }), _jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] })] }), aiSettings && onAcceptFix && onCustomizeFix && (_jsx(FixItPanel, { data: data, aiSettings: aiSettings, conflicts: conflicts, onAccept: onAcceptFix, onCustomize: onCustomizeFix })), conflicts.length > 0 && (_jsx(ScheduleWarnings, { conflicts: conflicts, appointments: data.appointments, onSelect: onSelectAppointment, mutedConflictKeys: mutedConflictKeys, onMuteConflict: onMuteConflict, onUnmuteConflict: onUnmuteConflict, onConfirmDismissConflict: onConfirmDismissConflict })), pastIncomplete.length > 0 && (_jsx(PastIncomplete, { items: pastIncomplete, onMarkComplete: onMarkComplete, onRequestCancel: onRequestCancel, onSelect: onSelectAppointment })), compView === 'case' && (_jsxs(_Fragment, { children: [_jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginBottom: 12 }, children: ["Supervision target: ", _jsxs("strong", { children: [targetPct, "%"] }), " of direct hours per client."] }), _jsxs("div", { style: { display: 'grid', gap: 12 }, children: [clientReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No clients yet. Add clients in Admin to start tracking compliance." })), clientReports.map(r => _jsx(ClientCard, { report: r, targetPct: targetPct, maxPct: maxPct }, r.client.id))] })] })), compView === 'staff' && (_jsxs(_Fragment, { children: [_jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginBottom: 12 }, children: ["RBTs must hit BACB ", _jsxs("strong", { children: [BACB_RBT_SUPERVISION_MIN_PERCENT, "%"] }), " AND the company target (", data.settings.supervisionRBTHoursPercent, "%), plus \u2265", rbtMinContacts, " supervision contacts/month. Non-RBT BTs follow the company-only target (", techTargetPct, "%) and require \u22651 contact/month if they have direct sessions."] }), _jsxs("div", { style: { display: 'grid', gap: 12 }, children: [techReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No technicians yet." })), techReports.map(r => (_jsx(TechCard, { report: r, maxPct: maxPct, contacts: techContactDays.get(r.tech.id), rbtMinContacts: rbtMinContacts }, r.tech.id)))] })] }))] }));
+}
+// The calendar's schedule warnings, surfaced on the Compliance tab in a
+// collapsible area (collapsed by default so the compliance cards lead). Reuses
+// ConflictPanel — which carries the per-conflict confirm/mute controls.
+function ScheduleWarnings({ conflicts, appointments, onSelect, mutedConflictKeys, onMuteConflict, onUnmuteConflict, onConfirmDismissConflict }) {
+    const [collapsed, setCollapsed] = useState(true);
+    return (_jsxs("div", { style: { marginBottom: 16, border: '1px solid #fcd34d', borderRadius: 8, overflow: 'hidden' }, children: [_jsxs("button", { onClick: () => setCollapsed(c => !c), style: {
+                    width: '100%', background: '#fffbeb', border: 'none', cursor: 'pointer',
+                    fontSize: 14, fontWeight: 700, color: '#92400e', padding: '10px 12px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+                }, children: [_jsxs("span", { children: ["\u26A0\uFE0F Schedule warnings (", conflicts.length, ")"] }), _jsx("span", { children: collapsed ? '▸' : '▾' })] }), !collapsed && (_jsx(ConflictPanel, { conflicts: conflicts, appointments: appointments, onSelectAppointment: onSelect, mutedKeys: mutedConflictKeys, onMute: onMuteConflict, onUnmute: onUnmuteConflict, onConfirmDismiss: onConfirmDismissConflict }))] }));
 }
 function SectionHeader({ children }) {
     return (_jsx("h3", { style: {
@@ -45,19 +77,6 @@ function PastIncomplete({ items, onMarkComplete, onRequestCancel, onSelect }) {
 // times before accepting (one tap accepts unchanged). Speed matters: this is
 // the high-frequency path for matching the roll to delivered minutes.
 function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }) {
-    const [editing, setEditing] = useState(false);
-    const [startClock, setStartClock] = useState(a.startTime.slice(11, 16));
-    const [endClock, setEndClock] = useState(a.endTime.slice(11, 16));
-    const accept = () => {
-        const date = a.startTime.slice(0, 10);
-        const newStart = `${date}T${startClock}:00`;
-        const newEnd = `${date}T${endClock}:00`;
-        if (newEnd <= newStart) {
-            alert('End time must be after the start time.');
-            return;
-        }
-        onMarkComplete({ ...a, startTime: newStart, endTime: newEnd });
-    };
     return (_jsxs("div", { style: {
             backgroundColor: 'white', borderRadius: 6, padding: 8,
             display: 'flex', flexDirection: 'column', gap: 6,
@@ -65,7 +84,7 @@ function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }) {
                     background: 'none', border: 'none', padding: 0, textAlign: 'left',
                     fontSize: 13, fontWeight: 600, color: '#1d4ed8', cursor: 'pointer',
                     textDecoration: 'underline',
-                }, children: a.title }), _jsxs("div", { style: { fontSize: 11, color: '#6b7280' }, children: [new Date(a.startTime).toLocaleString(), " \u2192 ", new Date(a.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), a.client && _jsxs(_Fragment, { children: [" \u00B7 ", a.client] }), a.technician && _jsxs(_Fragment, { children: [" \u00B7 ", a.technician] })] }), editing ? (_jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }, children: [_jsxs("label", { style: { fontSize: 11, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }, children: ["Start", _jsx("input", { type: "time", step: "900", value: startClock, onChange: e => setStartClock(e.target.value), style: timeInput })] }), _jsxs("label", { style: { fontSize: 11, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }, children: ["End", _jsx("input", { type: "time", step: "900", value: endClock, onChange: e => setEndClock(e.target.value), style: timeInput })] }), _jsx("button", { onClick: accept, style: completeBtn, children: "Accept" }), _jsx("button", { onClick: () => setEditing(false), style: ghostBtn, children: "Cancel" })] })) : (_jsxs("div", { style: { display: 'flex', gap: 6 }, children: [_jsx("button", { onClick: () => setEditing(true), style: completeBtn, children: "\u2713 Complete" }), _jsx("button", { onClick: () => onRequestCancel(a), style: cancelBtn, children: "\u2715 Cancel" })] }))] }));
+                }, children: a.title }), _jsxs("div", { style: { fontSize: 11, color: '#6b7280' }, children: [new Date(a.startTime).toLocaleString(), " \u2192 ", new Date(a.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), a.client && _jsxs(_Fragment, { children: [" \u00B7 ", a.client] }), a.technician && _jsxs(_Fragment, { children: [" \u00B7 ", a.technician] })] }), _jsxs("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' }, children: [_jsx(CompleteTimePrompt, { a: a, onComplete: onMarkComplete }), _jsx("button", { onClick: () => onRequestCancel(a), style: cancelBtn, children: "\u2715 Cancel" })] })] }));
 }
 // ---------- Per-client card ----------
 function ClientCard({ report, targetPct, maxPct }) {
@@ -94,13 +113,17 @@ function ClientCard({ report, targetPct, maxPct }) {
                             padding: '2px 8px', borderRadius: 10,
                         }, children: statusLabel(status) })] }), noDirect ? (_jsxs("p", { style: { fontSize: 12, color: '#6b7280', margin: 0 }, children: ["No direct sessions in ", monthLabel(report), ". Nothing to supervise."] })) : (_jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }, children: [_jsx(Metric, { title: "Actual", m: actual, targetPct: targetPct, accent: accentColor, maxPct: maxPct }), _jsx(Metric, { title: "Projected", m: projected, targetPct: targetPct, accent: accentColor, maxPct: maxPct })] }))] }));
 }
-function TechCard({ report, maxPct }) {
+function TechCard({ report, maxPct, contacts, rbtMinContacts }) {
     const { tech, actual, projected } = report;
     const noDirect = actual.directHours === 0 && projected.directHours === 0;
-    // A tech misses if they fall short on EITHER applicable threshold (BACB
-    // for RBTs and/or company). Status uses the tighter of actual + projected.
+    const minContacts = tech.isRBT ? (rbtMinContacts ?? 2) : 1;
+    const contactsRequired = !noDirect ? minContacts : 0;
+    const contactsBehind = contacts !== undefined && contactsRequired > 0 && contacts.projected < contactsRequired;
     const status = techStatus(actual, projected, tech.isRBT, noDirect);
-    const accent = statusColor(status);
+    const overallStatus = (status === 'green' && contactsBehind) ? 'yellow'
+        : (status === 'yellow' && contactsBehind) ? 'red'
+            : status;
+    const accent = statusColor(overallStatus);
     return (_jsxs("div", { style: {
             backgroundColor: 'white',
             border: `2px solid ${accent}`,
@@ -113,7 +136,7 @@ function TechCard({ report, maxPct }) {
                             fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
                             color: 'white', backgroundColor: accent,
                             padding: '2px 8px', borderRadius: 10,
-                        }, children: statusLabel(status) })] }), noDirect ? (_jsx("p", { style: { fontSize: 12, color: '#6b7280', margin: 0 }, children: "No direct sessions this period. Nothing to supervise." })) : (_jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }, children: [_jsx(TechMetric, { title: "Actual", m: actual, accent: accent, isRBT: tech.isRBT, maxPct: maxPct }), _jsx(TechMetric, { title: "Projected", m: projected, accent: accent, isRBT: tech.isRBT, maxPct: maxPct })] }))] }));
+                        }, children: statusLabel(overallStatus) })] }), noDirect ? (_jsx("p", { style: { fontSize: 12, color: '#6b7280', margin: 0 }, children: "No direct sessions this period. Nothing to supervise." })) : (_jsxs(_Fragment, { children: [_jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }, children: [_jsx(TechMetric, { title: "Actual", m: actual, accent: accent, isRBT: tech.isRBT, maxPct: maxPct }), _jsx(TechMetric, { title: "Projected", m: projected, accent: accent, isRBT: tech.isRBT, maxPct: maxPct })] }), contacts !== undefined && contactsRequired > 0 && (_jsxs("div", { style: { marginTop: 8, fontSize: 12, color: '#6b7280' }, children: ["Supervision contacts: ", _jsxs("strong", { style: { color: contactsBehind ? accent : '#15803d' }, children: [contacts.actual, " actual / ", contacts.projected, " projected"] }), ' ', "(need ", contactsRequired, "/month)", contactsBehind && _jsx("span", { style: { color: accent, fontWeight: 600 }, children: " \u2014 behind" }), !contactsBehind && contacts.projected >= contactsRequired && _jsx("span", { style: { color: '#15803d' }, children: " \u2713" })] }))] }))] }));
 }
 function TechMetric({ title, m, accent, isRBT, maxPct }) {
     // Bar fills against whichever requirement is HIGHER (the binding one) so the
@@ -167,7 +190,7 @@ function Metric({ title, m, targetPct, accent, maxPct }) {
                 }, children: _jsx("div", { style: {
                         height: '100%', width: `${fillPct}%`,
                         backgroundColor: accent, transition: 'width 200ms',
-                    } }) }), _jsxs("div", { style: { fontSize: 11, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }, children: ["Direct: ", _jsxs("strong", { children: [m.directHours.toFixed(1), "h"] }), " \u00B7 Sup: ", _jsxs("strong", { children: [m.supervisionHours.toFixed(1), "h"] }), _jsx("br", {}), "Required: ", _jsxs("strong", { children: [m.requiredHours.toFixed(1), "h"] }), m.hoursToGo > 0 && (_jsxs(_Fragment, { children: [" \u00B7 To go: ", _jsxs("strong", { style: { color: accent }, children: [m.hoursToGo.toFixed(1), "h"] })] })), m.hoursToGo === 0 && m.directHours > 0 && (_jsx(_Fragment, { children: " \u00B7 \u2713 at target" }))] })] }));
+                    } }) }), _jsxs("div", { style: { fontSize: 11, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }, children: ["Direct: ", _jsxs("strong", { children: [m.directHours.toFixed(1), "h"] }), " \u00B7 Sup: ", _jsxs("strong", { children: [m.supervisionHours.toFixed(1), "h"] }), _jsx("br", {}), "Required: ", _jsxs("strong", { children: [m.requiredHours.toFixed(1), "h"] }), m.hoursToGo > 0 && (_jsxs(_Fragment, { children: [" \u00B7 To go: ", _jsxs("strong", { style: { color: accent }, children: [m.hoursToGo.toFixed(1), "h"] })] })), m.hoursToGo === 0 && m.directHours > 0 && (_jsx(_Fragment, { children: " \u00B7 \u2713 on track" }))] })] }));
 }
 function monthLabel(r) {
     // Just used in a display string; the metric carries enough context.
@@ -175,7 +198,7 @@ function monthLabel(r) {
 }
 function statusLabel(s) {
     switch (s) {
-        case 'green': return 'on target';
+        case 'green': return 'on track';
         case 'yellow': return 'projected ok';
         case 'red': return 'behind';
         case 'gray': return 'inactive';
@@ -187,26 +210,10 @@ function NavBtn({ onClick, children }) {
             borderRadius: 4, cursor: 'pointer', fontSize: 13,
         }, children: children }));
 }
-const completeBtn = {
-    flex: '1 1 auto', padding: '5px 9px',
-    backgroundColor: '#dcfce7', color: '#15803d',
-    border: '1px solid #86efac', borderRadius: 4,
-    cursor: 'pointer', fontSize: 12, fontWeight: 600,
-};
 const cancelBtn = {
     flex: '1 1 auto', padding: '5px 9px',
     backgroundColor: '#fee2e2', color: '#b91c1c',
     border: '1px solid #fca5a5', borderRadius: 4,
     cursor: 'pointer', fontSize: 12, fontWeight: 600,
-};
-const ghostBtn = {
-    padding: '5px 9px',
-    backgroundColor: 'white', color: '#6b7280',
-    border: '1px solid #d1d5db', borderRadius: 4,
-    cursor: 'pointer', fontSize: 12, fontWeight: 600,
-};
-const timeInput = {
-    fontSize: 12, padding: '3px 6px',
-    border: '1px solid #d1d5db', borderRadius: 4,
 };
 //# sourceMappingURL=ComplianceDashboard.js.map

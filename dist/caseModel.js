@@ -1,4 +1,4 @@
-import { SUPERVISION_CADENCES, BACB_RBT_SUPERVISION_MIN_PERCENT, } from './types';
+import { SUPERVISION_CADENCES, BACB_RBT_SUPERVISION_MIN_PERCENT, countsAsSupervision, } from './types';
 import { monthPeriod, computeClientCompliance, computeTechCompliance, computeTechContactDays, } from './compliance';
 import { computeReportDates, findAuthFor, inAuthSpan } from './authorization';
 // The Sunday-based calendar week containing `ref` (matches the validator's
@@ -53,7 +53,8 @@ export function computeCaseState(data, client, now = new Date()) {
         idealPerWk,
         actualThisWk,
         pctOfAuth: authDirectPerWk > 0 ? (actualThisWk / authDirectPerWk) * 100 : 0,
-        below75: authDirectPerWk > 0 && actualThisWk < 0.75 * authDirectPerWk,
+        belowTarget: authDirectPerWk > 0 && actualThisWk < ((client.directUtilizationTarget ?? 75) / 100) * authDirectPerWk,
+        get below75() { return this.belowTarget; },
     };
     // ---- Supervision (monthly %, floor/preferred/cap) ----
     const cc = computeClientCompliance(data, period, now).find(c => c.client.id === client.id);
@@ -140,16 +141,20 @@ function computeReassessment(data, client, auth, settings, now) {
         daysToInternalDue, paceOk,
     };
 }
-// Distinct calendar days this month where a supervision tagged with this case
-// overlaps a direct session for the same case (projected scope).
+// Distinct calendar days this month where a supervision-counting session tagged
+// with this case overlaps the NAMED BT's direct session for the same case.
 function countCaseContacts(data, client, period) {
     const directs = data.appointments.filter(a => a.type === 'client-session' && a.status !== 'canceled' && matchesClient(a, client) && inRange(a, period.start, period.end));
-    const sups = data.appointments.filter(a => a.type === 'supervision' && a.status !== 'canceled' && matchesClient(a, client) && inRange(a, period.start, period.end));
+    const sups = data.appointments.filter(a => countsAsSupervision(a) && a.status !== 'canceled' && matchesClient(a, client) && inRange(a, period.start, period.end));
     const days = new Set();
     for (const sup of sups) {
         const ss = new Date(sup.startTime).getTime();
         const se = new Date(sup.endTime).getTime();
         if (directs.some(d => {
+            // Supervision (no BT named) infers from any of this case's directs; a
+            // parent-training / case-planning counts only against its named BT's direct.
+            if (sup.technician && d.technician !== sup.technician)
+                return false;
             const ds = new Date(d.startTime).getTime();
             const de = new Date(d.endTime).getTime();
             return Math.min(se, de) > Math.max(ss, ds);

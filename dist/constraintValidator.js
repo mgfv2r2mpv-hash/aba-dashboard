@@ -36,6 +36,7 @@ export class ConstraintValidator {
     validateCaseModel() {
         const conflicts = [];
         const fmt = (n) => (Math.round(n * 10) / 10).toString();
+        const isUnstaffed = (clientId) => !this.data.technicians.some(t => t.assignments.some(a => a.clientId === clientId));
         for (const client of this.data.clients) {
             const cs = computeCaseState(this.data, client, this.now);
             if (!cs.auth)
@@ -48,13 +49,23 @@ export class ConstraintValidator {
                     message: `${client.name}: ${fmt(cs.direct.actualThisWk)}h direct scheduled this week vs ${fmt(cs.direct.authPerWk)}h authorized/week — overage is unbillable`,
                 });
             }
-            else if (cs.direct.below75) {
-                // 75% staffing is a soft target.
-                conflicts.push({
-                    type: 'scheduling-impossible',
-                    severity: 'info',
-                    message: `${client.name}: direct ${fmt(cs.direct.actualThisWk)}h is ${Math.round(cs.direct.pctOfAuth)}% of the ${fmt(cs.direct.authPerWk)}h/wk authorization (below the 75% staffing target)`,
-                });
+            else if (cs.direct.belowTarget) {
+                if (isUnstaffed(client.id)) {
+                    // Suppress utilization violation; emit a staff issue instead.
+                    conflicts.push({
+                        type: 'scheduling-impossible',
+                        severity: 'info',
+                        message: `${client.name}: no BT assigned — direct service hours not tracked`,
+                    });
+                }
+                else {
+                    const targetPct = client.directUtilizationTarget ?? 75;
+                    conflicts.push({
+                        type: 'scheduling-impossible',
+                        severity: 'info',
+                        message: `${client.name}: direct ${fmt(cs.direct.actualThisWk)}h is ${Math.round(cs.direct.pctOfAuth)}% of the ${fmt(cs.direct.authPerWk)}h/wk authorization (below ${targetPct}% targeted utilization)`,
+                    });
+                }
             }
             // Supervision pacing cadence (soft).
             if (cs.supervision.contactsRequiredByCadence !== undefined &&
@@ -143,6 +154,18 @@ export class ConstraintValidator {
                     });
                 }
             }
+            else if (tc.projected.directHours > 0) {
+                // Non-RBT BTs with direct sessions need at least 1 supervision contact per month.
+                const projContacts = computeTechContactDays(this.data, tc.tech, period, 'projected', this.now);
+                if (projContacts < 1) {
+                    conflicts.push({
+                        type: 'supervision-violation',
+                        severity: 'warning',
+                        message: `${tc.tech.name}: no supervision contact days projected for ${period.label} — at least 1 supervised observation required`,
+                        affectedTechnicians: [tc.tech.id],
+                    });
+                }
+            }
         }
         return conflicts;
     }
@@ -189,7 +212,10 @@ export class ConstraintValidator {
         const periods = [this.currentPeriod(pt.periodUnit)];
         // Per-client validation: minimum/target are company-wide defaults, but the
         // per-case max (Client.parentTrainingMaxHours) overrides them when lower.
+        // Clients with disablePTRequirements are fully exempted.
         this.data.clients.forEach(client => {
+            if (client.disablePTRequirements)
+                return;
             const caseMax = client.parentTrainingMaxHours;
             // If a case max is set and is below the target floor, the case max becomes
             // the effective minimum too (we don't fault a client for being below target
@@ -259,6 +285,10 @@ export class ConstraintValidator {
         const conflicts = [];
         const blackouts = this.data.blackouts || [];
         this.data.appointments.forEach(appointment => {
+            // A completed session already happened — whether or not it fell inside an
+            // availability window is moot, so don't surface an availability conflict for it.
+            if (appointment.status === 'completed')
+                return;
             const appointmentDate = new Date(appointment.startTime);
             // Only the current calendar month — keeps the Issues panel about now, and
             // stops a year of recurring appointments from flooding it.
@@ -279,6 +309,7 @@ export class ConstraintValidator {
             const parties = [];
             const blockingMessages = [];
             const affectedTechnicians = [];
+            let tentativeNote;
             if (technician) {
                 const windows = technician.availability[dayName] || [];
                 const blackout = this.findBlackout(blackouts, 'technician', technician.id, dateStr);
@@ -298,13 +329,37 @@ export class ConstraintValidator {
                 parties.push({ role: 'Client', name: client.name, status, windows, blackoutReason: blackout?.reason });
                 // Clients frequently have no availability configured, so we only fault
                 // a client when there ARE windows that don't cover the slot, or an
-                // explicit blackout — never for an unconfigured day ('none').
-                if (status === 'outside' || status === 'blackout') {
+                // explicit blackout — never for an unconfigured day ('none'). When the
+                // parent can meet outside their scheduled availability, an out-of-window
+                // parent-training slot is allowed-but-tentative rather than blocking.
+                const ptOutsideOk = appointment.type === 'parent-training'
+                    && client.parentAvailableOutsideSessions === true
+                    && status === 'outside';
+                if ((status === 'outside' && !ptOutsideOk) || status === 'blackout') {
                     blockingMessages.push(this.partyMessage(client.name, dayName, status, windows, blackout));
                 }
+                else if (ptOutsideOk) {
+                    tentativeNote = `${client.name}: parent training ${this.minutesToTime(appStart)}–${this.minutesToTime(appEnd)} is outside set availability on ${dayName} — allowed, pending confirmation`;
+                }
             }
-            if (blockingMessages.length === 0)
+            if (blockingMessages.length === 0) {
+                if (tentativeNote) {
+                    conflicts.push({
+                        type: 'availability-conflict',
+                        severity: 'warning',
+                        message: tentativeNote,
+                        affectedAppointments: [appointment.id],
+                        availabilityDetail: {
+                            day: dayName,
+                            date: dateStr,
+                            start: this.minutesToTime(appStart),
+                            end: this.minutesToTime(appEnd),
+                            parties,
+                        },
+                    });
+                }
                 return;
+            }
             conflicts.push({
                 type: 'availability-conflict',
                 severity: 'error',

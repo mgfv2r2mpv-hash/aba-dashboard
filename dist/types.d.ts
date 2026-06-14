@@ -23,6 +23,8 @@ export interface Client {
     parentAvailableOutsideSessions?: boolean;
     anticipatedDischarge?: string;
     notes?: string;
+    disablePTRequirements?: boolean;
+    directUtilizationTarget?: number;
 }
 export interface Technician {
     id: string;
@@ -83,9 +85,22 @@ export interface CompanySettings {
         unplannedHoursThreshold: number;
         plannedDaysThreshold: number;
     };
+    cancellationReasons?: CancellationCode[];
     utilization?: UtilizationSettings;
     rbtMinContactsPerMonth?: number;
+    ptoBillableDeductionRatio?: number;
+    pto?: PtoConfig;
+    bcbaSessionDefaults?: BcbaSessionDefaults;
 }
+export declare const DEFAULT_PTO_DEDUCTION_RATIO = 1;
+export interface BcbaSessionDefaults {
+    supervisionPercentOfWeeklyDirect: number;
+    reassessmentHours: number;
+    casePlanningHours: number;
+    parentTrainingHours: number;
+    otherHours: number;
+}
+export declare const DEFAULT_BCBA_SESSION_DEFAULTS: BcbaSessionDefaults;
 export declare const DEFAULT_CANCELLATION_NOTICE: {
     unplannedHoursThreshold: number;
     plannedDaysThreshold: number;
@@ -126,11 +141,23 @@ export declare const CANCELLATION_SOURCES: {
     value: CancellationSource;
     label: string;
 }[];
-export type CancellationReason = 'sick' | 'pto' | 'training' | 'holiday' | 'weather' | 'auth_issues';
-export declare const CANCELLATION_REASONS: {
-    value: CancellationReason;
+export interface CancellationCode {
+    value: string;
     label: string;
-}[];
+    retired?: boolean;
+}
+export type CancellationReason = string;
+export declare const CANCELLATION_REASONS: CancellationCode[];
+export declare function resolveCancellationCodes(settings?: {
+    cancellationReasons?: CancellationCode[];
+}): CancellationCode[];
+export declare function activeCancellationCodes(settings?: {
+    cancellationReasons?: CancellationCode[];
+}): CancellationCode[];
+export declare function cancellationReasonLabel(value: string, settings?: {
+    cancellationReasons?: CancellationCode[];
+}): string;
+export declare function slugifyCancellationCode(label: string): string;
 export interface Cancellation {
     source: CancellationSource;
     reason: CancellationReason;
@@ -159,6 +186,8 @@ export interface Appointment {
     cancellation?: Cancellation;
     isGhost?: boolean;
 }
+export declare const SUPERVISION_COUNTING_TYPES: readonly Appointment['type'][];
+export declare function countsAsSupervision(a: Pick<Appointment, 'type' | 'technician'>): boolean;
 export interface Blackout {
     id: string;
     entityType: 'technician' | 'client';
@@ -166,6 +195,47 @@ export interface Blackout {
     entityName?: string;
     date: string;
     reason?: string;
+    createdAt?: string;
+}
+export type PtoBucket = 'sick' | 'vacation' | 'combined' | 'unpaid';
+export type AccrualKind = 'semimonthly' | 'everyNWeeks' | 'perConvertedHours' | 'perConvertedBonus';
+export declare const DATE_BASED_ACCRUALS: AccrualKind[];
+export interface AccrualRule {
+    id: string;
+    kind: AccrualKind;
+    bucket: PtoBucket;
+    hours: number;
+    everyWeeks?: number;
+    weekday?: DayOfWeek;
+    anchor?: string;
+    perHours?: number;
+    bonusHours?: number;
+    bonusInterval?: 'week' | 'month';
+    bonusConsecutiveIntervals?: number;
+    bonusCriterion?: 'hours' | 'percentAboveGoal';
+    bonusPerExtraHours?: number;
+    bonusPercentAboveGoal?: number;
+    enabled?: boolean;
+}
+export interface PtoOpeningBalance {
+    bucket: PtoBucket;
+    hours: number;
+    asOf: string;
+}
+export interface PtoConfig {
+    mode: 'unlimited' | 'accrual';
+    buckets: 'combined' | 'separate';
+    unpaidEnabled?: boolean;
+    accruals?: AccrualRule[];
+    openingBalances?: PtoOpeningBalance[];
+}
+export declare const DEFAULT_PTO_CONFIG: PtoConfig;
+export interface TimeOff {
+    id: string;
+    date: string;
+    hours: number;
+    bucket?: PtoBucket;
+    note?: string;
     createdAt?: string;
 }
 export interface ScheduleData {
@@ -176,8 +246,10 @@ export interface ScheduleData {
     settings: CompanySettings;
     appointments: Appointment[];
     blackouts?: Blackout[];
+    timeOff?: TimeOff[];
     authorizations?: Authorization[];
     manualUsage?: ManualUsage[];
+    confirmedConflicts?: string[];
     lastModified: string;
 }
 export type PartyAvailabilityStatus = 'ok' | 'outside' | 'none' | 'blackout';
@@ -224,5 +296,65 @@ export interface ScheduleSolution {
     }[];
     reasoning: string;
     violatesConstraints: boolean;
+}
+export type WishKind = 'vacation' | 'clearWindow' | 'addRecurring' | 'shaveDown' | 'freeform';
+export interface WishRequest {
+    kind: WishKind;
+    note?: string;
+    dateStart?: string;
+    dateEnd?: string;
+    weekday?: DayOfWeek;
+    windowStart?: string;
+    windowEnd?: string;
+    everyOtherWeek?: boolean;
+    newType?: Appointment['type'];
+    client?: string;
+    durationMins?: number;
+    horizonWeeks?: number;
+    shaveDown?: boolean;
+}
+export interface FixItOptions {
+    includeBtSupervision: boolean;
+    includeNoBtSupervision: boolean;
+    includeInSessionParentTraining: boolean;
+    includeOutSessionParentTraining: boolean;
+    includeCasePlanning: boolean;
+    softenBillableMinimum: boolean;
+    excludedClientIds: string[];
+    horizonWeeks?: number;
+    prioritizeBtSupervision?: boolean;
+    prioritizeParentTraining?: boolean;
+}
+export declare const DEFAULT_FIXIT_OPTIONS: FixItOptions;
+export type WishOp = {
+    op: 'move';
+    appointmentId: string;
+    start: string;
+    end: string;
+} | {
+    op: 'remove';
+    appointmentId: string;
+} | {
+    op: 'add';
+    title?: string;
+    type: Appointment['type'];
+    client?: string;
+    technician?: string;
+    start: string;
+    end: string;
+    recurring?: boolean;
+    pattern?: 'weekly' | 'biweekly' | 'monthly';
+} | {
+    op: 'blackout';
+    entityType: 'client' | 'technician';
+    entity: string;
+    date: string;
+    reason?: string;
+};
+export interface WishSolution {
+    id: string;
+    summary: string;
+    reasoning: string;
+    ops: WishOp[];
 }
 //# sourceMappingURL=types.d.ts.map

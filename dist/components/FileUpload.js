@@ -1,5 +1,5 @@
 import { jsx as _jsx, Fragment as _Fragment, jsxs as _jsxs } from "react/jsx-runtime";
-import { useRef } from 'react';
+import React, { useRef } from 'react';
 export default function FileUpload({ onUpload, loading }) {
     const fileInputRef = useRef(null);
     const handleClick = () => {

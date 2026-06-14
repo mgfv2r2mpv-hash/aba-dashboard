@@ -66,7 +66,11 @@ export default function ConflictPanel({ conflicts, appointments = [], onSelectAp
         {errorCount > 0 && <span style={{ color: '#dc2626', fontWeight: 'bold' }}>({errorCount} errors)</span>}
         {warningCount > 0 && <span style={{ color: '#f59e0b', fontWeight: 'bold' }}>({warningCount} warnings)</span>}
       </h3>
-      <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+      {/* No height cap: in the docked frozen pane this list fills the space left
+          by the hours summary and the slide-up appointment, and overflow scrolls
+          in the pane's own scroll region; in the narrow single-column layout the
+          page scrolls. The old 300px cap kept it stuck "very short" either way. */}
+      <div>
         {conflicts.map((conflict, idx) => {
           const affectedAppts = (conflict.affectedAppointments || [])
             .map(id => appointments.find(a => a.id === id))

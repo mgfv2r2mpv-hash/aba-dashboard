@@ -180,10 +180,13 @@ export default function App() {
 
   // iPad (portrait and up) keeps the context pane permanently docked beside the
   // calendar: hours totals on top, conflicts/agenda filling the middle, and the
-  // selected session sliding up from the bottom. 768px is the classic tablet
-  // breakpoint so iPad portrait gets the split too (phones fall back to the
-  // single-column layout with a slide-up bottom sheet for the detail).
-  const dockPane = useMinWidth(768);
+  // selected session sliding up from the bottom. 744px is the iPad mini's
+  // portrait CSS width — the classic 768 tablet breakpoint excluded it, leaving
+  // the mini stuck on the phone fallback (billable hours under the calendar, a
+  // modal edit popup). 744 pulls every iPad portrait into the split; phones
+  // (≤ ~430 portrait, ~430–740 landscape on the small ones) still fall back to
+  // the single-column layout with a slide-up bottom sheet for the detail.
+  const dockPane = useMinWidth(744);
   // Wide screens in the schedule view get a two-pane split with independent
   // scrolling (calendar | bounded context pane). Other views and narrow screens
   // keep the single page-scroll layout.
@@ -1068,10 +1071,11 @@ export default function App() {
                   );
 
                   // Wide: a frozen, full-height pane. Totals pinned to the top
-                  // (~15%), conflicts/agenda filling the middle, and the selected
-                  // appointment sliding up from the bottom — 30% for the read-only
-                  // detail, expanding to ~80% (shrinking the middle) for inline
-                  // edits, all animated.
+                  // (≤25%), conflicts/agenda filling the remaining ~75%, and the
+                  // selected appointment sliding up from the bottom — 25% for the
+                  // read-only detail, expanding to 50% (shrinking the middle) for
+                  // inline edits, all animated. Overflow in any band scrolls
+                  // within the band, never growing the frozen pane.
                   if (splitView) {
                     return (
                       <div ref={detailPanelRef} style={{
@@ -1079,7 +1083,7 @@ export default function App() {
                         display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%',
                       }}>
                         {!draftActive && (
-                          <div style={{ flexShrink: 0, maxHeight: '15%', overflowY: 'auto', padding: '10px 14px', borderBottom: '1px solid #e5e7eb', WebkitOverflowScrolling: 'touch' as any }}>
+                          <div style={{ flexShrink: 0, maxHeight: '25%', overflowY: 'auto', padding: '10px 14px', borderBottom: '1px solid #e5e7eb', WebkitOverflowScrolling: 'touch' as any }}>
                             <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} currentDate={viewDate} />
                           </div>
                         )}
@@ -1090,7 +1094,7 @@ export default function App() {
                           flexShrink: 0, overflow: 'hidden',
                           display: 'flex', flexDirection: 'column',
                           borderTop: selectedAppointment ? '1px solid #e5e7eb' : 'none',
-                          maxHeight: selectedAppointment ? (inlineEdit ? '80%' : '30%') : 0,
+                          maxHeight: selectedAppointment ? (inlineEdit ? '50%' : '25%') : 0,
                           transition: 'max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                         }}>
                           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>

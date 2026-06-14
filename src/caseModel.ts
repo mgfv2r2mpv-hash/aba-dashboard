@@ -76,7 +76,8 @@ export interface CaseDirectState {
   idealPerWk: number;       // schedulable max = sum of this week's non-canceled directs' planned hours
   actualThisWk: number;     // delivered (completed) + still-scheduled this week
   pctOfAuth: number;        // actualThisWk / authPerWk * 100 (0 if no auth)
-  below75: boolean;         // actualThisWk < 75% of authPerWk (only meaningful when authPerWk > 0)
+  below75: boolean;         // legacy alias for belowTarget
+  belowTarget: boolean;     // actualThisWk < directUtilizationTarget% of authPerWk
 }
 
 export interface CaseSupervisionState {
@@ -163,7 +164,8 @@ export function computeCaseState(
     idealPerWk,
     actualThisWk,
     pctOfAuth: authDirectPerWk > 0 ? (actualThisWk / authDirectPerWk) * 100 : 0,
-    below75: authDirectPerWk > 0 && actualThisWk < 0.75 * authDirectPerWk,
+    belowTarget: authDirectPerWk > 0 && actualThisWk < ((client.directUtilizationTarget ?? 75) / 100) * authDirectPerWk,
+    get below75() { return this.belowTarget; },
   };
 
   // ---- Supervision (monthly %, floor/preferred/cap) ----

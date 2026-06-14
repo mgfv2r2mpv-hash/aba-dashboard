@@ -110,12 +110,11 @@ function blobToBase64(blob: Blob): Promise<string> {
 export default function App() {
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
   const [conflicts, setConflicts] = useState<ScheduleConflict[]>([]);
-  // Per-instance conflict triage (session-scoped). A muted conflict drops into
-  // the minimized bin at the bottom of the issues list; a confirmed-and-dismissed
-  // one is hidden outright. Keyed by conflictKey() so each applies only to that
-  // exact instance (a future month's same-shaped conflict has a different key).
+  // Per-instance conflict triage. Muted conflicts drop into the minimized bin
+  // (session-scoped, clears on reload). Confirmed-and-dismissed conflicts are
+  // hidden outright and persisted in scheduleData.confirmedConflicts so they
+  // survive page reloads and round-trip through the Excel export.
   const [mutedConflicts, setMutedConflicts] = useState<string[]>([]);
-  const [dismissedConflicts, setDismissedConflicts] = useState<string[]>([]);
   const [solutions, setSolutions] = useState<ScheduleSolution[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [view, setView] = useState<'schedule' | 'admin' | 'compliance' | 'caseload'>('schedule');
@@ -187,19 +186,27 @@ export default function App() {
   const compSummary: ComplianceSummary | null =
     scheduleData && compCache ? summarize(compCache, scheduleData) : null;
 
-  // Conflict triage applied: dismissed are hidden everywhere; muted move to the
-  // bin (still passed through, the panel sorts them out via mutedConflicts).
-  const dismissedSet = new Set(dismissedConflicts);
+  // Conflict triage: confirmed-and-dismissed are hidden outright (persisted);
+  // muted are moved to the bin (session-only).
+  const confirmedSet = new Set(scheduleData?.confirmedConflicts ?? []);
   const mutedSet = new Set(mutedConflicts);
-  const visibleConflicts = conflicts.filter(c => !dismissedSet.has(conflictKey(c)));
+  const visibleConflicts = conflicts.filter(c => !confirmedSet.has(conflictKey(c)));
   const activeConflicts = visibleConflicts.filter(c => !mutedSet.has(conflictKey(c)));
 
   const muteConflict = (key: string) =>
     setMutedConflicts(prev => (prev.includes(key) ? prev : [...prev, key]));
   const unmuteConflict = (key: string) =>
     setMutedConflicts(prev => prev.filter(k => k !== key));
-  const confirmDismissConflict = (key: string) =>
-    setDismissedConflicts(prev => (prev.includes(key) ? prev : [...prev, key]));
+  const confirmDismissConflict = (key: string) => {
+    if (!scheduleData) return;
+    const prev = scheduleData.confirmedConflicts ?? [];
+    if (prev.includes(key)) return;
+    commitFull({ ...scheduleData, confirmedConflicts: [...prev, key] });
+  };
+  const unconfirmConflict = (key: string) => {
+    if (!scheduleData) return;
+    commitFull({ ...scheduleData, confirmedConflicts: (scheduleData.confirmedConflicts ?? []).filter(k => k !== key) });
+  };
 
   // "Fix It" is actionable when there's anything to fix — active calendar
   // conflicts (errors/warnings, minus muted/dismissed) and/or compliance
@@ -966,6 +973,51 @@ export default function App() {
             {a.cancellation.notes && <div>Notes: {a.cancellation.notes}</div>}
           </div>
         )}
+        {(() => {
+          const apptConflicts = conflicts.filter(c => c.affectedAppointments?.includes(a.id));
+          const dismissed = apptConflicts.filter(c => confirmedSet.has(conflictKey(c)));
+          const muted = apptConflicts.filter(c => mutedSet.has(conflictKey(c)));
+          const conflictTitle = (c: import('./types').ScheduleConflict) => {
+            if (c.type === 'availability-conflict') return 'Availability Conflict';
+            if (c.type === 'training-violation') return c.message.toLowerCase().includes('below') ? 'PT Below Minimum' : 'PT Over Maximum';
+            if (c.type === 'supervision-violation') return 'Supervision Gap';
+            return c.message.split(':')[0].trim() || c.type;
+          };
+          return (
+            <>
+              {dismissed.length > 0 && (
+                <details style={{ marginTop: 10, fontSize: 12 }}>
+                  <summary style={{ cursor: 'pointer', color: '#6b7280', fontWeight: 600 }}>
+                    Dismissed Issues ({dismissed.length})
+                  </summary>
+                  <div style={{ paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {dismissed.map((c, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, background: '#f9fafb', borderRadius: 4, padding: '4px 8px' }}>
+                        <span style={{ color: '#374151' }}>{conflictTitle(c)}</span>
+                        <button onClick={() => unconfirmConflict(conflictKey(c))} style={{ border: '1px solid #d1d5db', borderRadius: 4, background: 'white', cursor: 'pointer', fontSize: 11, padding: '2px 6px' }}>Un-dismiss</button>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+              {muted.length > 0 && (
+                <details style={{ marginTop: 6, fontSize: 12 }}>
+                  <summary style={{ cursor: 'pointer', color: '#6b7280', fontWeight: 600 }}>
+                    Muted Issues ({muted.length})
+                  </summary>
+                  <div style={{ paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {muted.map((c, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, background: '#f9fafb', borderRadius: 4, padding: '4px 8px' }}>
+                        <span style={{ color: '#374151' }}>{conflictTitle(c)}</span>
+                        <button onClick={() => unmuteConflict(conflictKey(c))} style={{ border: '1px solid #d1d5db', borderRadius: 4, background: 'white', cursor: 'pointer', fontSize: 11, padding: '2px 6px' }}>Un-mute</button>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </>
+          );
+        })()}
         {a.isGhost ? (
           <div style={{ display: 'flex', gap: '6px', marginTop: '12px', flexWrap: 'wrap' }}>
             <button
@@ -1408,6 +1460,7 @@ export default function App() {
           technicians={scheduleData.technicians}
           clients={scheduleData.clients}
           settings={scheduleData.settings}
+          initialType={calLens === 'bcba' ? 'supervision' : 'client-session'}
           onSave={handleSaveAppointments}
           onCancel={() => setShowAddAppointment(false)}
         />
@@ -1473,10 +1526,10 @@ function ViewTabs({ view, onChange, compSummary }: {
   compSummary?: ComplianceSummary | null;
 }) {
   const tabs: { key: 'schedule' | 'admin' | 'compliance' | 'caseload'; label: string; aria: string }[] = [
-    { key: 'schedule', label: 'Sched', aria: 'Schedule' },
-    { key: 'admin', label: 'Admin', aria: 'Admin' },
+    { key: 'schedule', label: '🗓️ Cal', aria: 'Schedule' },
     { key: 'compliance', label: 'Comp', aria: 'Compliance' },
-    { key: 'caseload', label: 'Cases', aria: 'Caseload' },
+    { key: 'caseload', label: '📈 Dash', aria: 'Dashboard' },
+    { key: 'admin', label: '⚙️ Config', aria: 'Admin' },
   ];
   // Live count of clients/techs needing attention this month, updated on every
   // appointment change. Red = behind even projected; amber = projected ok only.

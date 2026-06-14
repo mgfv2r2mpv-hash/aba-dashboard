@@ -26,6 +26,12 @@ export function clientPastel(name?: string): string {
   return `hsl(${clientHue(name)} 72% 88%)`;
 }
 
+// Slightly darker shade of the client pastel — used as a completed-tile border.
+export function clientDarkBorder(name?: string): string {
+  if (!name) return '#9ca3af';
+  return `hsl(${clientHue(name)} 55% 62%)`;
+}
+
 export function staffBold(name?: string): string {
   if (!name) return '#6b7280';
   return `hsl(${staffHue(name)} 62% 42%)`;

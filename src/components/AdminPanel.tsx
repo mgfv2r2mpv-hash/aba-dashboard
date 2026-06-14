@@ -378,6 +378,7 @@ export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWi
                   <ClientCard
                     key={client.id}
                     client={client}
+                    technicians={data.technicians}
                     saving={savingId === client.id}
                     onChange={(patch) => persistClient(client.id, patch)}
                     onRemove={() => removeClient(client.id)}
@@ -482,13 +483,15 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
   };
   const availDays = Object.values(tech.availability || {}).filter(w => w && (w as TimeWindow[]).length > 0).length;
 
+  const noClients = assignments.length === 0;
+
   return (
     <div style={cardStyle}>
       <CardHeader
         collapsed={collapsed}
         onToggle={() => setCollapsed(c => !c)}
         name={tech.name}
-        badges={tech.isRBT ? ['RBT'] : []}
+        badges={[...(tech.isRBT ? ['RBT'] : []), ...(noClients ? ['(!) No Clients'] : [])]}
         summary={`${availDays} day${availDays === 1 ? '' : 's'} avail · ${assignments.length} assignment${assignments.length === 1 ? '' : 's'}`}
       />
 
@@ -599,12 +602,17 @@ function CardHeader({ collapsed, onToggle, name, badges, summary }: {
       <span style={{ fontWeight: 600, fontSize: '15px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {name || 'Unnamed'}
       </span>
-      {badges.map(b => (
-        <span key={b} style={{
-          fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', padding: '1px 6px',
-          borderRadius: '8px', backgroundColor: '#dbeafe', color: '#1e40af', flexShrink: 0,
-        }}>{b}</span>
-      ))}
+      {badges.map(b => {
+        const isAlert = b.startsWith('(!)');
+        return (
+          <span key={b} style={{
+            fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', padding: '1px 6px',
+            borderRadius: '8px', flexShrink: 0,
+            backgroundColor: isAlert ? '#fee2e2' : '#dbeafe',
+            color: isAlert ? '#dc2626' : '#1e40af',
+          }}>{b}</span>
+        );
+      })}
       {collapsed && (
         <span style={{ fontSize: '12px', color: '#6b7280', marginLeft: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>
           {summary}
@@ -883,16 +891,20 @@ function AvailabilityEditor({ initial, onSave, onCancel }: {
   );
 }
 
-function ClientCard({ client, saving, onChange, onRemove }: {
+function ClientCard({ client, technicians, saving, onChange, onRemove }: {
   client: Client;
+  technicians?: Technician[];
   saving: boolean;
   onChange: (patch: Partial<Client>) => void;
   onRemove: () => void;
 }) {
   const [name, setName] = useState(client.name);
   const [maxStr, setMaxStr] = useState(client.parentTrainingMaxHours !== undefined ? String(client.parentTrainingMaxHours) : '');
+  const [utilStr, setUtilStr] = useState(client.directUtilizationTarget !== undefined ? String(client.directUtilizationTarget) : '');
   const [editing, setEditing] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
+
+  const noStaff = !(technicians ?? []).some(t => t.assignments.some(a => a.clientId === client.id));
 
   const commitMax = () => {
     const next = maxStr === '' ? undefined : parseFloat(maxStr);
@@ -910,7 +922,7 @@ function ClientCard({ client, saving, onChange, onRemove }: {
         collapsed={collapsed}
         onToggle={() => setCollapsed(c => !c)}
         name={client.name}
-        badges={[]}
+        badges={noStaff ? ['(!) No Staff'] : []}
         summary={`${availDays} day${availDays === 1 ? '' : 's'} avail${ptMax !== undefined ? ` · PT max ${ptMax}h` : ''}`}
       />
 
@@ -945,6 +957,28 @@ function ClientCard({ client, saving, onChange, onRemove }: {
           style={{ ...inputStyle, width: '90px' }}
         />
         <span style={{ fontSize: '11px', color: '#6b7280' }}>h per case-period</span>
+      </div>
+      <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '8px', fontSize: '12px' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Completely exempts this client from parent-training minimum requirements.">
+          <input type="checkbox" checked={client.disablePTRequirements === true}
+            onChange={e => onChange({ disablePTRequirements: e.target.checked || undefined })} />
+          <span>Disable PT Requirements</span>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ color: '#374151', whiteSpace: 'nowrap' }}>Direct utilization target:</span>
+          <input
+            type="number" step="1" min="1" max="100"
+            value={utilStr}
+            onChange={(e) => setUtilStr(e.target.value)}
+            onBlur={() => {
+              const v = utilStr === '' ? undefined : parseFloat(utilStr);
+              if (v !== client.directUtilizationTarget) onChange({ directUtilizationTarget: Number.isFinite(v as number) ? v : undefined });
+            }}
+            placeholder="75"
+            style={{ ...inputStyle, width: '70px' }}
+          />
+          <span style={{ color: '#6b7280' }}>%</span>
+        </label>
       </div>
 
       {/* Per-case clinical / scheduling metadata (feeds the correction engine) */}

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Appointment, Technician, Client, CompanySettings, TimeOff } from '../types';
 import { DraftMark } from '../draft';
 import { rollupHours, resolveUtilization, HoursByStatus, ptoHoursInRange, reduceRequirementForPto } from '../utilization';
-import { tileStyle, clientPastel, legendStripeStyle } from '../calendarColors';
+import { tileStyle, clientPastel, clientDarkBorder, legendStripeStyle } from '../calendarColors';
 import { useMinWidth } from '../useMediaQuery';
 import {
   startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek,
@@ -351,6 +351,16 @@ function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelec
                   fontWeight: isToday ? 700 : 400,
                   marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: roomy ? 15 : 12,
                 }}>{format(day, 'd')}</div>
+                {/* Sunday: weekly totals always appear at the top, before appointments. */}
+                {dow === 0 && (
+                  <SundayTotal
+                    lens={lens}
+                    hours={rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens)}
+                    target={lens === 'bcba'
+                      ? reduceRequirementForPto(weeklyTarget, ptoHoursInRange(timeOff, weekStart.getTime(), addDays(weekStart, 7).getTime()), settings?.ptoBillableDeductionRatio)
+                      : weeklyTarget}
+                  />
+                )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {(expanded ? dayAppts : dayAppts.slice(0, maxChips)).map(apt => (
                     <AppointmentChip key={apt.id} apt={apt} mark={draftMarks?.get(apt.id)} onClick={() => onSelectAppointment(apt)} />
@@ -368,18 +378,6 @@ function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelec
                     >Show less ▴</div>
                   )}
                 </div>
-                {/* Sunday is the end-of-week (rightmost) cell. Show the full
-                    Mon–Sun total even when the week straddles a month rollover
-                    (BT utilization is weekly, so the week still counts). */}
-                {dow === 0 && (
-                  <SundayTotal
-                    lens={lens}
-                    hours={rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens)}
-                    target={lens === 'bcba'
-                      ? reduceRequirementForPto(weeklyTarget, ptoHoursInRange(timeOff, weekStart.getTime(), addDays(weekStart, 7).getTime()), settings?.ptoBillableDeductionRatio)
-                      : weeklyTarget}
-                  />
-                )}
               </div>
             );
           })}
@@ -639,7 +637,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
   const hours = Array.from({ length: VISIBLE_END_HOUR - VISIBLE_START_HOUR }, (_, i) => VISIBLE_START_HOUR + i);
   const totalHeight = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * hourHeight;
   const today = new Date();
-  const minWidth = days.length > 1 ? (roomy ? 720 : 560) : undefined;
+  const minWidth = days.length > 1 ? (roomy ? 980 : 760) : undefined;
   // The tapped tile (shows a small "view session" dialog). Distinct from drag.
   const [tapped, setTapped] = useState<Appointment | null>(null);
 
@@ -1018,10 +1016,10 @@ function blockLook(apt: Appointment, mark?: DraftMark) {
   let prefix = '';
   let statusIcon: string | null = null;
 
-  if (completed) { border = '2px solid #16a34a'; statusIcon = '✓'; }
+  if (completed) { border = `2px solid ${clientDarkBorder(apt.client)}`; }
   else if (canceled) {
     border = `2px solid ${apt.cancellation?.source === 'family' ? '#f97316' : '#dc2626'}`;
-    opacity = 0.55; strike = true; statusIcon = '✕';
+    opacity = 0.55; strike = true;
   }
 
   if (apt.isGhost) {
@@ -1035,9 +1033,8 @@ function blockLook(apt: Appointment, mark?: DraftMark) {
     canceled, completed,
     backgroundColor: tile.backgroundColor,
     backgroundImage: tile.backgroundImage,
-    border, opacity, strike, prefix, statusIcon,
+    border, opacity, strike, prefix,
     color: '#1f2937',
-    statusColor: 'rgba(0,0,0,0.65)',
   };
 }
 
@@ -1083,11 +1080,6 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }}>
         <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{look.prefix}{apt.title}</span>
-        {look.statusIcon && (
-          <span style={{ fontSize: 11, fontWeight: 700, color: look.statusColor, lineHeight: 1, flexShrink: 0 }}>
-            {look.statusIcon}
-          </span>
-        )}
       </div>
       <div style={{ fontSize: roomy ? 12 : 10, opacity: 0.85, marginTop: 2 }}>
         {format(new Date(apt.startTime), 'h:mm')}–{format(new Date(apt.endTime), 'h:mm a')}
@@ -1113,7 +1105,7 @@ function appointmentLayout(apt: Appointment, hourHeight: number = HOUR_HEIGHT): 
   const clampedStart = Math.max(startHrs, VISIBLE_START_HOUR);
   const clampedEnd = Math.min(endHrs, VISIBLE_END_HOUR);
   const top = (clampedStart - VISIBLE_START_HOUR) * hourHeight;
-  const height = Math.max(20, (clampedEnd - clampedStart) * hourHeight);
+  const height = Math.max(28, (clampedEnd - clampedStart) * hourHeight);
   return { top, height };
 }
 

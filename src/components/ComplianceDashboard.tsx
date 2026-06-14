@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Appointment, ScheduleData, ScheduleConflict, WishSolution } from '../types';
 import {
   ClientCompliance, TechCompliance, TechComplianceMetrics,
-  computeClientCompliance, computeTechCompliance,
+  computeClientCompliance, computeTechCompliance, computeTechContactDays,
   pastIncompleteAppointments, monthPeriod,
 } from '../compliance';
 import { ComplianceCache } from '../complianceCache';
@@ -40,6 +40,7 @@ interface Props {
 
 export default function ComplianceDashboard({ data, cache, conflicts = [], aiSettings, mutedConflictKeys, onMuteConflict, onUnmuteConflict, onConfirmDismissConflict, onMarkComplete, onRequestCancel, onSelectAppointment, onAcceptFix, onCustomizeFix }: Props) {
   const [periodRef, setPeriodRef] = useState(new Date());
+  const [compView, setCompView] = useState<'case' | 'staff'>('case');
   const period = useMemo(() => monthPeriod(periodRef), [periodRef]);
   const usingCache = !!cache && cache.period.start.getTime() === period.start.getTime();
   const clientReports = useMemo(
@@ -54,6 +55,17 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
       : computeTechCompliance(data, period),
     [data, period, cache, usingCache],
   );
+  const techContactDays = useMemo(() => {
+    const map = new Map<string, { actual: number; projected: number }>();
+    for (const tech of data.technicians) {
+      map.set(tech.id, {
+        actual: computeTechContactDays(data, tech, period, 'actual'),
+        projected: computeTechContactDays(data, tech, period, 'projected'),
+      });
+    }
+    return map;
+  }, [data, period]);
+  const rbtMinContacts = data.settings.rbtMinContactsPerMonth ?? 2;
   const pastIncomplete = useMemo(() => pastIncompleteAppointments(data), [data]);
   const targetPct = data.settings.supervisionDirectHoursPercent || 5;
   const techTargetPct = data.settings.supervisionTechHoursPercent ?? 0;
@@ -63,24 +75,32 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
   const goNext = () => setPeriodRef(new Date(periodRef.getFullYear(), periodRef.getMonth() + 1, 1));
   const goToday = () => setPeriodRef(new Date());
 
+  const tabBtn = (v: 'case' | 'staff', label: string) => (
+    <button
+      onClick={() => setCompView(v)}
+      style={{
+        padding: '5px 14px', border: 'none', borderRadius: 5, cursor: 'pointer',
+        fontSize: 13, fontWeight: 600,
+        background: compView === v ? '#1d4ed8' : 'transparent',
+        color: compView === v ? 'white' : '#374151',
+      }}
+    >{label}</button>
+  );
+
   return (
     <div style={{ flex: 1, padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Compliance ({period.label})</h2>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 6, padding: 2, marginRight: 4 }}>
+            {tabBtn('case', 'Cases')}
+            {tabBtn('staff', 'Staff')}
+          </div>
           <NavBtn onClick={goPrev}>←</NavBtn>
           <NavBtn onClick={goToday}>Today</NavBtn>
           <NavBtn onClick={goNext}>→</NavBtn>
         </div>
       </div>
-
-      <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
-        Supervision target: <strong>{targetPct}%</strong> of direct hours per client.
-        Counted as overlap minutes between a supervision tagged with the client and
-        any direct session for that client (any tech). A supervision with no
-        overlapping direct (BCBA solo with the client) consumes BCBA time but
-        contributes 0 to compliance.
-      </p>
 
       {aiSettings && onAcceptFix && onCustomizeFix && (
         <FixItPanel
@@ -113,32 +133,47 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
         />
       )}
 
-      <SectionHeader>Per client</SectionHeader>
-      <div style={{ display: 'grid', gap: 12, marginBottom: 24 }}>
-        {clientReports.length === 0 && (
-          <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>
-            No clients yet. Add clients in Admin to start tracking compliance.
+      {compView === 'case' && (
+        <>
+          <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+            Supervision target: <strong>{targetPct}%</strong> of direct hours per client.
           </p>
-        )}
-        {clientReports.map(r => <ClientCard key={r.client.id} report={r} targetPct={targetPct} maxPct={maxPct} />)}
-      </div>
+          <div style={{ display: 'grid', gap: 12 }}>
+            {clientReports.length === 0 && (
+              <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>
+                No clients yet. Add clients in Admin to start tracking compliance.
+              </p>
+            )}
+            {clientReports.map(r => <ClientCard key={r.client.id} report={r} targetPct={targetPct} maxPct={maxPct} />)}
+          </div>
+        </>
+      )}
 
-      <SectionHeader>Per technician</SectionHeader>
-      <p style={{ fontSize: 12, color: '#6b7280', marginTop: -8, marginBottom: 8 }}>
-        RBTs must hit BACB <strong>{BACB_RBT_SUPERVISION_MIN_PERCENT}%</strong> AND the
-        company target ({data.settings.supervisionRBTHoursPercent}%).
-        Non-RBT techs follow the company-only target ({techTargetPct}%).
-        Numerator counts supervision time overlapping that tech's direct sessions
-        regardless of which client the supervision was tagged with.
-      </p>
-      <div style={{ display: 'grid', gap: 12 }}>
-        {techReports.length === 0 && (
-          <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>
-            No technicians yet.
+      {compView === 'staff' && (
+        <>
+          <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+            RBTs must hit BACB <strong>{BACB_RBT_SUPERVISION_MIN_PERCENT}%</strong> AND the company target ({data.settings.supervisionRBTHoursPercent}%),
+            plus ≥{rbtMinContacts} supervision contacts/month.
+            Non-RBT BTs follow the company-only target ({techTargetPct}%) and require ≥1 contact/month if they have direct sessions.
           </p>
-        )}
-        {techReports.map(r => <TechCard key={r.tech.id} report={r} maxPct={maxPct} />)}
-      </div>
+          <div style={{ display: 'grid', gap: 12 }}>
+            {techReports.length === 0 && (
+              <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>
+                No technicians yet.
+              </p>
+            )}
+            {techReports.map(r => (
+              <TechCard
+                key={r.tech.id}
+                report={r}
+                maxPct={maxPct}
+                contacts={techContactDays.get(r.tech.id)}
+                rbtMinContacts={rbtMinContacts}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -323,14 +358,23 @@ function ClientCard({ report, targetPct, maxPct }: { report: ClientCompliance; t
   );
 }
 
-function TechCard({ report, maxPct }: { report: TechCompliance; maxPct?: number }) {
+function TechCard({ report, maxPct, contacts, rbtMinContacts }: {
+  report: TechCompliance;
+  maxPct?: number;
+  contacts?: { actual: number; projected: number };
+  rbtMinContacts?: number;
+}) {
   const { tech, actual, projected } = report;
   const noDirect = actual.directHours === 0 && projected.directHours === 0;
+  const minContacts = tech.isRBT ? (rbtMinContacts ?? 2) : 1;
+  const contactsRequired = !noDirect ? minContacts : 0;
+  const contactsBehind = contacts !== undefined && contactsRequired > 0 && contacts.projected < contactsRequired;
 
-  // A tech misses if they fall short on EITHER applicable threshold (BACB
-  // for RBTs and/or company). Status uses the tighter of actual + projected.
   const status = techStatus(actual, projected, tech.isRBT, noDirect);
-  const accent = statusColor(status);
+  const overallStatus = (status === 'green' && contactsBehind) ? 'yellow'
+    : (status === 'yellow' && contactsBehind) ? 'red'
+    : status;
+  const accent = statusColor(overallStatus);
 
   return (
     <div style={{
@@ -351,7 +395,7 @@ function TechCard({ report, maxPct }: { report: TechCompliance; maxPct?: number 
           fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
           color: 'white', backgroundColor: accent,
           padding: '2px 8px', borderRadius: 10,
-        }}>{statusLabel(status)}</span>
+        }}>{statusLabel(overallStatus)}</span>
       </div>
 
       {noDirect ? (
@@ -359,10 +403,22 @@ function TechCard({ report, maxPct }: { report: TechCompliance; maxPct?: number 
           No direct sessions this period. Nothing to supervise.
         </p>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-          <TechMetric title="Actual" m={actual} accent={accent} isRBT={tech.isRBT} maxPct={maxPct} />
-          <TechMetric title="Projected" m={projected} accent={accent} isRBT={tech.isRBT} maxPct={maxPct} />
-        </div>
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+            <TechMetric title="Actual" m={actual} accent={accent} isRBT={tech.isRBT} maxPct={maxPct} />
+            <TechMetric title="Projected" m={projected} accent={accent} isRBT={tech.isRBT} maxPct={maxPct} />
+          </div>
+          {contacts !== undefined && contactsRequired > 0 && (
+            <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>
+              Supervision contacts: <strong style={{ color: contactsBehind ? accent : '#15803d' }}>
+                {contacts.actual} actual / {contacts.projected} projected
+              </strong>
+              {' '}(need {contactsRequired}/month)
+              {contactsBehind && <span style={{ color: accent, fontWeight: 600 }}> — behind</span>}
+              {!contactsBehind && contacts.projected >= contactsRequired && <span style={{ color: '#15803d' }}> ✓</span>}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -498,7 +554,7 @@ function Metric({ title, m, targetPct, accent, maxPct }: {
           <> · To go: <strong style={{ color: accent }}>{m.hoursToGo.toFixed(1)}h</strong></>
         )}
         {m.hoursToGo === 0 && m.directHours > 0 && (
-          <> · ✓ at target</>
+          <> · ✓ on track</>
         )}
       </div>
     </div>
@@ -512,7 +568,7 @@ function monthLabel(r: ClientCompliance): string {
 
 function statusLabel(s: 'green' | 'yellow' | 'red' | 'gray'): string {
   switch (s) {
-    case 'green': return 'on target';
+    case 'green': return 'on track';
     case 'yellow': return 'projected ok';
     case 'red': return 'behind';
     case 'gray': return 'inactive';

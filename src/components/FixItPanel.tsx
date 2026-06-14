@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { ScheduleData, ScheduleConflict, WishSolution, WishOp, FixItOptions, DEFAULT_FIXIT_OPTIONS } from '../types';
 import { AISettings } from './Settings';
 import { ClaudeScheduler } from '../claudeScheduler';
@@ -26,6 +26,11 @@ const TOGGLES: { key: keyof FixItOptions; label: string }[] = [
   { key: 'softenBillableMinimum', label: 'Soften billable minimum requirement' },
 ];
 
+const PRIORITY_TOGGLES: { key: keyof FixItOptions; label: string }[] = [
+  { key: 'prioritizeBtSupervision', label: 'Prioritize BT supervision' },
+  { key: 'prioritizeParentTraining', label: 'Prioritize parent training' },
+];
+
 function opText(o: WishOp): string {
   const t = (iso: string) => { const d = new Date(iso); return isNaN(d.getTime()) ? iso : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
   switch (o.op) {
@@ -45,6 +50,9 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
   // "Object": a feedback note folded into a regenerate request.
   const [objecting, setObjecting] = useState(false);
   const [objection, setObjection] = useState('');
+  const [showPromptPreview, setShowPromptPreview] = useState(false);
+  const [previewPrompt, setPreviewPrompt] = useState('');
+  const previewTextRef = useRef<HTMLTextAreaElement>(null);
 
   const toggle = (key: keyof FixItOptions) =>
     setOptions(o => ({ ...o, [key]: !o[key] }));
@@ -80,6 +88,13 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
 
   const reject = () => { setSolutions(null); setObjecting(false); setObjection(''); };
 
+  const openPromptPreview = () => {
+    const scheduler = new ClaudeScheduler(aiSettings.apiKey || 'preview', data, aiSettings.model);
+    const text = scheduler.buildFixItPrompt(options, conflicts.map(c => c.message));
+    setPreviewPrompt(text);
+    setShowPromptPreview(true);
+  };
+
   const anyStrategy = options.includeBtSupervision || options.includeNoBtSupervision
     || options.includeInSessionParentTraining || options.includeOutSessionParentTraining
     || options.includeCasePlanning;
@@ -101,6 +116,27 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
         <span>{open ? '▾' : '▸'}</span>
       </button>
 
+      {showPromptPreview && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, boxSizing: 'border-box' }}>
+          <div style={{ background: 'white', borderRadius: 10, padding: 20, width: '100%', maxWidth: 640, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <strong style={{ fontSize: 15 }}>AI Prompt Preview</strong>
+              <button onClick={() => setShowPromptPreview(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>✕</button>
+            </div>
+            <textarea
+              ref={previewTextRef}
+              readOnly
+              value={previewPrompt}
+              style={{ flex: 1, fontFamily: 'monospace', fontSize: 11, padding: 10, border: '1px solid #d1d5db', borderRadius: 6, resize: 'none', overflowY: 'auto' }}
+            />
+            <button
+              onClick={() => { navigator.clipboard.writeText(previewPrompt).catch(() => {}); }}
+              style={{ marginTop: 10, padding: '7px 14px', background: '#ea580c', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13, alignSelf: 'flex-end' }}
+            >Copy to clipboard</button>
+          </div>
+        </div>
+      )}
+
       {open && (
         <div style={{ padding: '0 14px 14px' }}>
           <p style={{ fontSize: 12, color: '#9a3412', marginTop: 0 }}>
@@ -110,9 +146,17 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
           </p>
 
           {/* Strategy toggles */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 6, marginBottom: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 6, marginBottom: 8 }}>
             {TOGGLES.map(t => (
               <label key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#374151', cursor: 'pointer' }}>
+                <input type="checkbox" checked={!!options[t.key]} onChange={() => toggle(t.key)} />
+                {t.label}
+              </label>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+            {PRIORITY_TOGGLES.map(t => (
+              <label key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#6b21a8', cursor: 'pointer' }}>
                 <input type="checkbox" checked={!!options[t.key]} onChange={() => toggle(t.key)} />
                 {t.label}
               </label>
@@ -126,8 +170,8 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
                 Clients to consider ({data.clients.length - excluded.size} of {data.clients.length})
               </span>
               <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={excludeAllClients} style={miniBtn}>Uncheck all clients</button>
-                {excluded.size > 0 && <button onClick={includeAllClients} style={miniBtn}>Check all</button>}
+                <button onClick={excludeAllClients} disabled={excluded.size === data.clients.length} style={{ ...miniBtn, opacity: excluded.size === data.clients.length ? 0.45 : 1 }}>Uncheck all</button>
+                <button onClick={includeAllClients} disabled={excluded.size === 0} style={{ ...miniBtn, opacity: excluded.size === 0 ? 0.45 : 1 }}>Check all</button>
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 4, maxHeight: 160, overflowY: 'auto' }}>
@@ -149,7 +193,7 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
 
           {error && <div style={{ color: '#b91c1c', fontSize: 13, marginBottom: 10 }}>{error}</div>}
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8, alignItems: 'center' }}>
             <button
               onClick={() => generate()}
               disabled={loading || !anyStrategy}
@@ -158,6 +202,11 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
                 border: 'none', borderRadius: 6, cursor: loading || !anyStrategy ? 'default' : 'pointer', fontWeight: 600, fontSize: 13,
               }}
             >{loading ? 'Thinking…' : solutions ? 'Regenerate' : 'Generate solutions'}</button>
+            <button
+              onClick={openPromptPreview}
+              title="Preview AI prompt"
+              style={{ ...miniBtn, fontSize: 14, padding: '7px 10px' }}
+            >🔍</button>
             {!anyStrategy && <span style={{ fontSize: 12, color: '#9a3412', alignSelf: 'center' }}>Select at least one strategy.</span>}
           </div>
 
@@ -200,11 +249,13 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
                 <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <textarea
                     value={objection}
-                    onChange={e => setObjection(e.target.value)}
+                    onChange={e => setObjection(e.target.value.slice(0, 400))}
+                    maxLength={400}
                     rows={2}
                     placeholder="What's wrong with these options? e.g. don't touch Tuesday mornings; prefer adding rather than moving."
                     style={{ padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, resize: 'vertical' }}
                   />
+                  <span style={{ fontSize: 11, color: objection.length >= 380 ? '#b91c1c' : '#9ca3af', textAlign: 'right' }}>{objection.length}/400</span>
                   <div>
                     <button
                       onClick={() => generate(objection)}

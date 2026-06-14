@@ -1,6 +1,6 @@
 {
   "name": "aba-dashboard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "A dashboard to quickly manage supervision and scheduling, using claude API to accept changes to schedule and come up with alternatives for the user to ensure clinical compliance according to configurable company and credentialing requirements.",
   "main": "index.js",

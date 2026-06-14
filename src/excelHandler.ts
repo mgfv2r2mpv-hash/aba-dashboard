@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import {
   ScheduleData, Appointment, Technician, Client, CompanySettings, DayOfWeek,
   Blackout, Authorization, ManualUsage, Cancellation, CancellationCode, AUTH_BUCKETS, TimeOff,
+  PtoConfig, AccrualRule, AccrualKind, PtoBucket, PtoOpeningBalance,
 } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -296,6 +297,12 @@ function parseSettings(
   const finalVal = num(row.reportFinalLeadValue);
   if (finalVal !== undefined) settings.reportFinalLead = { value: finalVal, unit: row.reportFinalLeadUnit === 'days' ? 'days' : 'weeks' };
 
+  // PTO config (Upgrade 2): scalar mode columns + two child sheets. Only attach
+  // settings.pto when something is actually configured, so a schedule with no PTO
+  // setup round-trips as `pto: undefined` rather than a synthesized object.
+  const pto = parsePtoConfig(workbook, row);
+  if (pto) settings.pto = pto;
+
   // Custom cancellation reason codes (own child sheet).
   const codeRows = rowsOf(workbook, 'CancellationCodes').filter(r => r && !isBlank(r.value));
   if (codeRows.length) {
@@ -341,6 +348,58 @@ function parseTimeOff(workbook: XLSX.WorkBook): TimeOff[] {
       if (!isBlank(row.createdAt)) t.createdAt = String(row.createdAt);
       return t;
     });
+}
+
+const PTO_BUCKET_VALUES: PtoBucket[] = ['sick', 'vacation', 'combined', 'unpaid'];
+const ACCRUAL_KINDS: AccrualKind[] = ['semimonthly', 'everyNWeeks', 'perConvertedHours', 'perConvertedBonus'];
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function parsePtoConfig(workbook: XLSX.WorkBook, settingsRow: any): PtoConfig | undefined {
+  const accrualRows = rowsOf(workbook, 'PtoAccruals')
+    .filter(r => r && ACCRUAL_KINDS.includes(text(r.kind) as AccrualKind) && PTO_BUCKET_VALUES.includes(text(r.bucket) as PtoBucket));
+  const balanceRows = rowsOf(workbook, 'PtoOpeningBalances')
+    .filter(r => r && PTO_BUCKET_VALUES.includes(text(r.bucket) as PtoBucket) && num(r.hours) !== undefined);
+
+  const modeCell = text(settingsRow.ptoMode);
+  const bucketsCell = text(settingsRow.ptoBuckets);
+  const unpaidCell = bool3(settingsRow.ptoUnpaidEnabled);
+  // Nothing configured at all → leave settings.pto undefined (the default).
+  if (!modeCell && !bucketsCell && unpaidCell === undefined && accrualRows.length === 0 && balanceRows.length === 0) {
+    return undefined;
+  }
+
+  const pto: PtoConfig = {
+    mode: modeCell === 'accrual' ? 'accrual' : 'unlimited',
+    buckets: bucketsCell === 'separate' ? 'separate' : 'combined',
+  };
+  if (unpaidCell === true) pto.unpaidEnabled = true;
+
+  if (accrualRows.length) {
+    pto.accruals = accrualRows.map((r: any): AccrualRule => {
+      const rule: AccrualRule = {
+        id: text(r.id) || uuidv4(),
+        kind: text(r.kind) as AccrualKind,
+        bucket: text(r.bucket) as PtoBucket,
+        hours: num(r.hours) ?? 0,
+      };
+      const everyWeeks = num(r.everyWeeks); if (everyWeeks !== undefined) rule.everyWeeks = everyWeeks;
+      const wd = text(r.weekday); if (wd && DAY_NAMES.includes(wd)) rule.weekday = wd as AccrualRule['weekday'];
+      if (!isBlank(r.anchor)) rule.anchor = normalizeDateString(r.anchor);
+      const perHours = num(r.perHours); if (perHours !== undefined) rule.perHours = perHours;
+      const bonusHours = num(r.bonusHours); if (bonusHours !== undefined) rule.bonusHours = bonusHours;
+      const bonusPer = num(r.bonusPerExtraHours); if (bonusPer !== undefined) rule.bonusPerExtraHours = bonusPer;
+      const enabled = bool3(r.enabled); if (enabled !== undefined) rule.enabled = enabled;
+      return rule;
+    });
+  }
+  if (balanceRows.length) {
+    pto.openingBalances = balanceRows.map((r: any): PtoOpeningBalance => ({
+      bucket: text(r.bucket) as PtoBucket,
+      hours: num(r.hours) ?? 0,
+      asOf: normalizeDateString(r.asOf),
+    }));
+  }
+  return pto;
 }
 
 function parseAuthorizations(workbook: XLSX.WorkBook): Authorization[] {
@@ -446,7 +505,7 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
       'bcbaMonthlyBillableHours5Week', 'bcbaWeeklyBillableMin',
       'cancellationUnplannedHoursThreshold', 'cancellationPlannedDaysThreshold',
       'reportDraftLeadValue', 'reportDraftLeadUnit', 'reportFinalLeadValue', 'reportFinalLeadUnit',
-      'ptoBillableDeductionRatio'],
+      'ptoBillableDeductionRatio', 'ptoMode', 'ptoBuckets', 'ptoUnpaidEnabled'],
     [[
       s.supervisionDirectHoursPercent, s.supervisionRBTHoursPercent, W(s.supervisionTechHoursPercent),
       W(s.supervisionMaxHoursPercent), W(s.supervisionFloorPercent), W(s.supervisionPreferredMinPercent),
@@ -456,7 +515,7 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
       W(u.bcbaMonthlyBillableHours5Week), W(u.bcbaWeeklyBillableMin),
       W(cn?.unplannedHoursThreshold), W(cn?.plannedDaysThreshold),
       W(s.reportDraftLead?.value), W(s.reportDraftLead?.unit), W(s.reportFinalLead?.value), W(s.reportFinalLead?.unit),
-      W(s.ptoBillableDeductionRatio),
+      W(s.ptoBillableDeductionRatio), W(s.pto?.mode), W(s.pto?.buckets), WB(s.pto?.unpaidEnabled),
     ]]);
 
   // Appointments (cancellation columns split out).
@@ -492,6 +551,17 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
   // forthcoming accrual/balance tracking.
   add('TimeOff', ['id', 'date', 'hours', 'bucket', 'note', 'createdAt'],
     (data.timeOff || []).map(t => [t.id, t.date, t.hours, W(t.bucket), W(t.note), W(t.createdAt)]));
+
+  // PTO accrual rules + opening balances (Upgrade 2). One row each; absent =
+  // unlimited mode with no balances.
+  add('PtoAccruals',
+    ['id', 'kind', 'bucket', 'hours', 'everyWeeks', 'weekday', 'anchor', 'perHours', 'bonusHours', 'bonusPerExtraHours', 'enabled'],
+    (data.settings.pto?.accruals || []).map(r => [
+      r.id, r.kind, r.bucket, r.hours, W(r.everyWeeks), W(r.weekday), W(r.anchor),
+      W(r.perHours), W(r.bonusHours), W(r.bonusPerExtraHours), r.enabled === undefined ? '' : WB(r.enabled),
+    ]));
+  add('PtoOpeningBalances', ['bucket', 'hours', 'asOf'],
+    (data.settings.pto?.openingBalances || []).map(b => [b.bucket, b.hours, b.asOf]));
 
   // Authorizations (bucket + weekly columns).
   add('Authorizations',

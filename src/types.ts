@@ -170,6 +170,9 @@ export interface CompanySettings {
   // 8h PTO day removes 5 billable hours from the 25h/wk requirement. The reduced
   // week is floored at 0. Stored in the workbook so it travels with the schedule.
   ptoBillableDeductionRatio?: number;
+  // PTO buckets / accrual / balances (Upgrade 2). Absent = DEFAULT_PTO_CONFIG
+  // (unlimited mode, one combined pool, no balances).
+  pto?: PtoConfig;
 }
 
 export const DEFAULT_PTO_DEDUCTION_RATIO = 1;
@@ -365,6 +368,59 @@ export interface Blackout {
 // entry now so Upgrade 2 (accrual + balances) is purely additive; today only the
 // deduction-from-billable-requirement (Upgrade 1) reads these entries.
 export type PtoBucket = 'sick' | 'vacation' | 'combined' | 'unpaid';
+
+// ── PTO buckets, accrual & balances (Upgrade 2) ──────────────────────────────
+// Balances are OPTIONAL: in 'unlimited' mode the app only tracks leave taken
+// (used hours) and never blocks; in 'accrual' mode it also accrues hours over
+// time and reports a remaining balance. Anyone whose real accrual rule isn't yet
+// supported can stay on 'unlimited' and still use time off.
+
+// How a rule grants hours. Phase 1 computes the two date-based kinds; the
+// hours-based kinds are defined for forward-compat and reported as deferred until
+// Phase 2 (so a saved rule round-trips and is visible, but doesn't yet accrue).
+export type AccrualKind =
+  | 'semimonthly'        // fixed hours on the 1st and the 15th of every month
+  | 'everyNWeeks'        // fixed hours every N weeks, on a given weekday, from an anchor date
+  | 'perConvertedHours'  // (Phase 2) X hours per Y converted billable hours
+  | 'perConvertedBonus'; // (Phase 2) base per-converted plus a bonus when extra hours sustained
+
+export const DATE_BASED_ACCRUALS: AccrualKind[] = ['semimonthly', 'everyNWeeks'];
+
+export interface AccrualRule {
+  id: string;
+  kind: AccrualKind;
+  bucket: PtoBucket;       // which pool this rule feeds
+  hours: number;           // hours granted per event (or per `perHours` block)
+  // everyNWeeks:
+  everyWeeks?: number;     // cadence in weeks (>=1)
+  weekday?: DayOfWeek;     // which day the grant lands on
+  anchor?: string;         // YYYY-MM-DD the cadence counts from
+  // perConvertedHours / bonus (Phase 2):
+  perHours?: number;       // grant `hours` per this many converted billable hours
+  bonusHours?: number;     // extra hours when the bonus condition holds
+  bonusPerExtraHours?: number;
+  enabled?: boolean;       // default true; lets a rule be parked without deleting
+}
+
+// A starting balance for a bucket as of a date — accrual is summed forward from
+// here, so a BCBA can adopt the feature mid-year without backfilling history.
+export interface PtoOpeningBalance {
+  bucket: PtoBucket;
+  hours: number;
+  asOf: string;            // YYYY-MM-DD
+}
+
+export interface PtoConfig {
+  mode: 'unlimited' | 'accrual';   // default 'unlimited'
+  // 'combined' = one pool (entries use the 'combined' bucket); 'separate' = sick
+  // and vacation tracked apart. Default 'combined'.
+  buckets: 'combined' | 'separate';
+  unpaidEnabled?: boolean;         // expose a distinct 'unpaid' pool. Default false.
+  accruals?: AccrualRule[];        // used only in 'accrual' mode
+  openingBalances?: PtoOpeningBalance[];
+}
+
+export const DEFAULT_PTO_CONFIG: PtoConfig = { mode: 'unlimited', buckets: 'combined' };
 
 // One block of BCBA leave on a single calendar day. The hours reduce that week's
 // billable requirement by `hours * ptoBillableDeductionRatio` (see CompanySettings).

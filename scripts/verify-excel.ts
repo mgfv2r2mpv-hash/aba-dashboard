@@ -32,6 +32,14 @@ const data: ScheduleData = {
     cancellationNotice: { unplannedHoursThreshold: 24, plannedDaysThreshold: 30 },
     reportDraftLead: { value: 4, unit: 'weeks' }, reportFinalLead: { value: 2, unit: 'weeks' },
     ptoBillableDeductionRatio: 0.625,
+    pto: {
+      mode: 'accrual', buckets: 'separate', unpaidEnabled: true,
+      accruals: [
+        { id: 'AC1', kind: 'semimonthly', bucket: 'vacation', hours: 4 },
+        { id: 'AC2', kind: 'everyNWeeks', bucket: 'sick', hours: 2, everyWeeks: 2, weekday: 'Friday', anchor: '2026-01-02', enabled: true },
+      ],
+      openingBalances: [{ bucket: 'vacation', hours: 10, asOf: '2026-01-01' }],
+    },
   },
   appointments: [
     { id: 'A1', title: 'Direct', technician: 'T1', client: 'C1', startTime: '2026-06-01T09:00:00', endTime: '2026-06-01T11:00:00', isFixed: false, isBillable: true, type: 'client-session', isRecurring: true, recurringPattern: 'weekly', seriesId: 'S1' },
@@ -81,6 +89,10 @@ check('blackout + manualUsage', rt.blackouts![0].reason === 'holiday' && rt.manu
 check('timeOff + pto deduction ratio',
   rt.timeOff![0].hours === 8 && rt.timeOff![0].bucket === 'vacation' && rt.timeOff![0].note === 'beach'
   && st.ptoBillableDeductionRatio === 0.625);
+check('pto config (mode/buckets/unpaid/accruals/openings)',
+  st.pto?.mode === 'accrual' && st.pto?.buckets === 'separate' && st.pto?.unpaidEnabled === true
+  && st.pto?.accruals?.length === 2 && st.pto?.accruals?.[1].weekday === 'Friday' && st.pto?.accruals?.[1].everyWeeks === 2
+  && st.pto?.openingBalances?.[0].hours === 10 && st.pto?.openingBalances?.[0].asOf === '2026-01-01');
 
 // Full structural round-trip (ignoring volatile lastModified).
 const norm = (d: ScheduleData) => { const x: any = JSON.parse(JSON.stringify(d)); delete x.lastModified; return x; };

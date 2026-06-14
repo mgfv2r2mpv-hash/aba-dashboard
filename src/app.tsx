@@ -30,9 +30,10 @@ import PasswordPrompt from './components/PasswordPrompt';
 import {
   hasPin, setPin, verifyPin, changePin,
   saveSchedule, loadSchedule,
+  saveAIConfig, loadAIConfig, clearAIConfig,
   isFaceIdEnabled, enableFaceId, disableFaceId, recoverPinViaBiometric,
 } from './appLock';
-import { isBiometricAvailable, biometricAuthenticate } from './biometric';
+import { isBiometricAvailable, biometricAuthenticate, getBiometryLabel, BiometryLabel } from './biometric';
 import { pastIncompleteAppointments } from './compliance';
 import {
   ComplianceCache, ComplianceSummary, ApptChange,
@@ -163,16 +164,18 @@ export default function App() {
   const [changingPin, setChangingPin] = useState(false);
   const [faceIdAvailable, setFaceIdAvailable] = useState(false);
   const [faceIdEnabled, setFaceIdEnabled] = useState(false);
+  // What to call the device's biometry in UI copy ("Face ID" / "Touch ID").
+  const [biometryLabel, setBiometryLabel] = useState<BiometryLabel>('biometric unlock');
   // The unlocked PIN, kept in memory only, so we can re-encrypt on each change.
   const unlockedPinRef = React.useRef<string | null>(null);
 
   // Schedule-decrypt password modal (replaces window.prompt for AutoFill).
-  const [pwPrompt, setPwPrompt] = useState<{ title: string; message: string } | null>(null);
+  const [pwPrompt, setPwPrompt] = useState<{ title: string; message: string; placeholder?: string; submitLabel?: string } | null>(null);
   const pwResolverRef = React.useRef<((pw: string | null) => void) | null>(null);
-  const askPassword = (title: string, message: string) =>
+  const askPassword = (title: string, message: string, opts?: { placeholder?: string; submitLabel?: string }) =>
     new Promise<string | null>((resolve) => {
       pwResolverRef.current = resolve;
-      setPwPrompt({ title, message });
+      setPwPrompt({ title, message, ...opts });
     });
   const resolvePassword = (pw: string | null) => {
     setPwPrompt(null);
@@ -265,12 +268,20 @@ export default function App() {
   const handleAISettingsSave = (settings: AISettings) => {
     setAiSettings(settings);
     saveSessionSettings(settings);
+    // Seal the key under the unlocked PIN so it persists across cold launches.
+    // (Native + unlocked only; web has no at-rest store.)
+    const pin = unlockedPinRef.current;
+    if (isNative && pin) {
+      if (settings.apiKey) void saveAIConfig({ apiKey: settings.apiKey, model: settings.model }, pin);
+      else void clearAIConfig();
+    }
   };
 
   const handleClearKey = () => {
     const cleared = { ...aiSettings, apiKey: '' };
     setAiSettings(cleared);
     saveSessionSettings(cleared);
+    if (isNative) void clearAIConfig();
   };
 
   const fetchSampleBlob = async (): Promise<Blob> => {
@@ -318,8 +329,10 @@ export default function App() {
         apiKey: parsed.apiKey,
         model: parsed.model || aiSettings.model || 'claude-sonnet-4-6',
       };
-      setAiSettings(restored);
-      saveSessionSettings(restored);
+      // Route through the saver so the imported key is also sealed under the PIN
+      // at rest (native) — otherwise it would survive this session but not a
+      // cold launch, the same gap that made keys feel "not maintained".
+      handleAISettingsSave(restored);
     } catch (_e) {
       // Corrupt/foreign blob — ignore silently; the user can paste a key.
     }
@@ -341,7 +354,9 @@ export default function App() {
     (async () => {
       const has = await hasPin();
       setLockMode(has ? 'unlock' : 'create');
-      setFaceIdAvailable(await isBiometricAvailable());
+      const bioAvailable = await isBiometricAvailable();
+      setFaceIdAvailable(bioAvailable);
+      if (bioAvailable) setBiometryLabel(await getBiometryLabel());
       setFaceIdEnabled(await isFaceIdEnabled());
       setLocked(true);
       setLockReady(true);
@@ -355,6 +370,18 @@ export default function App() {
     if (restored) {
       setNativeStore(restored);
       commitFull(restored);
+    }
+    // Recover the API key + model that were sealed under this same PIN, so the
+    // key is "maintained" across cold launches without ever sitting in plaintext.
+    const aiConfig = await loadAIConfig(pin);
+    if (aiConfig?.apiKey) {
+      const restoredSettings: AISettings = {
+        ...aiSettings,
+        apiKey: aiConfig.apiKey,
+        model: (aiConfig.model as ClaudeModel) || aiSettings.model || 'claude-sonnet-4-6',
+      };
+      setAiSettings(restoredSettings);
+      saveSessionSettings(restoredSettings);
     }
     setLocked(false);
   };
@@ -383,6 +410,9 @@ export default function App() {
   // Re-key to a new PIN from inside the app (already authenticated by being in).
   const handleChangePin = async (pin: string) => {
     await changePin(pin, scheduleData);
+    // Re-seal the API key under the new PIN so it stays recoverable on unlock.
+    if (aiSettings.apiKey) await saveAIConfig({ apiKey: aiSettings.apiKey, model: aiSettings.model }, pin);
+    else await clearAIConfig();
     unlockedPinRef.current = pin;
     setChangingPin(false);
   };
@@ -398,6 +428,21 @@ export default function App() {
       await disableFaceId();
       setFaceIdEnabled(false);
     }
+  };
+
+  // Re-auth gate for revealing/replacing the stored API key. On native the key
+  // is sealed under the PIN, so replacing it requires the same proof that opens
+  // the app: Face ID (if enabled) or the PIN. Web has no lock, so it's allowed
+  // outright. Returns true when the user is authorized to edit the key.
+  const authenticateForKey = async (): Promise<boolean> => {
+    if (!isNative) return true;
+    if (faceIdEnabled && await biometricAuthenticate('Unlock to replace API key')) return true;
+    const pin = await askPassword(
+      'Enter your PIN',
+      'Enter your app PIN to replace the saved Claude API key.',
+      { placeholder: 'App PIN', submitLabel: 'Unlock' });
+    if (!pin) return false;
+    return verifyPin(pin);
   };
 
   // Persist the schedule (encrypted under the unlocked PIN) on every change, so
@@ -867,6 +912,7 @@ export default function App() {
         onVerify={handleVerifyPin}
         onBiometric={lockMode === 'unlock' && faceIdEnabled && faceIdAvailable ? handleBiometricUnlock : undefined}
         biometricAuto
+        biometryLabel={biometryLabel}
       />
     );
   }
@@ -1303,9 +1349,11 @@ export default function App() {
           onSave={handleAISettingsSave}
           onClose={() => setShowSettings(false)}
           onClearKey={handleClearKey}
+          onRequestUnlock={authenticateForKey}
           lock={isNative ? {
             faceIdAvailable,
             faceIdEnabled,
+            biometryLabel,
             onChangePin: () => { setShowSettings(false); setChangingPin(true); },
             onToggleFaceId: handleToggleFaceId,
           } : undefined}
@@ -1402,6 +1450,8 @@ export default function App() {
         <PasswordPrompt
           title={pwPrompt.title}
           message={pwPrompt.message}
+          placeholder={pwPrompt.placeholder}
+          submitLabel={pwPrompt.submitLabel}
           onSubmit={(pw) => resolvePassword(pw)}
           onCancel={() => resolvePassword(null)}
         />

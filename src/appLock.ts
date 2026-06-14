@@ -21,8 +21,16 @@ import { ScheduleData } from './types';
 
 const VERIFIER_KEY = 'pin.verifier';
 const SCHEDULE_KEY = 'schedule.enc';
+const AICONFIG_KEY = 'aiconfig.enc';
 const FACEID_KEY = 'faceid.enabled';
 const PIN_STASH_KEY = 'pin.stash';
+
+// The AI config we persist at rest. The API key is the only sensitive part;
+// the model preference rides along so it survives a cold launch too.
+export interface StoredAIConfig {
+  apiKey: string;
+  model: string;
+}
 
 // Constant sealed under the PIN. Decrypting back to this exact string proves the
 // entered PIN matches the one that set the lock.
@@ -61,6 +69,7 @@ export async function changePin(newPin: string, currentSchedule: ScheduleData | 
 export async function clearLock(): Promise<void> {
   await deleteBlob(VERIFIER_KEY);
   await deleteBlob(SCHEDULE_KEY);
+  await deleteBlob(AICONFIG_KEY);
   await deleteBlob(FACEID_KEY);
   await deleteBlob(PIN_STASH_KEY);
 }
@@ -81,6 +90,31 @@ export async function loadSchedule(pin: string): Promise<ScheduleData | null> {
     // verifier, so this would only happen on corruption. Fail soft to empty.
     return null;
   }
+}
+
+// ---- At-rest AI config (API key + model) ----------------------------------
+//
+// The Claude API key is encrypted under the same PIN as the schedule, so it
+// survives a cold launch and is never readable from disk in plaintext. It is
+// recovered on unlock (PIN entry or, when enabled, Face ID → PIN → decrypt) —
+// the same gate that opens the app.
+
+export async function saveAIConfig(config: StoredAIConfig, pin: string): Promise<void> {
+  await writeBlob(AICONFIG_KEY, await encryptString(JSON.stringify(config), pin));
+}
+
+export async function loadAIConfig(pin: string): Promise<StoredAIConfig | null> {
+  const blob = await readBlob(AICONFIG_KEY);
+  if (!blob) return null;
+  try {
+    return JSON.parse(await decryptString(blob, pin)) as StoredAIConfig;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearAIConfig(): Promise<void> {
+  await deleteBlob(AICONFIG_KEY);
 }
 
 // ---- Face ID opt-in -------------------------------------------------------

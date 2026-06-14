@@ -22,8 +22,10 @@
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
+    "@aparajita/capacitor-biometric-auth": "^9.0.0",
     "@capacitor/core": "^8.3.1",
     "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/ios": "^8.4.0",
     "@capacitor/share": "^8.0.1",
     "axios": "^1.15.2",
     "cors": "^2.8.6",
@@ -37,6 +39,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^25.6.0",

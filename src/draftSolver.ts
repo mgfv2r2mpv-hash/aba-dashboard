@@ -20,7 +20,7 @@ import { DraftOp, applyOps } from './draft';
 import { overlapHours } from './compliance';
 import { weekRange } from './caseModel';
 import { findOpenSlots } from './corrections';
-import { rollupHours, resolveUtilization, bucketOf } from './utilization';
+import { rollupHours, resolveUtilization, bucketOf, ptoHoursInRange, reduceRequirementForPto } from './utilization';
 
 export type DraftGrade = 'green' | 'yellow' | 'red';
 
@@ -320,10 +320,13 @@ export function solveDraft(
   }
 
   // Billable floor/target (no-tech BCBA lens). A draft that drops the BCBA below
-  // the floor for any affected week is a hard red.
+  // the floor for any affected week is a hard red. BCBA leave in the affected
+  // week(s) lowers both thresholds by ptoHours * ratio (Upgrade 1), so a week the
+  // BCBA is partly on PTO isn't graded red against the full 25h floor.
   const util = resolveUtilization(settings.utilization);
-  const target = util.bcbaWeeklyBillableHours;
-  const floor = util.bcbaWeeklyBillableMin;
+  const ptoH = weeks.reduce((sum, w) => sum + ptoHoursInRange(base.timeOff, w, w + 7 * 86400000), 0);
+  const target = reduceRequirementForPto(util.bcbaWeeklyBillableHours, ptoH, settings.ptoBillableDeductionRatio);
+  const floor = reduceRequirementForPto(util.bcbaWeeklyBillableMin, ptoH, settings.ptoBillableDeductionRatio);
   const baseBillable = bcbaBillable(base, weeks);
 
   const { data: resolved, movedIds, clean } = reshuffleMobile(preview, weeks, nowMs);

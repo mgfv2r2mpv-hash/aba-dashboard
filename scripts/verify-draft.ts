@@ -107,6 +107,16 @@ console.log('solveDraft grading');
   check('remove BCBA session below floor → red', sRed.grade === 'red' && sRed.label === 'billable below minimum', `${sRed.grade}/${sRed.label}`);
   check('red is AI-eligible', sRed.aiEligible);
 
+  // PTO polish (Upgrade 1): the same removal on a week with enough BCBA leave to
+  // zero out the floor is NOT red — leave lowers the requirement (2h PTO × 1.0 ≥
+  // the 1.5h floor → reduced floor 0).
+  const ptoCovered: ScheduleData = {
+    ...makeData([bcbaSession], { bcbaWeeklyBillableHours: 5, bcbaWeeklyBillableMin: 1.5 }),
+    timeOff: [{ id: 'pto1', date: '2026-06-16', hours: 2 }],
+  };
+  const sPto = solveDraft(ptoCovered, [newRemoveOp(bcbaSession.id)], NOW, ptoCovered.settings);
+  check('remove BCBA session on a PTO-covered week → not red', sPto.grade !== 'red', `${sPto.grade}/${sPto.label}`);
+
   // YELLOW: adding a BCBA session pushes above target (no conflicts).
   const yellow = makeData([], { bcbaWeeklyBillableHours: 1, bcbaWeeklyBillableMin: 0 });
   const ptAdd = appt({ type: 'parent-training', client: 'C1', date: '2026-06-18', start: '10:00', end: '12:00' });

@@ -1072,6 +1072,7 @@ export default function App() {
                         conflicts={conflicts}
                         appointments={scheduleData?.appointments}
                         onSelectAppointment={setSelectedAppointment}
+                        fill={splitView && solutions.length === 0}
                       />
                     )}
                     {solutions.length > 0 && (

@@ -55,38 +55,41 @@ console.log('bucket classification');
   check('client-session with a tech is BT direct', bucketOf(direct()) === 'bt');
 }
 
-console.log('named BT + overlap → credited');
+console.log('supervision is inferred (no BT needed)');
 {
-  const d = data([direct(), appt({ type: 'supervision', client: 'C1', technician: 'T1', date: '2026-06-15', start: '10:30', end: '11:30' })]); // 1h within
-  check('per-client credits the 1h overlap', near(supHours(d, 'C1'), 1));
-  check('per-tech T1 credits the 1h overlap', near(techSup(d, 'T1'), 1));
+  const d = data([direct(), appt({ type: 'supervision', client: 'C1', date: '2026-06-15', start: '10:30', end: '11:30' })]); // 1h within
+  check('per-client credits the 1h overlap with the case direct', near(supHours(d, 'C1'), 1));
+  check('per-tech T1 (doing that direct) is credited', near(techSup(d, 'T1'), 1));
+  check('per-tech T2 (no direct) gets nothing', near(techSup(d, 'T2'), 0));
 }
 
-console.log('no BT named → 0 credit');
+console.log('parent-training needs an explicit BT');
 {
-  const d = data([direct(), appt({ type: 'supervision', client: 'C1', date: '2026-06-15', start: '10:30', end: '11:30' })]);
-  check('supervision without a BT counts 0', near(supHours(d, 'C1'), 0));
-}
+  const noBt = data([direct(), appt({ type: 'parent-training', client: 'C1', date: '2026-06-15', start: '10:30', end: '11:30' })]);
+  check('parent-training without a BT counts 0', near(supHours(noBt, 'C1'), 0));
 
-console.log('partial overlap → partial credit (BT leaves, PT continues)');
-{
   // PT 11:00–12:30 overlaps the 10:00–12:00 direct by 1h; the 12:00–12:30 tail (BT gone) doesn't count.
-  const d = data([direct(), appt({ type: 'parent-training', client: 'C1', technician: 'T1', date: '2026-06-15', start: '11:00', end: '12:30' })]);
-  check('parent-training credits only the overlapping hour', near(supHours(d, 'C1'), 1));
-}
+  const partial = data([direct(), appt({ type: 'parent-training', client: 'C1', technician: 'T1', date: '2026-06-15', start: '11:00', end: '12:30' })]);
+  check('parent-training (BT named) credits only the overlapping hour', near(supHours(partial, 'C1'), 1));
 
-console.log('wrong BT named → 0 credit');
-{
-  // Names T2, but only T1 is in the direct → no credit for C1 or T2.
-  const d = data([direct(), appt({ type: 'supervision', client: 'C1', technician: 'T2', date: '2026-06-15', start: '10:30', end: '11:30' })]);
-  check('naming a BT not in the direct counts 0 for the case', near(supHours(d, 'C1'), 0));
-  check('that BT (T2) gets 0 — no direct of their own', near(techSup(d, 'T2'), 0));
+  // Names T2, but only T1 is in the direct → no credit.
+  const wrong = data([direct(), appt({ type: 'parent-training', client: 'C1', technician: 'T2', date: '2026-06-15', start: '10:30', end: '11:30' })]);
+  check('parent-training naming a BT not in the direct counts 0', near(supHours(wrong, 'C1'), 0));
 }
 
 console.log('other types never count');
 {
   const d = data([direct(), appt({ type: 'reassessment', client: 'C1', technician: 'T1', date: '2026-06-15', start: '10:30', end: '11:30' })]);
   check('reassessment overlapping a direct counts 0', near(supHours(d, 'C1'), 0));
+}
+
+console.log('touching sessions (end == next start) do not overlap');
+{
+  const d = data([
+    direct(), // 10:00–12:00
+    appt({ type: 'supervision', client: 'C1', date: '2026-06-15', start: '12:00', end: '13:00' }), // starts exactly when direct ends
+  ]);
+  check('a supervision starting when the direct ends earns 0 (no overlap)', near(supHours(d, 'C1'), 0));
 }
 
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed\n`);

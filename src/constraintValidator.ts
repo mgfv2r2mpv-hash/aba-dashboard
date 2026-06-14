@@ -303,6 +303,9 @@ export class ConstraintValidator {
     const blackouts = this.data.blackouts || [];
 
     this.data.appointments.forEach(appointment => {
+      // A completed session already happened — whether or not it fell inside an
+      // availability window is moot, so don't surface an availability conflict for it.
+      if (appointment.status === 'completed') return;
       const appointmentDate = new Date(appointment.startTime);
       // Only the current calendar month — keeps the Issues panel about now, and
       // stops a year of recurring appointments from flooding it.

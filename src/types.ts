@@ -355,16 +355,26 @@ export interface Appointment {
 }
 
 // Session types that can count toward BT supervision — supervision, parent
-// training, and coordination-of-care (case planning) — but ONLY when a supervised
-// BT is named (Appointment.technician) and that BT's direct session overlaps in
-// time. Other types never count toward supervision/compliance.
+// training, and coordination-of-care (case planning) — but ONLY when they
+// overlap the supervised BT's direct (client-session) in time. Other types
+// never count.
+//   - A SUPERVISION session implies the client is present, so the BT is inferred
+//     from whichever of that client's directs it overlaps — no BT need be named.
+//   - PARENT-TRAINING / CASE-PLANNING can be caregiver-only (client/BT not in the
+//     room), so they count only when they NAME the observed BT (technician field)
+//     and overlap that BT's direct.
+// Either way these stay BCBA billable (the technician on a parent-training /
+// case-planning session is the observee, not a provider — see bucketOf).
 export const SUPERVISION_COUNTING_TYPES: readonly Appointment['type'][] = ['supervision', 'parent-training', 'case-planning'];
 
-// True for a session that should be credited as supervision of its named BT
-// (a supervision-counting type WITH a technician/supervisee selected). The actual
-// credited hours are the time-overlap with that BT's direct session(s).
+// True for a session eligible for supervision credit. Supervision always
+// qualifies (credit is decided by overlap); parent-training / case-planning
+// qualify only when they name a BT. The credited hours are the time-overlap with
+// the relevant BT's direct session(s) — partial overlap → partial credit.
 export function countsAsSupervision(a: Pick<Appointment, 'type' | 'technician'>): boolean {
-  return SUPERVISION_COUNTING_TYPES.includes(a.type) && !!a.technician;
+  if (a.type === 'supervision') return true;
+  if (a.type === 'parent-training' || a.type === 'case-planning') return !!a.technician;
+  return false;
 }
 
 // A single-day "no session" marker for a technician or client. Unlike the

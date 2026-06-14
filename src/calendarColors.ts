@@ -1,47 +1,49 @@
-// Stable per-entity colors for the week / day calendar tiles. A tile's
-// background is a pastel keyed to the CLIENT; diagonal candy-stripes in a bold
-// color are keyed to the BT/staff. Colors are derived by hashing the name so
-// they stay consistent across renders and weeks.
+// Stable, MAXIMALLY-DISTINCT per-entity colors for the calendar tiles. A tile's
+// background is a pastel keyed to the CLIENT; bold diagonal candy-stripes are
+// keyed to the BT/staff.
+//
+// Colors are assigned by first-seen order through the golden-angle hue sequence
+// (~137.5° apart), so consecutive entities are spread as far around the hue wheel
+// as possible — no two clients (or two staff) get a confusingly-similar color the
+// way a small fixed palette + hashing did (11 clients, 10 swatches → guaranteed
+// collisions). Clients render light (high lightness) and staff render dark/striped,
+// so the two systems also never read as the same color.
 
-const CLIENT_PASTELS = [
-  '#dbeafe', '#dcfce7', '#fef9c3', '#fae8ff', '#ffe4e6',
-  '#cffafe', '#fed7aa', '#e0e7ff', '#d1fae5', '#fce7f3',
-];
+const GOLDEN_ANGLE = 137.508;
+const clientIndex = new Map<string, number>();
+const staffIndex = new Map<string, number>();
 
-const STAFF_BOLDS = [
-  '#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626',
-  '#0891b2', '#ea580c', '#4f46e5', '#059669', '#db2777',
-];
-
-function hash(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h;
+function indexOf(reg: Map<string, number>, name: string): number {
+  let i = reg.get(name);
+  if (i === undefined) { i = reg.size; reg.set(name, i); }
+  return i;
 }
+function clientHue(name: string): number { return Math.round((indexOf(clientIndex, name) * GOLDEN_ANGLE) % 360); }
+function staffHue(name: string): number { return Math.round((indexOf(staffIndex, name) * GOLDEN_ANGLE) % 360); }
 
 export function clientPastel(name?: string): string {
   if (!name) return '#e5e7eb';
-  return CLIENT_PASTELS[hash(name) % CLIENT_PASTELS.length]!;
+  return `hsl(${clientHue(name)} 72% 88%)`;
 }
 
 export function staffBold(name?: string): string {
   if (!name) return '#6b7280';
-  return STAFF_BOLDS[hash(name) % STAFF_BOLDS.length]!;
+  return `hsl(${staffHue(name)} 62% 42%)`;
 }
 
-// CSS for a tile: client pastel base, with bold diagonal stripes for the staff
-// member overlaid when a technician is assigned (supervision / BCBA-lens items
-// carry no technician and so render as the plain client pastel).
+// CSS for a tile: client pastel base, with translucent bold diagonal stripes for
+// the staff member overlaid when a technician is assigned (supervision / BCBA-lens
+// items carry no technician and so render as the plain client pastel).
 export function tileStyle(clientName?: string, techName?: string): {
   backgroundColor: string;
   backgroundImage?: string;
 } {
   const pastel = clientPastel(clientName);
   if (!techName) return { backgroundColor: pastel };
-  const stripe = staffBold(techName);
+  const stripe = `hsl(${staffHue(techName)} 62% 42% / 0.28)`;
   return {
     backgroundColor: pastel,
-    backgroundImage: `repeating-linear-gradient(45deg, ${stripe}40 0, ${stripe}40 6px, transparent 6px, transparent 12px)`,
+    backgroundImage: `repeating-linear-gradient(45deg, ${stripe} 0, ${stripe} 6px, transparent 6px, transparent 12px)`,
   };
 }
 

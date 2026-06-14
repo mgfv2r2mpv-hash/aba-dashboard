@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DATE_BASED_ACCRUALS, DEFAULT_PTO_DEDUCTION_RATIO } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, Appointment } from '../types';
 import { resolvePtoConfig, activeBuckets, ptoBucketLabel, computePtoBalances } from '../pto';
 import { computeAuthUsage, computeReportDates } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
@@ -409,6 +409,7 @@ export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWi
           <TimeOffTab
             timeOff={data.timeOff || []}
             settings={data.settings}
+            appointments={data.appointments}
             savingId={savingId}
             onAdd={addTimeOff}
             onRemove={removeTimeOff}
@@ -1400,16 +1401,19 @@ function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemo
   );
 }
 
-function TimeOffTab({ timeOff, settings, savingId, onAdd, onRemove }: {
+function TimeOffTab({ timeOff, settings, appointments, savingId, onAdd, onRemove }: {
   timeOff: TimeOff[];
   settings: CompanySettings;
+  appointments: Appointment[];
   savingId: string | null;
   onAdd: (t: TimeOff) => void;
   onRemove: (id: string) => void;
 }) {
   const cfg = resolvePtoConfig(settings.pto);
   const buckets = activeBuckets(cfg);
-  const balances = computePtoBalances(cfg, timeOff);
+  // Pass appointments so per-converted accrual reflects completed billable hours
+  // live — completing or reopening a session moves the balance.
+  const balances = computePtoBalances(cfg, timeOff, appointments);
   // A multi-day vacation is entered as a date range and expanded to one entry
   // per weekday so each lands in the right ISO week. Single day = same start/end.
   const [start, setStart] = useState(todayStr());
@@ -1489,9 +1493,6 @@ function TimeOffTab({ timeOff, settings, savingId, onAdd, onRemove }: {
                 <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
                   {fmtHours(b.opening ?? 0)} opening + {fmtHours(b.accrued ?? 0)} accrued − {fmtHours(b.used)} used
                 </div>
-                {b.hasDeferredRule && (
-                  <div style={{ fontSize: '11px', color: '#b45309', marginTop: '2px' }}>+ an hours-based rule (computed in a later update)</div>
-                )}
               </>
             ) : (
               <div style={{ fontSize: '20px', fontWeight: 700, color: '#111827' }}>
@@ -1598,8 +1599,8 @@ function fmtHours(n: number): string {
 const ACCRUAL_KIND_LABEL: Record<AccrualKind, string> = {
   semimonthly: '1st & 15th of month',
   everyNWeeks: 'Every N weeks on a day',
-  perConvertedHours: 'Per converted hours (coming soon)',
-  perConvertedBonus: 'Per converted + bonus (coming soon)',
+  perConvertedHours: 'Per converted (completed) hours',
+  perConvertedBonus: 'Per converted + bonus',
 };
 const WEEKDAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -1662,7 +1663,6 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
             <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '6px' }}>Accrual rules</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {(cfg.accruals || []).map(r => {
-                const deferred = !DATE_BASED_ACCRUALS.includes(r.kind);
                 return (
                   <div key={r.id} style={{ ...cardStyle, padding: '10px 12px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end' }}>
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '1 1 180px' }}>
@@ -1699,9 +1699,27 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
                         </label>
                       </>
                     )}
-                    {deferred && (
-                      <span style={{ fontSize: '11px', color: '#b45309', flex: '1 1 100%' }}>
-                        This rule type isn't computed yet — it's saved and will start accruing in a later update.
+                    {(r.kind === 'perConvertedHours' || r.kind === 'perConvertedBonus') && (
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 130px' }}>
+                        <span style={{ fontSize: '11px', color: '#6b7280' }}>Per converted hrs</span>
+                        <input type="number" min="0" step="0.5" value={String(r.perHours ?? 0)} onChange={e => updateRule(r.id, { perHours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                      </label>
+                    )}
+                    {r.kind === 'perConvertedBonus' && (
+                      <>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
+                          <span style={{ fontSize: '11px', color: '#6b7280' }}>Bonus hrs</span>
+                          <input type="number" min="0" step="0.25" value={String(r.bonusHours ?? 0)} onChange={e => updateRule(r.id, { bonusHours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                        </label>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 150px' }}>
+                          <span style={{ fontSize: '11px', color: '#6b7280' }}>…once converted ≥</span>
+                          <input type="number" min="0" step="1" value={String(r.bonusPerExtraHours ?? 0)} onChange={e => updateRule(r.id, { bonusPerExtraHours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                        </label>
+                      </>
+                    )}
+                    {(r.kind === 'perConvertedHours' || r.kind === 'perConvertedBonus') && (
+                      <span style={{ fontSize: '11px', color: '#6b7280', flex: '1 1 100%' }}>
+                        "Converted" = your completed billable hours since the opening-balance date; the balance moves as sessions are completed or reopened.
                       </span>
                     )}
                     <button onClick={() => removeRule(r.id)} style={dangerBtn}>Remove</button>

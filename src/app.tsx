@@ -33,7 +33,7 @@ import {
   saveAIConfig, loadAIConfig, clearAIConfig,
   isFaceIdEnabled, enableFaceId, disableFaceId, recoverPinViaBiometric,
 } from './appLock';
-import { isBiometricAvailable, biometricAuthenticate, getBiometryLabel, BiometryLabel } from './biometric';
+import { isBiometricAvailable, checkBiometryFull, biometricAuthenticate, getBiometryLabel, BiometryLabel } from './biometric';
 import { pastIncompleteAppointments } from './compliance';
 import {
   ComplianceCache, ComplianceSummary, ApptChange,
@@ -356,15 +356,20 @@ export default function App() {
 
   // Decide the cold-launch lock state. Native always lands locked: into "create"
   // mode if no PIN exists yet (first run), otherwise "unlock". Web has no lock.
+  // All three reads are independent so we fire them in parallel to minimize the
+  // time to first render of the PIN screen.
   useEffect(() => {
     if (!isNative) return;
     (async () => {
-      const has = await hasPin();
+      const [has, biometry, faceIdOn] = await Promise.all([
+        hasPin(),
+        checkBiometryFull(),
+        isFaceIdEnabled(),
+      ]);
       setLockMode(has ? 'unlock' : 'create');
-      const bioAvailable = await isBiometricAvailable();
-      setFaceIdAvailable(bioAvailable);
-      if (bioAvailable) setBiometryLabel(await getBiometryLabel());
-      setFaceIdEnabled(await isFaceIdEnabled());
+      setFaceIdAvailable(biometry.available);
+      if (biometry.available) setBiometryLabel(biometry.label);
+      setFaceIdEnabled(faceIdOn);
       setLocked(true);
       setLockReady(true);
     })();

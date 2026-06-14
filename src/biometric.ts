@@ -41,18 +41,26 @@ export async function isBiometricAvailable(): Promise<boolean> {
   }
 }
 
+// Single native call returning both availability and hardware label — use this
+// instead of calling isBiometricAvailable() then getBiometryLabel() separately.
+export async function checkBiometryFull(): Promise<{ available: boolean; label: BiometryLabel }> {
+  if (!Capacitor.isNativePlatform()) return { available: false, label: 'biometric unlock' };
+  try {
+    const res = await Native.checkBiometry();
+    const available = !!res?.isAvailable;
+    const label: BiometryLabel = res?.biometryType === TOUCH_ID ? 'Touch ID'
+      : res?.biometryType === FACE_ID ? 'Face ID'
+      : 'biometric unlock';
+    return { available, label };
+  } catch {
+    return { available: false, label: 'biometric unlock' };
+  }
+}
+
 // Names the actual hardware so the lock screen and Settings say "Touch ID" /
 // "Face ID" instead of always "Face ID". Falls back to a generic phrase.
 export async function getBiometryLabel(): Promise<BiometryLabel> {
-  if (!Capacitor.isNativePlatform()) return 'biometric unlock';
-  try {
-    const res = await Native.checkBiometry();
-    if (res?.biometryType === TOUCH_ID) return 'Touch ID';
-    if (res?.biometryType === FACE_ID) return 'Face ID';
-    return 'biometric unlock';
-  } catch {
-    return 'biometric unlock';
-  }
+  return (await checkBiometryFull()).label;
 }
 
 // Resolves true only on a successful biometric match. Any failure or cancel

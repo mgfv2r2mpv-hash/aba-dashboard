@@ -31,9 +31,13 @@ interface ConflictPanelProps {
   conflicts: ScheduleConflict[];
   appointments?: Appointment[];
   onSelectAppointment?: (a: Appointment) => void;
+  // Docked-pane mode: stretch to the full height of the scroll region so the
+  // issues list fills to the bottom of the frozen pane (and scrolls when long)
+  // instead of ending partway and leaving dead space. Narrow layout omits this.
+  fill?: boolean;
 }
 
-export default function ConflictPanel({ conflicts, appointments = [], onSelectAppointment }: ConflictPanelProps) {
+export default function ConflictPanel({ conflicts, appointments = [], onSelectAppointment, fill }: ConflictPanelProps) {
   const errorCount = conflicts.filter(c => c.severity === 'error').length;
   const warningCount = conflicts.filter(c => c.severity === 'warning').length;
 
@@ -60,7 +64,12 @@ export default function ConflictPanel({ conflicts, appointments = [], onSelectAp
   };
 
   return (
-    <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb' }}>
+    <div style={{
+      padding: '16px', boxSizing: 'border-box',
+      // Fill the pane to the bottom when docked; otherwise a divider under the
+      // (page-flow) list in the narrow layout.
+      ...(fill ? { minHeight: '100%' } : { borderBottom: '1px solid #e5e7eb' }),
+    }}>
       <h3 style={{ marginBottom: '12px', display: 'flex', gap: '8px', alignItems: 'center' }}>
         Issues Found
         {errorCount > 0 && <span style={{ color: '#dc2626', fontWeight: 'bold' }}>({errorCount} errors)</span>}

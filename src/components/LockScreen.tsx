@@ -13,11 +13,13 @@ interface LockScreenProps {
   // true on a successful match. `biometricAuto` triggers it once on mount.
   onBiometric?: () => Promise<boolean>;
   biometricAuto?: boolean;
+  // User-facing name for the device's biometry ("Face ID" / "Touch ID").
+  biometryLabel?: string;
 }
 
 const isDigits = (s: string) => /^[0-9]*$/.test(s);
 
-export default function LockScreen({ mode, onCreate, onVerify, onBiometric, biometricAuto }: LockScreenProps) {
+export default function LockScreen({ mode, onCreate, onVerify, onBiometric, biometricAuto, biometryLabel = 'biometric unlock' }: LockScreenProps) {
   const [pin, setPin] = useState('');
   const [confirm, setConfirm] = useState('');
   const [stage, setStage] = useState<'enter' | 'confirm'>('enter');
@@ -43,7 +45,7 @@ export default function LockScreen({ mode, onCreate, onVerify, onBiometric, biom
     setError(null);
     try {
       const ok = await onBiometric();
-      if (!ok) setError('Face ID unavailable — enter your PIN.');
+      if (!ok) setError(`${biometryLabel} unavailable — enter your PIN.`);
     } finally {
       setBusy(false);
     }
@@ -163,7 +165,7 @@ export default function LockScreen({ mode, onCreate, onVerify, onBiometric, biom
               fontSize: 14, fontWeight: 600, cursor: 'pointer',
             }}
           >
-            Use Face ID
+            Use {biometryLabel}
           </button>
         )}
       </form>

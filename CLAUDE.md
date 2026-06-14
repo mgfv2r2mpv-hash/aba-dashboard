@@ -101,13 +101,31 @@ ask before each merge.
   on native, so the at-rest key always exists before any save). The schedule is
   re-encrypted on every change (debounced 400ms in `app.tsx`) and restored on
   unlock — this is the ONLY cross-launch persistence (there's no GET on mount).
-- **Face ID is wired but dormant.** `src/biometric.ts` reaches the plugin via
-  `registerPlugin('BiometricAuth')` (no static import, so the web build needs no
-  package). It reports unavailable until the owner, on the Mac:
-  `npm i @aparajita/capacitor-biometric-auth` → `npx cap sync ios` → add
-  `NSFaceIDUsageDescription` to `ios/App/App/Info.plist`. Opting in stashes the
-  PIN under app-constant obfuscation (`pin.stash`) so a biometric success can
-  recover it — a deliberate convenience/strength tradeoff, off by default.
+- **Face ID / Touch ID is activated** (package added). `@aparajita/capacitor-
+  biometric-auth` (v9, peer-compatible with Capacitor 8) is now a dependency;
+  `src/biometric.ts` still reaches it via `registerPlugin('BiometricAuth')` (no
+  static import, so the web build never pulls it in — web reports unavailable and
+  has no lock). `getBiometryLabel()` maps the iOS `biometryType` (1 Touch ID,
+  2 Face ID) to UI copy so the LockScreen button and Settings toggle name the
+  real hardware. **Remaining Mac-only steps to run on device:** `npm install` →
+  `npx cap sync ios` (installs the pod) → add `NSFaceIDUsageDescription` to
+  `ios/App/App/Info.plist` (the iOS project isn't in this repo; Face ID crashes
+  without the key, Touch ID needs none). Opting in (Settings → App Lock) stashes
+  the PIN under app-constant obfuscation (`pin.stash`) so a biometric success can
+  recover it — a deliberate convenience/strength tradeoff, off by default. The
+  same gate guards revealing/replacing the stored API key.
+- **Claude API key persistence.** The key follows the schedule two ways: (1) it
+  rides inside the workbook in a `_Config` sheet, app-obfuscated (`obfuscateKey`,
+  not the user PIN) so a download→upload round-trip restores it with no prompt —
+  `loadEmbeddedKey` routes the recovered key through `handleAISettingsSave`; and
+  (2) on native it's **sealed at rest under the app PIN** (`aiconfig.enc` blob via
+  `saveAIConfig`/`loadAIConfig` in `appLock.ts`, re-keyed by `changePin`, cleared
+  by `clearLock`), recovered on unlock so it survives cold launch. In Settings the
+  key is **never re-displayed once set** (mirrors the schedule-password UX): it
+  shows "🔒 API key is set" with Replace…/Clear. Replacing is gated by
+  `onRequestUnlock` → on native, Face ID (if enabled) or PIN via `verifyPin`; web
+  has no lock so it's allowed outright. A blank field on Save keeps the existing
+  key (use Clear to remove), so a stray Save never wipes it.
 - The schedule-decrypt prompt is a real `<form>` (`PasswordPrompt.tsx`,
   `autocomplete="current-password"`) not `window.prompt`, so iOS offers AutoFill.
 

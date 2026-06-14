@@ -6,6 +6,10 @@ interface PasswordPromptProps {
   // A hidden username paired with the password field nudges iOS / password
   // managers to offer AutoFill and to save the entry. Defaults to the app name.
   username?: string;
+  // Field placeholder + submit-button label. Default to the schedule-decrypt
+  // wording; callers reusing this for other secrets (e.g. the app PIN) override.
+  placeholder?: string;
+  submitLabel?: string;
   onSubmit: (password: string) => void;
   onCancel: () => void;
 }
@@ -13,7 +17,7 @@ interface PasswordPromptProps {
 // Modal replacement for window.prompt() on the schedule-decrypt path. Using a
 // real <form> with a password <input autocomplete="current-password"> lets iOS
 // surface the Passwords key above the keyboard, unlike prompt() which can't.
-export default function PasswordPrompt({ title, message, username = 'aba-schedule', onSubmit, onCancel }: PasswordPromptProps) {
+export default function PasswordPrompt({ title, message, username = 'aba-schedule', placeholder = 'Schedule password', submitLabel = 'Open', onSubmit, onCancel }: PasswordPromptProps) {
   const [password, setPassword] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -59,8 +63,8 @@ export default function PasswordPrompt({ title, message, username = 'aba-schedul
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="Schedule password"
-          aria-label="Schedule password"
+          placeholder={placeholder}
+          aria-label={placeholder}
           style={{
             width: '100%', boxSizing: 'border-box',
             padding: '10px 12px', fontSize: 15,
@@ -85,7 +89,7 @@ export default function PasswordPrompt({ title, message, username = 'aba-schedul
               cursor: password ? 'pointer' : 'default',
             }}
           >
-            Open
+            {submitLabel}
           </button>
         </div>
       </form>

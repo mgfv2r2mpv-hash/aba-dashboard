@@ -15,6 +15,8 @@ export interface AISettings {
 export interface LockControls {
   faceIdAvailable: boolean;
   faceIdEnabled: boolean;
+  // What to call the device's biometry ("Face ID" / "Touch ID").
+  biometryLabel?: string;
   onChangePin: () => void;
   onToggleFaceId: (on: boolean) => void;
 }
@@ -24,6 +26,10 @@ interface SettingsProps {
   onSave: (settings: AISettings) => void;
   onClose: () => void;
   onClearKey: () => void;
+  // Gate for revealing/replacing a stored key. Resolves true once the user has
+  // re-authenticated (PIN / Face ID on native; an outright yes on web). When
+  // absent, replacing is allowed without a gate.
+  onRequestUnlock?: () => Promise<boolean>;
   lock?: LockControls;
 }
 
@@ -45,10 +51,29 @@ const MODEL_OPTIONS: { value: ClaudeModel; label: string; description: string }[
   },
 ];
 
-export default function Settings({ settings, onSave, onClose, onClearKey, lock }: SettingsProps) {
-  const [apiKey, setApiKey] = useState(settings.apiKey);
+export default function Settings({ settings, onSave, onClose, onClearKey, onRequestUnlock, lock }: SettingsProps) {
   const [model, setModel] = useState<ClaudeModel>(settings.model);
   const [showKey, setShowKey] = useState(false);
+
+  // The API key mirrors the schedule-password UX: once set it is never shown
+  // again (it is sealed under the app PIN at rest). Replacing it requires
+  // re-auth, after which the input opens empty for a fresh key. Until then the
+  // editable field is blank — we never seed it with the stored plaintext.
+  const hasExistingKey = !!settings.apiKey;
+  const [replacingKey, setReplacingKey] = useState(!hasExistingKey);
+  const [apiKey, setApiKey] = useState('');
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+
+  const handleReplaceKey = async () => {
+    setUnlockError(null);
+    if (onRequestUnlock && !(await onRequestUnlock())) {
+      setUnlockError('Could not verify — key unchanged.');
+      return;
+    }
+    setApiKey('');
+    setShowKey(false);
+    setReplacingKey(true);
+  };
 
   // Schedule (file) password. Once set it is never shown again — changing it
   // requires the current password, since it's the only key to already-exported
@@ -69,7 +94,11 @@ export default function Settings({ settings, onSave, onClose, onClearKey, lock }
       }
       schedulePassword = newPw.trim() || undefined;
     }
-    onSave({ apiKey: apiKey.trim(), model, schedulePassword });
+    // When the key is sealed and untouched, keep it. While replacing, a blank
+    // field is treated as "leave it" too — use the explicit Clear button to
+    // remove a key, so a stray Save never wipes it.
+    const apiKeyOut = replacingKey ? (apiKey.trim() || settings.apiKey) : settings.apiKey;
+    onSave({ apiKey: apiKeyOut, model, schedulePassword });
     onClose();
   };
 
@@ -147,54 +176,76 @@ export default function Settings({ settings, onSave, onClose, onClearKey, lock }
           <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
             Claude API Key
           </label>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <input
-              type={showKey ? 'text' : 'password'}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-ant-..."
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: '6px',
-                fontSize: '14px',
-                fontFamily: 'monospace',
-              }}
-            />
-            <button
-              onClick={() => setShowKey(!showKey)}
-              style={{
-                padding: '8px 12px',
-                border: '1px solid #d1d5db',
-                borderRadius: '6px',
-                background: 'white',
-                cursor: 'pointer',
-              }}
-            >
-              {showKey ? 'Hide' : 'Show'}
-            </button>
-          </div>
-          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px' }}>
-            Your key stays in this browser session. It is sent per-request via header and never stored on the server.
-          </p>
-          {settings.apiKey && (
-            <button
-              onClick={() => { onClearKey(); setApiKey(''); }}
-              style={{
-                marginTop: '8px',
-                padding: '6px 12px',
-                background: '#fee2e2',
-                color: '#dc2626',
-                border: '1px solid #fca5a5',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '12px',
-              }}
-            >
-              Clear stored key
-            </button>
+
+          {hasExistingKey && !replacingKey ? (
+            // Sealed under the PIN — never re-displayed. Offer a gated replace.
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '13px', color: '#374151' }}>🔒 API key is set.</span>
+              <button
+                onClick={handleReplaceKey}
+                style={{
+                  padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                  background: 'white', cursor: 'pointer', fontSize: '13px',
+                }}
+              >
+                Replace…
+              </button>
+              <button
+                onClick={() => { onClearKey(); setApiKey(''); }}
+                style={{
+                  padding: '6px 12px',
+                  background: '#fee2e2',
+                  color: '#dc2626',
+                  border: '1px solid #fca5a5',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                }}
+              >
+                Clear stored key
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={hasExistingKey ? 'Enter a new key' : 'sk-ant-...'}
+                autoComplete="off"
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontFamily: 'monospace',
+                }}
+              />
+              <button
+                onClick={() => setShowKey(!showKey)}
+                style={{
+                  padding: '8px 12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  background: 'white',
+                  cursor: 'pointer',
+                }}
+              >
+                {showKey ? 'Hide' : 'Show'}
+              </button>
+            </div>
           )}
+
+          {unlockError && (
+            <p style={{ fontSize: '12px', color: '#dc2626', marginTop: '6px' }}>{unlockError}</p>
+          )}
+          <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px' }}>
+            {lock
+              ? 'Your key is encrypted at rest under your app PIN and rides inside your downloaded schedule, so it follows the file. '
+              : 'Your key rides inside your downloaded schedule (lightly obfuscated), so it follows the file, and stays in this browser session. '}
+            It is sent per-request via header and never stored on the server.
+          </p>
         </div>
 
         {/* Schedule password (whole-file encryption) */}
@@ -290,7 +341,7 @@ export default function Settings({ settings, onSave, onClose, onClearKey, lock }
                   checked={lock.faceIdEnabled}
                   onChange={(e) => lock.onToggleFaceId(e.target.checked)}
                 />
-                <span style={{ fontSize: '13px' }}>Unlock with Face ID</span>
+                <span style={{ fontSize: '13px' }}>Unlock with {lock.biometryLabel || 'Face ID'}</span>
               </label>
             )}
           </div>

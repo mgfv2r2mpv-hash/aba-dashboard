@@ -7,6 +7,7 @@ import {
   SupervisionCadence,
   SUPERVISION_CADENCES,
   BACB_RBT_SUPERVISION_MIN_PERCENT,
+  countsAsSupervision,
 } from './types';
 import {
   CompliancePeriod,
@@ -272,8 +273,8 @@ function computeReassessment(
   };
 }
 
-// Distinct calendar days this month where a supervision tagged with this case
-// overlaps a direct session for the same case (projected scope).
+// Distinct calendar days this month where a supervision-counting session tagged
+// with this case overlaps the NAMED BT's direct session for the same case.
 function countCaseContacts(
   data: ScheduleData,
   client: Client,
@@ -283,13 +284,14 @@ function countCaseContacts(
     a.type === 'client-session' && a.status !== 'canceled' && matchesClient(a, client) && inRange(a, period.start, period.end)
   );
   const sups = data.appointments.filter(a =>
-    a.type === 'supervision' && a.status !== 'canceled' && matchesClient(a, client) && inRange(a, period.start, period.end)
+    countsAsSupervision(a) && a.status !== 'canceled' && matchesClient(a, client) && inRange(a, period.start, period.end)
   );
   const days = new Set<string>();
   for (const sup of sups) {
     const ss = new Date(sup.startTime).getTime();
     const se = new Date(sup.endTime).getTime();
     if (directs.some(d => {
+      if (d.technician !== sup.technician) return false; // only the observed BT's direct
       const ds = new Date(d.startTime).getTime();
       const de = new Date(d.endTime).getTime();
       return Math.min(se, de) > Math.max(ss, ds);

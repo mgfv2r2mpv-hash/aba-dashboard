@@ -80,13 +80,21 @@ function isBillableWork(a: Appointment): boolean {
   return a.type !== 'internal-task' && a.isBillable !== false;
 }
 
-// Who the hours belong to: an appointment assigned to a technician is BT direct
-// work; one with no technician (supervision, BCBA-run parent training, etc.) is
-// BCBA billable time.
+// Who the hours belong to. DIRECT service (a client-session a technician
+// delivers) is BT work. Everything else billable is the BCBA's own — including
+// supervision / parent-training / case-planning that NAME a supervised BT in the
+// technician field (that tech is the observee, not the provider), so those never
+// leak into BT direct hours.
 export type UtilBucket = 'bt' | 'bcba';
+
+const BCBA_SESSION_TYPES: ReadonlySet<Appointment['type']> = new Set([
+  'supervision', 'parent-training', 'case-planning', 'reassessment',
+]);
 
 export function bucketOf(a: Appointment): UtilBucket | null {
   if (!isBillableWork(a)) return null;
+  if (BCBA_SESSION_TYPES.has(a.type)) return 'bcba';
+  // client-session / other: BT work when a technician delivers it.
   return a.technician ? 'bt' : 'bcba';
 }
 

@@ -1106,7 +1106,7 @@ export default function App() {
                         display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%',
                       }}>
                         {!draftActive && (
-                          <div style={{ flexShrink: 0, maxHeight: '25%', overflowY: 'auto', padding: '10px 14px', borderBottom: '1px solid #e5e7eb', WebkitOverflowScrolling: 'touch' as any }}>
+                          <div style={{ flexShrink: 0, maxHeight: 'max(160px, 25%)', overflowY: 'auto', padding: '10px 14px', borderBottom: '1px solid #e5e7eb', WebkitOverflowScrolling: 'touch' as any }}>
                             <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} timeOff={scheduleData.timeOff} currentDate={viewDate} />
                           </div>
                         )}

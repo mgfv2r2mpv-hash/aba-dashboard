@@ -501,10 +501,12 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
           />
           <span>RBT</span>
         </label>
-        <button onClick={() => setEditing(!editing)} style={chipBtn}>
-          {editing ? 'Done' : 'Edit availability'}
-        </button>
-        <button onClick={onRemove} style={dangerBtn}>Remove</button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+          {!editing && (
+            <button onClick={() => setEditing(true)} style={chipBtn}>Edit availability</button>
+          )}
+          <button onClick={onRemove} style={dangerBtn}>Remove</button>
+        </div>
       </div>
       {saving && <p style={{ fontSize: '11px', color: '#3b82f6' }}>Saving…</p>}
 
@@ -911,10 +913,12 @@ function ClientCard({ client, saving, onChange, onRemove }: {
             style={{ ...inputStyle, fontWeight: 600, fontSize: '15px' }}
           />
         </div>
-        <button onClick={() => setEditing(!editing)} style={chipBtn}>
-          {editing ? 'Done' : 'Edit availability'}
-        </button>
-        <button onClick={onRemove} style={dangerBtn}>Remove</button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+          {!editing && (
+            <button onClick={() => setEditing(true)} style={chipBtn}>Edit availability</button>
+          )}
+          <button onClick={onRemove} style={dangerBtn}>Remove</button>
+        </div>
       </div>
       {saving && <p style={{ fontSize: '11px', color: '#3b82f6' }}>Saving…</p>}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>

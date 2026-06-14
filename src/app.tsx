@@ -1014,6 +1014,7 @@ export default function App() {
                     technicians={scheduleData.technicians}
                     clients={scheduleData.clients}
                     settings={scheduleData.settings}
+                    timeOff={scheduleData.timeOff}
                     onAppointmentChange={handleAppointmentChange}
                     onSelectAppointment={setSelectedAppointment}
                     onViewDateChange={setViewDate}
@@ -1085,7 +1086,7 @@ export default function App() {
                       }}>
                         {!draftActive && (
                           <div style={{ flexShrink: 0, maxHeight: '25%', overflowY: 'auto', padding: '10px 14px', borderBottom: '1px solid #e5e7eb', WebkitOverflowScrolling: 'touch' as any }}>
-                            <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} currentDate={viewDate} />
+                            <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} timeOff={scheduleData.timeOff} currentDate={viewDate} />
                           </div>
                         )}
                         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>

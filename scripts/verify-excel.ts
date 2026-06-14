@@ -31,12 +31,14 @@ const data: ScheduleData = {
     utilization: { bcbaWeeklyBillableHours: 25, btWeeklyDirectHours: 165, bcbaMonthlyBillableHours: 100, bcbaMonthlyBillableHours5Week: 125, bcbaWeeklyBillableMin: 22 },
     cancellationNotice: { unplannedHoursThreshold: 24, plannedDaysThreshold: 30 },
     reportDraftLead: { value: 4, unit: 'weeks' }, reportFinalLead: { value: 2, unit: 'weeks' },
+    ptoBillableDeductionRatio: 0.625,
   },
   appointments: [
     { id: 'A1', title: 'Direct', technician: 'T1', client: 'C1', startTime: '2026-06-01T09:00:00', endTime: '2026-06-01T11:00:00', isFixed: false, isBillable: true, type: 'client-session', isRecurring: true, recurringPattern: 'weekly', seriesId: 'S1' },
     { id: 'A2', title: 'Canceled', technician: 'T1', client: 'C1', startTime: '2026-06-02T09:00:00', endTime: '2026-06-02T10:00:00', isFixed: false, isBillable: true, type: 'client-session', isRecurring: false, status: 'canceled', cancellation: { source: 'family', reason: 'sick', unplanned: true, noticeMet: false, canceledAt: '2026-06-01T20:00:00', notes: 'called out' } },
   ],
   blackouts: [{ id: 'B1', entityType: 'client', entityId: 'C1', entityName: 'Client One', date: '2026-07-04', reason: 'holiday' }],
+  timeOff: [{ id: 'PTO1', date: '2026-06-15', hours: 8, bucket: 'vacation', note: 'beach', createdAt: '2026-06-01T12:00:00.000Z' }],
   authorizations: [{
     id: 'AU1', clientId: 'C1', label: 'Payer-123', startDate: '2026-01-01', endDate: '2026-08-31',
     buckets: { reassessment: 8, direct: 400 }, weekly: { direct: 20, supervision: 4, parentTraining: 1, casePlanning: 1 },
@@ -76,6 +78,9 @@ check('appointment recurring metadata', rt.appointments[0].seriesId === 'S1' && 
 
 check('schemaVersion = 2', rt.version === SCHEMA_VERSION);
 check('blackout + manualUsage', rt.blackouts![0].reason === 'holiday' && rt.manualUsage![0].hours === 5);
+check('timeOff + pto deduction ratio',
+  rt.timeOff![0].hours === 8 && rt.timeOff![0].bucket === 'vacation' && rt.timeOff![0].note === 'beach'
+  && st.ptoBillableDeductionRatio === 0.625);
 
 // Full structural round-trip (ignoring volatile lastModified).
 const norm = (d: ScheduleData) => { const x: any = JSON.parse(JSON.stringify(d)); delete x.lastModified; return x; };

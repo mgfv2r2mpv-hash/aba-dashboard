@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import {
   ScheduleData, Appointment, Technician, Client, CompanySettings, DayOfWeek,
-  Blackout, Authorization, ManualUsage, Cancellation, CancellationCode, AUTH_BUCKETS,
+  Blackout, Authorization, ManualUsage, Cancellation, CancellationCode, AUTH_BUCKETS, TimeOff,
 } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -104,6 +104,7 @@ export function parseWorkbook(workbook: XLSX.WorkBook): ParsedSchedule {
       settings,
       appointments,
       blackouts: parseBlackouts(workbook),
+      timeOff: parseTimeOff(workbook),
       authorizations: parseAuthorizations(workbook),
       manualUsage: parseManualUsage(workbook),
       lastModified: text(meta.lastModified) || new Date().toISOString(),
@@ -262,6 +263,7 @@ function parseSettings(
   for (const key of [
     'supervisionTechHoursPercent', 'supervisionMaxHoursPercent', 'supervisionFloorPercent',
     'supervisionPreferredMinPercent', 'supervisionPreferredMaxPercent', 'rbtMinContactsPerMonth',
+    'ptoBillableDeductionRatio',
   ] as const) {
     const v = num(row[key]);
     if (v !== undefined) (settings as any)[key] = v;
@@ -321,6 +323,23 @@ function parseBlackouts(workbook: XLSX.WorkBook): Blackout[] {
       if (!isBlank(row.reason)) b.reason = String(row.reason);
       if (!isBlank(row.createdAt)) b.createdAt = String(row.createdAt);
       return b;
+    });
+}
+
+function parseTimeOff(workbook: XLSX.WorkBook): TimeOff[] {
+  return rowsOf(workbook, 'TimeOff')
+    .filter(row => row && !isBlank(row.date) && num(row.hours) !== undefined)
+    .map((row: any) => {
+      const t: TimeOff = {
+        id: text(row.id) || uuidv4(),
+        date: normalizeDateString(row.date),
+        hours: num(row.hours) ?? 0,
+      };
+      const b = text(row.bucket);
+      if (b === 'sick' || b === 'vacation' || b === 'combined' || b === 'unpaid') t.bucket = b;
+      if (!isBlank(row.note)) t.note = String(row.note);
+      if (!isBlank(row.createdAt)) t.createdAt = String(row.createdAt);
+      return t;
     });
 }
 
@@ -426,7 +445,8 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
       'bcbaWeeklyBillableHours', 'btWeeklyDirectHours', 'bcbaMonthlyBillableHours',
       'bcbaMonthlyBillableHours5Week', 'bcbaWeeklyBillableMin',
       'cancellationUnplannedHoursThreshold', 'cancellationPlannedDaysThreshold',
-      'reportDraftLeadValue', 'reportDraftLeadUnit', 'reportFinalLeadValue', 'reportFinalLeadUnit'],
+      'reportDraftLeadValue', 'reportDraftLeadUnit', 'reportFinalLeadValue', 'reportFinalLeadUnit',
+      'ptoBillableDeductionRatio'],
     [[
       s.supervisionDirectHoursPercent, s.supervisionRBTHoursPercent, W(s.supervisionTechHoursPercent),
       W(s.supervisionMaxHoursPercent), W(s.supervisionFloorPercent), W(s.supervisionPreferredMinPercent),
@@ -436,6 +456,7 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
       W(u.bcbaMonthlyBillableHours5Week), W(u.bcbaWeeklyBillableMin),
       W(cn?.unplannedHoursThreshold), W(cn?.plannedDaysThreshold),
       W(s.reportDraftLead?.value), W(s.reportDraftLead?.unit), W(s.reportFinalLead?.value), W(s.reportFinalLead?.unit),
+      W(s.ptoBillableDeductionRatio),
     ]]);
 
   // Appointments (cancellation columns split out).
@@ -465,6 +486,12 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
   // Blackouts.
   add('Blackouts', ['id', 'entityType', 'entityId', 'entityName', 'date', 'reason', 'createdAt'],
     (data.blackouts || []).map(b => [b.id, b.entityType, b.entityId, W(b.entityName), b.date, W(b.reason), W(b.createdAt)]));
+
+  // BCBA time off (one row per leave day). Drives the billable-requirement
+  // deduction (Settings.ptoBillableDeductionRatio); bucket is recorded for the
+  // forthcoming accrual/balance tracking.
+  add('TimeOff', ['id', 'date', 'hours', 'bucket', 'note', 'createdAt'],
+    (data.timeOff || []).map(t => [t.id, t.date, t.hours, W(t.bucket), W(t.note), W(t.createdAt)]));
 
   // Authorizations (bucket + weekly columns).
   add('Authorizations',

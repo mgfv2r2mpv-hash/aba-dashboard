@@ -255,6 +255,26 @@ async function route(method: string, path: string, body: any): Promise<any> {
     return { success: true, removed: before - data.blackouts.length };
   }
 
+  if (m === 'POST' && path === '/api/admin/time-off') {
+    const data = requireData();
+    if (!body?.id || !body?.date || !(Number(body?.hours) > 0)) {
+      throw new HttpError('Time off must have id, date and positive hours');
+    }
+    if (!data.timeOff) data.timeOff = [];
+    const existing = data.timeOff.find(t => t.id === body.id);
+    if (existing) Object.assign(existing, body);
+    else data.timeOff.push(body);
+    return { success: true, timeOff: existing || body };
+  }
+
+  const timeOffIdMatch = path.match(/^\/api\/admin\/time-off\/([^/]+)$/);
+  if (m === 'DELETE' && timeOffIdMatch) {
+    const data = requireData();
+    const before = (data.timeOff || []).length;
+    data.timeOff = (data.timeOff || []).filter(t => t.id !== timeOffIdMatch[1]);
+    return { success: true, removed: before - data.timeOff.length };
+  }
+
   throw new HttpError(`Native API: no handler for ${m} ${path}`, 404);
 }
 

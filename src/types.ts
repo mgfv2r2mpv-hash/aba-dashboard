@@ -164,7 +164,15 @@ export interface CompanySettings {
   // RBT (at least one must observe service delivery — in this data model every
   // counted contact is an observed overlap, so that's inherent). Default 2.
   rbtMinContactsPerMonth?: number;
+  // Billable-requirement hours removed per 1 hour of BCBA leave (Upgrade 1).
+  // Default 1.0 — every PTO hour drops the week's requirement by an hour. A
+  // company that assumes ~3 non-billable hours in an 8h day sets 0.625, so an
+  // 8h PTO day removes 5 billable hours from the 25h/wk requirement. The reduced
+  // week is floored at 0. Stored in the workbook so it travels with the schedule.
+  ptoBillableDeductionRatio?: number;
 }
+
+export const DEFAULT_PTO_DEDUCTION_RATIO = 1;
 
 export const DEFAULT_CANCELLATION_NOTICE = {
   unplannedHoursThreshold: 24,
@@ -351,6 +359,26 @@ export interface Blackout {
   createdAt?: string;          // ISO timestamp when logged
 }
 
+// A bucket that paid/unpaid leave is drawn from. Sick/vacation can be tracked
+// separately or merged into one "combined" pool; "unpaid" is its own optional
+// pool (off by default — see CompanySettings.pto). The bucket is recorded on each
+// entry now so Upgrade 2 (accrual + balances) is purely additive; today only the
+// deduction-from-billable-requirement (Upgrade 1) reads these entries.
+export type PtoBucket = 'sick' | 'vacation' | 'combined' | 'unpaid';
+
+// One block of BCBA leave on a single calendar day. The hours reduce that week's
+// billable requirement by `hours * ptoBillableDeductionRatio` (see CompanySettings).
+// A multi-day vacation is stored as one entry per day so each lands in the right
+// ISO week and partial days are exact.
+export interface TimeOff {
+  id: string;
+  date: string;                // YYYY-MM-DD (local calendar day)
+  hours: number;               // leave hours taken that day (e.g. 8)
+  bucket?: PtoBucket;          // which pool it draws from; absent = 'combined'
+  note?: string;
+  createdAt?: string;          // ISO timestamp when logged
+}
+
 export interface ScheduleData {
   id: string;
   version: number;
@@ -361,6 +389,9 @@ export interface ScheduleData {
   // Per-day "away" markers. Optional for backward compatibility with schedules
   // (and Excel files) created before blackouts existed; treat absent as [].
   blackouts?: Blackout[];
+  // BCBA paid/unpaid leave. Each day's hours shave the week's billable
+  // requirement per CompanySettings.ptoBillableDeductionRatio. Optional; absent = [].
+  timeOff?: TimeOff[];
   // Insurance authorizations + manually-entered consumed hours. Optional for
   // backward compatibility; treat absent as [].
   authorizations?: Authorization[];

@@ -16,6 +16,6 @@ interface DraftTrayProps {
     onLogGhosts: () => void;
     aiLoading?: boolean;
 }
-export default function DraftTray({ base, ops, status, hasApiKey, onResetOp, onResetAll, onCancel, onAccept, onSaveAnyway, onAI, onPickChoice, onLogGhosts, aiLoading, }: DraftTrayProps): import("react/jsx-runtime").JSX.Element;
+export default function DraftTray({ base, ops, status, hasApiKey, onResetOp, onResetAll, onCancel, onAccept, onSaveAnyway, onAI, onPickChoice, onLogGhosts, aiLoading, }: DraftTrayProps): any;
 export {};
 //# sourceMappingURL=DraftTray.d.ts.map

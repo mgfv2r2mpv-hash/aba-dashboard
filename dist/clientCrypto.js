@@ -4,6 +4,17 @@ const ITERATIONS = 100000;
 const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 const KEY_LENGTH = 256;
+// btoa(String.fromCharCode(...bytes)) overflows the argument limit on large
+// inputs (a whole encrypted ScheduleData), throwing RangeError. Chunk the
+// conversion so encryptString works for blobs of any size.
+function bytesToBase64(bytes) {
+    let binary = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
+    }
+    return btoa(binary);
+}
 async function deriveKey(password, salt) {
     const enc = new TextEncoder();
     const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
@@ -25,7 +36,7 @@ export async function encryptString(plaintext, password) {
     combined.set(salt, 0);
     combined.set(iv, salt.length);
     combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
-    return btoa(String.fromCharCode(...combined));
+    return bytesToBase64(combined);
 }
 export async function decryptString(encrypted, password) {
     const combined = Uint8Array.from(atob(encrypted), c => c.charCodeAt(0));

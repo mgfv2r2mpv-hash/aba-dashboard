@@ -11,6 +11,7 @@ export interface CaseDirectState {
     actualThisWk: number;
     pctOfAuth: number;
     below75: boolean;
+    belowTarget: boolean;
 }
 export interface CaseSupervisionState {
     directHoursMonth: number;

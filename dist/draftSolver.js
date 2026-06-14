@@ -18,7 +18,7 @@ import { applyOps } from './draft';
 import { overlapHours } from './compliance';
 import { weekRange } from './caseModel';
 import { findOpenSlots } from './corrections';
-import { rollupHours, resolveUtilization } from './utilization';
+import { rollupHours, resolveUtilization, bucketOf, ptoHoursInRange, reduceRequirementForPto } from './utilization';
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MAX_ROUNDS = 60; // hill-climb cap — keeps the badge instant
 // ---- small time helpers (local-day, matching the seeder's ISO format) ----
@@ -27,11 +27,6 @@ function minutesOfDay(iso) { const d = new Date(iso); return d.getHours() * 60 +
 function toMin(hhmm) { const [h, m] = hhmm.split(':').map(Number); return (h || 0) * 60 + (m || 0); }
 function dateStrOf(iso) { return iso.slice(0, 10); }
 function durationMin(a) { return Math.round((ms(a.endTime) - ms(a.startTime)) / 60000); }
-// A session occupies the CLIENT's presence (so two can't overlap) unless it's
-// supervision (which is meant to overlap a direct) or an internal task.
-function occupiesClient(a) {
-    return a.type !== 'supervision' && a.type !== 'internal-task';
-}
 function isActive(a) {
     return a.status !== 'canceled' && !a.isGhost;
 }
@@ -56,15 +51,22 @@ function focusedConflicts(data, weekStartMs) {
     const inAffectedWeek = (a) => weekStartMs.some(w => { const t = ms(a.startTime); return t >= w && t < w + 7 * 86400000; });
     const sessions = data.appointments.filter(a => isActive(a) && inAffectedWeek(a));
     const conflicts = [];
-    // Pairwise double-booking (same tech, or same client for client-occupying types).
+    // Pairwise double-booking — keyed on the PROVIDER, not the client. A single
+    // technician can't be in two overlapping sessions, and the lone BCBA can't be
+    // in two overlapping BILLABLE no-tech sessions (supervision / parent-training /
+    // coordination-of-care, etc.). A BCBA (no-tech) session overlapping a BT direct
+    // session is legitimate CONCURRENT care — that's how supervision and in-session
+    // parent training work — so it is NOT a conflict, even for the same client.
+    // (The all-billable filter in the past-only path still lets a non-billable task
+    // share a tech's slot.)
     for (let i = 0; i < sessions.length; i++) {
         for (let j = i + 1; j < sessions.length; j++) {
             const a = sessions[i], b = sessions[j];
             if (overlapHours(a, b) <= 0)
                 continue;
             const sameTech = !!a.technician && (a.technician === b.technician);
-            const sameClient = !!a.client && (a.client === b.client);
-            if (sameTech || (sameClient && occupiesClient(a) && occupiesClient(b))) {
+            const bothBcbaBillable = bucketOf(a) === 'bcba' && bucketOf(b) === 'bcba';
+            if (sameTech || bothBcbaBillable) {
                 conflicts.push({ ids: [a.id, b.id], kind: 'double-book' });
             }
         }
@@ -88,12 +90,43 @@ function focusedConflicts(data, weekStartMs) {
         }
         const techBad = tech && !windowsCover(tech.availability[day], s, e);
         // Clients are only faulted when they HAVE windows that don't cover the slot.
+        // A parent who can meet outside their scheduled availability makes an
+        // out-of-window parent-training slot tentative (BCBA-confirm), not a hard
+        // conflict — so the engine doesn't call it "no in-week solution".
+        const ptOutsideOk = a.type === 'parent-training' && client?.parentAvailableOutsideSessions === true;
         const clientWindows = client ? client.availabilityWindows[day] : undefined;
-        const clientBad = clientWindows && clientWindows.length > 0 && !windowsCover(clientWindows, s, e);
+        const clientBad = !ptOutsideOk && clientWindows && clientWindows.length > 0 && !windowsCover(clientWindows, s, e);
         if (techBad || clientBad)
             conflicts.push({ ids: [a.id], kind: 'availability' });
     }
     return conflicts;
+}
+// Parent-training slots that land outside the client's set availability for a
+// client flagged "parent available outside scheduled availability". Allowed,
+// but tentative until the BCBA confirms — used to nudge an otherwise-clean
+// draft from green to yellow. Blackout days are excluded (still a hard block).
+function tentativePtOutside(data, weekStartMs) {
+    const inAffectedWeek = (a) => weekStartMs.some(w => { const t = ms(a.startTime); return t >= w && t < w + 7 * 86400000; });
+    const clientById = new Map(data.clients.map(c => [c.id, c]));
+    const clientByName = new Map(data.clients.map(c => [c.name, c]));
+    const blackouts = data.blackouts || [];
+    const ids = [];
+    for (const a of data.appointments) {
+        if (a.type !== 'parent-training' || !isActive(a) || !inAffectedWeek(a))
+            continue;
+        const client = a.client ? (clientById.get(a.client) || clientByName.get(a.client)) : undefined;
+        if (!client || client.parentAvailableOutsideSessions !== true)
+            continue;
+        const date = dateStrOf(a.startTime);
+        if (blackouts.some(b => b.date === date && b.entityType === 'client' && b.entityId === client.id))
+            continue;
+        const day = DAY_NAMES[new Date(a.startTime).getDay()];
+        const windows = client.availabilityWindows[day];
+        if (windows && windows.length > 0 && !windowsCover(windows, minutesOfDay(a.startTime), minutesOfDay(a.endTime))) {
+            ids.push(a.id);
+        }
+    }
+    return ids;
 }
 // Relocate `appt` to its first feasible in-week slot (for its client+tech) that
 // is not before `now`. Returns a moved clone, or null if no slot exists.
@@ -224,11 +257,34 @@ export function solveDraft(base, ops, now, settings) {
     if (weekSet.size === 0)
         weekSet.add(weekRange(now).start.getTime());
     const weeks = [...weekSet];
+    // Past-only drafts (e.g. logging a historical session that already happened):
+    // it can't be rescheduled, and billable floors/targets are forward-looking, so
+    // grade purely on hard timeslot conflicts. Two BILLABLE activities can't share
+    // a slot (you can't bill two at once), but a billable+nonbillable or
+    // nonbillable overlap is allowed and passes clean.
+    const allPast = ops.length > 0 && ops.every(op => {
+        const iso = op.appt?.startTime ?? base.appointments.find(a => a.id === op.targetId)?.startTime;
+        return !!iso && ms(iso) < nowMs;
+    });
+    if (allPast) {
+        const conflicts = focusedConflicts(preview, weeks);
+        const billable = new Map(preview.appointments.map(a => [a.id, a.isBillable === true]));
+        const blocking = conflicts.filter(c => c.kind === 'double-book' && c.ids.every(id => billable.get(id)));
+        if (blocking.length === 0) {
+            return { grade: 'green', label: 'past session — logged as actual', resolved: preview,
+                movedIds: [], choices: [], needsChoice: false, aiEligible: false };
+        }
+        return { grade: 'red', label: 'two billable sessions overlap', resolved: undefined,
+            movedIds: [], choices: [], needsChoice: false, aiEligible: false };
+    }
     // Billable floor/target (no-tech BCBA lens). A draft that drops the BCBA below
-    // the floor for any affected week is a hard red.
+    // the floor for any affected week is a hard red. BCBA leave in the affected
+    // week(s) lowers both thresholds by ptoHours * ratio (Upgrade 1), so a week the
+    // BCBA is partly on PTO isn't graded red against the full 25h floor.
     const util = resolveUtilization(settings.utilization);
-    const target = util.bcbaWeeklyBillableHours;
-    const floor = util.bcbaWeeklyBillableMin;
+    const ptoH = weeks.reduce((sum, w) => sum + ptoHoursInRange(base.timeOff, w, w + 7 * 86400000), 0);
+    const target = reduceRequirementForPto(util.bcbaWeeklyBillableHours, ptoH, settings.ptoBillableDeductionRatio);
+    const floor = reduceRequirementForPto(util.bcbaWeeklyBillableMin, ptoH, settings.ptoBillableDeductionRatio);
     const baseBillable = bcbaBillable(base, weeks);
     const { data: resolved, movedIds, clean } = reshuffleMobile(preview, weeks, nowMs);
     const previewBillable = bcbaBillable(resolved, weeks);
@@ -238,9 +294,16 @@ export function solveDraft(base, ops, now, settings) {
     // "Above" only counts when this draft pushes further above target than the
     // starting schedule already was.
     const aboveTarget = previewBillable > target + 0.01 && previewBillable > baseBillable + 0.01;
+    // Out-of-window parent-training slots a flagged parent can still make — allowed
+    // but tentative, so a clean draft surfaces as yellow (BCBA confirms) not green.
+    const tentative = tentativePtOutside(resolved, weeks);
     if (clean && !belowFloor) {
         if (aboveTarget) {
             return { grade: 'yellow', label: 'confirmation needed; above hours', resolved,
+                movedIds: [...movedIds], choices: [], needsChoice: false, aiEligible: false };
+        }
+        if (tentative.length > 0) {
+            return { grade: 'yellow', label: 'confirmation needed; outside set availability', resolved,
                 movedIds: [...movedIds], choices: [], needsChoice: false, aiEligible: false };
         }
         return { grade: 'green', label: 'no conflict; within hours', resolved,

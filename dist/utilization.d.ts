@@ -1,6 +1,8 @@
-import { Appointment, UtilizationSettings } from './types';
+import { Appointment, UtilizationSettings, TimeOff } from './types';
 export declare const DEFAULT_UTILIZATION: Required<UtilizationSettings>;
 export declare function resolveUtilization(u?: UtilizationSettings): Required<UtilizationSettings>;
+export declare function ptoHoursInRange(timeOff: TimeOff[] | undefined, startMs: number, endMs: number): number;
+export declare function reduceRequirementForPto(baseTarget: number, ptoHours: number, ratio?: number): number;
 export interface HoursByStatus {
     completed: number;
     scheduled: number;

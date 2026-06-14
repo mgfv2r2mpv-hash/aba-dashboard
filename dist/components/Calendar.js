@@ -1,12 +1,15 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import React, { useState, useEffect } from 'react';
-import { rollupHours, resolveUtilization } from '../utilization';
-import { tileStyle, clientPastel, legendStripeStyle } from '../calendarColors';
+import { rollupHours, resolveUtilization, ptoHoursInRange, reduceRequirementForPto } from '../utilization';
+import { tileStyle, clientPastel, clientDarkBorder, legendStripeStyle } from '../calendarColors';
+import { useMinWidth } from '../useMediaQuery';
 import { startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay, } from 'date-fns';
 const VISIBLE_START_HOUR = 6;
 const VISIBLE_END_HOUR = 22;
 const HOUR_HEIGHT = 40;
+const HOUR_HEIGHT_WIDE = 56; // roomier hour rows on iPad and up
 const TIME_AXIS_WIDTH = 52;
+const TIME_AXIS_WIDTH_WIDE = 64;
 // Snap drag movements to 15-minute slots — matches typical scheduling resolution.
 const SNAP_MINUTES = 15;
 function useIsLandscape() {
@@ -21,16 +24,34 @@ function useIsLandscape() {
     }, []);
     return landscape;
 }
-export default function Calendar({ appointments, technicians: _technicians, clients: _clients, settings, onAppointmentChange, onSelectAppointment, onViewDateChange, draftMarks, }) {
+export default function Calendar({ appointments, technicians: _technicians, clients: _clients, settings, timeOff, onAppointmentChange, onSelectAppointment, onViewDateChange, onLensChange, hideTotals, draftMarks, }) {
     const [view, setView] = useState('month');
     const [lens, setLens] = useState('bcba');
     const [currentDate, setCurrentDate] = useState(new Date());
+    const [pickedDay, setPickedDay] = useState(null);
     const isLandscape = useIsLandscape();
+    // iPad and up: roomier rows, wider time axis, richer tiles, taller month cells.
+    const roomy = useMinWidth(820);
+    const hourHeight = roomy ? HOUR_HEIGHT_WIDE : HOUR_HEIGHT;
+    const axisWidth = roomy ? TIME_AXIS_WIDTH_WIDE : TIME_AXIS_WIDTH;
+    // From the month grid, tapping a day offers a jump to that day's week or day
+    // view. Both set the anchor date first, then switch the view.
+    const openDayIn = (target) => {
+        if (pickedDay)
+            setCurrentDate(pickedDay);
+        setView(target);
+        setPickedDay(null);
+    };
     // Surface the viewed anchor date to the parent whenever it changes.
     useEffect(() => {
         onViewDateChange?.(currentDate);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentDate]);
+    // Surface the active lens so the parent can dock the hours totals.
+    useEffect(() => {
+        onLensChange?.(lens);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [lens]);
     // The lens hides the other party's appointments: BT = has a technician,
     // BCBA = none. Totals are computed from these filtered appointments too.
     const lensAppts = appointments.filter(a => (lens === 'bt' ? !!a.technician : !a.technician));
@@ -77,10 +98,83 @@ export default function Calendar({ appointments, technicians: _technicians, clie
     return (_jsxs("div", { style: { padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: {
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     marginBottom: 16, gap: 8, flexWrap: 'wrap',
-                }, children: [_jsxs("div", { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }, children: [_jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: view === 'month', onClick: () => setView('month'), children: "Month" }), _jsx(ViewBtn, { active: view === 'week', onClick: () => setView('week'), children: "Week" }), _jsx(ViewBtn, { active: view === 'day', onClick: () => setView('day'), children: "Day" })] }), _jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: lens === 'bcba', onClick: () => setLens('bcba'), children: "BCBA" }), _jsx(ViewBtn, { active: lens === 'bt', onClick: () => setLens('bt'), children: "BT" })] })] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] }), _jsx("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }, children: headerLabel })] }), view === 'month' && (_jsx(MonthView, { currentDate: currentDate, appointments: lensAppts, lens: lens, settings: settings, onSelectAppointment: onSelectAppointment, draftMarks: draftMarks })), view === 'week' && (_jsx(TimeGrid, { days: Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(currentDate, { weekStartsOn: 1 }), i)), appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks })), view === 'day' && (_jsx(TimeGrid, { days: [currentDate], appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks })), (view === 'week' || view === 'day') && !isLandscape && (_jsx("p", { style: { fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }, children: "Rotate to landscape to drag appointments to a new time." }))] }));
+                }, children: [_jsxs("div", { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }, children: [_jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: view === 'month', onClick: () => setView('month'), children: "Month" }), _jsx(ViewBtn, { active: view === 'week', onClick: () => setView('week'), children: "Week" }), _jsx(ViewBtn, { active: view === 'day', onClick: () => setView('day'), children: "Day" })] }), _jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: lens === 'bcba', onClick: () => setLens('bcba'), children: "BCBA" }), _jsx(ViewBtn, { active: lens === 'bt', onClick: () => setLens('bt'), children: "BT" })] })] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] }), _jsx("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }, children: headerLabel })] }), view === 'month' && (_jsx(MonthView, { currentDate: currentDate, appointments: lensAppts, lens: lens, settings: settings, timeOff: timeOff, onSelectAppointment: onSelectAppointment, onPickDay: setPickedDay, draftMarks: draftMarks, roomy: roomy })), view === 'month' && !hideTotals && (_jsx("div", { style: { marginTop: 16 }, children: _jsx(HoursSummary, { appointments: appointments, lens: lens, settings: settings, timeOff: timeOff, currentDate: currentDate }) })), view === 'week' && (_jsx(TimeGrid, { days: Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(currentDate, { weekStartsOn: 1 }), i)), appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks, hourHeight: hourHeight, axisWidth: axisWidth, roomy: roomy })), view === 'day' && (_jsx(TimeGrid, { days: [currentDate], appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks, hourHeight: hourHeight, axisWidth: axisWidth, roomy: roomy })), (view === 'week' || view === 'day') && !isLandscape && (_jsx("p", { style: { fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }, children: "Rotate to landscape to drag appointments to a new time." })), pickedDay && (_jsx("div", { onClick: () => setPickedDay(null), style: {
+                    position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.35)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400, padding: 16,
+                }, children: _jsxs("div", { onClick: e => e.stopPropagation(), style: {
+                        background: 'white', borderRadius: 8, padding: 16, maxWidth: 320, width: '100%',
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+                    }, children: [_jsx("div", { style: { fontWeight: 700, fontSize: 15, marginBottom: 12 }, children: format(pickedDay, 'EEEE, MMM d, yyyy') }), _jsxs("div", { style: { display: 'flex', gap: 8 }, children: [_jsx("button", { onClick: () => openDayIn('week'), style: {
+                                        flex: 1, padding: '10px 12px', borderRadius: 6, border: '1px solid #d1d5db',
+                                        background: '#f9fafb', cursor: 'pointer', fontSize: 14, fontWeight: 600,
+                                    }, children: "Week view" }), _jsx("button", { onClick: () => openDayIn('day'), style: {
+                                        flex: 1, padding: '10px 12px', borderRadius: 6, border: '1px solid #3b82f6',
+                                        background: '#3b82f6', color: 'white', cursor: 'pointer', fontSize: 14, fontWeight: 600,
+                                    }, children: "Day view" })] }), _jsx("button", { onClick: () => setPickedDay(null), style: {
+                                marginTop: 12, width: '100%', padding: '8px 12px', borderRadius: 6,
+                                border: 'none', background: 'transparent', color: '#6b7280', cursor: 'pointer', fontSize: 13,
+                            }, children: "Cancel" })] }) }))] }));
 }
 // ---------- Month View ----------
-function MonthView({ currentDate, appointments, lens, settings, onSelectAppointment, draftMarks }) {
+function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelectAppointment, onPickDay, draftMarks, roomy }) {
+    const maxChips = roomy ? 6 : 3;
+    // Minimum readable width per day column. Below 7×this, the grid scrolls
+    // horizontally inside its panel rather than smushing columns / pushing
+    // weekend days off-screen.
+    const colMin = roomy ? 108 : 92;
+    // Which grid week-rows are expanded to reveal every appointment. Tapping a
+    // cell's "+N more" expands the whole row downward (the CSS grid stretches
+    // sibling cells to match), and a "Show less" control collapses it again.
+    const [expandedRows, setExpandedRows] = useState(() => new Set());
+    const toggleRow = (r) => setExpandedRows(prev => {
+        const next = new Set(prev);
+        next.has(r) ? next.delete(r) : next.add(r);
+        return next;
+    });
+    const monthStart = startOfMonth(currentDate);
+    const monthEnd = endOfMonth(monthStart);
+    const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+    const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+    const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
+    const util = resolveUtilization(settings?.utilization);
+    const weeklyTarget = lens === 'bt' ? util.btWeeklyDirectHours : util.bcbaWeeklyBillableHours;
+    // Collapse all rows when navigating to a different month.
+    const monthKey = format(monthStart, 'yyyy-MM');
+    useEffect(() => { setExpandedRows(new Set()); }, [monthKey]);
+    return (_jsxs("div", { style: { overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #e5e7eb', borderRadius: 6 }, children: [_jsx("div", { style: {
+                    display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 1,
+                    backgroundColor: '#e5e7eb', marginBottom: 1, minWidth: colMin * 7,
+                }, children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (_jsx("div", { style: {
+                        padding: '10px 8px', backgroundColor: '#f9f9f9',
+                        fontWeight: 600, textAlign: 'center', fontSize: roomy ? 15 : 13,
+                    }, children: d }, d))) }), _jsx("div", { style: {
+                    display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 1, backgroundColor: '#e5e7eb', minWidth: colMin * 7,
+                }, children: days.map((day, idx) => {
+                    const dayAppts = appointmentsOn(appointments, day);
+                    const inCurrentMonth = isSameMonth(day, monthStart);
+                    const isToday = isSameDay(day, new Date());
+                    const dow = getDay(day); // 0 = Sun (now the rightmost column)
+                    const weekStart = startOfWeek(day, { weekStartsOn: 1 });
+                    const rowIdx = Math.floor(idx / 7);
+                    const expanded = expandedRows.has(rowIdx);
+                    return (_jsxs("div", { onClick: () => onPickDay(day), title: "Open week or day view", style: {
+                            backgroundColor: inCurrentMonth ? '#ffffff' : '#f3f4f6',
+                            minHeight: roomy ? 168 : 110, padding: roomy ? 8 : 6, opacity: inCurrentMonth ? 1 : 0.5,
+                            cursor: 'pointer', overflow: 'hidden',
+                        }, children: [_jsx("div", { style: {
+                                    fontWeight: isToday ? 700 : 400,
+                                    marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: roomy ? 15 : 12,
+                                }, children: format(day, 'd') }), dow === 0 && (_jsx(SundayTotal, { lens: lens, hours: rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens), target: lens === 'bcba'
+                                    ? reduceRequirementForPto(weeklyTarget, ptoHoursInRange(timeOff, weekStart.getTime(), addDays(weekStart, 7).getTime()), settings?.ptoBillableDeductionRatio)
+                                    : weeklyTarget })), _jsxs("div", { style: { display: 'flex', flexDirection: 'column', gap: 2 }, children: [(expanded ? dayAppts : dayAppts.slice(0, maxChips)).map(apt => (_jsx(AppointmentChip, { apt: apt, mark: draftMarks?.get(apt.id), onClick: () => onSelectAppointment(apt) }, apt.id))), dayAppts.length > maxChips && !expanded && (_jsxs("div", { onClick: e => { e.stopPropagation(); toggleRow(rowIdx); }, style: { fontSize: 10, color: '#3b82f6', fontWeight: 600, cursor: 'pointer' }, children: ["+", dayAppts.length - maxChips, " more \u25BE"] })), dayAppts.length > maxChips && expanded && (_jsx("div", { onClick: e => { e.stopPropagation(); toggleRow(rowIdx); }, style: { fontSize: 10, color: '#3b82f6', fontWeight: 600, cursor: 'pointer' }, children: "Show less \u25B4" }))] })] }, format(day, 'yyyy-MM-dd')));
+                }) })] }));
+}
+// ---------- Hours totals (BT direct / BCBA billable) ----------
+// Self-contained monthly hours summary: one card per grid week + a month total.
+// Computes its own rollups from the (unfiltered) appointments + lens so it can
+// be rendered either inline under the month grid (narrow screens) or docked in
+// the side pane (wide screens). rollupHours filters by lens internally.
+export function HoursSummary({ appointments, lens, settings, timeOff, currentDate }) {
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(monthStart);
     const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
@@ -104,8 +198,14 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
         if (weekdaysInMonth >= 3)
             workWeeks++;
     }
-    const monthlyGoal = workWeeks >= 5 ? util.bcbaMonthlyBillableHours5Week : util.bcbaMonthlyBillableHours;
-    // One rollup per grid week, for the side ribbon.
+    const monthlyGoalBase = workWeeks >= 5 ? util.bcbaMonthlyBillableHours5Week : util.bcbaMonthlyBillableHours;
+    // BCBA leave taken within the month proper shaves the monthly goal too, by the
+    // same ratio. BT direct hours are unaffected by the BCBA's PTO.
+    const ptoRatio = settings?.ptoBillableDeductionRatio;
+    const monthPtoHours = ptoHoursInRange(timeOff, monthStart.getTime(), monthEnd.getTime() + 1);
+    const monthlyGoal = lens === 'bcba'
+        ? reduceRequirementForPto(monthlyGoalBase, monthPtoHours, ptoRatio)
+        : monthlyGoalBase;
     const weekSummaries = Array.from({ length: weekRows }, (_, r) => {
         const weekStart = days[r * 7];
         return {
@@ -115,28 +215,7 @@ function MonthView({ currentDate, appointments, lens, settings, onSelectAppointm
         };
     });
     const monthHours = rollupHours(appointments, monthStart.getTime(), monthEnd.getTime() + 1, lens);
-    return (_jsxs("div", { style: { display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }, children: [_jsxs("div", { style: { flex: '1 1 260px', minWidth: 0 }, children: [_jsx("div", { style: {
-                            display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1,
-                            backgroundColor: '#e5e7eb', marginBottom: 1,
-                        }, children: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (_jsx("div", { style: {
-                                padding: '10px 8px', backgroundColor: '#f9f9f9',
-                                fontWeight: 600, textAlign: 'center', fontSize: 13,
-                            }, children: d }, d))) }), _jsx("div", { style: {
-                            display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, backgroundColor: '#e5e7eb',
-                        }, children: days.map(day => {
-                            const dayAppts = appointmentsOn(appointments, day);
-                            const inCurrentMonth = isSameMonth(day, monthStart);
-                            const isToday = isSameDay(day, new Date());
-                            const dow = getDay(day); // 0 = Sun (now the rightmost column)
-                            const weekStart = startOfWeek(day, { weekStartsOn: 1 });
-                            return (_jsxs("div", { style: {
-                                    backgroundColor: inCurrentMonth ? '#ffffff' : '#f3f4f6',
-                                    minHeight: 110, padding: 6, opacity: inCurrentMonth ? 1 : 0.5,
-                                }, children: [_jsx("div", { style: {
-                                            fontWeight: isToday ? 700 : 400,
-                                            marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: 12,
-                                        }, children: format(day, 'd') }), _jsxs("div", { style: { display: 'flex', flexDirection: 'column', gap: 2 }, children: [dayAppts.slice(0, 3).map(apt => (_jsx(AppointmentChip, { apt: apt, mark: draftMarks?.get(apt.id), onClick: () => onSelectAppointment(apt) }, apt.id))), dayAppts.length > 3 && (_jsxs("div", { style: { fontSize: 10, color: '#9ca3af' }, children: ["+", dayAppts.length - 3, " more"] }))] }), dow === 0 && (_jsx(SundayTotal, { lens: lens, hours: rollupHours(appointments, weekStart.getTime(), addDays(weekStart, 7).getTime(), lens), target: weeklyTarget }))] }, format(day, 'yyyy-MM-dd')));
-                        }) })] }), _jsx(WeekRibbon, { lens: lens, weeks: weekSummaries, weeklyTarget: weeklyTarget, monthHours: monthHours, monthlyGoal: lens === 'bcba' ? monthlyGoal : undefined, monthWeeks: lens === 'bcba' ? workWeeks : inMonthWeeks })] }));
+    return (_jsx(WeekRibbon, { lens: lens, weeks: weekSummaries, weeklyTarget: weeklyTarget, timeOff: timeOff, ptoRatio: ptoRatio, monthHours: monthHours, monthlyGoal: lens === 'bcba' ? monthlyGoal : undefined, monthWeeks: lens === 'bcba' ? workWeeks : inMonthWeeks }));
 }
 // Round to ≤1 decimal, dropping a trailing .0.
 function fmtH(n) {
@@ -174,12 +253,15 @@ function CapBar({ hours, target }) {
     return (_jsxs("div", { style: { position: 'relative', marginTop: 4 }, children: [_jsxs("div", { style: { height: 8, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden', display: 'flex' }, children: [_jsx("div", { style: { width: `${pct(hours.completed)}%`, background: '#16a34a' } }), _jsx("div", { style: { width: `${pct(hours.scheduled)}%`, background: '#9ca3af' } }), _jsx("div", { style: { width: `${pct(hours.canceledFamily)}%`, background: '#f97316' } }), _jsx("div", { style: { width: `${pct(hours.canceledStaff)}%`, background: '#dc2626' } })] }), _jsx("div", { style: { position: 'absolute', top: -1, bottom: -1, left: `${capPct}%`, width: 2, background: '#111827', transform: 'translateX(-1px)' }, title: "Scheduled cap (completed + scheduled)" })] }));
 }
 // Vertical ribbon beside the grid: one row per in-month week + a month total.
-function WeekRibbon({ lens, weeks, weeklyTarget, monthHours, monthlyGoal, monthWeeks }) {
-    return (_jsxs("div", { style: { flex: '1 1 150px', minWidth: 140, maxWidth: 240, display: 'flex', flexDirection: 'column', gap: 6 }, children: [_jsx("div", { style: { fontSize: 12, fontWeight: 700, color: '#111827' }, children: lens === 'bt' ? 'BT direct hours' : 'BCBA billable hours' }), weeks.filter(w => w.inMonth).map((w, i) => {
-                const color = trackColor(w.hours, weeklyTarget);
-                const live = w.hours.completed + w.hours.scheduled;
-                return (_jsxs("div", { style: { border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 8px', background: '#fff' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 }, children: [_jsxs("span", { style: { fontSize: 11, fontWeight: 600, color: '#374151' }, children: ["Wk ", format(w.weekStart, 'M/d')] }), _jsxs("span", { style: { fontSize: 11, fontWeight: 700, color }, children: [fmtH(live), "/", fmtH(weeklyTarget), "h"] })] }), _jsx(CapBar, { hours: w.hours, target: weeklyTarget }), _jsxs("div", { style: { fontSize: 10, color: '#6b7280', marginTop: 3 }, children: ["\u2713", fmtH(w.hours.completed), " \u00B7 \u25FB", fmtH(w.hours.scheduled), w.hours.canceled > 0 ? ` · ✕${fmtH(w.hours.canceled)}` : ''] })] }, i));
-            }), _jsx(MonthTotalRow, { lens: lens, hours: monthHours, goal: monthlyGoal, weeklyTarget: weeklyTarget, monthWeeks: monthWeeks }), _jsx(Legend, {})] }));
+function WeekRibbon({ lens, weeks, weeklyTarget, timeOff, ptoRatio, monthHours, monthlyGoal, monthWeeks }) {
+    return (_jsxs("div", { style: { display: 'flex', flexDirection: 'column', gap: 8 }, children: [_jsx("div", { style: { fontSize: 12, fontWeight: 700, color: '#111827' }, children: lens === 'bt' ? 'BT direct hours' : 'BCBA billable hours' }), _jsxs("div", { style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'stretch' }, children: [weeks.filter(w => w.inMonth).map((w, i) => {
+                        // BCBA leave this week lowers the requirement; BT direct is unaffected.
+                        const ptoH = lens === 'bcba' ? ptoHoursInRange(timeOff, w.weekStart.getTime(), addDays(w.weekStart, 7).getTime()) : 0;
+                        const target = reduceRequirementForPto(weeklyTarget, ptoH, ptoRatio);
+                        const color = trackColor(w.hours, target);
+                        const live = w.hours.completed + w.hours.scheduled;
+                        return (_jsxs("div", { style: { flex: '1 1 200px', minWidth: 180, border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 8px', background: '#fff' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 }, children: [_jsxs("span", { style: { fontSize: 11, fontWeight: 600, color: '#374151' }, children: ["Wk ", format(w.weekStart, 'M/d')] }), _jsxs("span", { style: { fontSize: 11, fontWeight: 700, color }, children: [fmtH(live), "/", fmtH(target), "h"] })] }), _jsx(CapBar, { hours: w.hours, target: target }), _jsxs("div", { style: { fontSize: 10, color: '#6b7280', marginTop: 3 }, children: ["\u2713", fmtH(w.hours.completed), " \u00B7 \u25FB", fmtH(w.hours.scheduled), w.hours.canceled > 0 ? ` · ✕${fmtH(w.hours.canceled)}` : '', ptoH > 0 && _jsxs("span", { style: { color: '#7c3aed', fontWeight: 600 }, children: [" \u00B7 \uD83C\uDF34", fmtH(ptoH), "h PTO \u2212", fmtH(weeklyTarget - target), "h"] })] })] }, i));
+                    }), _jsx("div", { style: { flex: '1 1 200px', minWidth: 180 }, children: _jsx(MonthTotalRow, { lens: lens, hours: monthHours, goal: monthlyGoal, weeklyTarget: weeklyTarget, monthWeeks: monthWeeks }) })] }), _jsx(Legend, {})] }));
 }
 function MonthTotalRow({ lens, hours, goal, weeklyTarget, monthWeeks }) {
     const live = hours.completed + hours.scheduled;
@@ -204,11 +286,11 @@ function Legend() {
 // Tiles are color-coded (client pastel background + staff diagonal stripes),
 // the time axis is frozen on side-scroll, and tapping a tile pops a small
 // dialog to view the session in the detail panel.
-function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks }) {
+function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks, hourHeight = HOUR_HEIGHT, axisWidth = TIME_AXIS_WIDTH, roomy = false }) {
     const hours = Array.from({ length: VISIBLE_END_HOUR - VISIBLE_START_HOUR }, (_, i) => VISIBLE_START_HOUR + i);
-    const totalHeight = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * HOUR_HEIGHT;
+    const totalHeight = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * hourHeight;
     const today = new Date();
-    const minWidth = days.length > 1 ? 560 : undefined;
+    const minWidth = days.length > 1 ? (roomy ? 980 : 760) : undefined;
     // The tapped tile (shows a small "view session" dialog). Distinct from drag.
     const [tapped, setTapped] = useState(null);
     // Active drag — only one appointment moves at a time. dragState tracks
@@ -222,7 +304,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
             return;
         const onMove = (e) => {
             const deltaY = e.clientY - dragState.startY;
-            const rawMin = (deltaY / HOUR_HEIGHT) * 60;
+            const rawMin = (deltaY / hourHeight) * 60;
             const snappedMin = Math.round(rawMin / SNAP_MINUTES) * SNAP_MINUTES;
             // Use elementFromPoint to detect which day column the cursor is over.
             // Each day column carries a data-day-iso attribute.
@@ -256,7 +338,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
             window.removeEventListener('pointerup', onUp);
             window.removeEventListener('pointercancel', onUp);
         };
-    }, [dragState, onAppointmentChange]);
+    }, [dragState, onAppointmentChange, hourHeight]);
     const beginDrag = (apt, e) => {
         if (!dragEnabled)
             return;
@@ -274,7 +356,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
     // Sticky cells keep the time axis pinned to the left while day columns
     // scroll horizontally. Opaque background so columns don't show through.
     const stickyAxis = {
-        width: TIME_AXIS_WIDTH, flexShrink: 0,
+        width: axisWidth, flexShrink: 0,
         position: 'sticky', left: 0, zIndex: 3, backgroundColor: 'white',
     };
     return (_jsxs("div", { style: { overflowX: 'auto' }, children: [_jsxs("div", { style: { display: 'flex', minWidth, borderBottom: '1px solid #e5e7eb' }, children: [_jsx("div", { style: { ...stickyAxis, borderRight: '1px solid #e5e7eb' } }), days.map(day => {
@@ -287,7 +369,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
                                 borderLeft: '1px solid #f3f4f6',
                             }, children: [_jsx("div", { children: format(day, 'EEE') }), _jsx("div", { style: { fontSize: 16 }, children: format(day, 'd') })] }, day.toISOString()));
                     })] }), _jsxs("div", { style: { display: 'flex', minWidth, height: totalHeight, position: 'relative' }, children: [_jsx("div", { style: { ...stickyAxis, borderRight: '1px solid #e5e7eb' }, children: hours.map(h => (_jsx("div", { style: {
-                                position: 'absolute', top: (h - VISIBLE_START_HOUR) * HOUR_HEIGHT,
+                                position: 'absolute', top: (h - VISIBLE_START_HOUR) * hourHeight,
                                 fontSize: 10, color: '#6b7280', padding: '2px 4px', right: 4,
                             }, children: formatHourLabel(h) }, h))) }), days.map(day => {
                         const dayISO = format(day, 'yyyy-MM-dd');
@@ -298,10 +380,10 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
                                 flex: 1, position: 'relative', borderLeft: '1px solid #f3f4f6',
                                 backgroundColor: isToday ? '#fafbff' : 'transparent',
                             }, children: [hours.map(h => {
-                                    const base = (h - VISIBLE_START_HOUR) * HOUR_HEIGHT;
-                                    return (_jsxs(React.Fragment, { children: [_jsx(GridLine, { top: base, color: "#e5e7eb" }), _jsx(GridLine, { top: base + HOUR_HEIGHT / 4, color: "#f5f6f7" }), _jsx(GridLine, { top: base + HOUR_HEIGHT / 2, color: "#eef0f2" }), _jsx(GridLine, { top: base + (HOUR_HEIGHT * 3) / 4, color: "#f5f6f7" })] }, h));
+                                    const base = (h - VISIBLE_START_HOUR) * hourHeight;
+                                    return (_jsxs(React.Fragment, { children: [_jsx(GridLine, { top: base, color: "#e5e7eb" }), _jsx(GridLine, { top: base + hourHeight / 4, color: "#f5f6f7" }), _jsx(GridLine, { top: base + hourHeight / 2, color: "#eef0f2" }), _jsx(GridLine, { top: base + (hourHeight * 3) / 4, color: "#f5f6f7" })] }, h));
                                 }), laid.map(({ appt, lane, lanes }) => {
-                                    const layout = appointmentLayout(appt);
+                                    const layout = appointmentLayout(appt, hourHeight);
                                     if (!layout)
                                         return null;
                                     const widthPct = 100 / lanes;
@@ -309,7 +391,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
                                     const mark = draftMarks?.get(appt.id);
                                     const draggable = dragEnabled && appt.status !== 'canceled' && appt.status !== 'completed'
                                         && !appt.isGhost && mark !== 'remove';
-                                    return (_jsx(AppointmentBlock, { apt: appt, mark: mark, onClick: () => setTapped(appt), onPointerDown: draggable ? (e) => beginDrag(appt, e) : undefined, dragHandle: draggable, style: {
+                                    return (_jsx(AppointmentBlock, { apt: appt, mark: mark, roomy: roomy, onClick: () => setTapped(appt), onPointerDown: draggable ? (e) => beginDrag(appt, e) : undefined, dragHandle: draggable, style: {
                                             position: 'absolute',
                                             top: layout.top,
                                             height: layout.height,
@@ -384,7 +466,11 @@ function formatLocalISO(d) {
 // ---------- Shared chip / block / helpers ----------
 function appointmentsOn(appointments, date) {
     const dateStr = format(date, 'yyyy-MM-dd');
-    return appointments.filter(a => a.startTime.startsWith(dateStr));
+    // Sessions in a day cell are always listed by start time, ascending (month,
+    // week, and day views all read through here).
+    return appointments
+        .filter(a => a.startTime.startsWith(dateStr))
+        .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 }
 // Status-based coloring so cancellation trends are visible at a glance across a
 // week: gray = pending, green = completed, and canceled splits by who canceled —
@@ -465,14 +551,12 @@ function blockLook(apt, mark) {
     let prefix = '';
     let statusIcon = null;
     if (completed) {
-        border = '2px solid #16a34a';
-        statusIcon = '✓';
+        border = `2px solid ${clientDarkBorder(apt.client)}`;
     }
     else if (canceled) {
         border = `2px solid ${apt.cancellation?.source === 'family' ? '#f97316' : '#dc2626'}`;
         opacity = 0.55;
         strike = true;
-        statusIcon = '✕';
     }
     if (apt.isGhost) {
         border = '1px dashed #9ca3af';
@@ -495,12 +579,11 @@ function blockLook(apt, mark) {
         canceled, completed,
         backgroundColor: tile.backgroundColor,
         backgroundImage: tile.backgroundImage,
-        border, opacity, strike, prefix, statusIcon,
+        border, opacity, strike, prefix,
         color: '#1f2937',
-        statusColor: 'rgba(0,0,0,0.65)',
     };
 }
-function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style }) {
+function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style, roomy }) {
     const look = blockLook(apt, mark);
     // When drag is enabled, suppress the click (click fires after pointerup
     // and would re-open the detail panel after a drag). Track whether the
@@ -520,17 +603,17 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
             backgroundColor: look.backgroundColor,
             backgroundImage: look.backgroundImage,
             color: look.color,
-            padding: '4px 6px', borderRadius: 4, fontSize: 11,
+            padding: roomy ? '5px 8px' : '4px 6px', borderRadius: 4, fontSize: roomy ? 13 : 11,
             overflow: 'hidden', cursor: dragHandle ? 'grab' : 'pointer', boxSizing: 'border-box',
             border: look.border,
             opacity: look.opacity,
             textDecoration: look.strike ? 'line-through' : 'none',
             touchAction: dragHandle ? 'none' : 'manipulation',
-        }, title: apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }, children: [_jsxs("span", { style: { fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }, children: [look.prefix, apt.title] }), look.statusIcon && (_jsx("span", { style: { fontSize: 11, fontWeight: 700, color: look.statusColor, lineHeight: 1, flexShrink: 0 }, children: look.statusIcon }))] }), _jsxs("div", { style: { fontSize: 10, opacity: 0.85, marginTop: 2 }, children: [format(new Date(apt.startTime), 'h:mm'), "\u2013", format(new Date(apt.endTime), 'h:mm a')] })] }));
+        }, title: apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), children: [_jsx("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }, children: _jsxs("span", { style: { fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }, children: [look.prefix, apt.title] }) }), _jsxs("div", { style: { fontSize: roomy ? 12 : 10, opacity: 0.85, marginTop: 2 }, children: [format(new Date(apt.startTime), 'h:mm'), "\u2013", format(new Date(apt.endTime), 'h:mm a')] }), roomy && (apt.client || apt.technician) && (_jsx("div", { style: { fontSize: 11, opacity: 0.8, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: [apt.client, apt.technician].filter(Boolean).join(' · ') }))] }));
 }
 // Returns the {top, height} of an appointment in pixels within the week-view
 // time grid, or null if it falls entirely outside the visible hour range.
-function appointmentLayout(apt) {
+function appointmentLayout(apt, hourHeight = HOUR_HEIGHT) {
     const start = new Date(apt.startTime);
     const end = new Date(apt.endTime);
     if (isNaN(start.getTime()) || isNaN(end.getTime()))
@@ -541,8 +624,8 @@ function appointmentLayout(apt) {
         return null;
     const clampedStart = Math.max(startHrs, VISIBLE_START_HOUR);
     const clampedEnd = Math.min(endHrs, VISIBLE_END_HOUR);
-    const top = (clampedStart - VISIBLE_START_HOUR) * HOUR_HEIGHT;
-    const height = Math.max(20, (clampedEnd - clampedStart) * HOUR_HEIGHT);
+    const top = (clampedStart - VISIBLE_START_HOUR) * hourHeight;
+    const height = Math.max(28, (clampedEnd - clampedStart) * hourHeight);
     return { top, height };
 }
 // Greedy lane assignment for overlapping appointments. Within each cluster of

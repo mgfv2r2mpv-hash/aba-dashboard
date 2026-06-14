@@ -4,6 +4,6 @@ interface SetupWizardProps {
     onCancel: () => void;
     initialData?: ScheduleData;
 }
-export default function SetupWizard({ onComplete, onCancel, initialData }: SetupWizardProps): import("react/jsx-runtime").JSX.Element;
+export default function SetupWizard({ onComplete, onCancel, initialData }: SetupWizardProps): any;
 export {};
 //# sourceMappingURL=SetupWizard.d.ts.map

@@ -1,104 +1,53 @@
 import * as XLSX from 'xlsx';
-import { AUTH_BUCKETS } from './types';
+import { AUTH_BUCKETS, DEFAULT_BCBA_SESSION_DEFAULTS, } from './types';
 import { v4 as uuidv4 } from 'uuid';
-export function parseExcelFile(filePath) {
-    return parseWorkbook(XLSX.readFile(filePath));
+// Workbook schema version. v2 = normalized relational sheets (Availability,
+// Assignments, Cancellations as child sheets; narrow Clients/Technicians; Settings
+// fully de-JSON'd). The parser understands v2 only — legacy v1 files are migrated
+// once via scripts/migrate-legacy-xlsx.ts. See CLAUDE.md.
+export const SCHEMA_VERSION = 2;
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+// ---------------------------------------------------------------------------
+// Cell helpers
+// ---------------------------------------------------------------------------
+const isBlank = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
+// TRUE/true → true; FALSE/false → false; blank → undefined (three-state).
+function bool3(v) {
+    if (v === true || v === 'TRUE')
+        return true;
+    if (v === false || v === 'FALSE')
+        return false;
+    return undefined;
 }
-export function parseWorkbook(workbook) {
-    const clients = parseClients(workbook);
-    const technicians = parseTechnicians(workbook);
-    const settings = parseSettings(workbook);
-    const appointments = parseAppointments(workbook);
-    const blackouts = parseBlackouts(workbook);
-    const authorizations = parseAuthorizations(workbook);
-    const manualUsage = parseManualUsage(workbook);
-    const embeddedConfig = parseEmbeddedConfig(workbook);
-    return {
-        data: {
-            id: uuidv4(),
-            version: 1,
-            clients,
-            technicians,
-            settings,
-            appointments,
-            blackouts,
-            authorizations,
-            manualUsage,
-            lastModified: new Date().toISOString(),
-        },
-        embeddedConfig,
+const truthy = (v) => v === true || v === 'TRUE';
+function num(v) {
+    if (isBlank(v))
+        return undefined;
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : undefined;
+}
+const text = (v) => (isBlank(v) ? undefined : String(v).trim());
+// For writing: blank cell for nullish/empty, value otherwise.
+const W = (v) => (v === undefined || v === null ? '' : v);
+const WB = (v) => (v === true ? 'TRUE' : v === false ? 'FALSE' : '');
+const WT = (v) => (v ? 'TRUE' : ''); // true-or-nothing flags
+function rowsOf(workbook, name) {
+    const sheet = workbook.Sheets[name];
+    if (!sheet)
+        return [];
+    return XLSX.utils.sheet_to_json(sheet);
+}
+// Resolve an entity reference (id preferred, name fallback) to a stable key used
+// for grouping child rows. Returns the matched entity's id, or the raw value.
+function makeResolver(entities) {
+    const byId = new Map(entities.map(e => [e.id, e]));
+    const byName = new Map(entities.map(e => [e.name, e]));
+    return (ref) => {
+        if (isBlank(ref))
+            return undefined;
+        const v = String(ref);
+        return byId.get(v) || byName.get(v);
     };
-}
-function parseAuthorizations(workbook) {
-    const sheet = workbook.Sheets['Authorizations'];
-    if (!sheet)
-        return [];
-    const data = XLSX.utils.sheet_to_json(sheet);
-    return data
-        .filter(row => row && row.clientId && row.startDate && row.endDate)
-        .map((row) => {
-        const buckets = {};
-        for (const { key } of AUTH_BUCKETS) {
-            const v = parseFloat(row[key]);
-            if (Number.isFinite(v) && v > 0)
-                buckets[key] = v;
-        }
-        const weekly = {};
-        for (const wk of ['direct', 'supervision', 'parentTraining', 'casePlanning']) {
-            const v = parseFloat(row[`weekly${wk.charAt(0).toUpperCase()}${wk.slice(1)}`]);
-            if (Number.isFinite(v) && v > 0)
-                weekly[wk] = v;
-        }
-        const auth = {
-            id: row.id || uuidv4(),
-            clientId: String(row.clientId),
-            label: row.label || undefined,
-            startDate: normalizeDateString(row.startDate),
-            endDate: normalizeDateString(row.endDate),
-            buckets,
-        };
-        if (Object.keys(weekly).length > 0)
-            auth.weekly = weekly;
-        if (row.reportFinalDue)
-            auth.reportFinalDue = normalizeDateString(row.reportFinalDue);
-        if (row.reportDraftDue)
-            auth.reportDraftDue = normalizeDateString(row.reportDraftDue);
-        return auth;
-    });
-}
-function parseManualUsage(workbook) {
-    const sheet = workbook.Sheets['ManualUsage'];
-    if (!sheet)
-        return [];
-    const data = XLSX.utils.sheet_to_json(sheet);
-    return data
-        .filter(row => row && row.clientId && row.bucket && row.date)
-        .map((row) => ({
-        id: row.id || uuidv4(),
-        clientId: String(row.clientId),
-        bucket: row.bucket,
-        hours: parseFloat(row.hours) || 0,
-        date: normalizeDateString(row.date),
-        note: row.note || undefined,
-    }));
-}
-function parseBlackouts(workbook) {
-    const sheet = workbook.Sheets['Blackouts'];
-    if (!sheet)
-        return [];
-    const data = XLSX.utils.sheet_to_json(sheet);
-    return data
-        .filter(row => row && row.entityId && row.date)
-        .map((row) => ({
-        id: row.id || uuidv4(),
-        entityType: row.entityType === 'client' ? 'client' : 'technician',
-        entityId: String(row.entityId),
-        entityName: row.entityName || undefined,
-        // Excel may parse a date cell into a number/Date; normalize to YYYY-MM-DD.
-        date: normalizeDateString(row.date),
-        reason: row.reason || undefined,
-        createdAt: row.createdAt || undefined,
-    }));
 }
 // Accept an ISO string, a YYYY-MM-DD string, or an Excel-parsed Date and
 // return a YYYY-MM-DD local-day string.
@@ -110,366 +59,556 @@ function normalizeDateString(raw) {
         return `${y}-${m}-${d}`;
     }
     const s = String(raw).trim();
-    // Already YYYY-MM-DD (optionally with a time component) — take the date part.
     const match = s.match(/^(\d{4}-\d{2}-\d{2})/);
     return match ? match[1] : s;
 }
-function parseEmbeddedConfig(workbook) {
-    const sheet = workbook.Sheets['_Config'];
-    if (!sheet)
-        return undefined;
-    const data = XLSX.utils.sheet_to_json(sheet);
-    const row = data[0];
-    return row?.encryptedBlob;
+// ===========================================================================
+// PARSE  (v2 workbook -> ScheduleData)
+// ===========================================================================
+export function parseExcelFile(filePath) {
+    return parseWorkbook(XLSX.readFile(filePath));
+}
+export function parseWorkbook(workbook) {
+    const meta = rowsOf(workbook, '_Meta')[0] || {};
+    const clients = parseClients(workbook);
+    const technicians = parseTechnicians(workbook);
+    // Normalized child sheets fanned back onto their parents.
+    const { clinicianAvailability } = applyAvailability(workbook, clients, technicians);
+    applyAssignments(workbook, technicians, clients);
+    const settings = parseSettings(workbook, clinicianAvailability);
+    const appointments = parseAppointments(workbook);
+    applyCancellations(workbook, appointments);
+    return {
+        data: {
+            id: text(meta.id) || uuidv4(),
+            version: num(meta.schemaVersion) || SCHEMA_VERSION,
+            clients,
+            technicians,
+            settings,
+            appointments,
+            blackouts: parseBlackouts(workbook),
+            timeOff: parseTimeOff(workbook),
+            authorizations: parseAuthorizations(workbook),
+            manualUsage: parseManualUsage(workbook),
+            lastModified: text(meta.lastModified) || new Date().toISOString(),
+        },
+        embeddedConfig: rowsOf(workbook, '_Config')[0]?.encryptedBlob,
+    };
 }
 function parseClients(workbook) {
-    const sheet = workbook.Sheets['Clients'];
-    if (!sheet)
-        return [];
-    const data = XLSX.utils.sheet_to_json(sheet);
-    return data.map((row) => {
-        const ptMaxRaw = row.parentTrainingMaxHours;
-        const ptMax = ptMaxRaw === undefined || ptMaxRaw === '' || ptMaxRaw === null
-            ? undefined
-            : parseFloat(ptMaxRaw);
+    return rowsOf(workbook, 'Clients').map((row) => {
         const client = {
-            id: row.id || uuidv4(),
-            name: row.name,
-            availabilityWindows: parseAvailabilityWindows(row),
-            notes: row.notes,
+            id: text(row.id) || uuidv4(),
+            name: text(row.name) || '',
+            availabilityWindows: {},
         };
-        if (ptMax !== undefined && Number.isFinite(ptMax)) {
+        const ptMax = num(row.parentTrainingMaxHours);
+        if (ptMax !== undefined)
             client.parentTrainingMaxHours = ptMax;
-        }
-        if (row.cadenceGoal === 'W' || row.cadenceGoal === 'EOW' || row.cadenceGoal === '3o4') {
+        if (row.cadenceGoal === 'W' || row.cadenceGoal === 'EOW' || row.cadenceGoal === '3o4')
             client.cadenceGoal = row.cadenceGoal;
-        }
-        if (row.isEI === 'TRUE' || row.isEI === true)
+        if (truthy(row.isEI))
             client.isEI = true;
-        if (row.eiDate)
+        if (!isBlank(row.eiDate))
             client.eiDate = normalizeDateString(row.eiDate);
-        // Default true; only store false explicitly when the sheet says N.
-        if (row.partialStaffAllowed === 'FALSE' || row.partialStaffAllowed === false)
-            client.partialStaffAllowed = false;
-        else if (row.partialStaffAllowed === 'TRUE' || row.partialStaffAllowed === true)
-            client.partialStaffAllowed = true;
-        if (row.parentAvailableOutsideSessions === 'TRUE' || row.parentAvailableOutsideSessions === true) {
+        const partial = bool3(row.partialStaffAllowed);
+        if (partial !== undefined)
+            client.partialStaffAllowed = partial;
+        if (truthy(row.parentAvailableOutsideSessions))
             client.parentAvailableOutsideSessions = true;
-        }
-        if (row.anticipatedDischarge)
+        if (!isBlank(row.anticipatedDischarge))
             client.anticipatedDischarge = String(row.anticipatedDischarge);
+        const notes = text(row.notes);
+        if (notes)
+            client.notes = notes;
         return client;
     });
 }
 function parseTechnicians(workbook) {
-    const sheet = workbook.Sheets['Technicians'];
-    if (!sheet)
-        return [];
-    const data = XLSX.utils.sheet_to_json(sheet);
-    return data.map((row) => ({
-        id: row.id || uuidv4(),
-        name: row.name,
-        isRBT: row.isRBT === 'TRUE' || row.isRBT === true,
-        assignments: parseAssignments(row),
-        availability: parseAvailabilityWindows(row),
-        notes: row.notes,
-    }));
+    return rowsOf(workbook, 'Technicians').map((row) => {
+        const tech = {
+            id: text(row.id) || uuidv4(),
+            name: text(row.name) || '',
+            isRBT: truthy(row.isRBT),
+            assignments: [],
+            availability: {},
+        };
+        const notes = text(row.notes);
+        if (notes)
+            tech.notes = notes;
+        return tech;
+    });
 }
-function parseSettings(workbook) {
-    const sheet = workbook.Sheets['Settings'];
-    const defaultSettings = {
-        supervisionDirectHoursPercent: 5,
-        supervisionRBTHoursPercent: 5,
-        parentTraining: {
-            minimumHours: 1.5,
-            targetMinHours: 2,
-            targetMaxHours: 4,
-            periodUnit: 'month',
-        },
-    };
-    if (!sheet)
-        return defaultSettings;
-    const data = XLSX.utils.sheet_to_json(sheet);
-    const row = (data && data[0]) || {};
-    const periodUnit = row.parentTrainingPeriodUnit || 'month';
-    const minimumHours = parseFloat(row.parentTrainingMinimum) || 1.5;
-    const targetMinHours = parseFloat(row.parentTrainingTargetMin) || 2;
-    const targetMaxHours = parseFloat(row.parentTrainingTargetMax) || 4;
-    let clinicianAvailability = undefined;
-    const clinicianRaw = row.clinicianAvailability;
-    if (typeof clinicianRaw === 'string' && clinicianRaw.trim()) {
-        try {
-            const parsed = JSON.parse(clinicianRaw);
-            if (parsed && typeof parsed === 'object')
-                clinicianAvailability = parsed;
+// Availability sheet -> client.availabilityWindows / technician.availability /
+// settings.clinicianAvailability. One row per window.
+function applyAvailability(workbook, clients, technicians) {
+    var _a, _b;
+    const clientOf = makeResolver(clients);
+    const techOf = makeResolver(technicians);
+    const clientMap = new Map(clients.map(c => [c.id, c]));
+    const techMap = new Map(technicians.map(t => [t.id, t]));
+    let clinician;
+    for (const row of rowsOf(workbook, 'Availability')) {
+        const day = text(row.day);
+        const start = text(row.start);
+        const end = text(row.end);
+        if (!day || !start || !end)
+            continue;
+        const win = { start, end };
+        const ownerType = text(row.ownerType);
+        if (ownerType === 'clinician') {
+            clinician = clinician || {};
+            (clinician[day] || (clinician[day] = [])).push(win);
         }
-        catch (_e) { /* ignore malformed clinician availability */ }
-    }
-    const settings = {
-        supervisionDirectHoursPercent: parseFloat(row.supervisionDirectHoursPercent) || 5,
-        supervisionRBTHoursPercent: parseFloat(row.supervisionRBTHoursPercent) || 5,
-        parentTraining: { minimumHours, targetMinHours, targetMaxHours, periodUnit },
-        clinicianAvailability,
-    };
-    const techPct = parseFloat(row.supervisionTechHoursPercent);
-    if (Number.isFinite(techPct))
-        settings.supervisionTechHoursPercent = techPct;
-    const maxPct = parseFloat(row.supervisionMaxHoursPercent);
-    if (Number.isFinite(maxPct))
-        settings.supervisionMaxHoursPercent = maxPct;
-    const minContacts = parseFloat(row.rbtMinContactsPerMonth);
-    if (Number.isFinite(minContacts))
-        settings.rbtMinContactsPerMonth = minContacts;
-    for (const [col, key] of [
-        ['supervisionFloorPercent', 'supervisionFloorPercent'],
-        ['supervisionPreferredMinPercent', 'supervisionPreferredMinPercent'],
-        ['supervisionPreferredMaxPercent', 'supervisionPreferredMaxPercent'],
-        ['reportLeadWeeksBackOffice', 'reportLeadWeeksBackOffice'],
-        ['reportLeadWeeksClinicalDirector', 'reportLeadWeeksClinicalDirector'],
-    ]) {
-        const v = parseFloat(row[col]);
-        if (Number.isFinite(v))
-            settings[key] = v;
-    }
-    // JSON-packed compound settings (utilization targets, cancellation notice).
-    for (const [col, key] of [['utilization', 'utilization'], ['cancellationNotice', 'cancellationNotice']]) {
-        const raw = row[col];
-        if (typeof raw === 'string' && raw.trim()) {
-            try {
-                const parsed = JSON.parse(raw);
-                if (parsed && typeof parsed === 'object')
-                    settings[key] = parsed;
-            }
-            catch (_e) { /* ignore malformed */ }
+        else if (ownerType === 'technician') {
+            const t = techOf(row.ownerId);
+            const tech = t && techMap.get(t.id);
+            if (tech)
+                ((_a = tech.availability)[day] || (_a[day] = [])).push(win);
+        }
+        else {
+            const c = clientOf(row.ownerId);
+            const client = c && clientMap.get(c.id);
+            if (client)
+                ((_b = client.availabilityWindows)[day] || (_b[day] = [])).push(win);
         }
     }
-    return settings;
+    return { clinicianAvailability: clinician };
+}
+// Assignments sheet -> technician.assignments. One row per assignment.
+function applyAssignments(workbook, technicians, _clients) {
+    const techOf = makeResolver(technicians);
+    const techMap = new Map(technicians.map(t => [t.id, t]));
+    for (const row of rowsOf(workbook, 'Assignments')) {
+        const t = techOf(row.techId);
+        const tech = t && techMap.get(t.id);
+        if (!tech || isBlank(row.clientId))
+            continue;
+        tech.assignments.push({
+            clientId: String(row.clientId),
+            hoursPerWeek: num(row.hoursPerWeek) ?? 0,
+            billable: bool3(row.billable) ?? true,
+        });
+    }
 }
 function parseAppointments(workbook) {
-    const sheet = workbook.Sheets['Appointments'];
-    if (!sheet)
-        return [];
-    const data = XLSX.utils.sheet_to_json(sheet);
-    return data.map((row) => {
+    return rowsOf(workbook, 'Appointments').map((row) => {
         const appt = {
-            id: row.id || uuidv4(),
-            title: row.title,
-            description: row.description,
-            technician: row.technician,
-            client: row.client,
-            startTime: row.startTime,
-            endTime: row.endTime,
-            isFixed: row.isFixed === 'TRUE' || row.isFixed === true,
-            isBillable: row.isBillable === 'TRUE' || row.isBillable === true,
+            id: text(row.id) || uuidv4(),
+            title: text(row.title) || '',
+            technician: text(row.technician),
+            client: text(row.client),
+            startTime: String(row.startTime),
+            endTime: String(row.endTime),
+            isFixed: truthy(row.isFixed),
+            isBillable: truthy(row.isBillable),
             type: row.type || 'other',
-            isRecurring: row.isRecurring === 'TRUE' || row.isRecurring === true,
-            recurringPattern: row.recurringPattern,
-            seriesId: row.seriesId || undefined,
-            isMakeUp: row.isMakeUp === 'TRUE' || row.isMakeUp === true || undefined,
-            makeupForId: row.makeupForId || undefined,
-            isGhost: row.isGhost === 'TRUE' || row.isGhost === true || undefined,
+            isRecurring: bool3(row.isRecurring) ?? false,
         };
-        if (row.status === 'completed' || row.status === 'canceled') {
+        const desc = text(row.description);
+        if (desc)
+            appt.description = desc;
+        if (!isBlank(row.recurringPattern))
+            appt.recurringPattern = row.recurringPattern;
+        if (!isBlank(row.seriesId))
+            appt.seriesId = String(row.seriesId);
+        if (truthy(row.isMakeUp))
+            appt.isMakeUp = true;
+        if (!isBlank(row.makeupForId))
+            appt.makeupForId = String(row.makeupForId);
+        if (truthy(row.isGhost))
+            appt.isGhost = true;
+        if (row.status === 'completed' || row.status === 'canceled')
             appt.status = row.status;
-        }
-        if (row.cancellationSource && row.cancellationReason) {
-            appt.cancellation = {
-                source: row.cancellationSource,
-                reason: row.cancellationReason,
-                unplanned: row.cancellationUnplanned === 'TRUE' || row.cancellationUnplanned === true,
-                noticeMet: row.cancellationNoticeMet === 'TRUE' || row.cancellationNoticeMet === true
-                    ? true
-                    : row.cancellationNoticeMet === 'FALSE' || row.cancellationNoticeMet === false
-                        ? false
-                        : undefined,
-                canceledAt: row.cancellationAt || undefined,
-                notes: row.cancellationNotes || undefined,
-            };
-        }
         return appt;
     });
 }
-function parseAvailabilityWindows(row) {
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    const availability = {};
-    days.forEach(day => {
-        // Multi-window format: JSON-encoded array in `${day}Windows`
-        const windowsRaw = row[`${day}Windows`];
-        if (typeof windowsRaw === 'string' && windowsRaw.trim()) {
-            try {
-                const parsed = JSON.parse(windowsRaw);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                    availability[day] = parsed.filter(w => w && w.start && w.end);
-                    return;
-                }
-            }
-            catch (_e) { /* fall through to legacy */ }
-        }
-        // Legacy single-window format: `${day}Start` / `${day}End`
-        const start = row[`${day}Start`];
-        const end = row[`${day}End`];
-        if (start && end) {
-            availability[day] = [{ start, end }];
-        }
-    });
-    return availability;
-}
-function parseAssignments(row) {
-    const assignments = [];
-    for (let i = 1; i <= 10; i++) {
-        const clientKey = `client${i}`;
-        const hoursKey = `hours${i}`;
-        if (row[clientKey]) {
-            assignments.push({
-                clientId: row[clientKey],
-                hoursPerWeek: parseFloat(row[hoursKey]) || 0,
-                billable: true,
-            });
-        }
-    }
-    return assignments;
-}
-export function generateExcelFile(data, embeddedConfig) {
-    const workbook = XLSX.utils.book_new();
-    // _Config sheet (optional) - holds encrypted API key + model
-    if (embeddedConfig) {
-        const configData = [{ encryptedBlob: embeddedConfig }];
-        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(configData), '_Config');
-    }
-    // Clients sheet
-    const clientsData = data.clients.map(c => ({
-        id: c.id,
-        name: c.name,
-        parentTrainingMaxHours: c.parentTrainingMaxHours ?? '',
-        cadenceGoal: c.cadenceGoal ?? '',
-        isEI: c.isEI ? 'TRUE' : '',
-        eiDate: c.eiDate ?? '',
-        partialStaffAllowed: c.partialStaffAllowed === false ? 'FALSE' : c.partialStaffAllowed === true ? 'TRUE' : '',
-        parentAvailableOutsideSessions: c.parentAvailableOutsideSessions ? 'TRUE' : '',
-        anticipatedDischarge: c.anticipatedDischarge ?? '',
-        ...flattenAvailability(c.availabilityWindows),
-        notes: c.notes,
-    }));
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(clientsData), 'Clients');
-    // Technicians sheet
-    const techniciansData = data.technicians.map(t => ({
-        id: t.id,
-        name: t.name,
-        isRBT: t.isRBT ? 'TRUE' : 'FALSE',
-        ...flattenAvailability(t.availability),
-        ...flattenAssignments(t.assignments),
-        notes: t.notes,
-    }));
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(techniciansData), 'Technicians');
-    // Settings sheet
-    const settingsData = [{
-            supervisionDirectHoursPercent: data.settings.supervisionDirectHoursPercent,
-            supervisionRBTHoursPercent: data.settings.supervisionRBTHoursPercent,
-            parentTrainingMinimum: data.settings.parentTraining.minimumHours,
-            parentTrainingTargetMin: data.settings.parentTraining.targetMinHours,
-            parentTrainingTargetMax: data.settings.parentTraining.targetMaxHours,
-            parentTrainingPeriodUnit: data.settings.parentTraining.periodUnit,
-            clinicianAvailability: data.settings.clinicianAvailability
-                ? JSON.stringify(data.settings.clinicianAvailability)
-                : '',
-            supervisionTechHoursPercent: data.settings.supervisionTechHoursPercent ?? '',
-            supervisionMaxHoursPercent: data.settings.supervisionMaxHoursPercent ?? '',
-            supervisionFloorPercent: data.settings.supervisionFloorPercent ?? '',
-            supervisionPreferredMinPercent: data.settings.supervisionPreferredMinPercent ?? '',
-            supervisionPreferredMaxPercent: data.settings.supervisionPreferredMaxPercent ?? '',
-            reportLeadWeeksBackOffice: data.settings.reportLeadWeeksBackOffice ?? '',
-            reportLeadWeeksClinicalDirector: data.settings.reportLeadWeeksClinicalDirector ?? '',
-            rbtMinContactsPerMonth: data.settings.rbtMinContactsPerMonth ?? '',
-            utilization: data.settings.utilization ? JSON.stringify(data.settings.utilization) : '',
-            cancellationNotice: data.settings.cancellationNotice ? JSON.stringify(data.settings.cancellationNotice) : '',
-        }];
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(settingsData), 'Settings');
-    // Appointments sheet
-    const appointmentsData = data.appointments.map(a => ({
-        id: a.id,
-        title: a.title,
-        description: a.description,
-        technician: a.technician,
-        client: a.client,
-        startTime: a.startTime,
-        endTime: a.endTime,
-        isFixed: a.isFixed ? 'TRUE' : 'FALSE',
-        isBillable: a.isBillable ? 'TRUE' : 'FALSE',
-        type: a.type,
-        isRecurring: a.isRecurring ? 'TRUE' : 'FALSE',
-        recurringPattern: a.recurringPattern,
-        seriesId: a.seriesId || '',
-        isMakeUp: a.isMakeUp ? 'TRUE' : '',
-        makeupForId: a.makeupForId || '',
-        isGhost: a.isGhost ? 'TRUE' : '',
-        status: a.status || 'scheduled',
-        cancellationSource: a.cancellation?.source || '',
-        cancellationReason: a.cancellation?.reason || '',
-        cancellationUnplanned: a.cancellation ? (a.cancellation.unplanned ? 'TRUE' : 'FALSE') : '',
-        cancellationNoticeMet: a.cancellation?.noticeMet === undefined
-            ? ''
-            : a.cancellation.noticeMet ? 'TRUE' : 'FALSE',
-        cancellationAt: a.cancellation?.canceledAt || '',
-        cancellationNotes: a.cancellation?.notes || '',
-    }));
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(appointmentsData), 'Appointments');
-    // Blackouts sheet (single-day "away" markers). Always emitted so a
-    // round-trip preserves them; empty when there are none.
-    const blackoutsData = (data.blackouts || []).map(b => ({
-        id: b.id,
-        entityType: b.entityType,
-        entityId: b.entityId,
-        entityName: b.entityName || '',
-        date: b.date,
-        reason: b.reason || '',
-        createdAt: b.createdAt || '',
-    }));
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(blackoutsData), 'Blackouts');
-    // Authorizations sheet — bucket hours as columns keyed by AuthBucketKey.
-    const authData = (data.authorizations || []).map(a => {
-        const row = {
-            id: a.id, clientId: a.clientId, label: a.label || '',
-            startDate: a.startDate, endDate: a.endDate,
+// Cancellations child sheet -> appointment.cancellation, keyed by appointmentId.
+function applyCancellations(workbook, appointments) {
+    const byId = new Map(appointments.map(a => [a.id, a]));
+    for (const row of rowsOf(workbook, 'Cancellations')) {
+        const appt = byId.get(String(row.appointmentId));
+        if (!appt || isBlank(row.source) || isBlank(row.reason))
+            continue;
+        const cancellation = {
+            source: row.source,
+            reason: row.reason,
+            unplanned: truthy(row.unplanned),
         };
-        for (const { key } of AUTH_BUCKETS)
-            row[key] = a.buckets[key] ?? '';
-        row.weeklyDirect = a.weekly?.direct ?? '';
-        row.weeklySupervision = a.weekly?.supervision ?? '';
-        row.weeklyParentTraining = a.weekly?.parentTraining ?? '';
-        row.weeklyCasePlanning = a.weekly?.casePlanning ?? '';
-        row.reportFinalDue = a.reportFinalDue ?? '';
-        row.reportDraftDue = a.reportDraftDue ?? '';
-        return row;
-    });
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(authData), 'Authorizations');
-    const usageData = (data.manualUsage || []).map(u => ({
-        id: u.id, clientId: u.clientId, bucket: u.bucket,
-        hours: u.hours, date: u.date, note: u.note || '',
-    }));
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(usageData), 'ManualUsage');
-    return XLSX.write(workbook, { bookType: 'xlsx', type: 'buffer' });
+        const noticeMet = bool3(row.noticeMet);
+        if (noticeMet !== undefined)
+            cancellation.noticeMet = noticeMet;
+        if (!isBlank(row.canceledAt))
+            cancellation.canceledAt = String(row.canceledAt);
+        const notes = text(row.notes);
+        if (notes)
+            cancellation.notes = notes;
+        appt.cancellation = cancellation;
+    }
 }
-function flattenAvailability(availability) {
-    const result = {};
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    days.forEach(day => {
-        const windows = availability[day];
-        if (windows && windows.length > 0) {
-            // Always write the first window in legacy columns for human readability,
-            // and write the full array in `${day}Windows` for round-tripping multi-window data.
-            result[`${day}Start`] = windows[0].start;
-            result[`${day}End`] = windows[0].end;
-            result[`${day}Windows`] = JSON.stringify(windows);
+function parseSettings(workbook, clinicianAvailability) {
+    const row = rowsOf(workbook, 'Settings')[0] || {};
+    const settings = {
+        supervisionDirectHoursPercent: num(row.supervisionDirectHoursPercent) ?? 5,
+        supervisionRBTHoursPercent: num(row.supervisionRBTHoursPercent) ?? 5,
+        parentTraining: {
+            minimumHours: num(row.parentTrainingMinimum) ?? 1.5,
+            targetMinHours: num(row.parentTrainingTargetMin) ?? 2,
+            targetMaxHours: num(row.parentTrainingTargetMax) ?? 4,
+            periodUnit: row.parentTrainingPeriodUnit || 'month',
+        },
+    };
+    if (clinicianAvailability)
+        settings.clinicianAvailability = clinicianAvailability;
+    for (const key of [
+        'supervisionTechHoursPercent', 'supervisionMaxHoursPercent', 'supervisionFloorPercent',
+        'supervisionPreferredMinPercent', 'supervisionPreferredMaxPercent', 'rbtMinContactsPerMonth',
+        'ptoBillableDeductionRatio',
+    ]) {
+        const v = num(row[key]);
+        if (v !== undefined)
+            settings[key] = v;
+    }
+    // Utilization targets (own columns).
+    const util = {};
+    for (const key of [
+        'bcbaWeeklyBillableHours', 'btWeeklyDirectHours', 'bcbaMonthlyBillableHours',
+        'bcbaMonthlyBillableHours5Week', 'bcbaWeeklyBillableMin',
+    ]) {
+        const v = num(row[key]);
+        if (v !== undefined)
+            util[key] = v;
+    }
+    if (Object.keys(util).length)
+        settings.utilization = util;
+    // Cancellation-notice thresholds (own columns).
+    const unplanned = num(row.cancellationUnplannedHoursThreshold);
+    const planned = num(row.cancellationPlannedDaysThreshold);
+    if (unplanned !== undefined || planned !== undefined) {
+        settings.cancellationNotice = {
+            unplannedHoursThreshold: unplanned ?? 24,
+            plannedDaysThreshold: planned ?? 30,
+        };
+    }
+    // Reassessment report lead times (value + unit columns).
+    const draftVal = num(row.reportDraftLeadValue);
+    if (draftVal !== undefined)
+        settings.reportDraftLead = { value: draftVal, unit: row.reportDraftLeadUnit === 'days' ? 'days' : 'weeks' };
+    const finalVal = num(row.reportFinalLeadValue);
+    if (finalVal !== undefined)
+        settings.reportFinalLead = { value: finalVal, unit: row.reportFinalLeadUnit === 'days' ? 'days' : 'weeks' };
+    // PTO config (Upgrade 2): scalar mode columns + two child sheets. Only attach
+    // settings.pto when something is actually configured, so a schedule with no PTO
+    // setup round-trips as `pto: undefined` rather than a synthesized object.
+    const pto = parsePtoConfig(workbook, row);
+    if (pto)
+        settings.pto = pto;
+    // BCBA session-length defaults (own columns). Only attach when any are present,
+    // backfilling the rest from the defaults so a partial file still round-trips.
+    const bsd = {};
+    const bsdMap = [
+        ['bcbaSupervisionPctOfDirect', 'supervisionPercentOfWeeklyDirect'],
+        ['bcbaReassessmentHours', 'reassessmentHours'],
+        ['bcbaCasePlanningHours', 'casePlanningHours'],
+        ['bcbaParentTrainingHours', 'parentTrainingHours'],
+        ['bcbaOtherHours', 'otherHours'],
+    ];
+    for (const [col, key] of bsdMap) {
+        const v = num(row[col]);
+        if (v !== undefined)
+            bsd[key] = v;
+    }
+    if (Object.keys(bsd).length)
+        settings.bcbaSessionDefaults = { ...DEFAULT_BCBA_SESSION_DEFAULTS, ...bsd };
+    // Custom cancellation reason codes (own child sheet).
+    const codeRows = rowsOf(workbook, 'CancellationCodes').filter(r => r && !isBlank(r.value));
+    if (codeRows.length) {
+        settings.cancellationReasons = codeRows.map((r) => {
+            const code = { value: String(r.value), label: text(r.label) || String(r.value) };
+            if (truthy(r.retired))
+                code.retired = true;
+            return code;
+        });
+    }
+    return settings;
+}
+function parseBlackouts(workbook) {
+    return rowsOf(workbook, 'Blackouts')
+        .filter(row => row && !isBlank(row.entityId) && !isBlank(row.date))
+        .map((row) => {
+        const b = {
+            id: text(row.id) || uuidv4(),
+            entityType: row.entityType === 'client' ? 'client' : 'technician',
+            entityId: String(row.entityId),
+            date: normalizeDateString(row.date),
+        };
+        if (!isBlank(row.entityName))
+            b.entityName = String(row.entityName);
+        if (!isBlank(row.reason))
+            b.reason = String(row.reason);
+        if (!isBlank(row.createdAt))
+            b.createdAt = String(row.createdAt);
+        return b;
+    });
+}
+function parseTimeOff(workbook) {
+    return rowsOf(workbook, 'TimeOff')
+        .filter(row => row && !isBlank(row.date) && num(row.hours) !== undefined)
+        .map((row) => {
+        const t = {
+            id: text(row.id) || uuidv4(),
+            date: normalizeDateString(row.date),
+            hours: num(row.hours) ?? 0,
+        };
+        const b = text(row.bucket);
+        if (b === 'sick' || b === 'vacation' || b === 'combined' || b === 'unpaid')
+            t.bucket = b;
+        if (!isBlank(row.note))
+            t.note = String(row.note);
+        if (!isBlank(row.createdAt))
+            t.createdAt = String(row.createdAt);
+        return t;
+    });
+}
+const PTO_BUCKET_VALUES = ['sick', 'vacation', 'combined', 'unpaid'];
+const ACCRUAL_KINDS = ['semimonthly', 'everyNWeeks', 'perConvertedHours', 'perConvertedBonus'];
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function parsePtoConfig(workbook, settingsRow) {
+    const accrualRows = rowsOf(workbook, 'PtoAccruals')
+        .filter(r => r && ACCRUAL_KINDS.includes(text(r.kind)) && PTO_BUCKET_VALUES.includes(text(r.bucket)));
+    const balanceRows = rowsOf(workbook, 'PtoOpeningBalances')
+        .filter(r => r && PTO_BUCKET_VALUES.includes(text(r.bucket)) && num(r.hours) !== undefined);
+    const modeCell = text(settingsRow.ptoMode);
+    const bucketsCell = text(settingsRow.ptoBuckets);
+    const unpaidCell = bool3(settingsRow.ptoUnpaidEnabled);
+    // Nothing configured at all → leave settings.pto undefined (the default).
+    if (!modeCell && !bucketsCell && unpaidCell === undefined && accrualRows.length === 0 && balanceRows.length === 0) {
+        return undefined;
+    }
+    const pto = {
+        mode: modeCell === 'accrual' ? 'accrual' : 'unlimited',
+        buckets: bucketsCell === 'separate' ? 'separate' : 'combined',
+    };
+    if (unpaidCell === true)
+        pto.unpaidEnabled = true;
+    if (accrualRows.length) {
+        pto.accruals = accrualRows.map((r) => {
+            const rule = {
+                id: text(r.id) || uuidv4(),
+                kind: text(r.kind),
+                bucket: text(r.bucket),
+                hours: num(r.hours) ?? 0,
+            };
+            const everyWeeks = num(r.everyWeeks);
+            if (everyWeeks !== undefined)
+                rule.everyWeeks = everyWeeks;
+            const wd = text(r.weekday);
+            if (wd && DAY_NAMES.includes(wd))
+                rule.weekday = wd;
+            if (!isBlank(r.anchor))
+                rule.anchor = normalizeDateString(r.anchor);
+            const perHours = num(r.perHours);
+            if (perHours !== undefined)
+                rule.perHours = perHours;
+            const bonusHours = num(r.bonusHours);
+            if (bonusHours !== undefined)
+                rule.bonusHours = bonusHours;
+            const bonusInterval = text(r.bonusInterval);
+            if (bonusInterval === 'week' || bonusInterval === 'month')
+                rule.bonusInterval = bonusInterval;
+            const bonusConsec = num(r.bonusConsecutiveIntervals);
+            if (bonusConsec !== undefined)
+                rule.bonusConsecutiveIntervals = bonusConsec;
+            const bonusCriterion = text(r.bonusCriterion);
+            if (bonusCriterion === 'hours' || bonusCriterion === 'percentAboveGoal')
+                rule.bonusCriterion = bonusCriterion;
+            const bonusPer = num(r.bonusPerExtraHours);
+            if (bonusPer !== undefined)
+                rule.bonusPerExtraHours = bonusPer;
+            const bonusPct = num(r.bonusPercentAboveGoal);
+            if (bonusPct !== undefined)
+                rule.bonusPercentAboveGoal = bonusPct;
+            const enabled = bool3(r.enabled);
+            if (enabled !== undefined)
+                rule.enabled = enabled;
+            return rule;
+        });
+    }
+    if (balanceRows.length) {
+        pto.openingBalances = balanceRows.map((r) => ({
+            bucket: text(r.bucket),
+            hours: num(r.hours) ?? 0,
+            asOf: normalizeDateString(r.asOf),
+        }));
+    }
+    return pto;
+}
+function parseAuthorizations(workbook) {
+    return rowsOf(workbook, 'Authorizations')
+        .filter(row => row && !isBlank(row.clientId) && !isBlank(row.startDate) && !isBlank(row.endDate))
+        .map((row) => {
+        const buckets = {};
+        for (const { key } of AUTH_BUCKETS) {
+            const v = num(row[key]);
+            if (v !== undefined && v > 0)
+                buckets[key] = v;
         }
+        const weekly = {};
+        for (const wk of ['direct', 'supervision', 'parentTraining', 'casePlanning']) {
+            const v = num(row[`weekly${wk.charAt(0).toUpperCase()}${wk.slice(1)}`]);
+            if (v !== undefined && v > 0)
+                weekly[wk] = v;
+        }
+        const auth = {
+            id: text(row.id) || uuidv4(),
+            clientId: String(row.clientId),
+            startDate: normalizeDateString(row.startDate),
+            endDate: normalizeDateString(row.endDate),
+            buckets,
+        };
+        if (!isBlank(row.label))
+            auth.label = String(row.label);
+        if (Object.keys(weekly).length > 0)
+            auth.weekly = weekly;
+        if (!isBlank(row.reportFinalDue))
+            auth.reportFinalDue = normalizeDateString(row.reportFinalDue);
+        if (!isBlank(row.reportDraftDue))
+            auth.reportDraftDue = normalizeDateString(row.reportDraftDue);
+        return auth;
     });
-    return result;
 }
-function flattenAssignments(assignments) {
-    const result = {};
-    assignments.forEach((assignment, index) => {
-        result[`client${index + 1}`] = assignment.clientId;
-        result[`hours${index + 1}`] = assignment.hoursPerWeek;
+function parseManualUsage(workbook) {
+    return rowsOf(workbook, 'ManualUsage')
+        .filter(row => row && !isBlank(row.clientId) && !isBlank(row.bucket) && !isBlank(row.date))
+        .map((row) => {
+        const u = {
+            id: text(row.id) || uuidv4(),
+            clientId: String(row.clientId),
+            bucket: row.bucket,
+            hours: num(row.hours) ?? 0,
+            date: normalizeDateString(row.date),
+        };
+        if (!isBlank(row.note))
+            u.note = String(row.note);
+        return u;
     });
-    return result;
+}
+// ===========================================================================
+// GENERATE  (ScheduleData -> v2 workbook). aoa_to_sheet keeps column order
+// stable; compression:true so the zip is actually compressed (~5x smaller).
+// ===========================================================================
+export function generateExcelFile(data, embeddedConfig) {
+    const wb = XLSX.utils.book_new();
+    const add = (name, headers, rows) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([headers, ...rows]), name);
+    // _Meta — format marker + provenance.
+    add('_Meta', ['schemaVersion', 'id', 'lastModified', 'exportedAt', 'appName'], [[SCHEMA_VERSION, W(data.id), W(data.lastModified), new Date().toISOString(), 'aba-dashboard']]);
+    if (embeddedConfig)
+        add('_Config', ['encryptedBlob'], [[embeddedConfig]]);
+    // Clients (scalars only).
+    add('Clients', ['id', 'name', 'parentTrainingMaxHours', 'cadenceGoal', 'isEI', 'eiDate',
+        'partialStaffAllowed', 'parentAvailableOutsideSessions', 'anticipatedDischarge', 'notes'], data.clients.map(c => [
+        c.id, c.name, W(c.parentTrainingMaxHours), W(c.cadenceGoal), WT(c.isEI), W(c.eiDate),
+        WB(c.partialStaffAllowed), WT(c.parentAvailableOutsideSessions), W(c.anticipatedDischarge), W(c.notes),
+    ]));
+    // Technicians (scalars only).
+    add('Technicians', ['id', 'name', 'isRBT', 'notes'], data.technicians.map(t => [t.id, t.name, WB(t.isRBT), W(t.notes)]));
+    // Availability (normalized: clients + technicians + clinician).
+    const availRows = [];
+    const emitAvail = (ownerType, ownerId, ownerName, av) => {
+        if (!av)
+            return;
+        for (const day of DAYS)
+            for (const w of (av[day] || []))
+                availRows.push([ownerType, ownerId, ownerName, day, w.start, w.end]);
+    };
+    data.clients.forEach(c => emitAvail('client', c.id, c.name, c.availabilityWindows));
+    data.technicians.forEach(t => emitAvail('technician', t.id, t.name, t.availability));
+    emitAvail('clinician', '', 'Clinician', data.settings.clinicianAvailability);
+    add('Availability', ['ownerType', 'ownerId', 'ownerName', 'day', 'start', 'end'], availRows);
+    // Assignments (normalized).
+    const clientName = makeNameLookup(data.clients);
+    const asgRows = [];
+    data.technicians.forEach(t => (t.assignments || []).forEach(a => asgRows.push([t.id, t.name, a.clientId, clientName(a.clientId), W(a.hoursPerWeek), WB(a.billable)])));
+    add('Assignments', ['techId', 'techName', 'clientId', 'clientName', 'hoursPerWeek', 'billable'], asgRows);
+    // Settings (single row, de-JSON'd).
+    const s = data.settings;
+    const u = s.utilization || {};
+    const cn = s.cancellationNotice;
+    add('Settings', ['supervisionDirectHoursPercent', 'supervisionRBTHoursPercent', 'supervisionTechHoursPercent',
+        'supervisionMaxHoursPercent', 'supervisionFloorPercent', 'supervisionPreferredMinPercent',
+        'supervisionPreferredMaxPercent', 'rbtMinContactsPerMonth', 'parentTrainingMinimum',
+        'parentTrainingTargetMin', 'parentTrainingTargetMax', 'parentTrainingPeriodUnit',
+        'bcbaWeeklyBillableHours', 'btWeeklyDirectHours', 'bcbaMonthlyBillableHours',
+        'bcbaMonthlyBillableHours5Week', 'bcbaWeeklyBillableMin',
+        'cancellationUnplannedHoursThreshold', 'cancellationPlannedDaysThreshold',
+        'reportDraftLeadValue', 'reportDraftLeadUnit', 'reportFinalLeadValue', 'reportFinalLeadUnit',
+        'ptoBillableDeductionRatio', 'ptoMode', 'ptoBuckets', 'ptoUnpaidEnabled',
+        'bcbaSupervisionPctOfDirect', 'bcbaReassessmentHours', 'bcbaCasePlanningHours',
+        'bcbaParentTrainingHours', 'bcbaOtherHours'], [[
+            s.supervisionDirectHoursPercent, s.supervisionRBTHoursPercent, W(s.supervisionTechHoursPercent),
+            W(s.supervisionMaxHoursPercent), W(s.supervisionFloorPercent), W(s.supervisionPreferredMinPercent),
+            W(s.supervisionPreferredMaxPercent), W(s.rbtMinContactsPerMonth), s.parentTraining.minimumHours,
+            s.parentTraining.targetMinHours, s.parentTraining.targetMaxHours, s.parentTraining.periodUnit,
+            W(u.bcbaWeeklyBillableHours), W(u.btWeeklyDirectHours), W(u.bcbaMonthlyBillableHours),
+            W(u.bcbaMonthlyBillableHours5Week), W(u.bcbaWeeklyBillableMin),
+            W(cn?.unplannedHoursThreshold), W(cn?.plannedDaysThreshold),
+            W(s.reportDraftLead?.value), W(s.reportDraftLead?.unit), W(s.reportFinalLead?.value), W(s.reportFinalLead?.unit),
+            W(s.ptoBillableDeductionRatio), W(s.pto?.mode), W(s.pto?.buckets), WB(s.pto?.unpaidEnabled),
+            W(s.bcbaSessionDefaults?.supervisionPercentOfWeeklyDirect), W(s.bcbaSessionDefaults?.reassessmentHours),
+            W(s.bcbaSessionDefaults?.casePlanningHours), W(s.bcbaSessionDefaults?.parentTrainingHours),
+            W(s.bcbaSessionDefaults?.otherHours),
+        ]]);
+    // Appointments (cancellation columns split out).
+    add('Appointments', ['id', 'title', 'description', 'technician', 'client', 'startTime', 'endTime', 'isFixed',
+        'isBillable', 'type', 'isMakeUp', 'makeupForId', 'isGhost', 'isRecurring', 'recurringPattern',
+        'seriesId', 'status'], data.appointments.map(a => [
+        a.id, a.title, W(a.description), W(a.technician), W(a.client), a.startTime, a.endTime,
+        WB(a.isFixed), WB(a.isBillable), a.type, WT(a.isMakeUp), W(a.makeupForId), WT(a.isGhost),
+        WB(a.isRecurring), W(a.recurringPattern), W(a.seriesId), a.status || 'scheduled',
+    ]));
+    // Cancellations (child of canceled appointments).
+    const cxRows = [];
+    data.appointments.forEach(a => {
+        const c = a.cancellation;
+        if (c)
+            cxRows.push([a.id, c.source, c.reason, WB(c.unplanned), WB(c.noticeMet), W(c.canceledAt), W(c.notes)]);
+    });
+    add('Cancellations', ['appointmentId', 'source', 'reason', 'unplanned', 'noticeMet', 'canceledAt', 'notes'], cxRows);
+    // Company-customized cancellation reason codes (one row per code). Absent /
+    // empty falls back to the built-in defaults at read time.
+    add('CancellationCodes', ['value', 'label', 'retired'], (s.cancellationReasons || []).map(c => [c.value, c.label, WB(!!c.retired)]));
+    // Blackouts.
+    add('Blackouts', ['id', 'entityType', 'entityId', 'entityName', 'date', 'reason', 'createdAt'], (data.blackouts || []).map(b => [b.id, b.entityType, b.entityId, W(b.entityName), b.date, W(b.reason), W(b.createdAt)]));
+    // BCBA time off (one row per leave day). Drives the billable-requirement
+    // deduction (Settings.ptoBillableDeductionRatio); bucket is recorded for the
+    // forthcoming accrual/balance tracking.
+    add('TimeOff', ['id', 'date', 'hours', 'bucket', 'note', 'createdAt'], (data.timeOff || []).map(t => [t.id, t.date, t.hours, W(t.bucket), W(t.note), W(t.createdAt)]));
+    // PTO accrual rules + opening balances (Upgrade 2). One row each; absent =
+    // unlimited mode with no balances.
+    add('PtoAccruals', ['id', 'kind', 'bucket', 'hours', 'everyWeeks', 'weekday', 'anchor', 'perHours',
+        'bonusHours', 'bonusInterval', 'bonusConsecutiveIntervals', 'bonusCriterion',
+        'bonusPerExtraHours', 'bonusPercentAboveGoal', 'enabled'], (data.settings.pto?.accruals || []).map(r => [
+        r.id, r.kind, r.bucket, r.hours, W(r.everyWeeks), W(r.weekday), W(r.anchor), W(r.perHours),
+        W(r.bonusHours), W(r.bonusInterval), W(r.bonusConsecutiveIntervals), W(r.bonusCriterion),
+        W(r.bonusPerExtraHours), W(r.bonusPercentAboveGoal), r.enabled === undefined ? '' : WB(r.enabled),
+    ]));
+    add('PtoOpeningBalances', ['bucket', 'hours', 'asOf'], (data.settings.pto?.openingBalances || []).map(b => [b.bucket, b.hours, b.asOf]));
+    // Authorizations (bucket + weekly columns).
+    add('Authorizations', ['id', 'clientId', 'label', 'startDate', 'endDate', ...AUTH_BUCKETS.map(b => b.key),
+        'weeklyDirect', 'weeklySupervision', 'weeklyParentTraining', 'weeklyCasePlanning',
+        'reportFinalDue', 'reportDraftDue'], (data.authorizations || []).map(a => [
+        a.id, a.clientId, W(a.label), a.startDate, a.endDate,
+        ...AUTH_BUCKETS.map(b => W(a.buckets[b.key])),
+        W(a.weekly?.direct), W(a.weekly?.supervision), W(a.weekly?.parentTraining), W(a.weekly?.casePlanning),
+        W(a.reportFinalDue), W(a.reportDraftDue),
+    ]));
+    // ManualUsage.
+    add('ManualUsage', ['id', 'clientId', 'bucket', 'hours', 'date', 'note'], (data.manualUsage || []).map(u => [u.id, u.clientId, u.bucket, u.hours, u.date, W(u.note)]));
+    return XLSX.write(wb, { bookType: 'xlsx', type: 'buffer', compression: true });
+}
+function makeNameLookup(clients) {
+    const byId = new Map(clients.map(c => [c.id, c.name]));
+    const byName = new Map(clients.map(c => [c.name, c.name]));
+    return (ref) => byId.get(ref) || byName.get(ref) || ref;
 }
 //# sourceMappingURL=excelHandler.js.map

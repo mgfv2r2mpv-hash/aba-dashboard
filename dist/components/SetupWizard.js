@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { BACB_RBT_SUPERVISION_MIN_PERCENT, DEFAULT_CANCELLATION_NOTICE } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { PRESET_WINDOWS, PRESET_LABELS, WEEKDAYS, isPresetActive, togglePreset, mergeWindows } from '../availabilityUtils';

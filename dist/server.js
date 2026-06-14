@@ -480,6 +480,39 @@ app.delete('/api/admin/blackout/:id', (req, res) => {
     currentScheduleData.blackouts = (currentScheduleData.blackouts || []).filter(b => b.id !== req.params.id);
     res.json({ success: true, removed: before - currentScheduleData.blackouts.length });
 });
+// Admin: Create/update a BCBA time-off (leave) entry
+app.post('/api/admin/time-off', express.json(), (req, res) => {
+    try {
+        if (!currentScheduleData) {
+            return res.status(400).json({ error: 'No schedule loaded' });
+        }
+        const t = req.body;
+        if (!t.id || !t.date || !(Number(t.hours) > 0)) {
+            return res.status(400).json({ error: 'Time off must have id, date and positive hours' });
+        }
+        if (!currentScheduleData.timeOff)
+            currentScheduleData.timeOff = [];
+        const existing = currentScheduleData.timeOff.find(x => x.id === t.id);
+        if (existing) {
+            Object.assign(existing, t);
+        }
+        else {
+            currentScheduleData.timeOff.push(t);
+        }
+        res.json({ success: true, timeOff: existing || t });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+// Admin: Delete a time-off entry
+app.delete('/api/admin/time-off/:id', (req, res) => {
+    if (!currentScheduleData)
+        return res.status(400).json({ error: 'No schedule loaded' });
+    const before = (currentScheduleData.timeOff || []).length;
+    currentScheduleData.timeOff = (currentScheduleData.timeOff || []).filter(t => t.id !== req.params.id);
+    res.json({ success: true, removed: before - currentScheduleData.timeOff.length });
+});
 app.listen(PORT, () => {
     console.log(`ABA Schedule Assistant API running on port ${PORT}`);
 });

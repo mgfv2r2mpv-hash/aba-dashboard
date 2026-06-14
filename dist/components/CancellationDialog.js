@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useState } from 'react';
-import { CANCELLATION_SOURCES, CANCELLATION_REASONS, DEFAULT_CANCELLATION_NOTICE, } from '../types';
+import React, { useState } from 'react';
+import { CANCELLATION_SOURCES, CANCELLATION_REASONS, activeCancellationCodes, DEFAULT_CANCELLATION_NOTICE, } from '../types';
 // For client-session/internal-task: BCBA isn't a participant, so don't offer
 // Cancel-BCBA. For everything else (supervision, parent-training, other) all
 // four sources are valid. The data model holds all four either way; the UI
@@ -12,8 +12,12 @@ function applicableSources(apptType) {
     return CANCELLATION_SOURCES;
 }
 export default function CancellationDialog({ appointment, settings, onConfirm, onCancel }) {
+    // Active reason codes for this company; fall back to the built-ins if every
+    // code has been retired, so the cancel flow is never left with no options.
+    const activeReasons = activeCancellationCodes(settings);
+    const reasons = activeReasons.length ? activeReasons : CANCELLATION_REASONS;
     const [source, setSource] = useState('bt');
-    const [reason, setReason] = useState('sick');
+    const [reason, setReason] = useState(() => reasons[0]?.value ?? '');
     const [unplanned, setUnplanned] = useState(true);
     const [noticeMet, setNoticeMet] = useState(false);
     const [notes, setNotes] = useState('');
@@ -22,6 +26,10 @@ export default function CancellationDialog({ appointment, settings, onConfirm, o
     // Keep source valid if appointment type changes the available list.
     if (!sources.some(s => s.value === source)) {
         setSource(sources[0].value);
+    }
+    // Keep reason valid if the active set changes (e.g. selected code retired).
+    if (reasons.length && !reasons.some(r => r.value === reason)) {
+        setReason(reasons[0].value);
     }
     const noticeQuestion = unplanned
         ? `>${notice.unplannedHoursThreshold} hour notice given?`
@@ -41,7 +49,7 @@ export default function CancellationDialog({ appointment, settings, onConfirm, o
                             backgroundColor: source === s.value ? '#3b82f6' : 'white',
                             color: source === s.value ? 'white' : '#374151',
                             borderColor: source === s.value ? '#3b82f6' : '#d1d5db',
-                        }, children: s.label }, s.value))) }), _jsx("label", { style: label, children: "Reason" }), _jsx("select", { value: reason, onChange: e => setReason(e.target.value), style: input, children: CANCELLATION_REASONS.map(r => (_jsx("option", { value: r.value, children: r.label }, r.value))) }), _jsxs("label", { style: { ...checkbox, marginTop: 12 }, children: [_jsx("input", { type: "checkbox", checked: unplanned, onChange: e => setUnplanned(e.target.checked) }), _jsx("span", { children: "Unplanned?" })] }), _jsxs("label", { style: checkbox, children: [_jsx("input", { type: "checkbox", checked: noticeMet, onChange: e => setNoticeMet(e.target.checked) }), _jsx("span", { children: noticeQuestion })] }), _jsx("label", { style: label, children: "Notes (optional)" }), _jsx("textarea", { value: notes, onChange: e => setNotes(e.target.value), rows: 2, style: { ...input, fontFamily: 'inherit', resize: 'vertical' } }), _jsxs("div", { style: { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }, children: [_jsx("button", { onClick: onCancel, style: secondaryBtn, children: "Back" }), _jsx("button", { onClick: submit, style: dangerBtn, children: "Mark canceled" })] })] }) }));
+                        }, children: s.label }, s.value))) }), _jsx("label", { style: label, children: "Reason" }), _jsx("select", { value: reason, onChange: e => setReason(e.target.value), style: input, children: reasons.map(r => (_jsx("option", { value: r.value, children: r.label }, r.value))) }), _jsxs("label", { style: { ...checkbox, marginTop: 12 }, children: [_jsx("input", { type: "checkbox", checked: unplanned, onChange: e => setUnplanned(e.target.checked) }), _jsx("span", { children: "Unplanned?" })] }), _jsxs("label", { style: checkbox, children: [_jsx("input", { type: "checkbox", checked: noticeMet, onChange: e => setNoticeMet(e.target.checked) }), _jsx("span", { children: noticeQuestion })] }), _jsx("label", { style: label, children: "Notes (optional)" }), _jsx("textarea", { value: notes, onChange: e => setNotes(e.target.value), rows: 2, style: { ...input, fontFamily: 'inherit', resize: 'vertical' } }), _jsxs("div", { style: { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }, children: [_jsx("button", { onClick: onCancel, style: secondaryBtn, children: "Back" }), _jsx("button", { onClick: submit, style: dangerBtn, children: "Mark canceled" })] })] }) }));
 }
 const overlay = {
     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,

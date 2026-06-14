@@ -5,6 +5,6 @@ interface Props {
     onConfirm: (cancellation: Cancellation) => void;
     onCancel: () => void;
 }
-export default function CancellationDialog({ appointment, settings, onConfirm, onCancel }: Props): import("react/jsx-runtime").JSX.Element;
+export default function CancellationDialog({ appointment, settings, onConfirm, onCancel }: Props): any;
 export {};
 //# sourceMappingURL=CancellationDialog.d.ts.map

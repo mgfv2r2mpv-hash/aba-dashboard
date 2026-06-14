@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, DEFAULT_PTO_DEDUCTION_RATIO } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DATE_BASED_ACCRUALS, DEFAULT_PTO_DEDUCTION_RATIO } from '../types';
+import { resolvePtoConfig, activeBuckets, ptoBucketLabel, computePtoBalances } from '../pto';
 import { computeAuthUsage, computeReportDates } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 import { resolveUtilization } from '../utilization';
@@ -1399,13 +1400,6 @@ function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemo
   );
 }
 
-const PTO_BUCKETS: { value: PtoBucket; label: string }[] = [
-  { value: 'combined', label: 'PTO (combined)' },
-  { value: 'vacation', label: 'Vacation' },
-  { value: 'sick', label: 'Sick' },
-  { value: 'unpaid', label: 'Unpaid' },
-];
-
 function TimeOffTab({ timeOff, settings, savingId, onAdd, onRemove }: {
   timeOff: TimeOff[];
   settings: CompanySettings;
@@ -1413,14 +1407,20 @@ function TimeOffTab({ timeOff, settings, savingId, onAdd, onRemove }: {
   onAdd: (t: TimeOff) => void;
   onRemove: (id: string) => void;
 }) {
+  const cfg = resolvePtoConfig(settings.pto);
+  const buckets = activeBuckets(cfg);
+  const balances = computePtoBalances(cfg, timeOff);
   // A multi-day vacation is entered as a date range and expanded to one entry
   // per weekday so each lands in the right ISO week. Single day = same start/end.
   const [start, setStart] = useState(todayStr());
   const [end, setEnd] = useState(todayStr());
   const [hours, setHours] = useState('8');
-  const [bucket, setBucket] = useState<PtoBucket>('combined');
+  const [bucket, setBucket] = useState<PtoBucket>(buckets[0]);
   const [note, setNote] = useState('');
   const [skipWeekends, setSkipWeekends] = useState(true);
+
+  // Keep the picked bucket valid if the config's bucket set changes.
+  useEffect(() => { if (!buckets.includes(bucket)) setBucket(buckets[0]); }, [buckets.join(','), bucket]);
 
   const ratio = settings.ptoBillableDeductionRatio ?? DEFAULT_PTO_DEDUCTION_RATIO;
   const perDay = Number(hours);
@@ -1441,8 +1441,6 @@ function TimeOffTab({ timeOff, settings, savingId, onAdd, onRemove }: {
   const sorted = [...timeOff].sort((a, b) => a.date.localeCompare(b.date));
   const upcoming = sorted.filter(t => t.date >= today);
   const past = sorted.filter(t => t.date < today).reverse();
-  const bucketLabel = (b?: PtoBucket) => PTO_BUCKETS.find(x => x.value === (b || 'combined'))?.label || 'PTO';
-
   const renderRow = (t: TimeOff, dim: boolean) => (
     <div key={t.id} style={{
       display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
@@ -1458,7 +1456,7 @@ function TimeOffTab({ timeOff, settings, savingId, onAdd, onRemove }: {
           <span style={{
             fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', padding: '1px 6px',
             borderRadius: '8px', marginRight: '6px', backgroundColor: '#ede9fe', color: '#5b21b6',
-          }}>{bucketLabel(t.bucket)}</span>
+          }}>{ptoBucketLabel(t.bucket || 'combined')}</span>
           {t.note && <span style={{ color: '#6b7280', fontStyle: 'italic' }}>{t.note}</span>}
         </div>
       </div>
@@ -1477,6 +1475,38 @@ function TimeOffTab({ timeOff, settings, savingId, onAdd, onRemove }: {
         −{fmtHours(8 * ratio)}h). Change the ratio in <strong>Settings → Time off</strong>.
       </p>
 
+      {/* Balances per bucket. Unlimited mode shows leave taken; accrual mode adds
+          opening + accrued − remaining. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
+        {balances.map(b => (
+          <div key={b.bucket} style={{ ...cardStyle, flex: '1 1 150px', minWidth: 140, padding: '10px 12px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#5b21b6' }}>{ptoBucketLabel(b.bucket)}</div>
+            {cfg.mode === 'accrual' ? (
+              <>
+                <div style={{ fontSize: '20px', fontWeight: 700, color: (b.remaining ?? 0) < 0 ? '#dc2626' : '#111827' }}>
+                  {fmtHours(b.remaining ?? 0)}h <span style={{ fontSize: '11px', fontWeight: 500, color: '#6b7280' }}>left</span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>
+                  {fmtHours(b.opening ?? 0)} opening + {fmtHours(b.accrued ?? 0)} accrued − {fmtHours(b.used)} used
+                </div>
+                {b.hasDeferredRule && (
+                  <div style={{ fontSize: '11px', color: '#b45309', marginTop: '2px' }}>+ an hours-based rule (computed in a later update)</div>
+                )}
+              </>
+            ) : (
+              <div style={{ fontSize: '20px', fontWeight: 700, color: '#111827' }}>
+                {fmtHours(b.used)}h <span style={{ fontSize: '11px', fontWeight: 500, color: '#6b7280' }}>used</span>
+              </div>
+            )}
+          </div>
+        ))}
+        {cfg.mode !== 'accrual' && (
+          <div style={{ flex: '1 1 100%', fontSize: '12px', color: '#9ca3af' }}>
+            Unlimited mode — tracking leave taken only. Turn on accrual in <strong>Settings → Time off</strong> to see remaining balances.
+          </div>
+        )}
+      </div>
+
       {/* Add form */}
       <div style={{ ...cardStyle, marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'flex-end' }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 150px' }}>
@@ -1494,7 +1524,7 @@ function TimeOffTab({ timeOff, settings, savingId, onAdd, onRemove }: {
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 150px' }}>
           <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Bucket</span>
           <select value={bucket} onChange={e => setBucket(e.target.value as PtoBucket)} style={inputStyle}>
-            {PTO_BUCKETS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+            {buckets.map(b => <option key={b} value={b}>{ptoBucketLabel(b)}</option>)}
           </select>
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 180px', minWidth: 0 }}>
@@ -1565,6 +1595,156 @@ function fmtHours(n: number): string {
   return Number.isInteger(r) ? String(r) : String(r);
 }
 
+const ACCRUAL_KIND_LABEL: Record<AccrualKind, string> = {
+  semimonthly: '1st & 15th of month',
+  everyNWeeks: 'Every N weeks on a day',
+  perConvertedHours: 'Per converted hours (coming soon)',
+  perConvertedBonus: 'Per converted + bonus (coming soon)',
+};
+const WEEKDAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+// Editor for the whole PTO config (mode / buckets / unpaid / accrual rules +
+// opening balances). Operates on a PtoConfig value; the parent folds it into the
+// settings save. Kept self-contained so the rest of SettingsEditor is untouched.
+function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: PtoConfig) => void }) {
+  const cfg = resolvePtoConfig(value);
+  const set = (patch: Partial<PtoConfig>) => onChange({ ...cfg, ...patch });
+  const buckets = activeBuckets(cfg);
+
+  const updateRule = (id: string, patch: Partial<AccrualRule>) =>
+    set({ accruals: (cfg.accruals || []).map(r => r.id === id ? { ...r, ...patch } : r) });
+  const addRule = () =>
+    set({ accruals: [...(cfg.accruals || []), { id: uuidv4(), kind: 'semimonthly', bucket: buckets[0], hours: 4 }] });
+  const removeRule = (id: string) => set({ accruals: (cfg.accruals || []).filter(r => r.id !== id) });
+
+  const addBalance = () =>
+    set({ openingBalances: [...(cfg.openingBalances || []), { bucket: buckets[0], hours: 0, asOf: todayStr() }] });
+  const updateBalance = (i: number, patch: Partial<PtoOpeningBalance>) =>
+    set({ openingBalances: (cfg.openingBalances || []).map((b, j) => j === i ? { ...b, ...patch } : b) });
+  const removeBalance = (i: number) => set({ openingBalances: (cfg.openingBalances || []).filter((_, j) => j !== i) });
+
+  const radioRow = (label: string, options: { v: string; l: string }[], current: string, onPick: (v: string) => void) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>{label}</span>
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        {options.map(o => (
+          <button key={o.v} onClick={() => onPick(o.v)} style={{
+            padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px',
+            border: `1px solid ${current === o.v ? '#7c3aed' : '#d1d5db'}`,
+            background: current === o.v ? '#ede9fe' : 'white',
+            color: current === o.v ? '#5b21b6' : '#374151', fontWeight: current === o.v ? 700 : 400,
+          }}>{o.l}</button>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px dashed #e5e7eb', paddingTop: '12px', marginTop: '4px' }}>
+      {radioRow('Tracking mode', [
+        { v: 'unlimited', l: 'Unlimited (used only)' },
+        { v: 'accrual', l: 'Accrual + balances' },
+      ], cfg.mode, v => set({ mode: v as PtoConfig['mode'] }))}
+
+      {radioRow('Buckets', [
+        { v: 'combined', l: 'One combined pool' },
+        { v: 'separate', l: 'Separate sick / vacation' },
+      ], cfg.buckets, v => set({ buckets: v as PtoConfig['buckets'] }))}
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#374151' }}>
+        <input type="checkbox" checked={!!cfg.unpaidEnabled} onChange={e => set({ unpaidEnabled: e.target.checked })} />
+        Track a separate Unpaid bucket
+      </label>
+
+      {cfg.mode === 'accrual' && (
+        <>
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '6px' }}>Accrual rules</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {(cfg.accruals || []).map(r => {
+                const deferred = !DATE_BASED_ACCRUALS.includes(r.kind);
+                return (
+                  <div key={r.id} style={{ ...cardStyle, padding: '10px 12px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end' }}>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '1 1 180px' }}>
+                      <span style={{ fontSize: '11px', color: '#6b7280' }}>Rule</span>
+                      <select value={r.kind} onChange={e => updateRule(r.id, { kind: e.target.value as AccrualKind })} style={inputStyle}>
+                        {(Object.keys(ACCRUAL_KIND_LABEL) as AccrualKind[]).map(k => <option key={k} value={k}>{ACCRUAL_KIND_LABEL[k]}</option>)}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 120px' }}>
+                      <span style={{ fontSize: '11px', color: '#6b7280' }}>Bucket</span>
+                      <select value={r.bucket} onChange={e => updateRule(r.id, { bucket: e.target.value as PtoBucket })} style={inputStyle}>
+                        {buckets.map(b => <option key={b} value={b}>{ptoBucketLabel(b)}</option>)}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
+                      <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours</span>
+                      <input type="number" min="0" step="0.25" value={String(r.hours)} onChange={e => updateRule(r.id, { hours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                    </label>
+                    {r.kind === 'everyNWeeks' && (
+                      <>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
+                          <span style={{ fontSize: '11px', color: '#6b7280' }}>Every (wks)</span>
+                          <input type="number" min="1" step="1" value={String(r.everyWeeks ?? 1)} onChange={e => updateRule(r.id, { everyWeeks: Math.max(1, parseInt(e.target.value) || 1) })} style={inputStyle} />
+                        </label>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 110px' }}>
+                          <span style={{ fontSize: '11px', color: '#6b7280' }}>On</span>
+                          <select value={r.weekday ?? 'Friday'} onChange={e => updateRule(r.id, { weekday: e.target.value as DayOfWeek })} style={inputStyle}>
+                            {WEEKDAYS.map(d => <option key={d} value={d}>{d}</option>)}
+                          </select>
+                        </label>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 150px' }}>
+                          <span style={{ fontSize: '11px', color: '#6b7280' }}>From (anchor)</span>
+                          <input type="date" value={r.anchor ?? ''} onChange={e => updateRule(r.id, { anchor: e.target.value })} style={inputStyle} />
+                        </label>
+                      </>
+                    )}
+                    {deferred && (
+                      <span style={{ fontSize: '11px', color: '#b45309', flex: '1 1 100%' }}>
+                        This rule type isn't computed yet — it's saved and will start accruing in a later update.
+                      </span>
+                    )}
+                    <button onClick={() => removeRule(r.id)} style={dangerBtn}>Remove</button>
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={addRule} style={{ ...primaryBtn, marginTop: '8px' }}>+ Add accrual rule</button>
+          </div>
+
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '6px' }}>
+              Opening balances <span style={{ fontWeight: 400, textTransform: 'none' }}>(starting point; accrual sums forward from each date)</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {(cfg.openingBalances || []).map((b, i) => (
+                <div key={i} style={{ ...cardStyle, padding: '10px 12px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 120px' }}>
+                    <span style={{ fontSize: '11px', color: '#6b7280' }}>Bucket</span>
+                    <select value={b.bucket} onChange={e => updateBalance(i, { bucket: e.target.value as PtoBucket })} style={inputStyle}>
+                      {buckets.map(x => <option key={x} value={x}>{ptoBucketLabel(x)}</option>)}
+                    </select>
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
+                    <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours</span>
+                    <input type="number" step="0.25" value={String(b.hours)} onChange={e => updateBalance(i, { hours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 150px' }}>
+                    <span style={{ fontSize: '11px', color: '#6b7280' }}>As of</span>
+                    <input type="date" value={b.asOf} onChange={e => updateBalance(i, { asOf: e.target.value })} style={inputStyle} />
+                  </label>
+                  <button onClick={() => removeBalance(i)} style={dangerBtn}>Remove</button>
+                </div>
+              ))}
+            </div>
+            <button onClick={addBalance} style={{ ...primaryBtn, marginTop: '8px' }}>+ Add opening balance</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard }: {
   settings: CompanySettings;
   saving: boolean;
@@ -1600,6 +1780,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
   // defaults). Saved with the rest of the settings via the "Save settings" button.
   const [codes, setCodes] = useState<CancellationCode[]>(() => resolveCancellationCodes(settings).map(c => ({ ...c })));
   const [ptoRatio, setPtoRatio] = useState(s(settings.ptoBillableDeductionRatio ?? DEFAULT_PTO_DEDUCTION_RATIO));
+  const [ptoCfg, setPtoCfg] = useState<PtoConfig>(() => resolvePtoConfig(settings.pto));
 
   const num = (str: string, fallback: number) => {
     const n = parseFloat(str);
@@ -1642,6 +1823,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
       reportFinalLead: { value: num(finalLeadVal, 2), unit: finalLeadUnit },
       cancellationReasons: codes,
       ptoBillableDeductionRatio: num(ptoRatio, DEFAULT_PTO_DEDUCTION_RATIO),
+      pto: ptoCfg,
     };
     onSave(next);
   };
@@ -1675,6 +1857,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard 
           suffix="h / PTO h"
           hint={`1 = every leave hour drops the week's requirement by an hour. Set 0.625 if an 8h day should remove 5 billable hours (~3 non-billable hours/day assumed). Currently 8h off = −${(() => { const r = parseFloat(ptoRatio); return Number.isFinite(r) ? Math.round(8 * r * 100) / 100 : 8; })()}h.`}
         />
+        <PtoConfigEditor value={ptoCfg} onChange={setPtoCfg} />
       </SettingsSection>
 
       <SettingsSection title="Report due dates (before auth end)">

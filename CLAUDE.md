@@ -41,6 +41,17 @@ ask before each merge.
 
 - `SCHEMA_VERSION = 2`. A `_Meta` sheet (`schemaVersion`, `id`, `lastModified`,
   `exportedAt`, `appName`) marks the format. The parser understands **v2 only**.
+- **PTO (Upgrades 1–2):** BCBA leave lives in a `TimeOff` sheet (one row per
+  leave day: `date,hours,bucket,note`). `Settings.ptoBillableDeductionRatio`
+  (default 1.0) shaves the BCBA weekly/monthly billable requirement by
+  `hours*ratio` (floored at 0) — read by the hours ribbon/grid AND the draft
+  grader (`draftSolver`). Bucket/accrual config is `Settings.pto{Mode,Buckets,
+  UnpaidEnabled}` cols + `PtoAccruals` + `PtoOpeningBalances` sheets; logic lives
+  in `src/pto.ts` (`computePtoBalances`, `accruedForRule`). Mode `unlimited`
+  (default) tracks used-only; `accrual` reports opening+accrued−used. Only the
+  date-based accrual kinds (`semimonthly`,`everyNWeeks`) are computed — the
+  `perConverted*` kinds round-trip but are deferred (accrue 0). Round-trip +
+  logic covered by `scripts/verify-excel.ts` and `scripts/verify-pto.ts`.
 - **Normalized, relational sheets:** `Clients`/`Technicians` hold scalars only;
   availability lives in one `Availability` sheet (`ownerType client|technician|
   clinician, ownerId, ownerName, day, start, end`, one row per window — this also

@@ -927,7 +927,11 @@ function formatLocalISO(d: Date): string {
 
 function appointmentsOn(appointments: Appointment[], date: Date): Appointment[] {
   const dateStr = format(date, 'yyyy-MM-dd');
-  return appointments.filter(a => a.startTime.startsWith(dateStr));
+  // Sessions in a day cell are always listed by start time, ascending (month,
+  // week, and day views all read through here).
+  return appointments
+    .filter(a => a.startTime.startsWith(dateStr))
+    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 }
 
 // Status-based coloring so cancellation trends are visible at a glance across a

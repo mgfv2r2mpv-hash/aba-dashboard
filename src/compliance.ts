@@ -9,6 +9,14 @@ function makeTechResolver(data: ScheduleData): (ref?: string) => string | undefi
   return (ref?: string) => (ref ? (byId.get(ref) ?? byName.get(ref) ?? ref) : undefined);
 }
 
+// Same idea for clients, so a supervision and a direct that reference the same
+// client in different forms (id vs name) still match.
+function makeClientResolver(data: ScheduleData): (ref?: string) => string | undefined {
+  const byId = new Map(data.clients.map(c => [c.id, c.id]));
+  const byName = new Map(data.clients.map(c => [c.name, c.id]));
+  return (ref?: string) => (ref ? (byId.get(ref) ?? byName.get(ref) ?? ref) : undefined);
+}
+
 export interface ClientComplianceMetrics {
   directHours: number;
   supervisionHours: number;
@@ -138,14 +146,15 @@ function computeMetrics(
   const directHours = direct.reduce((s, a) => s + duration(a), 0);
 
   // For each supervision-counting session tagged with this client, credit its
-  // overlap with the NAMED BT's direct sessions for this client (capped at the
-  // session's own length so multiple overlapping directs can't double-count). A
-  // session that names no BT — or whose BT isn't in a direct then — earns 0.
+  // overlap with this client's directs, capped at the session's own length.
+  // A supervision (no BT named) is inferred — overlap with ANY of the client's
+  // directs. A parent-training / case-planning NAMES the BT, so only that BT's
+  // directs count. No qualifying overlap → 0.
   const supervisionHours = supervision.reduce((s, sup) => {
     const supDur = duration(sup);
     const supTech = resolveTech(sup.technician);
     const ov = direct.reduce((acc, d) =>
-      acc + (resolveTech(d.technician) === supTech ? overlapHours(sup, d) : 0), 0);
+      acc + ((supTech === undefined || resolveTech(d.technician) === supTech) ? overlapHours(sup, d) : 0), 0);
     return s + Math.min(ov, supDur);
   }, 0);
 
@@ -209,23 +218,31 @@ function computeTechMetrics(
     return t >= startMs && t < endMs;
   };
   const resolveTech = makeTechResolver(data);
+  const resolveClient = makeClientResolver(data);
   const techId = tech.id;
-  const matchesTech = (a: Appointment) => resolveTech(a.technician) === techId;
 
   const direct = data.appointments.filter(a =>
-    matchesTech(a) && a.type === 'client-session' && inPeriod(a) && inScope(a)
+    resolveTech(a.technician) === techId && a.type === 'client-session' && inPeriod(a) && inScope(a)
   );
-  // Supervision-counting sessions that name THIS tech as the observee.
-  const supervisions = data.appointments.filter(a =>
-    countsAsSupervision(a) && matchesTech(a) && inPeriod(a) && inScope(a)
+  const candidates = data.appointments.filter(a =>
+    countsAsSupervision(a) && inPeriod(a) && inScope(a)
   );
 
   const directHours = direct.reduce((s, a) => s + duration(a), 0);
 
-  const supervisionHours = supervisions.reduce((s, sup) => {
-    const supDur = duration(sup);
-    const ov = direct.reduce((acc, d) => acc + overlapHours(sup, d), 0);
-    return s + Math.min(ov, supDur);
+  // Credit this tech for: a supervision (no BT named) that overlaps one of THIS
+  // tech's directs for the supervision's client (inferred observee); or a session
+  // that explicitly NAMES this tech, overlapping any of this tech's directs.
+  const supervisionHours = candidates.reduce((s, sup) => {
+    const supTech = resolveTech(sup.technician);
+    let ov = 0;
+    if (supTech === undefined) {
+      const supClient = resolveClient(sup.client);
+      ov = direct.reduce((acc, d) => acc + (resolveClient(d.client) === supClient ? overlapHours(sup, d) : 0), 0);
+    } else if (supTech === techId) {
+      ov = direct.reduce((acc, d) => acc + overlapHours(sup, d), 0);
+    }
+    return s + Math.min(ov, duration(sup));
   }, 0);
 
   const pct = directHours > 0 ? (supervisionHours / directHours) * 100 : 0;
@@ -277,21 +294,24 @@ export function computeTechContactDays(
     return t >= startMs && t < endMs;
   };
   const resolveTech = makeTechResolver(data);
+  const resolveClient = makeClientResolver(data);
   const techId = tech.id;
-  const matchesTech = (a: Appointment) => resolveTech(a.technician) === techId;
 
   const direct = data.appointments.filter(a =>
-    matchesTech(a) && a.type === 'client-session' && inPeriod(a) && inScope(a)
+    resolveTech(a.technician) === techId && a.type === 'client-session' && inPeriod(a) && inScope(a)
   );
-  const supervisions = data.appointments.filter(a =>
-    countsAsSupervision(a) && matchesTech(a) && inPeriod(a) && inScope(a)
+  const candidates = data.appointments.filter(a =>
+    countsAsSupervision(a) && inPeriod(a) && inScope(a)
   );
 
   const days = new Set<string>();
-  for (const sup of supervisions) {
-    if (direct.some(d => overlapHours(sup, d) > 0)) {
-      days.add(sup.startTime.slice(0, 10));
-    }
+  for (const sup of candidates) {
+    const supTech = resolveTech(sup.technician);
+    const supClient = resolveClient(sup.client);
+    const hit = direct.some(d =>
+      overlapHours(sup, d) > 0 &&
+      (supTech === undefined ? resolveClient(d.client) === supClient : supTech === techId));
+    if (hit) days.add(sup.startTime.slice(0, 10));
   }
   return days.size;
 }

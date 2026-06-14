@@ -291,7 +291,9 @@ function countCaseContacts(
     const ss = new Date(sup.startTime).getTime();
     const se = new Date(sup.endTime).getTime();
     if (directs.some(d => {
-      if (d.technician !== sup.technician) return false; // only the observed BT's direct
+      // Supervision (no BT named) infers from any of this case's directs; a
+      // parent-training / case-planning counts only against its named BT's direct.
+      if (sup.technician && d.technician !== sup.technician) return false;
       const ds = new Date(d.startTime).getTime();
       const de = new Date(d.endTime).getTime();
       return Math.min(se, de) > Math.max(ss, ds);

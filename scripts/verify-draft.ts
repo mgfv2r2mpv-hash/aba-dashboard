@@ -167,6 +167,12 @@ console.log('past-only drafts');
     check(`past add, BCBA ${t} overlapping a direct → green (concurrent care)`, r.grade === 'green', `${r.grade}/${r.label}`);
   }
 
+  // Touching (back-to-back, end == next start) is NOT an overlap.
+  const touchA = appt({ type: 'client-session', client: 'C1', technician: 'T1', date: PAST, start: '10:00', end: '11:00' });
+  const touchB = appt({ type: 'client-session', client: 'C1', technician: 'T1', date: PAST, start: '11:00', end: '12:00' });
+  s = solveDraft(makeData([touchA]), [newAddOp(touchB)], NOW, baseSettings);
+  check('past add, back-to-back same-minute touch → green (no overlap)', s.grade === 'green', `${s.grade}/${s.label}`);
+
   // But two BCBA (no-tech) billable sessions at once is still the BCBA double-booked.
   const bcbaA = appt({ type: 'case-planning', client: 'C1', date: PAST, start: '14:00', end: '15:00', isBillable: true });
   const bcbaB = appt({ type: 'parent-training', client: 'C1', date: PAST, start: '14:30', end: '15:30', isBillable: true });

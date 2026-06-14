@@ -113,23 +113,28 @@ ask before each merge.
 
 ## Compliance rules (BCBA-confirmed; do not re-derive)
 
-- **Supervision is provider-attributed (not inferred).** Only supervision,
-  parent-training, and case-planning can count (`SUPERVISION_COUNTING_TYPES` /
-  `countsAsSupervision`), and ONLY when they NAME the observed BT in the
-  `technician` field AND that BT's direct (client-session) overlaps in time.
-  Credit = the overlapping hours (partial overlap → partial credit, e.g. the BT
-  leaves and parent training continues). No BT named, wrong BT, or no overlap → 0.
-  These sessions stay **BCBA billable** — `bucketOf` keys the BT/BCBA split on
-  TYPE (BCBA session types are never BT direct hours), so a supervised BT named on
-  them doesn't leak into BT direct totals. A BCBA session overlapping a BT direct
-  is legitimate concurrent care, never a double-book (`draftSolver`).
-- Per-client compliance: numerator = each supervision-counting session tagged with
-  the client × its overlap with the NAMED BT's directs for that client (capped at
-  the session's duration); denominator = the client's direct hours.
-- Per-RBT compliance (`src/compliance.ts` `computeTechCompliance`): denominator =
-  ALL of that RBT's direct hours across clients; numerator = overlap of the
-  sessions that NAME this RBT with that RBT's own directs. RBTs must hit BOTH the
-  BACB 5% floor and the company target. Non-RBT BTs follow company target only.
+- **Supervision credit = time-overlap with a BT's direct** (`countsAsSupervision`).
+  Only supervision, parent-training, and case-planning count, never other types.
+  A **supervision** session implies the client is present, so the BT is INFERRED —
+  it credits overlap with any of that client's directs (no BT need be named). A
+  **parent-training / case-planning** can be caregiver-only, so it counts ONLY when
+  it NAMES the observed BT (`technician` field) and overlaps that BT's direct. No
+  qualifying overlap → 0. Partial overlap → partial credit (the BT leaves, parent
+  training continues). These all stay **BCBA billable** — `bucketOf` keys the
+  BT/BCBA split on TYPE (BCBA session types never become BT direct hours), so a
+  supervised BT named on a parent-training doesn't leak into BT direct totals. A
+  BCBA session overlapping a BT direct is concurrent care, never a double-book.
+- Per-client (case): numerator = each counting session tagged with the client ×
+  its overlap with the relevant BT's directs for that client (inferred for
+  supervision; the named BT for PT/CoC), capped at the session's duration;
+  denominator = the client's direct hours.
+- Per-RBT (`computeTechCompliance`): denominator = ALL of that RBT's direct hours;
+  numerator = overlap of inferred-supervision (its client matching this RBT's
+  direct) + sessions that name this RBT, with that RBT's directs. RBTs must hit
+  BOTH the BACB 5% floor and the company target; non-RBT BTs the company target.
+- A completed appointment never raises an availability conflict (it already
+  happened). Touching sessions (one ends exactly when the next starts) don't
+  overlap — never a billable double-book.
 - Insurer cap (`supervisionMaxHoursPercent`, typically 20%) is a display-only
   warning — over-cap ratios render in orange but don't change green/yellow/red
   status, since min and max are orthogonal axes.

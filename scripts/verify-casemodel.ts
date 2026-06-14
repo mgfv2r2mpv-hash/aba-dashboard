@@ -92,11 +92,11 @@ appointments.push(appt({ type: 'client-session', client: 'Somerville', technicia
 for (const d of ['2026-06-02', '2026-06-04', '2026-06-09', '2026-06-11', '2026-06-16', '2026-06-18', '2026-06-23', '2026-06-25', '2026-06-29', '2026-06-30']) {
   appointments.push(appt({ type: 'client-session', client: 'FloorCase', technician: 'rbt1', date: d, start: '13:00', end: '17:00' })); // 4h each = 40h
 }
-appointments.push(appt({ type: 'supervision', technician: 'rbt1', client: 'FloorCase', date: '2026-06-16', start: '13:00', end: '15:00' })); // 2h overlap
+appointments.push(appt({ type: 'supervision', client: 'FloorCase', date: '2026-06-16', start: '13:00', end: '15:00' })); // 2h overlap
 
 // EowCase: directs + a single supervision contact this month (cadence EOW needs 2).
 appointments.push(appt({ type: 'client-session', client: 'EowCase', technician: 'rbt1', date: '2026-06-15', start: '09:00', end: '14:00' }));
-appointments.push(appt({ type: 'supervision', technician: 'rbt1', client: 'EowCase', date: '2026-06-15', start: '09:00', end: '11:00' }));
+appointments.push(appt({ type: 'supervision', client: 'EowCase', date: '2026-06-15', start: '09:00', end: '11:00' }));
 
 // ReassessCase: 8h reassessment block, none done. Auth ends 2026-07-15 so the
 // internal initial-draft milestone (auth end minus the 4-week draft lead) lands
@@ -109,8 +109,8 @@ appointments.push(appt({ type: 'client-session', client: 'ReassessCase', technic
 for (const d of ['2026-06-08', '2026-06-15', '2026-06-22', '2026-06-29']) {
   appointments.push(appt({ type: 'client-session', client: 'ShaveCase', technician: 'rbt1', date: d, start: '09:00', end: '14:00' }));
 }
-appointments.push(appt({ type: 'supervision', technician: 'rbt1', client: 'ShaveCase', date: '2026-06-15', start: '09:00', end: '13:00' })); // 4h past (actual)
-const shaveSup = appt({ type: 'supervision', technician: 'rbt1', client: 'ShaveCase', date: '2026-06-22', start: '09:00', end: '13:00' }); // 4h future (shaveable)
+appointments.push(appt({ type: 'supervision', client: 'ShaveCase', date: '2026-06-15', start: '09:00', end: '13:00' })); // 4h past (actual)
+const shaveSup = appt({ type: 'supervision', client: 'ShaveCase', date: '2026-06-22', start: '09:00', end: '13:00' }); // 4h future (shaveable)
 appointments.push(shaveSup);
 
 // PtBoundCase: a direct session window on the 17th (parent present only then).
@@ -204,7 +204,7 @@ check('RBT contacts-required = 2 (BACB)', btState.contactsRequired === 2);
 
 console.log('\n[6] QC harness');
 // Proposed: add an in-window supervision for FloorCase overlapping a direct → cures floor, no hard violations.
-const cure: Appointment = appt({ type: 'supervision', technician: 'rbt1', client: 'FloorCase', date: '2026-06-23', start: '13:00', end: '16:00' });
+const cure: Appointment = appt({ type: 'supervision', client: 'FloorCase', date: '2026-06-23', start: '13:00', end: '16:00' });
 const goodProposed: ScheduleData = { ...data, appointments: [...data.appointments, cure] };
 const goodQc = qcSchedule(goodProposed, data, NOW);
 check('QC: valid in-window supervision make-up passes', goodQc.pass, JSON.stringify(goodQc.hardViolations.map(v => v.message)));

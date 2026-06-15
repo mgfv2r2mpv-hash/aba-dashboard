@@ -339,6 +339,13 @@ export default function WebApp() {
     };
 
     worker.addEventListener('message', onMessage);
+    worker.onerror = (e) => {
+      worker.onerror = null;
+      worker.removeEventListener('message', onMessage);
+      setUploadError(`Worker failed to load: ${e.message ?? 'unknown error'}. Try refreshing the page.`);
+      setFileBytes(null);
+      setPhase('upload');
+    };
     worker.postMessage({ bytes: fileBytes, password });
   }, [fileBytes, getWorker]);
 

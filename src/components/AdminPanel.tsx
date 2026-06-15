@@ -901,6 +901,7 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
   const [name, setName] = useState(client.name);
   const [maxStr, setMaxStr] = useState(client.parentTrainingMaxHours !== undefined ? String(client.parentTrainingMaxHours) : '');
   const [utilStr, setUtilStr] = useState(client.directUtilizationTarget !== undefined ? String(client.directUtilizationTarget) : '');
+  const [supIdealStr, setSupIdealStr] = useState(client.supervisionIdealPct !== undefined ? String(client.supervisionIdealPct) : '');
   const [editing, setEditing] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
 
@@ -977,6 +978,21 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
               if (v !== client.directUtilizationTarget) onChange({ directUtilizationTarget: Number.isFinite(v as number) ? v : undefined });
             }}
             placeholder="75"
+            style={{ ...inputStyle, width: '70px' }}
+          />
+          <span style={{ color: '#6b7280' }}>%</span>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Ideal supervision % for this case. Overrides the company default on the Compliance dashboard.">
+          <span style={{ color: '#374151', whiteSpace: 'nowrap' }}>Ideal supervision:</span>
+          <input
+            type="number" step="0.5" min="0" max="100"
+            value={supIdealStr}
+            onChange={(e) => setSupIdealStr(e.target.value)}
+            onBlur={() => {
+              const v = supIdealStr === '' ? undefined : parseFloat(supIdealStr);
+              if (v !== client.supervisionIdealPct) onChange({ supervisionIdealPct: Number.isFinite(v as number) ? v : undefined });
+            }}
+            placeholder={`company default`}
             style={{ ...inputStyle, width: '70px' }}
           />
           <span style={{ color: '#6b7280' }}>%</span>

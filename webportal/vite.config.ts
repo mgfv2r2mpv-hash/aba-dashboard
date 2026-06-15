@@ -30,7 +30,9 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   worker: {
-    format: 'es',
+    // iife wraps the worker in a blob URL, compatible with all browsers and
+    // avoids needing 'self' in worker-src CSP (blob: alone is sufficient).
+    format: 'iife',
   },
   build: {
     outDir: 'dist',

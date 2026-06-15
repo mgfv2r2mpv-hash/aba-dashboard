@@ -17,7 +17,7 @@ export declare function affectedEntities(appt: Appointment, data: ScheduleData):
 };
 export declare function recomputeCache(prev: ComplianceCache | null, oldData: ScheduleData, newData: ScheduleData, changes: ApptChange[], now?: Date): ComplianceCache;
 export type ComplianceStatus = 'green' | 'yellow' | 'red' | 'gray';
-export declare function clientStatus(report: ClientCompliance, targetPct: number): ComplianceStatus;
+export declare function clientStatus(report: ClientCompliance, targetPct: number, preferredPct: number, maxPct?: number): ComplianceStatus;
 export declare function techStatus(report: TechCompliance): ComplianceStatus;
 export interface ComplianceSummary {
     red: number;

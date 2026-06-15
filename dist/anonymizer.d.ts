@@ -11,6 +11,8 @@ export interface AnonymizedSchedule {
     clients: any[];
     appointments: any[];
     settings: any;
+    blackouts: any[];
+    timeOff: any[];
 }
 export declare function anonymizeSchedule(data: ScheduleData, map: AnonymizationMap): AnonymizedSchedule;
 export declare function anonymizeAppointment(a: Appointment, map: AnonymizationMap): any;

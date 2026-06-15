@@ -108,15 +108,23 @@ export function recomputeCache(prev, oldData, newData, changes, now = new Date()
 function sameMonth(a, b) {
     return a.start.getTime() === b.start.getTime();
 }
-export function clientStatus(report, targetPct) {
+// Margin around the minimum target: projected within 2 pp of the floor is "Risky."
+const RISKY_MARGIN = 2;
+export function clientStatus(report, targetPct, preferredPct, maxPct) {
     const { actual, projected } = report;
     if (actual.directHours === 0 && projected.directHours === 0)
         return 'gray';
-    if (actual.pct >= targetPct)
-        return 'green';
-    if (projected.pct >= targetPct)
+    // Both actual and projected below the floor → critical (red).
+    if (actual.pct < targetPct && projected.pct < targetPct)
+        return 'red';
+    // Projected won't reach the floor (or is uncomfortably close) → risky (red).
+    if (projected.pct < targetPct + RISKY_MARGIN)
+        return 'red';
+    // Actual is over the insurer cap → warrants attention (yellow).
+    if (maxPct !== undefined && actual.pct > maxPct)
         return 'yellow';
-    return 'red';
+    // Projected lands in the preferred band or better → green.
+    return 'green';
 }
 export function techStatus(report) {
     const { actual, projected, tech } = report;
@@ -136,10 +144,12 @@ export function techStatus(report) {
 // defaults in when the company target isn't set, matching the dashboard.
 export function summarize(cache, data) {
     const clientTarget = data.settings.supervisionDirectHoursPercent || 5;
+    const preferredPct = data.settings.supervisionPreferredMinPercent ?? 15;
+    const maxPct = data.settings.supervisionMaxHoursPercent;
     let red = 0;
     let yellow = 0;
     for (const r of cache.clients.values()) {
-        const s = clientStatus(r, clientTarget);
+        const s = clientStatus(r, clientTarget, preferredPct, maxPct);
         if (s === 'red')
             red++;
         else if (s === 'yellow')

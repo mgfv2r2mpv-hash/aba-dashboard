@@ -184,7 +184,7 @@ export function computeBtState(data, tech, now = new Date()) {
         requiredPct,
         gapToRequired: Math.max(0, requiredH - supHoursMonth),
         contactsThisMonth: computeTechContactDays(data, tech, period, 'projected', now),
-        contactsRequired: tech.isRBT ? (data.settings.rbtMinContactsPerMonth ?? 2) : 0,
+        contactsRequired: tech.isRBT ? (data.settings.rbtMinContactsPerMonth ?? 2) : (data.settings.techMinContactsPerMonth ?? 1),
         directHoursWeek,
     };
 }

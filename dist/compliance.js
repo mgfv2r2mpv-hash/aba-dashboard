@@ -196,16 +196,22 @@ export function computeTechContactDays(data, tech, period, scope, now = new Date
     const techId = tech.id;
     const direct = data.appointments.filter(a => resolveTech(a.technician) === techId && a.type === 'client-session' && inPeriod(a) && inScope(a));
     const candidates = data.appointments.filter(a => countsAsSupervision(a) && inPeriod(a) && inScope(a));
+    const separateDays = data.settings.contactsMustOccurOnSeparateDays ?? true;
     const days = new Set();
+    let count = 0;
     for (const sup of candidates) {
         const supTech = resolveTech(sup.technician);
         const supClient = resolveClient(sup.client);
         const hit = direct.some(d => overlapHours(sup, d) > 0 &&
             (supTech === undefined ? resolveClient(d.client) === supClient : supTech === techId));
-        if (hit)
-            days.add(sup.startTime.slice(0, 10));
+        if (hit) {
+            if (separateDays)
+                days.add(sup.startTime.slice(0, 10));
+            else
+                count++;
+        }
     }
-    return days.size;
+    return separateDays ? days.size : count;
 }
 // Past-dated, non-canceled, not-yet-completed appointments. Surfaced in the
 // dashboard so the BCBA can finalize them into the actual roll.

@@ -82,6 +82,14 @@ export function anonymizeSchedule(data, map) {
         clients: data.clients.map(c => scrubClient(c, map)),
         appointments: data.appointments.map(a => scrubAppointment(a, map)),
         settings: data.settings,
+        blackouts: (data.blackouts || []).map(b => ({
+            entity: b.entityType === 'client'
+                ? (map.clients.get(b.entityId) || map.clients.get(b.entityName || '') || 'CLIENT_unknown')
+                : (map.technicians.get(b.entityId) || map.technicians.get(b.entityName || '') || 'TECH_unknown'),
+            date: b.date,
+            ...(b.reason ? { reason: b.reason } : {}),
+        })),
+        timeOff: (data.timeOff || []).map(t => ({ date: t.date, hours: t.hours })),
     };
 }
 export function anonymizeAppointment(a, map) {
@@ -89,9 +97,19 @@ export function anonymizeAppointment(a, map) {
 }
 // Scrub a free-text string of any names that appear in the schedule.
 // This is a defensive pass for conflict messages built from user data.
+//
+// We first protect any already-inserted CLIENT_n/TECH_n/APT_n tokens behind
+// null-byte placeholders so that short client names (e.g. "CL") can't corrupt
+// them when they are replaced globally (e.g. "CLIENT_1" → "CLIENT_4IENT_1").
 export function scrubText(text, data, map) {
-    let result = text;
-    // Replace longest names first so "John Smith" beats "John"
+    // Step 1: stash existing tokens so name replacements can't touch them.
+    const saved = [];
+    let result = text.replace(/\b(CLIENT_\d+|TECH_\d+|APT_\d+)\b/g, (m) => {
+        const idx = saved.length;
+        saved.push(m);
+        return `\x00${idx}\x00`;
+    });
+    // Step 2: replace real names, longest first so "John Smith" beats "John".
     const replacements = [];
     data.clients.forEach(c => {
         if (c.name)
@@ -108,6 +126,8 @@ export function scrubText(text, data, map) {
         const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         result = result.replace(new RegExp(escaped, 'gi'), to);
     }
+    // Step 3: restore saved tokens.
+    result = result.replace(/\x00(\d+)\x00/g, (_, i) => saved[parseInt(i)] ?? '');
     return result;
 }
 // De-anonymize tokens in a string back to original values.

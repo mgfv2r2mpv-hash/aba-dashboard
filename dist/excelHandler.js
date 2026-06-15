@@ -121,6 +121,9 @@ function parseClients(workbook) {
         const notes = text(row.notes);
         if (notes)
             client.notes = notes;
+        const supIdeal = num(row.supervisionIdealPct);
+        if (supIdeal !== undefined)
+            client.supervisionIdealPct = supIdeal;
         return client;
     });
 }
@@ -263,7 +266,7 @@ function parseSettings(workbook, clinicianAvailability) {
     for (const key of [
         'supervisionTechHoursPercent', 'supervisionMaxHoursPercent', 'supervisionFloorPercent',
         'supervisionPreferredMinPercent', 'supervisionPreferredMaxPercent', 'rbtMinContactsPerMonth',
-        'ptoBillableDeductionRatio',
+        'techMinContactsPerMonth', 'ptoBillableDeductionRatio',
     ]) {
         const v = num(row[key]);
         if (v !== undefined)
@@ -281,6 +284,10 @@ function parseSettings(workbook, clinicianAvailability) {
     }
     if (Object.keys(util).length)
         settings.utilization = util;
+    // Boolean setting: contacts must occur on separate days.
+    const sepDays = text(row.contactsMustOccurOnSeparateDays);
+    if (sepDays !== undefined)
+        settings.contactsMustOccurOnSeparateDays = sepDays === 'TRUE';
     // Cancellation-notice thresholds (own columns).
     const unplanned = num(row.cancellationUnplannedHoursThreshold);
     const planned = num(row.cancellationPlannedDaysThreshold);
@@ -506,9 +513,11 @@ export function generateExcelFile(data, embeddedConfig) {
         add('_Config', ['encryptedBlob'], [[embeddedConfig]]);
     // Clients (scalars only).
     add('Clients', ['id', 'name', 'parentTrainingMaxHours', 'cadenceGoal', 'isEI', 'eiDate',
-        'partialStaffAllowed', 'parentAvailableOutsideSessions', 'anticipatedDischarge', 'notes'], data.clients.map(c => [
+        'partialStaffAllowed', 'parentAvailableOutsideSessions', 'anticipatedDischarge', 'notes',
+        'supervisionIdealPct'], data.clients.map(c => [
         c.id, c.name, W(c.parentTrainingMaxHours), W(c.cadenceGoal), WT(c.isEI), W(c.eiDate),
         WB(c.partialStaffAllowed), WT(c.parentAvailableOutsideSessions), W(c.anticipatedDischarge), W(c.notes),
+        W(c.supervisionIdealPct),
     ]));
     // Technicians (scalars only).
     add('Technicians', ['id', 'name', 'isRBT', 'notes'], data.technicians.map(t => [t.id, t.name, WB(t.isRBT), W(t.notes)]));
@@ -536,7 +545,8 @@ export function generateExcelFile(data, embeddedConfig) {
     const cn = s.cancellationNotice;
     add('Settings', ['supervisionDirectHoursPercent', 'supervisionRBTHoursPercent', 'supervisionTechHoursPercent',
         'supervisionMaxHoursPercent', 'supervisionFloorPercent', 'supervisionPreferredMinPercent',
-        'supervisionPreferredMaxPercent', 'rbtMinContactsPerMonth', 'parentTrainingMinimum',
+        'supervisionPreferredMaxPercent', 'rbtMinContactsPerMonth', 'techMinContactsPerMonth',
+        'contactsMustOccurOnSeparateDays', 'parentTrainingMinimum',
         'parentTrainingTargetMin', 'parentTrainingTargetMax', 'parentTrainingPeriodUnit',
         'bcbaWeeklyBillableHours', 'btWeeklyDirectHours', 'bcbaMonthlyBillableHours',
         'bcbaMonthlyBillableHours5Week', 'bcbaWeeklyBillableMin',
@@ -547,7 +557,8 @@ export function generateExcelFile(data, embeddedConfig) {
         'bcbaParentTrainingHours', 'bcbaOtherHours'], [[
             s.supervisionDirectHoursPercent, s.supervisionRBTHoursPercent, W(s.supervisionTechHoursPercent),
             W(s.supervisionMaxHoursPercent), W(s.supervisionFloorPercent), W(s.supervisionPreferredMinPercent),
-            W(s.supervisionPreferredMaxPercent), W(s.rbtMinContactsPerMonth), s.parentTraining.minimumHours,
+            W(s.supervisionPreferredMaxPercent), W(s.rbtMinContactsPerMonth), W(s.techMinContactsPerMonth),
+            WB(s.contactsMustOccurOnSeparateDays), s.parentTraining.minimumHours,
             s.parentTraining.targetMinHours, s.parentTraining.targetMaxHours, s.parentTraining.periodUnit,
             W(u.bcbaWeeklyBillableHours), W(u.btWeeklyDirectHours), W(u.bcbaMonthlyBillableHours),
             W(u.bcbaMonthlyBillableHours5Week), W(u.bcbaWeeklyBillableMin),

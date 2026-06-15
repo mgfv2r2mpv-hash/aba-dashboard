@@ -133,6 +133,8 @@ function parseClients(workbook: XLSX.WorkBook): Client[] {
     if (!isBlank(row.anticipatedDischarge)) client.anticipatedDischarge = String(row.anticipatedDischarge);
     const notes = text(row.notes);
     if (notes) client.notes = notes;
+    const supIdeal = num(row.supervisionIdealPct);
+    if (supIdeal !== undefined) client.supervisionIdealPct = supIdeal;
     return client;
   });
 }
@@ -484,10 +486,12 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
   // Clients (scalars only).
   add('Clients',
     ['id', 'name', 'parentTrainingMaxHours', 'cadenceGoal', 'isEI', 'eiDate',
-      'partialStaffAllowed', 'parentAvailableOutsideSessions', 'anticipatedDischarge', 'notes'],
+      'partialStaffAllowed', 'parentAvailableOutsideSessions', 'anticipatedDischarge', 'notes',
+      'supervisionIdealPct'],
     data.clients.map(c => [
       c.id, c.name, W(c.parentTrainingMaxHours), W(c.cadenceGoal), WT(c.isEI), W(c.eiDate),
       WB(c.partialStaffAllowed), WT(c.parentAvailableOutsideSessions), W(c.anticipatedDischarge), W(c.notes),
+      W(c.supervisionIdealPct),
     ]));
 
   // Technicians (scalars only).

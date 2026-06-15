@@ -68,7 +68,10 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
   const rbtMinContacts = data.settings.rbtMinContactsPerMonth ?? 2;
   const pastIncomplete = useMemo(() => pastIncompleteAppointments(data), [data]);
   const targetPct = data.settings.supervisionDirectHoursPercent || 5;
-  const preferredPct = data.settings.supervisionPreferredMinPercent ?? 15;
+  const companyPreferredPct = data.settings.supervisionPreferredMinPercent ?? 15;
+  // Per-client override falls back to the company-wide preferred minimum.
+  const clientPreferredPct = (client: { supervisionIdealPct?: number }) =>
+    client.supervisionIdealPct ?? companyPreferredPct;
   const techTargetPct = data.settings.supervisionTechHoursPercent ?? 0;
   const maxPct = data.settings.supervisionMaxHoursPercent;
 
@@ -146,15 +149,17 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
               </p>
             )}
             {[...clientReports].sort((a, b) => {
-              const aLevel = getActualLevel(a.actual.directHours, a.actual.pct, targetPct, preferredPct, maxPct);
-              const bLevel = getActualLevel(b.actual.directHours, b.actual.pct, targetPct, preferredPct, maxPct);
-              const aPLevel = getProjectedLevel(a.projected.directHours, a.projected.pct, targetPct, preferredPct, maxPct);
-              const bPLevel = getProjectedLevel(b.projected.directHours, b.projected.pct, targetPct, preferredPct, maxPct);
+              const aPref = clientPreferredPct(a.client);
+              const bPref = clientPreferredPct(b.client);
+              const aLevel = getActualLevel(a.actual.directHours, a.actual.pct, targetPct, aPref, maxPct);
+              const bLevel = getActualLevel(b.actual.directHours, b.actual.pct, targetPct, bPref, maxPct);
+              const aPLevel = getProjectedLevel(a.projected.directHours, a.projected.pct, targetPct, aPref, maxPct);
+              const bPLevel = getProjectedLevel(b.projected.directHours, b.projected.pct, targetPct, bPref, maxPct);
               const aCrit = overallBadge(aLevel, aPLevel, a.actual.directHours === 0 && a.projected.directHours === 0).isCritical;
               const bCrit = overallBadge(bLevel, bPLevel, b.actual.directHours === 0 && b.projected.directHours === 0).isCritical;
               if (aCrit !== bCrit) return aCrit ? -1 : 1;
               return a.client.name.localeCompare(b.client.name);
-            }).map(r => <ClientCard key={r.client.id} report={r} targetPct={targetPct} preferredPct={preferredPct} maxPct={maxPct} />)}
+            }).map(r => <ClientCard key={r.client.id} report={r} targetPct={targetPct} preferredPct={clientPreferredPct(r.client)} maxPct={maxPct} />)}
           </div>
         </>
       )}

@@ -55,6 +55,9 @@ export interface Client {
   // Per-case direct utilization floor (%). Default 75. If direct hours fall below
   // this % of authorization, a "Below Targeted Utilization" issue is emitted.
   directUtilizationTarget?: number;
+  // Per-case ideal supervision percentage (%). Overrides the company-wide
+  // supervisionPreferredMinPercent on the Compliance dashboard for this client.
+  supervisionIdealPct?: number;
 }
 
 export interface Technician {

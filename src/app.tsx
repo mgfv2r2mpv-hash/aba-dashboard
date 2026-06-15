@@ -152,6 +152,7 @@ export default function App() {
   const detailPanelRef = React.useRef<HTMLDivElement | null>(null);
   const importInputRef = React.useRef<HTMLInputElement | null>(null);
   const headerRef = React.useRef<HTMLElement | null>(null);
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
   const mainScrollLastRef = React.useRef(0);
   const [headerHidden, setHeaderHidden] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(56);
@@ -283,8 +284,11 @@ export default function App() {
   // When the user taps an appointment, scroll the detail into view so they
   // notice it actually opened.
   useEffect(() => {
-    if (selectedAppointment && detailPanelRef.current) {
-      detailPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (selectedAppointment) {
+      setPanelCollapsed(false); // auto-expand right panel when an appointment is opened
+      if (detailPanelRef.current) {
+        detailPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
   }, [selectedAppointment]);
 
@@ -1315,28 +1319,58 @@ export default function App() {
                   // inline edits, all animated. Overflow in any band scrolls
                   // within the band, never growing the frozen pane.
                   if (splitView) {
+                    const canCollapse = isLandscape;
+                    const collapsed = canCollapse && panelCollapsed;
                     return (
-                      <div ref={detailPanelRef} style={{
-                        flex: '0 0 auto', width: 380, borderLeft: '1px solid #e5e7eb',
-                        display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%',
+                      <div style={{
+                        position: 'relative',
+                        flex: '0 0 auto',
+                        width: canCollapse ? (collapsed ? 20 : 400) : 380,
+                        transition: canCollapse ? 'width 0.25s ease' : undefined,
+                        minHeight: 0, height: '100%',
+                        overflow: 'hidden',
                       }}>
-                        {!draftActive && (
-                          <div style={{ flexShrink: 0, maxHeight: 'max(160px, 25%)', overflowY: 'auto', padding: '10px 14px', borderBottom: '1px solid #e5e7eb', WebkitOverflowScrolling: 'touch' as any }}>
-                            <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} timeOff={scheduleData.timeOff} currentDate={viewDate} />
-                          </div>
+                        {canCollapse && (
+                          <button
+                            onClick={() => setPanelCollapsed(c => !c)}
+                            aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
+                            style={{
+                              position: 'absolute', left: 0, top: 40,
+                              width: 20, height: 48, zIndex: 20,
+                              clipPath: collapsed
+                                ? 'polygon(0% 0%, 100% 50%, 0% 100%)'
+                                : 'polygon(100% 0%, 0% 50%, 100% 100%)',
+                              backgroundColor: '#94a3b8',
+                              border: 'none', cursor: 'pointer', padding: 0,
+                            }}
+                          />
                         )}
-                        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
-                          {middle}
-                        </div>
-                        <div style={{
-                          flexShrink: 0, overflow: 'hidden',
+                        <div ref={detailPanelRef} style={{
+                          position: 'absolute',
+                          left: canCollapse ? 20 : 0, top: 0, bottom: 0,
+                          width: 380,
+                          borderLeft: '1px solid #e5e7eb',
                           display: 'flex', flexDirection: 'column',
-                          borderTop: selectedAppointment ? '1px solid #e5e7eb' : 'none',
-                          maxHeight: selectedAppointment ? (inlineEdit ? '50%' : '25%') : 0,
-                          transition: 'max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                          minHeight: 0, overflow: 'hidden',
                         }}>
+                          {!draftActive && (
+                            <div style={{ flexShrink: 0, maxHeight: 'max(160px, 25%)', overflowY: 'auto', padding: '10px 14px', borderBottom: '1px solid #e5e7eb', WebkitOverflowScrolling: 'touch' as any }}>
+                              <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} timeOff={scheduleData.timeOff} currentDate={viewDate} />
+                            </div>
+                          )}
                           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
-                            {selectedAppointment && renderDetailOrEdit(selectedAppointment)}
+                            {middle}
+                          </div>
+                          <div style={{
+                            flexShrink: 0, overflow: 'hidden',
+                            display: 'flex', flexDirection: 'column',
+                            borderTop: selectedAppointment ? '1px solid #e5e7eb' : 'none',
+                            maxHeight: selectedAppointment ? (inlineEdit ? '50%' : '25%') : 0,
+                            transition: 'max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                          }}>
+                            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
+                              {selectedAppointment && renderDetailOrEdit(selectedAppointment)}
+                            </div>
                           </div>
                         </div>
                       </div>

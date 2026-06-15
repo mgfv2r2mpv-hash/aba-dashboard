@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 
 interface Props {
   onFile: (file: File) => void;
@@ -7,62 +7,73 @@ interface Props {
 
 export default function UploadZone({ onFile, error }: Props) {
   const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const process = useCallback((file: File) => { if (file) onFile(file); }, [onFile]);
+
+  const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file) onFile(file);
-  }, [onFile]);
+    if (file) process(file);
+  };
 
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) onFile(file);
+    if (file) process(file);
     e.target.value = '';
-  }, [onFile]);
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      inputRef.current?.click();
+    }
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
+    <div className="upload-screen">
+      <div className="upload-hero">
+        <h1>ABA Dashboard <span style={{ color: 'var(--c-primary)' }}>Portal</span></h1>
+        <p>Read-only schedule viewer &nbsp;·&nbsp; All decryption happens in your browser</p>
+      </div>
+
       <label
-        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        className={`drop-zone${dragging ? ' dragging' : ''}`}
+        tabIndex={0}
+        role="button"
+        aria-label="Upload encrypted schedule file"
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
-        onDrop={handleDrop}
-        style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          gap: 12, width: '100%', maxWidth: 480, minHeight: 200,
-          border: `2px dashed ${dragging ? '#3b82f6' : '#d1d5db'}`,
-          borderRadius: 12, padding: 32, cursor: 'pointer',
-          backgroundColor: dragging ? '#eff6ff' : 'white',
-          transition: 'all 0.15s',
-        }}
+        onDrop={onDrop}
+        onKeyDown={onKeyDown}
       >
-        <input type="file" accept=".xlsx" onChange={handleChange} style={{ display: 'none' }} />
-        <div style={{ fontSize: 40 }}>🔒</div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>
-            Drop encrypted schedule file here
-          </div>
-          <div style={{ fontSize: 13, color: '#6b7280', marginTop: 6 }}>
-            or click to browse — accepts <code style={{ fontFamily: 'monospace' }}>.enc.xlsx</code> only
-          </div>
-        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".xlsx"
+          onChange={onChange}
+          aria-hidden="true"
+          tabIndex={-1}
+          style={{ display: 'none' }}
+        />
+        <span className="drop-zone-icon">🔒</span>
+        <span className="drop-zone-label">Drop encrypted schedule file</span>
+        <span className="drop-zone-sublabel">
+          or tap to browse &nbsp;·&nbsp; <code>.enc.xlsx</code> only
+        </span>
       </label>
 
       {error && (
-        <div style={{
-          width: '100%', maxWidth: 480, padding: '12px 16px',
-          backgroundColor: '#fef2f2', border: '1px solid #fecaca',
-          borderRadius: 8, color: '#991b1b', fontSize: 13, lineHeight: 1.5,
-        }}>
+        <div className="error-banner" role="alert" aria-live="assertive">
           <strong>Cannot open file:</strong> {error}
         </div>
       )}
 
-      <div style={{ maxWidth: 480, fontSize: 12, color: '#9ca3af', textAlign: 'center', lineHeight: 1.6 }}>
-        To protect patient privacy, this portal only accepts files exported from the ABA
-        Dashboard app with a schedule password set. The file is decrypted entirely in your
-        browser — no data is sent to any server.
-      </div>
+      <p className="upload-hint">
+        This portal only accepts files exported from the ABA Dashboard app with a schedule
+        password set. No data is sent to any server — decryption runs entirely in your browser.
+      </p>
     </div>
   );
 }

@@ -96,8 +96,10 @@ export default function Calendar({
   }, [lens]);
 
   // The lens hides the other party's appointments: BT = has a technician,
-  // BCBA = none. Totals are computed from these filtered appointments too.
-  const lensAppts = appointments.filter(a => (lens === 'bt' ? !!a.technician : !a.technician));
+  // BCBA = none. Non-billable appointments (admin tasks, etc.) show in both lenses.
+  const lensAppts = appointments.filter(a =>
+    a.isBillable === false || (lens === 'bt' ? !!a.technician : !a.technician)
+  );
 
   // When a schedule loads with no appointments in the currently-shown range,
   // jump to the earliest appointment so users see their data.

@@ -357,19 +357,17 @@ function actualSectionStatus(level: ActualLevel): { text: string; color: string 
   switch (level) {
     case 'na':      return { text: 'N/A',    color: '#6b7280' };
     case 'reduce':  return { text: 'Over',   color: CAP_OVER };
-    case 'ideal':   return { text: 'Ideal',  color: '#15803d' };
+    case 'ideal':   return { text: 'Ideal',  color: '#166534' };
     case 'good':    return { text: 'Good',   color: '#15803d' };
     case 'behind':  return { text: 'Behind', color: '#b91c1c' };
   }
 }
 
-// Status badge for the PROJECTED supervision section.
-// OK is amber (not green) — makes the target but won't reach BCBA preferred.
 function projectedSectionStatus(level: ProjectedLevel): { text: string; color: string } {
   switch (level) {
     case 'overcap': return { text: 'Over',   color: CAP_OVER };
-    case 'ideal':   return { text: 'Ideal',  color: '#15803d' };
-    case 'ok':      return { text: 'OK',     color: '#a16207' };
+    case 'ideal':   return { text: 'Ideal',  color: '#166534' };
+    case 'ok':      return { text: 'OK',     color: '#15803d' };
     case 'risky':   return { text: 'Risky',  color: '#b91c1c' };
     case 'behind':  return { text: 'Behind', color: '#b91c1c' };
   }

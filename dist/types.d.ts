@@ -25,6 +25,7 @@ export interface Client {
     notes?: string;
     disablePTRequirements?: boolean;
     directUtilizationTarget?: number;
+    supervisionIdealPct?: number;
 }
 export interface Technician {
     id: string;
@@ -88,6 +89,8 @@ export interface CompanySettings {
     cancellationReasons?: CancellationCode[];
     utilization?: UtilizationSettings;
     rbtMinContactsPerMonth?: number;
+    techMinContactsPerMonth?: number;
+    contactsMustOccurOnSeparateDays?: boolean;
     ptoBillableDeductionRatio?: number;
     pto?: PtoConfig;
     bcbaSessionDefaults?: BcbaSessionDefaults;

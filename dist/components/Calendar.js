@@ -41,8 +41,8 @@ export default function Calendar({ appointments, technicians: _technicians, clie
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [lens]);
     // The lens hides the other party's appointments: BT = has a technician,
-    // BCBA = none. Totals are computed from these filtered appointments too.
-    const lensAppts = appointments.filter(a => (lens === 'bt' ? !!a.technician : !a.technician));
+    // BCBA = none. Non-billable appointments (admin tasks, etc.) show in both lenses.
+    const lensAppts = appointments.filter(a => a.isBillable === false || (lens === 'bt' ? !!a.technician : !a.technician));
     // When a schedule loads with no appointments in the currently-shown range,
     // jump to the earliest appointment so users see their data.
     useEffect(() => {
@@ -229,7 +229,7 @@ function trackColor(hours, target) {
 function SundayTotal({ lens, hours, target }) {
     const live = hours.completed + hours.scheduled;
     const color = trackColor(hours, target);
-    return (_jsxs("div", { style: { marginTop: 4, fontSize: 9, lineHeight: 1.25 }, title: `${lens === 'bt' ? 'BT direct' : 'BCBA billable'} this week: ${fmtH(hours.completed)}h completed, ${fmtH(hours.scheduled)}h scheduled, ${fmtH(hours.canceled)}h canceled — target ${fmtH(target)}h`, children: [_jsx("div", { style: { fontWeight: 700, color: '#374151' }, children: lens === 'bt' ? 'BT wk' : 'BCBA wk' }), _jsxs("div", { style: { fontWeight: 600, color }, children: [fmtH(live), "/", fmtH(target), "h"] }), _jsxs("div", { style: { color: '#6b7280' }, children: ["\u2713", fmtH(hours.completed), " \u25FB", fmtH(hours.scheduled), hours.canceled > 0 ? ` ✕${fmtH(hours.canceled)}` : ''] }), _jsx(CapBar, { hours: hours, target: target })] }));
+    return (_jsxs("div", { style: { marginTop: 4, marginBottom: 5, fontSize: 9, lineHeight: 1.25 }, title: `${lens === 'bt' ? 'BT direct' : 'BCBA billable'} this week: ${fmtH(hours.completed)}h completed, ${fmtH(hours.scheduled)}h scheduled, ${fmtH(hours.canceled)}h canceled — target ${fmtH(target)}h`, children: [_jsx("div", { style: { fontWeight: 700, color: '#374151' }, children: lens === 'bt' ? 'BT wk' : 'BCBA wk' }), _jsxs("div", { style: { fontWeight: 600, color }, children: [fmtH(live), "/", fmtH(target), "h"] }), _jsxs("div", { style: { color: '#6b7280' }, children: ["\u2713", fmtH(hours.completed), " \u25FB", fmtH(hours.scheduled), hours.canceled > 0 ? ` ✕${fmtH(hours.canceled)}` : ''] }), _jsx(CapBar, { hours: hours, target: target })] }));
 }
 // Usage gauge. Full width = target (e.g., 165h goal). Segments left→right:
 // completed (green), scheduled (gray), then canceled — family (orange) and
@@ -521,13 +521,12 @@ function AppointmentChip({ apt, mark, onClick }) {
             background: look.background, color: look.color,
             padding: '3px 4px', borderRadius: 3, fontSize: 10,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            cursor: 'pointer', position: 'relative',
-            paddingRight: look.statusIcon ? 14 : 4,
+            cursor: 'pointer',
             textDecoration: look.strike ? 'line-through' : 'none',
             opacity: look.opacity,
             border: look.border,
             boxSizing: 'border-box',
-        }, title: apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), children: [look.prefix, apt.title, look.statusIcon && (_jsx("span", { style: { position: 'absolute', top: 1, right: 3, fontSize: 10, fontWeight: 700, color: look.statusColor, lineHeight: 1 }, children: look.statusIcon }))] }));
+        }, title: apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), children: [look.prefix, apt.title] }));
 }
 // Status / draft coding for a time-grid tile. The CLIENT pastel + STAFF stripe
 // coding is the base; status (completed / canceled / ghost / draft) is folded

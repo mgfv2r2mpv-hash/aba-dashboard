@@ -66,6 +66,7 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
     return map;
   }, [data, period]);
   const rbtMinContacts = data.settings.rbtMinContactsPerMonth ?? 2;
+  const btMinContacts = data.settings.techMinContactsPerMonth ?? 1;
   const pastIncomplete = useMemo(() => pastIncompleteAppointments(data), [data]);
   const targetPct = data.settings.supervisionDirectHoursPercent || 5;
   const companyPreferredPct = data.settings.supervisionPreferredMinPercent ?? 15;
@@ -169,7 +170,7 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
           <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
             RBTs must hit BACB <strong>{BACB_RBT_SUPERVISION_MIN_PERCENT}%</strong> AND the company target ({data.settings.supervisionRBTHoursPercent}%),
             plus ≥{rbtMinContacts} supervision contacts/month.
-            Non-RBT BTs follow the company-only target ({techTargetPct}%) and require ≥1 contact/month if they have direct sessions.
+            Non-RBT BTs follow the company-only target ({techTargetPct}%) and require ≥{btMinContacts} contact(s)/month if they have direct sessions.
           </p>
           <div style={{ display: 'grid', gap: 12 }}>
             {techReports.length === 0 && (
@@ -184,6 +185,7 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
                 maxPct={maxPct}
                 contacts={techContactDays.get(r.tech.id)}
                 rbtMinContacts={rbtMinContacts}
+                btMinContacts={btMinContacts}
               />
             ))}
           </div>
@@ -455,15 +457,16 @@ function ClientCard({ report, targetPct, preferredPct, maxPct }: { report: Clien
   );
 }
 
-function TechCard({ report, maxPct, contacts, rbtMinContacts }: {
+function TechCard({ report, maxPct, contacts, rbtMinContacts, btMinContacts }: {
   report: TechCompliance;
   maxPct?: number;
   contacts?: { actual: number; projected: number };
   rbtMinContacts?: number;
+  btMinContacts?: number;
 }) {
   const { tech, actual, projected } = report;
   const noDirect = actual.directHours === 0 && projected.directHours === 0;
-  const minContacts = tech.isRBT ? (rbtMinContacts ?? 2) : 1;
+  const minContacts = tech.isRBT ? (rbtMinContacts ?? 2) : (btMinContacts ?? 1);
   const contactsRequired = !noDirect ? minContacts : 0;
   const contactsBehind = contacts !== undefined && contactsRequired > 0 && contacts.projected < contactsRequired;
 

@@ -1605,7 +1605,7 @@ function NavButtons({ view, onChange, compSummary, conflictCount, conflictHasErr
 
   return (
     <>
-      {btn('Cal', 'schedule')}
+      {btn('📅 Cal', 'schedule')}
       {btn('Fix', 'compliance', (
         <span style={{
           minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9,

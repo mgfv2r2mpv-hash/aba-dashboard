@@ -124,7 +124,10 @@ export class ConstraintValidator {
                 });
             }
         }
-        const minContacts = this.data.settings.rbtMinContactsPerMonth ?? 2;
+        const rbtMinContacts = this.data.settings.rbtMinContactsPerMonth ?? 2;
+        const btMinContacts = this.data.settings.techMinContactsPerMonth ?? 1;
+        const separateDays = this.data.settings.contactsMustOccurOnSeparateDays ?? true;
+        const contactLabel = separateDays ? 'contact day(s)' : 'contact(s)';
         for (const tc of computeTechCompliance(this.data, period, this.now)) {
             if (tc.projected.directHours === 0 && tc.actual.directHours === 0)
                 continue;
@@ -146,26 +149,24 @@ export class ConstraintValidator {
                     affectedTechnicians: [tc.tech.id],
                 });
             }
-            // Cadence applies to RBTs only; BTs are month-percentage only.
+            const projContacts = computeTechContactDays(this.data, tc.tech, period, 'projected', this.now);
             if (tc.tech.isRBT) {
-                const projContacts = computeTechContactDays(this.data, tc.tech, period, 'projected', this.now);
-                if (projContacts < minContacts) {
+                if (projContacts < rbtMinContacts) {
+                    const spreadNote = separateDays ? ' — spread supervision across separate days' : '';
                     conflicts.push({
                         type: 'supervision-violation',
                         severity: elapsed >= 0.75 ? 'error' : 'warning',
-                        message: `${tc.tech.name} (RBT): only ${projContacts} supervision contact day(s) projected for ${period.label}; BACB cadence needs ${minContacts} — spread supervision across separate days`,
+                        message: `${tc.tech.name} (RBT): only ${projContacts} supervision ${contactLabel} projected for ${period.label}; BACB cadence needs ${rbtMinContacts}${spreadNote}`,
                         affectedTechnicians: [tc.tech.id],
                     });
                 }
             }
-            else if (tc.projected.directHours > 0) {
-                // Non-RBT BTs with direct sessions need at least 1 supervision contact per month.
-                const projContacts = computeTechContactDays(this.data, tc.tech, period, 'projected', this.now);
-                if (projContacts < 1) {
+            else if (tc.projected.directHours > 0 && btMinContacts > 0) {
+                if (projContacts < btMinContacts) {
                     conflicts.push({
                         type: 'supervision-violation',
                         severity: 'warning',
-                        message: `${tc.tech.name}: no supervision contact days projected for ${period.label} — at least 1 supervised observation required`,
+                        message: `${tc.tech.name}: only ${projContacts} supervision ${contactLabel} projected for ${period.label} — company minimum is ${btMinContacts}`,
                         affectedTechnicians: [tc.tech.id],
                     });
                 }

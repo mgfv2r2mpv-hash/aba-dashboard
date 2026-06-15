@@ -101,7 +101,7 @@ export default function App() {
     const [showSettings, setShowSettings] = useState(false);
     const [showWizard, setShowWizard] = useState(false);
     const [showAddAppointment, setShowAddAppointment] = useState(false);
-    const [showWish, setShowWish] = useState(false);
+    // Wish view is now a full page (view === 'wish') rather than a modal.
     const [editingAppointment, setEditingAppointment] = useState(null);
     // Whether the selected appointment's detail panel is expanded into its inline
     // edit form (slide-up), replacing the old edit modal on the schedule view.
@@ -677,7 +677,7 @@ export default function App() {
         if (!scheduleData)
             return;
         await commitScheduleData(applyWishSolution(scheduleData, sol));
-        setShowWish(false);
+        setView('schedule');
         setSelectedAppointment(null);
     };
     const customizeWish = (sol) => {
@@ -687,7 +687,7 @@ export default function App() {
         if (blackouts.length)
             commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] });
         stageOps(ops);
-        setShowWish(false);
+        setView('schedule');
     };
     // "Fix It" produces WishSolutions too, so accept/customize reuse the Wish
     // plumbing — but they live on the Compliance tab, so after staging we jump to
@@ -983,7 +983,7 @@ export default function App() {
             // doesn't slip under the camera housing.
             paddingLeft: 'env(safe-area-inset-left)',
             paddingRight: 'env(safe-area-inset-right)',
-        }, children: [_jsx("header", { ref: headerRef, style: {
+        }, children: [_jsxs("header", { ref: headerRef, style: {
                     backgroundColor: '#1f2937',
                     color: 'white',
                     // Top padding includes the iOS status bar / notch inset so the
@@ -1000,10 +1000,11 @@ export default function App() {
                     flexShrink: 0,
                     transition: isLandscape ? undefined : 'top 0.22s ease',
                     boxSizing: 'border-box',
-                }, children: _jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }, children: [_jsx("h1", { style: { fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }, children: "SAssi - ABA Calendar" }), _jsxs("div", { style: { display: 'flex', gap: '4px', alignItems: 'center', flexShrink: 0 }, children: [aiSettings.apiKey && (_jsx("span", { title: `AI: ${aiSettings.model}`, style: {
-                                        width: 8, height: 8, borderRadius: '50%',
-                                        backgroundColor: '#10b981', display: 'inline-block',
-                                    } })), !scheduleData ? (_jsxs(_Fragment, { children: [compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6'), _jsx(FileUpload, { onUpload: handleFileUpload, loading: loading })] })) : (_jsxs(_Fragment, { children: [compactBtn('🔧', hasIssues ? `Fix It — ${issueCount} issue${issueCount === 1 ? '' : 's'} to resolve` : 'Fix It — no issues found', () => setView('compliance'), '#ea580c', !hasIssues), compactBtn('✨', 'Wish It — AI schedule rework', () => setShowWish(true), '#7c3aed'), _jsx(ViewTabs, { view: view, onChange: setView, compSummary: compSummary })] }))] })] }) }), _jsx("div", { onScroll: handleMainScroll, style: {
+                }, children: [_jsxs("div", { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }, children: [_jsx("h1", { style: { fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }, children: "SAssi - ABA Calendar" }), _jsx("span", { title: aiSettings.apiKey ? `AI: ${aiSettings.model}` : 'No AI key set — add in Settings', style: {
+                                    width: 8, height: 8, borderRadius: '50%',
+                                    backgroundColor: aiSettings.apiKey ? '#10b981' : '#ef4444',
+                                    display: 'inline-block', flexShrink: 0,
+                                } })] }), _jsx("div", { style: { display: 'flex', gap: '4px', alignItems: 'center' }, children: !scheduleData ? (_jsxs(_Fragment, { children: [compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6'), _jsx(FileUpload, { onUpload: handleFileUpload, loading: loading })] })) : (_jsx(NavButtons, { view: view, onChange: setView, compSummary: compSummary, conflictCount: activeConflicts.length, conflictHasError: activeConflicts.some(c => c.severity === 'error') })) })] }), _jsx("div", { onScroll: handleMainScroll, style: {
                     display: 'flex', flex: 1, minHeight: 0,
                     // Narrow / non-schedule views keep a single scroll region for the whole
                     // post-header area: each child reports its natural height instead of
@@ -1071,7 +1072,7 @@ export default function App() {
                                         transform: selectedAppointment ? 'translateY(0)' : 'translateY(100%)',
                                         transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                                         paddingBottom: 'env(safe-area-inset-bottom)',
-                                    }, children: _jsx("div", { style: { flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }, children: selectedAppointment && renderDetailOrEdit(selectedAppointment) }) }))] })), view === 'admin' && (_jsx(AdminPanel, { data: scheduleData, onDataChange: commitFull, onImportFile: triggerImportPicker, onRerunWizard: () => setShowWizard(true), onDownload: handleDownload, onClearData: handleClearData, onOpenAISettings: () => setShowSettings(true) })), view === 'compliance' && (_jsx(ComplianceDashboard, { data: scheduleData, cache: compCache, conflicts: visibleConflicts, aiSettings: aiSettings, mutedConflictKeys: mutedConflicts, onMuteConflict: muteConflict, onUnmuteConflict: unmuteConflict, onConfirmDismissConflict: confirmDismissConflict, onMarkComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onSelectAppointment: (a) => { setView('schedule'); setSelectedAppointment(a); }, onAcceptFix: acceptFix, onCustomizeFix: customizeFix })), view === 'caseload' && (_jsx(CaseloadView, { data: scheduleData, now: viewDate }))] })) : (_jsxs("div", { style: {
+                                    }, children: _jsx("div", { style: { flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }, children: selectedAppointment && renderDetailOrEdit(selectedAppointment) }) }))] })), view === 'admin' && (_jsx(AdminPanel, { data: scheduleData, onDataChange: commitFull, onImportFile: triggerImportPicker, onRerunWizard: () => setShowWizard(true), onDownload: handleDownload, onClearData: handleClearData, onOpenAISettings: () => setShowSettings(true) })), view === 'compliance' && (_jsx(ComplianceDashboard, { data: scheduleData, cache: compCache, conflicts: visibleConflicts, aiSettings: aiSettings, mutedConflictKeys: mutedConflicts, onMuteConflict: muteConflict, onUnmuteConflict: unmuteConflict, onConfirmDismissConflict: confirmDismissConflict, onMarkComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onSelectAppointment: (a) => { setView('schedule'); setSelectedAppointment(a); }, onAcceptFix: acceptFix, onCustomizeFix: customizeFix })), view === 'caseload' && (_jsx(CaseloadView, { data: scheduleData, now: viewDate })), view === 'wish' && (_jsx(WishComposer, { data: scheduleData, aiSettings: aiSettings, onAccept: acceptWish, onCustomize: customizeWish, onClose: () => setView('schedule') }))] })) : (_jsxs("div", { style: {
                         flex: 1,
                         display: 'flex',
                         alignItems: 'center',
@@ -1092,40 +1093,31 @@ export default function App() {
                     e.target.value = '';
                     if (file)
                         handleFileUpload(file);
-                } }), pendingImport && scheduleData && (_jsx(ImportPreview, { current: scheduleData, next: pendingImport.data, fileName: pendingImport.fileName, onConfirm: confirmPendingImport, onCancel: () => setPendingImport(null) })), cancelTarget && scheduleData && (_jsx(CancellationDialog, { appointment: cancelTarget, settings: scheduleData.settings, onConfirm: handleConfirmCancel, onCancel: () => setCancelTarget(null) })), showAddAppointment && scheduleData && (_jsx(AppointmentForm, { allAppointments: scheduleData.appointments, authorizations: scheduleData.authorizations, technicians: scheduleData.technicians, clients: scheduleData.clients, settings: scheduleData.settings, initialType: calLens === 'bcba' ? 'supervision' : 'client-session', onSave: handleSaveAppointments, onCancel: () => setShowAddAppointment(false) })), editingAppointment && scheduleData && (_jsx(AppointmentForm, { appointment: editingAppointment, allAppointments: scheduleData.appointments, authorizations: scheduleData.authorizations, technicians: scheduleData.technicians, clients: scheduleData.clients, settings: scheduleData.settings, onSave: handleSaveAppointments, onDelete: handleDeleteAppointments, onCancel: () => setEditingAppointment(null) })), showWish && scheduleData && (_jsx(WishComposer, { data: scheduleData, aiSettings: aiSettings, onAccept: acceptWish, onCustomize: customizeWish, onClose: () => setShowWish(false) })), showDayReview && scheduleData && (_jsx(DayReview, { appointments: pendingReview, onComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onClose: () => setShowDayReview(false) })), pwPrompt && (_jsx(PasswordPrompt, { title: pwPrompt.title, message: pwPrompt.message, placeholder: pwPrompt.placeholder, submitLabel: pwPrompt.submitLabel, onSubmit: (pw) => resolvePassword(pw), onCancel: () => resolvePassword(null) })), changingPin && (_jsx(LockScreen, { mode: "create", onCreate: handleChangePin }))] }));
+                } }), pendingImport && scheduleData && (_jsx(ImportPreview, { current: scheduleData, next: pendingImport.data, fileName: pendingImport.fileName, onConfirm: confirmPendingImport, onCancel: () => setPendingImport(null) })), cancelTarget && scheduleData && (_jsx(CancellationDialog, { appointment: cancelTarget, settings: scheduleData.settings, onConfirm: handleConfirmCancel, onCancel: () => setCancelTarget(null) })), showAddAppointment && scheduleData && (_jsx(AppointmentForm, { allAppointments: scheduleData.appointments, authorizations: scheduleData.authorizations, technicians: scheduleData.technicians, clients: scheduleData.clients, settings: scheduleData.settings, initialType: calLens === 'bcba' ? 'supervision' : 'client-session', onSave: handleSaveAppointments, onCancel: () => setShowAddAppointment(false) })), editingAppointment && scheduleData && (_jsx(AppointmentForm, { appointment: editingAppointment, allAppointments: scheduleData.appointments, authorizations: scheduleData.authorizations, technicians: scheduleData.technicians, clients: scheduleData.clients, settings: scheduleData.settings, onSave: handleSaveAppointments, onDelete: handleDeleteAppointments, onCancel: () => setEditingAppointment(null) })), showDayReview && scheduleData && (_jsx(DayReview, { appointments: pendingReview, onComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onClose: () => setShowDayReview(false) })), pwPrompt && (_jsx(PasswordPrompt, { title: pwPrompt.title, message: pwPrompt.message, placeholder: pwPrompt.placeholder, submitLabel: pwPrompt.submitLabel, onSubmit: (pw) => resolvePassword(pw), onCancel: () => resolvePassword(null) })), changingPin && (_jsx(LockScreen, { mode: "create", onCreate: handleChangePin }))] }));
 }
 // Three-way segmented control for the active view. Sits inline in the header
 // at compact-button size so it doesn't blow up the chrome.
-function ViewTabs({ view, onChange, compSummary }) {
-    const tabs = [
-        { key: 'schedule', label: '🗓️ Cal', aria: 'Schedule' },
-        { key: 'compliance', label: 'Comp', aria: 'Compliance' },
-        { key: 'caseload', label: '📈 Dash', aria: 'Dashboard' },
-        { key: 'admin', label: '⚙️ Config', aria: 'Admin' },
-    ];
-    // Live count of clients/techs needing attention this month, updated on every
-    // appointment change. Red = behind even projected; amber = projected ok only.
-    const attention = compSummary ? compSummary.red + compSummary.yellow : 0;
-    const badgeColor = compSummary?.worst === 'red' ? '#ef4444'
-        : compSummary?.worst === 'yellow' ? '#f59e0b' : '#10b981';
-    return (_jsx("div", { style: { display: 'flex', borderRadius: 5, overflow: 'hidden', border: '1px solid #4b5563' }, children: tabs.map(t => {
-            const active = t.key === view;
-            const showBadge = t.key === 'compliance' && !!compSummary;
-            return (_jsxs("button", { onClick: () => onChange(t.key), "aria-label": showBadge && attention > 0 ? `${t.aria} — ${attention} need attention` : t.aria, title: showBadge && attention > 0 ? `${attention} client(s)/tech(s) need attention this month` : t.aria, style: {
-                    position: 'relative',
-                    padding: '5px 9px', border: 'none',
-                    backgroundColor: active ? '#6366f1' : 'transparent',
-                    color: 'white', cursor: 'pointer',
-                    fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', lineHeight: 1.2,
-                    display: 'inline-flex', alignItems: 'center', gap: 5,
-                }, children: [t.label, showBadge && (attention > 0 ? (_jsx("span", { style: {
-                            minWidth: 15, height: 15, padding: '0 4px', borderRadius: 8,
-                            backgroundColor: badgeColor, color: 'white',
-                            fontSize: 10, fontWeight: 700, lineHeight: '15px', textAlign: 'center',
-                        }, children: attention })) : (_jsx("span", { style: {
-                            width: 8, height: 8, borderRadius: '50%',
-                            backgroundColor: badgeColor, display: 'inline-block',
-                        } })))] }, t.key));
-        }) }));
+function NavButtons({ view, onChange, compSummary, conflictCount, conflictHasError }) {
+    const compRed = compSummary?.red ?? 0;
+    const compYellow = compSummary?.yellow ?? 0;
+    const badgeCount = (conflictCount ?? 0) + compRed + compYellow;
+    const badgeColor = (conflictHasError || compRed > 0) ? '#ef4444'
+        : badgeCount > 0 ? '#f59e0b' : '#10b981';
+    const btn = (label, key, badge) => {
+        const active = view === key;
+        return (_jsxs("button", { onClick: () => onChange(key), "aria-label": label, title: label, style: {
+                padding: '5px 10px', border: 'none', borderRadius: 5,
+                backgroundColor: active ? '#6366f1' : '#374151',
+                color: 'white', cursor: 'pointer',
+                fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+            }, children: [badge, label] }, key));
+    };
+    return (_jsxs(_Fragment, { children: [btn('📅 Cal', 'schedule'), btn('Fix', 'compliance', (_jsx("span", { style: {
+                    minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9,
+                    backgroundColor: badgeColor, color: 'white',
+                    fontSize: 11, fontWeight: 700,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                }, children: badgeCount }))), btn('✨Wish', 'wish'), btn('⚙️Admin', 'admin')] }));
 }
 //# sourceMappingURL=app.js.map

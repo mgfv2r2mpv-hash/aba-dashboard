@@ -1900,7 +1900,9 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   const [bcbaMonthly, setBcbaMonthly] = useState(s(u.bcbaMonthlyBillableHours));
   const [bcbaMonthly5, setBcbaMonthly5] = useState(s(u.bcbaMonthlyBillableHours5Week));
   const [minContacts, setMinContacts] = useState(s(settings.rbtMinContactsPerMonth ?? 2));
-  const [floorPct, setFloorPct] = useState(s(settings.supervisionFloorPercent ?? 10));
+  const [techMinContacts, setTechMinContacts] = useState(s(settings.techMinContactsPerMonth ?? 1));
+  const [contactsSeparateDays, setContactsSeparateDays] = useState(settings.contactsMustOccurOnSeparateDays ?? true);
+  const [pendingUncheck, setPendingUncheck] = useState(false);
   const [prefMinPct, setPrefMinPct] = useState(s(settings.supervisionPreferredMinPercent ?? 15));
   const [prefMaxPct, setPrefMaxPct] = useState(s(settings.supervisionPreferredMaxPercent ?? 20));
   const [draftLeadVal, setDraftLeadVal] = useState(s(settings.reportDraftLead?.value ?? 4));
@@ -1954,7 +1956,8 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
         bcbaMonthlyBillableHours5Week: num(bcbaMonthly5, u.bcbaMonthlyBillableHours5Week),
       },
       rbtMinContactsPerMonth: num(minContacts, 2),
-      supervisionFloorPercent: num(floorPct, 10),
+      techMinContactsPerMonth: num(techMinContacts, 1),
+      contactsMustOccurOnSeparateDays: contactsSeparateDays,
       supervisionPreferredMinPercent: num(prefMinPct, 15),
       supervisionPreferredMaxPercent: num(prefMaxPct, 20),
       reportDraftLead: { value: num(draftLeadVal, 4), unit: draftLeadUnit },
@@ -1989,22 +1992,48 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   return (
     <div style={{ maxWidth: 640 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: 8, flexWrap: 'wrap' }}>
-        <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Company Settings</h3>
+        <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>SAssi App Settings</h3>
         {saveBar}
       </div>
 
       <SettingsSection title="Supervision targets">
-        <NumField label="Per-case (% of direct client hours)" value={directPct} onChange={setDirectPct} suffix="%" />
-        <NumField label="Per-RBT (% of that RBT's direct hours)" value={rbtPct} onChange={setRbtPct} suffix="%" hint="BACB floor is 5%." />
-        <NumField label="Per non-RBT tech (% of hours, optional)" value={techPct} onChange={setTechPct} suffix="%" placeholder="—" />
-        <NumField label="RBT min supervision contact days per month" value={minContacts} onChange={setMinContacts} suffix="days" hint="BACB cadence: distinct days with observed supervision. Default 2." />
-        <NumField label="Insurer cap on supervision:direct ratio (optional)" value={maxPct} onChange={setMaxPct} suffix="%" placeholder="—" hint="Over-cap ratios show as a warning; they don't change green/yellow/red status." />
-      </SettingsSection>
-
-      <SettingsSection title="Correction engine supervision band">
-        <NumField label="Floor (minimum % that must always be met)" value={floorPct} onChange={setFloorPct} suffix="%" hint="The engine never proposes shaving a case/BT below this. Default 10." />
-        <NumField label="Preferred min (% the BCBA aims for)" value={prefMinPct} onChange={setPrefMinPct} suffix="%" hint="Default 15." />
-        <NumField label="Preferred max / cap (% ceiling)" value={prefMaxPct} onChange={setPrefMaxPct} suffix="%" hint="Doubles as the cap when no insurer cap is set. Default 20." />
+        <NumField label="Per-case Company Min. (% of Direct Service Hours)" value={directPct} onChange={setDirectPct} suffix="%" defaultValue={5} />
+        <NumField label="Per-Credentialed BT Company Min. (% of Direct Service Hours)" value={rbtPct} onChange={setRbtPct} suffix="%" defaultValue={5} hint="BACB floor is 5%." />
+        <NumField label="Per-BT Company Min. (% of Direct Service Hours)" value={techPct} onChange={setTechPct} suffix="%" placeholder="—" />
+        <NumField label="Per-Credentialed BT Min. Contacts Count" value={minContacts} onChange={setMinContacts} suffix="contacts" defaultValue={2} hint="BACB cadence requires at least 2/month." />
+        <NumField label="Per-BT Company Min. Monthly Contacts Count" value={techMinContacts} onChange={setTechMinContacts} suffix="contacts" defaultValue={1} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={pendingUncheck ? true : contactsSeparateDays}
+              onChange={e => {
+                if (!e.target.checked) {
+                  setPendingUncheck(true);
+                } else {
+                  setContactsSeparateDays(true);
+                  setPendingUncheck(false);
+                }
+              }}
+              style={{ width: 15, height: 15 }}
+            />
+            <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Contacts Must Occur on Separate Days?</span>
+          </label>
+          {pendingUncheck && (
+            <div style={{ marginLeft: 23, padding: '8px 10px', backgroundColor: '#fef9c3', border: '1px solid #fde047', borderRadius: 6, fontSize: 12, color: '#713f12' }}>
+              <p style={{ margin: '0 0 6px' }}>
+                Unchecking means multiple supervision sessions on the same calendar day, for the same technician, will each count as a separate contact toward the monthly minimum.
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => { setContactsSeparateDays(false); setPendingUncheck(false); }} style={{ padding: '4px 10px', fontSize: 12, fontWeight: 600, backgroundColor: '#b45309', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>Confirm</button>
+                <button onClick={() => setPendingUncheck(false)} style={{ padding: '4px 10px', fontSize: 12, fontWeight: 600, backgroundColor: '#e5e7eb', color: '#374151', border: 'none', borderRadius: 4, cursor: 'pointer' }}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+        <NumField label="Insurer Max. Supervision % (% of Direct Service Hours)" value={maxPct} onChange={setMaxPct} suffix="%" placeholder="—" />
+        <NumField label="BCBA Preferred Sup. Min. (% of Direct Hours)" value={prefMinPct} onChange={setPrefMinPct} suffix="%" defaultValue={15} />
+        <NumField label="BCBA Preferred Sup. Max. (% of Direct Hours)" value={prefMaxPct} onChange={setPrefMaxPct} suffix="%" defaultValue={20} />
       </SettingsSection>
 
       <SettingsSection title="Time off">
@@ -2261,21 +2290,26 @@ function CancellationCodesEditor({ codes, onChange }: {
   );
 }
 
-function NumField({ label, value, onChange, suffix, hint, placeholder }: {
+function NumField({ label, value, onChange, suffix, hint, placeholder, defaultValue }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   suffix?: string;
   hint?: string;
   placeholder?: string;
+  defaultValue?: number;
 }) {
+  const handleBlur = () => {
+    if (defaultValue !== undefined && value.trim() === '') onChange(String(defaultValue));
+  };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
       <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>{label}</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <input
           type="number" step="0.5" min="0" inputMode="decimal"
-          value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+          value={value} onChange={e => onChange(e.target.value)} onBlur={handleBlur}
+          placeholder={placeholder ?? (defaultValue !== undefined ? String(defaultValue) : undefined)}
           style={{ ...inputStyle, width: '120px' }}
         />
         {suffix && <span style={{ fontSize: '12px', color: '#6b7280' }}>{suffix}</span>}

@@ -479,7 +479,7 @@ function SundayTotal({ lens, hours, target }: { lens: Lens; hours: HoursByStatus
   const color = trackColor(hours, target);
   return (
     <div
-      style={{ marginTop: 4, fontSize: 9, lineHeight: 1.25 }}
+      style={{ marginTop: 4, marginBottom: 5, fontSize: 9, lineHeight: 1.25 }}
       title={`${lens === 'bt' ? 'BT direct' : 'BCBA billable'} this week: ${fmtH(hours.completed)}h completed, ${fmtH(hours.scheduled)}h scheduled, ${fmtH(hours.canceled)}h canceled — target ${fmtH(target)}h`}
     >
       <div style={{ fontWeight: 700, color: '#374151' }}>{lens === 'bt' ? 'BT wk' : 'BCBA wk'}</div>
@@ -984,8 +984,7 @@ function AppointmentChip({ apt, mark, onClick }: { apt: Appointment; mark?: Draf
         background: look.background, color: look.color,
         padding: '3px 4px', borderRadius: 3, fontSize: 10,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        cursor: 'pointer', position: 'relative',
-        paddingRight: look.statusIcon ? 14 : 4,
+        cursor: 'pointer',
         textDecoration: look.strike ? 'line-through' : 'none',
         opacity: look.opacity,
         border: look.border,
@@ -994,11 +993,6 @@ function AppointmentChip({ apt, mark, onClick }: { apt: Appointment; mark?: Draf
       title={apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : '')}
     >
       {look.prefix}{apt.title}
-      {look.statusIcon && (
-        <span style={{ position: 'absolute', top: 1, right: 3, fontSize: 10, fontWeight: 700, color: look.statusColor, lineHeight: 1 }}>
-          {look.statusIcon}
-        </span>
-      )}
     </div>
   );
 }

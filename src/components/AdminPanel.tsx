@@ -904,7 +904,9 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
   const [editing, setEditing] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
 
-  const noStaff = !(technicians ?? []).some(t => t.assignments.some(a => a.clientId === client.id));
+  const noStaff = !(technicians ?? []).some(t =>
+    t.assignments.some(a => a.clientId === client.id || a.clientId === client.name)
+  );
 
   const commitMax = () => {
     const next = maxStr === '' ? undefined : parseFloat(maxStr);

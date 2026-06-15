@@ -145,7 +145,16 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
                 No clients yet. Add clients in Admin to start tracking compliance.
               </p>
             )}
-            {clientReports.map(r => <ClientCard key={r.client.id} report={r} targetPct={targetPct} preferredPct={preferredPct} maxPct={maxPct} />)}
+            {[...clientReports].sort((a, b) => {
+              const aLevel = getActualLevel(a.actual.directHours, a.actual.pct, targetPct, preferredPct, maxPct);
+              const bLevel = getActualLevel(b.actual.directHours, b.actual.pct, targetPct, preferredPct, maxPct);
+              const aPLevel = getProjectedLevel(a.projected.directHours, a.projected.pct, targetPct, preferredPct, maxPct);
+              const bPLevel = getProjectedLevel(b.projected.directHours, b.projected.pct, targetPct, preferredPct, maxPct);
+              const aCrit = overallBadge(aLevel, aPLevel, a.actual.directHours === 0 && a.projected.directHours === 0).isCritical;
+              const bCrit = overallBadge(bLevel, bPLevel, b.actual.directHours === 0 && b.projected.directHours === 0).isCritical;
+              if (aCrit !== bCrit) return aCrit ? -1 : 1;
+              return a.client.name.localeCompare(b.client.name);
+            }).map(r => <ClientCard key={r.client.id} report={r} targetPct={targetPct} preferredPct={preferredPct} maxPct={maxPct} />)}
           </div>
         </>
       )}
@@ -318,68 +327,109 @@ function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }: {
 // "Within 2 percentage-points of the minimum" → Risky.
 const RISKY_MARGIN = 2;
 
-// Status for the ACTUAL supervision section — always non-null so a badge is always shown.
-function actualSectionStatus(pct: number, targetPct: number, preferredPct: number, maxPct?: number): { text: string; color: string } {
-  if (maxPct !== undefined && pct > maxPct) return { text: 'Reduce', color: CAP_OVER };
-  if (pct >= preferredPct) return { text: 'Ideal', color: '#15803d' };
-  if (pct >= targetPct) return { text: 'Good', color: '#15803d' };
-  return { text: 'Behind', color: '#b91c1c' };
+type ActualLevel = 'na' | 'behind' | 'good' | 'ideal' | 'reduce';
+type ProjectedLevel = 'behind' | 'risky' | 'ok' | 'ideal' | 'overcap';
+
+function getActualLevel(directHours: number, pct: number, targetPct: number, preferredPct: number, maxPct?: number): ActualLevel {
+  if (directHours === 0) return 'na';
+  if (maxPct !== undefined && pct > maxPct) return 'reduce';
+  if (pct >= preferredPct) return 'ideal';
+  if (pct >= targetPct) return 'good';
+  return 'behind';
 }
 
-// Status for the PROJECTED supervision section.
-function projectedSectionStatus(pct: number, targetPct: number, preferredPct: number, maxPct?: number): { text: string; color: string } {
-  if (maxPct !== undefined && pct > maxPct) return { text: 'Over Cap', color: CAP_OVER };
-  if (pct >= preferredPct && (maxPct === undefined || pct <= maxPct)) return { text: 'Ideal', color: '#15803d' };
-  if (pct >= targetPct + RISKY_MARGIN) return { text: 'OK', color: '#15803d' };
-  return { text: 'Risky', color: '#b91c1c' };
+function getProjectedLevel(directHours: number, pct: number, targetPct: number, preferredPct: number, maxPct?: number): ProjectedLevel {
+  if (directHours === 0) return 'behind';
+  if (maxPct !== undefined && pct > maxPct) return 'overcap';
+  if (pct >= preferredPct) return 'ideal';
+  if (pct >= targetPct + RISKY_MARGIN) return 'ok';
+  if (pct >= targetPct) return 'risky';
+  return 'behind';
 }
 
-// Overall card badge — driven by projected (end-of-period outcome).
-function clientCardBadge(
-  actual: { pct: number },
-  projected: { pct: number },
-  targetPct: number,
-  preferredPct: number,
-  maxPct: number | undefined,
+// Status badge for the ACTUAL supervision section.
+function actualSectionStatus(level: ActualLevel): { text: string; color: string } {
+  switch (level) {
+    case 'na':      return { text: 'N/A',    color: '#6b7280' };
+    case 'reduce':  return { text: 'Reduce', color: CAP_OVER };
+    case 'ideal':   return { text: 'Ideal',  color: '#15803d' };
+    case 'good':    return { text: 'Good',   color: '#15803d' };
+    case 'behind':  return { text: 'Behind', color: '#b91c1c' };
+  }
+}
+
+// Status badge for the PROJECTED supervision section.
+// OK is amber (not green) — makes the target but won't reach BCBA preferred.
+function projectedSectionStatus(level: ProjectedLevel): { text: string; color: string } {
+  switch (level) {
+    case 'overcap': return { text: 'Over Cap', color: CAP_OVER };
+    case 'ideal':   return { text: 'Ideal',    color: '#15803d' };
+    case 'ok':      return { text: 'OK',       color: '#a16207' };
+    case 'risky':   return { text: 'Risky',    color: '#b91c1c' };
+    case 'behind':  return { text: 'Behind',   color: '#b91c1c' };
+  }
+}
+
+// Overall card badge — hybrid of actual + projected.
+function overallBadge(
+  actual: ActualLevel,
+  projected: ProjectedLevel,
   noDirect: boolean,
-): { text: string; bgColor: string } {
-  if (noDirect) return { text: 'Inactive', bgColor: '#6b7280' };
-  if (actual.pct < targetPct && projected.pct < targetPct)
-    return { text: 'Critical', bgColor: '#b91c1c' };
-  if (projected.pct < targetPct + RISKY_MARGIN)
-    return { text: 'Risky', bgColor: '#b91c1c' };
-  if (maxPct !== undefined && actual.pct > maxPct)
-    return { text: 'Reduce', bgColor: CAP_OVER };
-  if (projected.pct >= preferredPct && (maxPct === undefined || projected.pct <= maxPct))
-    return { text: 'Ideal', bgColor: '#15803d' };
-  return { text: 'OK', bgColor: '#15803d' };
+): { text: string; bgColor: string; cardBg?: string; isCritical: boolean; isAmazing: boolean } {
+  if (noDirect) return { text: 'Inactive', bgColor: '#6b7280', isCritical: false, isAmazing: false };
+
+  // Both sides behind the minimum floor.
+  if (actual === 'behind' && projected === 'behind')
+    return { text: 'Critical', bgColor: '#b91c1c', cardBg: '#fff5f5', isCritical: true, isAmazing: false };
+
+  // Any single side behind minimum (the other must not be, or Critical would have fired).
+  if (actual === 'behind' || projected === 'behind')
+    return { text: 'At Risk', bgColor: CAP_OVER, isCritical: false, isAmazing: false };
+
+  // Over insurer cap (not a minimum problem, but a financial one).
+  if (actual === 'reduce' || projected === 'overcap')
+    return { text: 'Reduce', bgColor: CAP_OVER, isCritical: false, isAmazing: false };
+
+  // Projected barely above minimum (risky zone).
+  if (projected === 'risky')
+    return { text: 'At Risk', bgColor: '#a16207', isCritical: false, isAmazing: false };
+
+  // Actual was ideal but projected drifts below ideal (regressing).
+  if (actual === 'ideal' && projected === 'ok')
+    return { text: 'At Risk', bgColor: '#a16207', isCritical: false, isAmazing: false };
+
+  // Both at or above BCBA preferred.
+  if (actual === 'ideal' && projected === 'ideal')
+    return { text: '✨ Amazing', bgColor: '#15803d', cardBg: '#f0fdf4', isCritical: false, isAmazing: true };
+
+  // Projected ideal but actual not yet (trending up), or both comfortably above min.
+  return { text: 'Great', bgColor: '#15803d', isCritical: false, isAmazing: false };
 }
 
 function ClientCard({ report, targetPct, preferredPct, maxPct }: { report: ClientCompliance; targetPct: number; preferredPct: number; maxPct?: number }) {
   const { client, actual, projected } = report;
   const noDirect = actual.directHours === 0 && projected.directHours === 0;
 
-  const badge = clientCardBadge(actual, projected, targetPct, preferredPct, maxPct, noDirect);
-  // When no sessions are completed yet, actual supervision % is not meaningful — show N/A.
-  const actualStatus = actual.directHours === 0
-    ? { text: 'N/A', color: '#6b7280' }
-    : actualSectionStatus(actual.pct, targetPct, preferredPct, maxPct);
-  const projStatus = projectedSectionStatus(projected.pct, targetPct, preferredPct, maxPct);
-
-  const cardBorderColor = badge.bgColor;
+  const aLevel = getActualLevel(actual.directHours, actual.pct, targetPct, preferredPct, maxPct);
+  const pLevel = getProjectedLevel(projected.directHours, projected.pct, targetPct, preferredPct, maxPct);
+  const badge = overallBadge(aLevel, pLevel, noDirect);
+  const actualStatus = actualSectionStatus(aLevel);
+  const projStatus = projectedSectionStatus(pLevel);
 
   return (
     <div style={{
-      backgroundColor: badge.bgColor === '#b91c1c' ? '#fff5f5' : 'white',
-      border: `2px solid ${cardBorderColor}`,
+      backgroundColor: badge.cardBg ?? 'white',
+      border: `2px solid ${badge.bgColor}`,
       borderRadius: 8, padding: 12,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>{client.name}</h3>
         <span style={{
-          fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+          fontSize: 11, fontWeight: 700,
+          textTransform: badge.isAmazing ? undefined : 'uppercase',
           color: 'white', backgroundColor: badge.bgColor,
-          padding: '2px 8px', borderRadius: 10,
+          padding: '2px 10px', borderRadius: 10,
+          boxShadow: badge.isAmazing ? '0 0 0 2px #86efac' : undefined,
         }}>{badge.text}</span>
       </div>
 
@@ -485,12 +535,7 @@ function TechMetric({ title, m, accent, isRBT, maxPct }: {
         {title}
       </div>
       <div style={{ fontSize: 18, fontWeight: 700, color: pctColor }}>
-        {m.pct.toFixed(1)}%
-        {overCap && (
-          <div style={{ fontSize: 11, color: CAP_OVER, fontWeight: 600, marginTop: 2 }}>
-            ⚠ over {maxPct}% insurer cap
-          </div>
-        )}
+        {m.pct.toFixed(1)}%{overCap && <span style={{ fontSize: 14 }}> ⚠️</span>}
       </div>
       <div style={{
         marginTop: 6, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden',
@@ -558,24 +603,23 @@ function Metric({ title, m, targetPct, sectionStatus, maxPct }: {
   sectionStatus: { text: string; color: string };
   maxPct?: number;
 }) {
+  const overCap = maxPct !== undefined && m.pct > maxPct;
   const fillPct = Math.min(100, (m.pct / targetPct) * 100);
   const { color: statusColor, text: statusText } = sectionStatus;
   return (
     <div>
-      {/* Section title */}
       <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: '#6b7280', marginBottom: 2 }}>
         {title}
       </div>
-      {/* Percentage + "of X% target" — no badge here so height is consistent */}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
         <span style={{ fontSize: 18, fontWeight: 700, color: statusColor }}>
-          {m.pct.toFixed(1)}%
+          {m.pct.toFixed(1)}%{overCap && <span style={{ fontSize: 14 }}> ⚠️</span>}
         </span>
         <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 400 }}>
           of {targetPct}% target
         </span>
       </div>
-      {/* Badge on its own fixed-height row — keeps bar vertically aligned across columns */}
+      {/* Badge on fixed-height row — keeps bar vertically aligned across columns */}
       <div style={{ height: 22, display: 'flex', alignItems: 'center', marginTop: 3 }}>
         <span style={{
           fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
@@ -583,7 +627,6 @@ function Metric({ title, m, targetPct, sectionStatus, maxPct }: {
           padding: '2px 7px', borderRadius: 8,
         }}>{statusText}</span>
       </div>
-      {/* Bar — always at the same vertical position */}
       <div style={{ height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${fillPct}%`, backgroundColor: statusColor, transition: 'width 200ms' }} />
       </div>

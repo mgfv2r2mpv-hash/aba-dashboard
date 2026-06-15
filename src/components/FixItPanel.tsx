@@ -52,7 +52,9 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
   const [objection, setObjection] = useState('');
   const [showPromptPreview, setShowPromptPreview] = useState(false);
   const [previewPrompt, setPreviewPrompt] = useState('');
+  const [copyFlash, setCopyFlash] = useState(false);
   const previewTextRef = useRef<HTMLTextAreaElement>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggle = (key: keyof FixItOptions) =>
     setOptions(o => ({ ...o, [key]: !o[key] }));
@@ -130,9 +132,14 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
               style={{ flex: 1, fontFamily: 'monospace', fontSize: 11, padding: 10, border: '1px solid #d1d5db', borderRadius: 6, resize: 'none', overflowY: 'auto' }}
             />
             <button
-              onClick={() => { navigator.clipboard.writeText(previewPrompt).catch(() => {}); }}
-              style={{ marginTop: 10, padding: '7px 14px', background: '#ea580c', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13, alignSelf: 'flex-end' }}
-            >Copy to clipboard</button>
+              onClick={() => {
+                navigator.clipboard.writeText(previewPrompt).catch(() => {});
+                setCopyFlash(true);
+                if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+                copyTimeoutRef.current = setTimeout(() => setCopyFlash(false), 2000);
+              }}
+              style={{ marginTop: 10, padding: '7px 14px', background: copyFlash ? '#15803d' : '#ea580c', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13, alignSelf: 'flex-end', transition: 'background 0.2s' }}
+            >{copyFlash ? '✓ Copied!' : 'Copy to clipboard'}</button>
           </div>
         </div>
       )}

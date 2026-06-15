@@ -84,6 +84,21 @@ async function nativeDeviceClass(): Promise<DeviceClass | null> {
   }
 }
 
+// Reactive orientation hook — true while device is in landscape.
+export function useIsLandscape(): boolean {
+  const [landscape, setLandscape] = useState(() =>
+    typeof window === 'undefined' ? false : window.matchMedia('(orientation: landscape)').matches
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(orientation: landscape)');
+    const handler = (e: MediaQueryListEvent) => setLandscape(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  return landscape;
+}
+
 // True for iPad / Android tablets. Seeds synchronously from the UA heuristic,
 // then upgrades to the native plugin's verdict once it resolves.
 export function useIsTablet(): boolean {

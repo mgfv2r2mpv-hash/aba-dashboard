@@ -31,6 +31,7 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
     const pastIncomplete = useMemo(() => pastIncompleteAppointments(data), [data]);
     const targetPct = data.settings.supervisionDirectHoursPercent || 5;
     const companyPreferredPct = data.settings.supervisionPreferredMinPercent ?? 15;
+    const companyPreferredMaxPct = data.settings.supervisionPreferredMaxPercent ?? 20;
     // Per-client override falls back to the company-wide preferred minimum.
     const clientPreferredPct = (client) => client.supervisionIdealPct ?? companyPreferredPct;
     const techTargetPct = data.settings.supervisionTechHoursPercent ?? 0;
@@ -47,16 +48,18 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
     return (_jsxs("div", { style: { flex: 1, padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }, children: [_jsxs("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0 }, children: ["Compliance (", period.label, ")"] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsxs("div", { style: { display: 'flex', background: '#f3f4f6', borderRadius: 6, padding: 2, marginRight: 4 }, children: [tabBtn('case', 'Cases'), tabBtn('staff', 'Staff')] }), _jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] })] }), aiSettings && onAcceptFix && onCustomizeFix && (_jsx(FixItPanel, { data: data, aiSettings: aiSettings, conflicts: conflicts, onAccept: onAcceptFix, onCustomize: onCustomizeFix })), conflicts.length > 0 && (_jsx(ScheduleWarnings, { conflicts: conflicts, appointments: data.appointments, onSelect: onSelectAppointment, mutedConflictKeys: mutedConflictKeys, onMuteConflict: onMuteConflict, onUnmuteConflict: onUnmuteConflict, onConfirmDismissConflict: onConfirmDismissConflict })), pastIncomplete.length > 0 && (_jsx(PastIncomplete, { items: pastIncomplete, onMarkComplete: onMarkComplete, onRequestCancel: onRequestCancel, onSelect: onSelectAppointment })), compView === 'case' && (_jsxs(_Fragment, { children: [_jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginBottom: 12 }, children: ["Supervision target: ", _jsxs("strong", { children: [targetPct, "%"] }), " of direct hours per client."] }), _jsxs("div", { style: { display: 'grid', gap: 12 }, children: [clientReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No clients yet. Add clients in Admin to start tracking compliance." })), [...clientReports].sort((a, b) => {
                                 const aPref = clientPreferredPct(a.client);
                                 const bPref = clientPreferredPct(b.client);
-                                const aLevel = getActualLevel(a.actual.directHours, a.actual.pct, targetPct, aPref, maxPct);
-                                const bLevel = getActualLevel(b.actual.directHours, b.actual.pct, targetPct, bPref, maxPct);
-                                const aPLevel = getProjectedLevel(a.projected.directHours, a.projected.pct, targetPct, aPref, maxPct);
-                                const bPLevel = getProjectedLevel(b.projected.directHours, b.projected.pct, targetPct, bPref, maxPct);
-                                const aCrit = overallBadge(aLevel, aPLevel, a.actual.directHours === 0 && a.projected.directHours === 0).isCritical;
-                                const bCrit = overallBadge(bLevel, bPLevel, b.actual.directHours === 0 && b.projected.directHours === 0).isCritical;
+                                const aLevel = getActualLevel(a.actual.directHours, a.actual.pct, targetPct, aPref, companyPreferredMaxPct, maxPct);
+                                const bLevel = getActualLevel(b.actual.directHours, b.actual.pct, targetPct, bPref, companyPreferredMaxPct, maxPct);
+                                const aPLevel = getProjectedLevel(a.projected.directHours, a.projected.pct, targetPct, aPref, companyPreferredMaxPct, maxPct);
+                                const bPLevel = getProjectedLevel(b.projected.directHours, b.projected.pct, targetPct, bPref, companyPreferredMaxPct, maxPct);
+                                const aNoDirect = a.actual.directHours === 0 && a.projected.directHours === 0;
+                                const bNoDirect = b.actual.directHours === 0 && b.projected.directHours === 0;
+                                const aCrit = overallBadge(aLevel, aPLevel, aNoDirect, a.actual.pct, a.projected.pct, targetPct, aPref, companyPreferredMaxPct, maxPct).isCritical;
+                                const bCrit = overallBadge(bLevel, bPLevel, bNoDirect, b.actual.pct, b.projected.pct, targetPct, bPref, companyPreferredMaxPct, maxPct).isCritical;
                                 if (aCrit !== bCrit)
                                     return aCrit ? -1 : 1;
                                 return a.client.name.localeCompare(b.client.name);
-                            }).map(r => _jsx(ClientCard, { report: r, targetPct: targetPct, preferredPct: clientPreferredPct(r.client), maxPct: maxPct }, r.client.id))] })] })), compView === 'staff' && (_jsxs(_Fragment, { children: [_jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginBottom: 12 }, children: ["RBTs must hit BACB ", _jsxs("strong", { children: [BACB_RBT_SUPERVISION_MIN_PERCENT, "%"] }), " AND the company target (", data.settings.supervisionRBTHoursPercent, "%), plus \u2265", rbtMinContacts, " supervision contacts/month. Non-RBT BTs follow the company-only target (", techTargetPct, "%) and require \u2265", btMinContacts, " contact(s)/month if they have direct sessions."] }), _jsxs("div", { style: { display: 'grid', gap: 12 }, children: [techReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No technicians yet." })), techReports.map(r => (_jsx(TechCard, { report: r, maxPct: maxPct, contacts: techContactDays.get(r.tech.id), rbtMinContacts: rbtMinContacts, btMinContacts: btMinContacts }, r.tech.id)))] })] }))] }));
+                            }).map(r => _jsx(ClientCard, { report: r, targetPct: targetPct, preferredPct: clientPreferredPct(r.client), preferredMaxPct: companyPreferredMaxPct, maxPct: maxPct }, r.client.id))] })] })), compView === 'staff' && (_jsxs(_Fragment, { children: [_jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginBottom: 12 }, children: ["RBTs must hit BACB ", _jsxs("strong", { children: [BACB_RBT_SUPERVISION_MIN_PERCENT, "%"] }), " AND the company target (", data.settings.supervisionRBTHoursPercent, "%), plus \u2265", rbtMinContacts, " supervision contacts/month. Non-RBT BTs follow the company-only target (", techTargetPct, "%) and require \u2265", btMinContacts, " contact(s)/month if they have direct sessions."] }), _jsxs("div", { style: { display: 'grid', gap: 12 }, children: [techReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No technicians yet." })), techReports.map(r => (_jsx(TechCard, { report: r, maxPct: maxPct, contacts: techContactDays.get(r.tech.id), rbtMinContacts: rbtMinContacts, btMinContacts: btMinContacts }, r.tech.id)))] })] }))] }));
 }
 // The calendar's schedule warnings, surfaced on the Compliance tab in a
 // collapsible area (collapsed by default so the compliance cards lead). Reuses
@@ -103,24 +106,29 @@ function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }) {
                 }, children: a.title }), _jsxs("div", { style: { fontSize: 11, color: '#6b7280' }, children: [new Date(a.startTime).toLocaleString(), " \u2192 ", new Date(a.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), a.client && _jsxs(_Fragment, { children: [" \u00B7 ", a.client] }), a.technician && _jsxs(_Fragment, { children: [" \u00B7 ", a.technician] })] }), _jsxs("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' }, children: [_jsx(CompleteTimePrompt, { a: a, onComplete: onMarkComplete }), _jsx("button", { onClick: () => onRequestCancel(a), style: cancelBtn, children: "\u2715 Cancel" })] })] }));
 }
 // ---------- Per-client card ----------
-// "Within 2 percentage-points of the minimum" → Risky.
+// "Within 2 percentage-points of the minimum" → Risky (sub-level of Good).
 const RISKY_MARGIN = 2;
-function getActualLevel(directHours, pct, targetPct, preferredPct, maxPct) {
+// 'risky' and 'ok' are sub-levels of Good used only for the inner section badge.
+function getActualLevel(directHours, pct, targetPct, preferredPct, preferredMaxPct, maxPct) {
     if (directHours === 0)
         return 'na';
     if (maxPct !== undefined && pct > maxPct)
-        return 'reduce';
+        return 'over';
+    if (pct > preferredMaxPct)
+        return 'high';
     if (pct >= preferredPct)
         return 'ideal';
     if (pct >= targetPct)
         return 'good';
     return 'behind';
 }
-function getProjectedLevel(directHours, pct, targetPct, preferredPct, maxPct) {
+function getProjectedLevel(directHours, pct, targetPct, preferredPct, preferredMaxPct, maxPct) {
     if (directHours === 0)
         return 'behind';
     if (maxPct !== undefined && pct > maxPct)
-        return 'overcap';
+        return 'over';
+    if (pct > preferredMaxPct)
+        return 'high';
     if (pct >= preferredPct)
         return 'ideal';
     if (pct >= targetPct + RISKY_MARGIN)
@@ -129,11 +137,12 @@ function getProjectedLevel(directHours, pct, targetPct, preferredPct, maxPct) {
         return 'risky';
     return 'behind';
 }
-// Status badge for the ACTUAL supervision section.
+// Status badge for the ACTUAL supervision section (inner card, not overall).
 function actualSectionStatus(level) {
     switch (level) {
         case 'na': return { text: 'N/A', color: '#6b7280' };
-        case 'reduce': return { text: 'Over', color: CAP_OVER };
+        case 'over': return { text: 'Over', color: CAP_OVER };
+        case 'high': return { text: 'High', color: '#b45309' };
         case 'ideal': return { text: 'Ideal', color: '#166534' };
         case 'good': return { text: 'Good', color: '#15803d' };
         case 'behind': return { text: 'Behind', color: '#b91c1c' };
@@ -141,48 +150,139 @@ function actualSectionStatus(level) {
 }
 function projectedSectionStatus(level) {
     switch (level) {
-        case 'overcap': return { text: 'Over', color: CAP_OVER };
+        case 'over': return { text: 'Over', color: CAP_OVER };
+        case 'high': return { text: 'High', color: '#b45309' };
         case 'ideal': return { text: 'Ideal', color: '#166534' };
         case 'ok': return { text: 'OK', color: '#15803d' };
         case 'risky': return { text: 'Risky', color: '#b91c1c' };
         case 'behind': return { text: 'Behind', color: '#b91c1c' };
     }
 }
-// Overall card badge — hybrid of actual + projected.
-function overallBadge(actual, projected, noDirect) {
+const mkBadge = (text, bgColor, cardBg, isCritical = false, isAmazing = false) => ({ text, bgColor, cardBg, isCritical, isAmazing });
+// Colours used in overallBadge.
+const BADGE_RED = '#b91c1c'; // Critical / High Risk
+const BADGE_RED_CARD = '#fff5f5';
+const BADGE_AMBER_WARM = '#b45309'; // At Risk (yellow-orange)
+const BADGE_AMBER = '#a16207'; // At Risk (yellow)
+const BADGE_YG = '#65a30d'; // Projected Good / Projected High (yellow-green)
+const BADGE_GREEN = '#15803d'; // Projected Good (green) / Projected Ideal
+const BADGE_GREEN_CARD = '#f0fdf4';
+const BADGE_ORANGE_RED = '#c2410c'; // Over/Over → High
+// Helper: how far below the company min is the projected pct?
+// Used for Behind-projection calculations.
+const belowMin = (projPct, minPct) => minPct - projPct;
+// Overall card badge — full 5×5 matrix with calculation cells.
+function overallBadge(actual, projected, noDirect, actualPct, projectedPct, companyMinPct, preferredMinPct, preferredMaxPct, insurerCapPct) {
     if (noDirect)
-        return { text: 'Inactive', bgColor: '#6b7280', isCritical: false, isAmazing: false };
-    // Both sides behind the minimum floor.
-    if (actual === 'behind' && projected === 'behind')
-        return { text: 'Critical', bgColor: '#b91c1c', cardBg: '#fff5f5', isCritical: true, isAmazing: false };
-    // Any single side behind minimum (the other must not be, or Critical would have fired).
-    if (actual === 'behind' || projected === 'behind')
-        return { text: 'At Risk', bgColor: CAP_OVER, isCritical: false, isAmazing: false };
-    // Over cap but projected barely above minimum → the risky trajectory is
-    // the more actionable concern; the ⚠️ on the actual % already flags the cap.
-    if (actual === 'reduce' && projected === 'risky')
-        return { text: 'At Risk', bgColor: '#a16207', isCritical: false, isAmazing: false };
-    // Both sides over insurer cap → financial problem in both views.
-    if (actual === 'reduce' && projected === 'overcap')
-        return { text: 'Reduce', bgColor: CAP_OVER, isCritical: false, isAmazing: false };
-    // Projected barely above minimum (risky zone).
-    if (projected === 'risky')
-        return { text: 'At Risk', bgColor: '#a16207', isCritical: false, isAmazing: false };
-    // Actual was ideal but projected drifts below ideal (regressing).
-    if (actual === 'ideal' && projected === 'ok')
-        return { text: 'At Risk', bgColor: '#a16207', isCritical: false, isAmazing: false };
-    // Both at or above BCBA preferred.
-    if (actual === 'ideal' && projected === 'ideal')
-        return { text: '✨ Amazing', bgColor: '#15803d', cardBg: '#f0fdf4', isCritical: false, isAmazing: true };
-    // Projected ideal but actual not yet (trending up), or both comfortably above min.
-    return { text: 'Great', bgColor: '#15803d', isCritical: false, isAmazing: false };
+        return mkBadge('Inactive', '#6b7280');
+    // No actual hours yet — judge by projected only.
+    if (actual === 'na') {
+        switch (projected) {
+            case 'behind': return mkBadge('Behind', BADGE_RED);
+            case 'risky': return mkBadge('At Risk', BADGE_AMBER);
+            case 'ok': return mkBadge('Projected Good', BADGE_GREEN);
+            case 'ideal': return mkBadge('Projected Ideal', BADGE_GREEN, BADGE_GREEN_CARD);
+            case 'high': return mkBadge('Projected High', BADGE_YG);
+            case 'over': return mkBadge('Projected High', BADGE_YG);
+        }
+    }
+    // Helper for projected-Behind severity based on how far below the floor.
+    const behindSeverity = (gap, atRiskColor) => gap > 10 ? mkBadge('Critical', BADGE_RED, BADGE_RED_CARD, true)
+        : gap >= 5 ? mkBadge('High Risk', BADGE_RED)
+            : mkBadge('At Risk', atRiskColor);
+    switch (actual) {
+        case 'behind':
+            switch (projected) {
+                case 'behind': return mkBadge('Critical', BADGE_RED, BADGE_RED_CARD, true);
+                case 'risky':
+                case 'ok': return mkBadge('High Risk', BADGE_RED);
+                case 'ideal': return mkBadge('At Risk', BADGE_AMBER);
+                case 'high': {
+                    const margin = projectedPct - companyMinPct;
+                    return margin >= 10
+                        ? mkBadge('Projected Good', BADGE_YG)
+                        : mkBadge('At Risk', BADGE_AMBER);
+                }
+                case 'over': {
+                    if (insurerCapPct === undefined)
+                        return mkBadge('At Risk', BADGE_AMBER);
+                    return projectedPct - insurerCapPct >= 10
+                        ? mkBadge('At Risk', BADGE_AMBER)
+                        : mkBadge('Projected Good', BADGE_YG);
+                }
+            }
+            break;
+        case 'good':
+            switch (projected) {
+                case 'behind': {
+                    const gap = belowMin(projectedPct, companyMinPct);
+                    return gap >= 10
+                        ? mkBadge('Critical', BADGE_RED, BADGE_RED_CARD, true)
+                        : mkBadge('At Risk', CAP_OVER);
+                }
+                case 'risky':
+                case 'ok': return mkBadge('Projected Good', BADGE_GREEN);
+                case 'ideal': return mkBadge('Projected Good', BADGE_GREEN);
+                case 'high': {
+                    // Projected Ideal if projected − 5% still lands in the ideal band.
+                    const adjPct = projectedPct - 5;
+                    return (adjPct >= preferredMinPct && adjPct <= preferredMaxPct)
+                        ? mkBadge('Projected Ideal', BADGE_GREEN, BADGE_GREEN_CARD)
+                        : mkBadge('Projected High', BADGE_YG);
+                }
+                case 'over': return mkBadge('Projected High', BADGE_YG);
+            }
+            break;
+        case 'ideal':
+            switch (projected) {
+                case 'behind': return behindSeverity(belowMin(projectedPct, companyMinPct), BADGE_AMBER_WARM);
+                case 'risky':
+                case 'ok': return mkBadge('Projected Good', BADGE_GREEN);
+                case 'ideal': return mkBadge('✨ Amazing', BADGE_GREEN, BADGE_GREEN_CARD, false, true);
+                case 'high': return mkBadge('Projected High', BADGE_YG);
+                case 'over': return mkBadge('At Risk', BADGE_AMBER);
+            }
+            break;
+        case 'high':
+            switch (projected) {
+                case 'behind': return behindSeverity(belowMin(projectedPct, companyMinPct), BADGE_AMBER);
+                case 'risky':
+                case 'ok': return mkBadge('Projected Good', BADGE_GREEN);
+                case 'ideal': {
+                    // Solidly in ideal (≥ 3% above preferred min) → Projected Ideal; barely → Projected Good.
+                    return (projectedPct - preferredMinPct >= 3)
+                        ? mkBadge('Projected Ideal', BADGE_GREEN, BADGE_GREEN_CARD)
+                        : mkBadge('Projected Good', BADGE_GREEN);
+                }
+                case 'high': return mkBadge('Projected High', BADGE_YG);
+                case 'over': return mkBadge('At Risk', BADGE_AMBER);
+            }
+            break;
+        case 'over':
+            switch (projected) {
+                case 'behind': return behindSeverity(belowMin(projectedPct, companyMinPct), BADGE_AMBER_WARM);
+                case 'risky':
+                case 'ok': return mkBadge('Projected Good', BADGE_GREEN);
+                case 'ideal': {
+                    if (insurerCapPct === undefined)
+                        return mkBadge('Projected Ideal', BADGE_GREEN, BADGE_GREEN_CARD);
+                    return (actualPct - insurerCapPct >= 10)
+                        ? mkBadge('At Risk', BADGE_AMBER)
+                        : mkBadge('Projected Ideal', BADGE_GREEN, BADGE_GREEN_CARD);
+                }
+                case 'high': return mkBadge('At Risk', BADGE_AMBER);
+                case 'over': return mkBadge('High', BADGE_ORANGE_RED);
+            }
+            break;
+    }
+    return mkBadge('Unknown', '#6b7280');
 }
-function ClientCard({ report, targetPct, preferredPct, maxPct }) {
+function ClientCard({ report, targetPct, preferredPct, preferredMaxPct, maxPct }) {
     const { client, actual, projected } = report;
     const noDirect = actual.directHours === 0 && projected.directHours === 0;
-    const aLevel = getActualLevel(actual.directHours, actual.pct, targetPct, preferredPct, maxPct);
-    const pLevel = getProjectedLevel(projected.directHours, projected.pct, targetPct, preferredPct, maxPct);
-    const badge = overallBadge(aLevel, pLevel, noDirect);
+    const aLevel = getActualLevel(actual.directHours, actual.pct, targetPct, preferredPct, preferredMaxPct, maxPct);
+    const pLevel = getProjectedLevel(projected.directHours, projected.pct, targetPct, preferredPct, preferredMaxPct, maxPct);
+    const badge = overallBadge(aLevel, pLevel, noDirect, actual.pct, projected.pct, targetPct, preferredPct, preferredMaxPct, maxPct);
     const actualStatus = actualSectionStatus(aLevel);
     const projStatus = projectedSectionStatus(pLevel);
     return (_jsxs("div", { style: {
@@ -195,7 +295,7 @@ function ClientCard({ report, targetPct, preferredPct, maxPct }) {
                             color: 'white', backgroundColor: badge.bgColor,
                             padding: '2px 10px', borderRadius: 10,
                             boxShadow: badge.isAmazing ? '0 0 0 2px #86efac' : undefined,
-                        }, children: badge.text })] }), noDirect ? (_jsxs("p", { style: { fontSize: 12, color: '#6b7280', margin: 0 }, children: ["No direct sessions in ", monthLabel(report), ". Nothing to supervise."] })) : (_jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, alignItems: 'start' }, children: [_jsx(Metric, { title: "Actual", m: actual, targetPct: targetPct, preferredPct: preferredPct, sectionStatus: actualStatus, maxPct: maxPct }), _jsx(Metric, { title: "Projected", m: projected, targetPct: targetPct, preferredPct: preferredPct, sectionStatus: projStatus, maxPct: maxPct })] }))] }));
+                        }, children: badge.text })] }), noDirect ? (_jsxs("p", { style: { fontSize: 12, color: '#6b7280', margin: 0 }, children: ["No direct sessions in ", monthLabel(report), ". Nothing to supervise."] })) : (_jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, alignItems: 'start' }, children: [_jsx(Metric, { title: "Actual", m: actual, targetPct: targetPct, preferredPct: preferredPct, preferredMaxPct: preferredMaxPct, sectionStatus: actualStatus, maxPct: maxPct }), _jsx(Metric, { title: "Projected", m: projected, targetPct: targetPct, preferredPct: preferredPct, preferredMaxPct: preferredMaxPct, sectionStatus: projStatus, maxPct: maxPct })] }))] }));
 }
 function TechCard({ report, maxPct, contacts, rbtMinContacts, btMinContacts }) {
     const { tech, actual, projected } = report;
@@ -265,12 +365,15 @@ function statusColor(s) {
 // Distinct from the green/yellow/red status colors so the over-cap warning
 // doesn't get confused with the under-min status pill.
 const CAP_OVER = '#ea580c';
-function Metric({ title, m, targetPct, preferredPct, sectionStatus, maxPct }) {
+function Metric({ title, m, targetPct, preferredPct, preferredMaxPct, sectionStatus, maxPct }) {
     const overCap = maxPct !== undefined && m.pct > maxPct;
+    const overPrefMax = !overCap && m.pct > preferredMaxPct;
     const fillPct = Math.min(100, (m.pct / targetPct) * 100);
     const { color: statusColor, text: statusText } = sectionStatus;
-    const label = overCap ? `of ${maxPct}% max` : `of ${preferredPct}%`;
-    return (_jsxs("div", { children: [_jsx("div", { style: { fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: '#6b7280', marginBottom: 2 }, children: title }), _jsxs("div", { style: { display: 'flex', alignItems: 'baseline', gap: 5 }, children: [_jsxs("span", { style: { fontSize: 18, fontWeight: 700, color: statusColor }, children: [m.pct.toFixed(1), "%", overCap && _jsx("span", { style: { fontSize: 14 }, children: " \u26A0\uFE0F" })] }), _jsx("span", { style: { fontSize: 11, color: '#6b7280', fontWeight: 400 }, children: label })] }), _jsx("div", { style: { height: 22, display: 'flex', alignItems: 'center', marginTop: 3 }, children: _jsx("span", { style: {
+    const label = overCap ? `of ${maxPct}% cap ⚠️`
+        : overPrefMax ? `of ${preferredMaxPct}% pref. max`
+            : `of ${preferredPct}% target`;
+    return (_jsxs("div", { children: [_jsx("div", { style: { fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: '#6b7280', marginBottom: 2 }, children: title }), _jsxs("div", { style: { display: 'flex', alignItems: 'baseline', gap: 5 }, children: [_jsxs("span", { style: { fontSize: 18, fontWeight: 700, color: statusColor }, children: [m.pct.toFixed(1), "%"] }), _jsx("span", { style: { fontSize: 11, color: '#6b7280', fontWeight: 400 }, children: label })] }), _jsx("div", { style: { height: 22, display: 'flex', alignItems: 'center', marginTop: 3 }, children: _jsx("span", { style: {
                         fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
                         color: 'white', backgroundColor: statusColor,
                         padding: '2px 7px', borderRadius: 8,

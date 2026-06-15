@@ -117,11 +117,11 @@ export default function App() {
   const [mutedConflicts, setMutedConflicts] = useState<string[]>([]);
   const [solutions, setSolutions] = useState<ScheduleSolution[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [view, setView] = useState<'schedule' | 'admin' | 'compliance' | 'caseload'>('schedule');
+  const [view, setView] = useState<'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish'>('schedule');
   const [showSettings, setShowSettings] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
-  const [showWish, setShowWish] = useState(false);
+  // Wish view is now a full page (view === 'wish') rather than a modal.
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   // Whether the selected appointment's detail panel is expanded into its inline
   // edit form (slide-up), replacing the old edit modal on the schedule view.
@@ -694,7 +694,7 @@ export default function App() {
   const acceptWish = async (sol: WishSolution) => {
     if (!scheduleData) return;
     await commitScheduleData(applyWishSolution(scheduleData, sol));
-    setShowWish(false); setSelectedAppointment(null);
+    setView('schedule'); setSelectedAppointment(null);
   };
 
   const customizeWish = (sol: WishSolution) => {
@@ -702,7 +702,7 @@ export default function App() {
     const { ops, blackouts } = wishSolutionToDraft(sol, scheduleData);
     if (blackouts.length) commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] });
     stageOps(ops);
-    setShowWish(false);
+    setView('schedule');
   };
 
   // "Fix It" produces WishSolutions too, so accept/customize reuse the Wish
@@ -1181,7 +1181,7 @@ export default function App() {
             }}
           />
         </div>
-        {/* Row 2: action buttons + view tabs, all in one line */}
+        {/* Row 2: nav buttons */}
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
           {!scheduleData ? (
             <>
@@ -1189,19 +1189,9 @@ export default function App() {
               <FileUpload onUpload={handleFileUpload} loading={loading} />
             </>
           ) : (
-            <>
-              {compactBtn(
-                '🔧',
-                hasIssues ? `Fix It — ${issueCount} issue${issueCount === 1 ? '' : 's'} to resolve` : 'Fix It — no issues found',
-                () => setView('compliance'),
-                '#ea580c',
-                !hasIssues,
-              )}
-              {compactBtn('✨', 'Wish It — AI schedule rework', () => setShowWish(true), '#7c3aed')}
-              <ViewTabs view={view} onChange={setView} compSummary={compSummary}
-                conflictCount={activeConflicts.length}
-                conflictHasError={activeConflicts.some(c => c.severity === 'error')} />
-            </>
+            <NavButtons view={view} onChange={setView} compSummary={compSummary}
+              conflictCount={activeConflicts.length}
+              conflictHasError={activeConflicts.some(c => c.severity === 'error')} />
           )}
         </div>
       </header>
@@ -1420,6 +1410,15 @@ export default function App() {
             {view === 'caseload' && (
               <CaseloadView data={scheduleData} now={viewDate} />
             )}
+            {view === 'wish' && (
+              <WishComposer
+                data={scheduleData}
+                aiSettings={aiSettings}
+                onAccept={acceptWish}
+                onCustomize={customizeWish}
+                onClose={() => setView('schedule')}
+              />
+            )}
           </>
         ) : (
           <div style={{
@@ -1535,16 +1534,6 @@ export default function App() {
         />
       )}
 
-      {showWish && scheduleData && (
-        <WishComposer
-          data={scheduleData}
-          aiSettings={aiSettings}
-          onAccept={acceptWish}
-          onCustomize={customizeWish}
-          onClose={() => setShowWish(false)}
-        />
-      )}
-
       {showDayReview && scheduleData && (
         <DayReview
           appointments={pendingReview}
@@ -1575,58 +1564,58 @@ export default function App() {
 
 // Three-way segmented control for the active view. Sits inline in the header
 // at compact-button size so it doesn't blow up the chrome.
-function ViewTabs({ view, onChange, compSummary, conflictCount, conflictHasError }: {
-  view: 'schedule' | 'admin' | 'compliance' | 'caseload';
-  onChange: (v: 'schedule' | 'admin' | 'compliance' | 'caseload') => void;
+function NavButtons({ view, onChange, compSummary, conflictCount, conflictHasError }: {
+  view: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish';
+  onChange: (v: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish') => void;
   compSummary?: ComplianceSummary | null;
   conflictCount?: number;
   conflictHasError?: boolean;
 }) {
-  const tabs: { key: 'schedule' | 'admin' | 'compliance' | 'caseload'; label: string; aria: string }[] = [
-    { key: 'schedule', label: '🗓️ Cal', aria: 'Schedule' },
-    { key: 'compliance', label: 'Comp', aria: 'Compliance' },
-    { key: 'caseload', label: '📈 Dash', aria: 'Dashboard' },
-    { key: 'admin', label: '⚙️', aria: 'Admin' },
-  ];
-  // Badge for Compliance tab: total of schedule conflicts + compliance entities needing attention.
-  // Color: red if any errors (schedule or compliance red), yellow if only warnings, green if 0.
   const compRed = compSummary?.red ?? 0;
   const compYellow = compSummary?.yellow ?? 0;
   const badgeCount = (conflictCount ?? 0) + compRed + compYellow;
   const badgeColor = (conflictHasError || compRed > 0) ? '#ef4444'
     : badgeCount > 0 ? '#f59e0b' : '#10b981';
 
+  const btn = (
+    label: string,
+    key: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish',
+    badge?: React.ReactNode,
+  ) => {
+    const active = view === key;
+    return (
+      <button
+        key={key}
+        onClick={() => onChange(key)}
+        aria-label={label}
+        title={label}
+        style={{
+          padding: '5px 10px', border: 'none', borderRadius: 5,
+          backgroundColor: active ? '#6366f1' : '#374151',
+          color: 'white', cursor: 'pointer',
+          fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+        }}
+      >
+        {badge}
+        {label}
+      </button>
+    );
+  };
+
   return (
-    <div style={{ display: 'flex', borderRadius: 5, overflow: 'hidden', border: '1px solid #4b5563' }}>
-      {tabs.map(t => {
-        const active = t.key === view;
-        const isComp = t.key === 'compliance';
-        return (
-          <button
-            key={t.key}
-            onClick={() => onChange(t.key)}
-            aria-label={isComp && badgeCount > 0 ? `${t.aria} — ${badgeCount} need attention` : t.aria}
-            title={isComp && badgeCount > 0 ? `${badgeCount} client(s)/tech(s) need attention this month` : t.aria}
-            style={{
-              padding: '5px 9px', border: 'none',
-              backgroundColor: active ? '#6366f1' : 'transparent',
-              color: 'white', cursor: 'pointer',
-              fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', lineHeight: 1.2,
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-            }}
-          >
-            {isComp && (
-              <span style={{
-                minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9,
-                backgroundColor: badgeColor, color: 'white',
-                fontSize: 11, fontWeight: 700,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              }}>{badgeCount}</span>
-            )}
-            {t.label}
-          </button>
-        );
-      })}
-    </div>
+    <>
+      {btn('Cal', 'schedule')}
+      {btn('Fix', 'compliance', (
+        <span style={{
+          minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9,
+          backgroundColor: badgeColor, color: 'white',
+          fontSize: 11, fontWeight: 700,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        }}>{badgeCount}</span>
+      ))}
+      {btn('✨Wish', 'wish')}
+      {btn('⚙️Admin', 'admin')}
+    </>
   );
 }

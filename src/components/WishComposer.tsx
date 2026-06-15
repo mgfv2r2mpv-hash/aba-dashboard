@@ -71,20 +71,12 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
     }
   };
 
-  const overlay: React.CSSProperties = {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000,
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    padding: 'max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))',
-    boxSizing: 'border-box',
-  };
-
   return (
-    <div style={overlay}>
-      <div style={{ background: 'white', borderRadius: 10, padding: 20, width: '100%', maxWidth: 560, maxHeight: '100%', overflowY: 'auto', boxSizing: 'border-box' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-          <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>✨ Wish It</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>✕</button>
-        </div>
+    <div style={{ padding: 20, maxWidth: 600, margin: '0 auto', boxSizing: 'border-box' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>✨ Wish It</h2>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>✕</button>
+      </div>
         <p style={{ fontSize: 13, color: '#6b7280', marginTop: 0 }}>
           Describe a goal; the AI proposes up to 3 compliant ways to reshape your schedule. Pick one to apply or customize.
         </p>
@@ -234,7 +226,6 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
             {loading ? 'Thinking…' : solutions ? 'Regenerate' : 'Generate options'}
           </button>
         </div>
-      </div>
     </div>
   );
 }

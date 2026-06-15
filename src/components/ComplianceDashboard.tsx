@@ -351,7 +351,7 @@ function getProjectedLevel(directHours: number, pct: number, targetPct: number, 
 function actualSectionStatus(level: ActualLevel): { text: string; color: string } {
   switch (level) {
     case 'na':      return { text: 'N/A',    color: '#6b7280' };
-    case 'reduce':  return { text: 'Reduce', color: CAP_OVER };
+    case 'reduce':  return { text: 'Over',   color: CAP_OVER };
     case 'ideal':   return { text: 'Ideal',  color: '#15803d' };
     case 'good':    return { text: 'Good',   color: '#15803d' };
     case 'behind':  return { text: 'Behind', color: '#b91c1c' };
@@ -362,11 +362,11 @@ function actualSectionStatus(level: ActualLevel): { text: string; color: string 
 // OK is amber (not green) — makes the target but won't reach BCBA preferred.
 function projectedSectionStatus(level: ProjectedLevel): { text: string; color: string } {
   switch (level) {
-    case 'overcap': return { text: 'Over Cap', color: CAP_OVER };
-    case 'ideal':   return { text: 'Ideal',    color: '#15803d' };
-    case 'ok':      return { text: 'OK',       color: '#a16207' };
-    case 'risky':   return { text: 'Risky',    color: '#b91c1c' };
-    case 'behind':  return { text: 'Behind',   color: '#b91c1c' };
+    case 'overcap': return { text: 'Over',   color: CAP_OVER };
+    case 'ideal':   return { text: 'Ideal',  color: '#15803d' };
+    case 'ok':      return { text: 'OK',     color: '#a16207' };
+    case 'risky':   return { text: 'Risky',  color: '#b91c1c' };
+    case 'behind':  return { text: 'Behind', color: '#b91c1c' };
   }
 }
 
@@ -391,8 +391,8 @@ function overallBadge(
   if (actual === 'reduce' && projected === 'risky')
     return { text: 'At Risk', bgColor: '#a16207', isCritical: false, isAmazing: false };
 
-  // Over insurer cap (not a minimum problem, but a financial one).
-  if (actual === 'reduce' || projected === 'overcap')
+  // Both sides over insurer cap → financial problem in both views.
+  if (actual === 'reduce' && projected === 'overcap')
     return { text: 'Reduce', bgColor: CAP_OVER, isCritical: false, isAmazing: false };
 
   // Projected barely above minimum (risky zone).
@@ -444,8 +444,8 @@ function ClientCard({ report, targetPct, preferredPct, maxPct }: { report: Clien
         </p>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, alignItems: 'start' }}>
-          <Metric title="Actual" m={actual} targetPct={targetPct} sectionStatus={actualStatus} maxPct={maxPct} />
-          <Metric title="Projected" m={projected} targetPct={targetPct} sectionStatus={projStatus} maxPct={maxPct} />
+          <Metric title="Actual" m={actual} targetPct={targetPct} preferredPct={preferredPct} sectionStatus={actualStatus} maxPct={maxPct} />
+          <Metric title="Projected" m={projected} targetPct={targetPct} preferredPct={preferredPct} sectionStatus={projStatus} maxPct={maxPct} />
         </div>
       )}
     </div>
@@ -601,16 +601,18 @@ function statusColor(s: 'green' | 'yellow' | 'red' | 'gray'): string {
 // doesn't get confused with the under-min status pill.
 const CAP_OVER = '#ea580c';
 
-function Metric({ title, m, targetPct, sectionStatus, maxPct }: {
+function Metric({ title, m, targetPct, preferredPct, sectionStatus, maxPct }: {
   title: string;
   m: { directHours: number; supervisionHours: number; requiredHours: number; pct: number; hoursToGo: number };
   targetPct: number;
+  preferredPct: number;
   sectionStatus: { text: string; color: string };
   maxPct?: number;
 }) {
   const overCap = maxPct !== undefined && m.pct > maxPct;
   const fillPct = Math.min(100, (m.pct / targetPct) * 100);
   const { color: statusColor, text: statusText } = sectionStatus;
+  const label = overCap ? `of ${maxPct}% max` : `of ${preferredPct}%`;
   return (
     <div>
       <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: '#6b7280', marginBottom: 2 }}>
@@ -621,7 +623,7 @@ function Metric({ title, m, targetPct, sectionStatus, maxPct }: {
           {m.pct.toFixed(1)}%{overCap && <span style={{ fontSize: 14 }}> ⚠️</span>}
         </span>
         <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 400 }}>
-          of {targetPct}% target
+          {label}
         </span>
       </div>
       {/* Badge on fixed-height row — keeps bar vertically aligned across columns */}

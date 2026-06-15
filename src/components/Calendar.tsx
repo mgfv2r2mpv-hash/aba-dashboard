@@ -3,7 +3,7 @@ import { Appointment, Technician, Client, CompanySettings, TimeOff } from '../ty
 import { DraftMark } from '../draft';
 import { rollupHours, resolveUtilization, HoursByStatus, ptoHoursInRange, reduceRequirementForPto } from '../utilization';
 import { tileStyle, clientPastel, clientDarkBorder, legendStripeStyle } from '../calendarColors';
-import { useMinWidth } from '../useMediaQuery';
+import { useMinWidth, useIsLandscape } from '../useMediaQuery';
 import {
   startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek,
   format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay,
@@ -31,6 +31,8 @@ interface CalendarProps {
   // When a draft is open, marks staged appointments (add/move/shorten/remove)
   // so they render as "proposed"/tombstoned rather than committed sessions.
   draftMarks?: Map<string, DraftMark>;
+  // Opens the add-appointment form; surfaced in the calendar toolbar.
+  onAddAppointment?: () => void;
 }
 
 type View = 'month' | 'week' | 'day';
@@ -48,19 +50,6 @@ const TIME_AXIS_WIDTH_WIDE = 64;
 // Snap drag movements to 15-minute slots — matches typical scheduling resolution.
 const SNAP_MINUTES = 15;
 
-function useIsLandscape(): boolean {
-  const [landscape, setLandscape] = useState(() =>
-    typeof window === 'undefined' ? false : window.matchMedia('(orientation: landscape)').matches
-  );
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia('(orientation: landscape)');
-    const handler = (e: MediaQueryListEvent) => setLandscape(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
-  return landscape;
-}
 
 export default function Calendar({
   appointments,
@@ -74,6 +63,7 @@ export default function Calendar({
   onLensChange,
   hideTotals,
   draftMarks,
+  onAddAppointment,
 }: CalendarProps) {
   const [view, setView] = useState<View>('month');
   const [lens, setLens] = useState<Lens>('bcba');
@@ -160,6 +150,18 @@ export default function Calendar({
         marginBottom: 16, gap: 8, flexWrap: 'wrap',
       }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {onAddAppointment && (
+            <button
+              onClick={onAddAppointment}
+              aria-label="Add appointment"
+              title="Add appointment"
+              style={{
+                padding: '5px 10px', backgroundColor: '#3b82f6', color: 'white',
+                border: 'none', borderRadius: 5, cursor: 'pointer',
+                fontSize: 16, fontWeight: 700, lineHeight: 1,
+              }}
+            >+</button>
+          )}
           <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
             <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
             <ViewBtn active={view === 'week'} onClick={() => setView('week')}>Week</ViewBtn>

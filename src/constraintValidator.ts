@@ -61,8 +61,12 @@ export class ConstraintValidator {
     const conflicts: ScheduleConflict[] = [];
     const fmt = (n: number) => (Math.round(n * 10) / 10).toString();
 
-    const isUnstaffed = (clientId: string): boolean =>
-      !this.data.technicians.some(t => t.assignments.some(a => a.clientId === clientId));
+    const isUnstaffed = (clientId: string): boolean => {
+      const clientName = this.data.clients.find(c => c.id === clientId)?.name;
+      return !this.data.technicians.some(t =>
+        t.assignments.some(a => a.clientId === clientId || (clientName != null && a.clientId === clientName))
+      );
+    };
 
     for (const client of this.data.clients) {
       const cs = computeCaseState(this.data, client, this.now);
@@ -93,13 +97,14 @@ export class ConstraintValidator {
         }
       }
 
-      // Supervision pacing cadence (soft).
+      // Supervision pacing cadence — critical: falling behind on contact count
+      // cannot be recovered by extending existing sessions; new sessions are required.
       if (cs.supervision.contactsRequiredByCadence !== undefined &&
           cs.supervision.contactsThisMonth < cs.supervision.contactsRequiredByCadence &&
           cs.supervision.directHoursMonth > 0) {
         conflicts.push({
           type: 'supervision-violation',
-          severity: 'info',
+          severity: 'error',
           message: `${client.name}: ${cs.supervision.contactsThisMonth} supervision contact(s) projected vs the ${cs.supervision.cadenceGoal} pacing goal (${cs.supervision.contactsRequiredByCadence}) for ${cs.monthLabel}`,
         });
       }

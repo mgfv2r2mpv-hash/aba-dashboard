@@ -45,8 +45,12 @@ function opText(o: WishOp): string {
   }
 }
 
+const DEFAULT_HORIZON = 4;
+
 export default function WishComposer({ data, aiSettings, onAccept, onCustomize, onClose }: Props) {
-  const [wish, setWish] = useState<WishRequest>({ kind: 'vacation', horizonWeeks: 8 });
+  const [wish, setWish] = useState<WishRequest>({ kind: 'vacation', horizonWeeks: DEFAULT_HORIZON });
+  const [horizonText, setHorizonText] = useState(String(DEFAULT_HORIZON));
+  const [tooltipVisible, setTooltipVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [solutions, setSolutions] = useState<WishSolution[] | null>(null);
@@ -143,8 +147,19 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: '#374151' }}>
               <span>{wish.kind === 'freeform' ? 'Describe your goal' : 'Anything else? (optional)'}</span>
-              <span title={CONTEXT_TOOLTIP} style={{ cursor: 'help', color: '#6b7280', fontSize: 11, border: '1px solid #d1d5db', borderRadius: '50%', width: 16, height: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>?</span>
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={() => setTooltipVisible(v => !v)}
+                onKeyDown={e => e.key === 'Enter' && setTooltipVisible(v => !v)}
+                style={{ cursor: 'pointer', color: '#6b7280', fontSize: 11, border: '1px solid #d1d5db', borderRadius: '50%', width: 16, height: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, userSelect: 'none' }}
+              >?</span>
             </div>
+            {tooltipVisible && (
+              <div style={{ fontSize: 12, color: '#374151', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: '8px 10px', lineHeight: 1.5 }}>
+                {CONTEXT_TOOLTIP}
+              </div>
+            )}
             <textarea
               value={wish.note || ''} onChange={e => upd({ note: e.target.value.slice(0, 400) })}
               rows={wish.kind === 'freeform' ? 3 : 2} maxLength={400}
@@ -156,7 +171,24 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
 
           <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             Look ahead
-            <input type="number" min="1" max="26" value={wish.horizonWeeks ?? 8} onChange={e => upd({ horizonWeeks: Math.max(1, parseInt(e.target.value) || 8) })} style={{ ...inputStyle, width: 70 }} />
+            <input
+              type="number"
+              min="1"
+              max="26"
+              value={horizonText}
+              onChange={e => {
+                setHorizonText(e.target.value);
+                const n = parseInt(e.target.value);
+                if (!isNaN(n) && n >= 1) upd({ horizonWeeks: Math.min(26, n) });
+              }}
+              onBlur={() => {
+                const n = parseInt(horizonText);
+                const clamped = isNaN(n) || n < 1 ? DEFAULT_HORIZON : Math.min(26, n);
+                setHorizonText(String(clamped));
+                upd({ horizonWeeks: clamped });
+              }}
+              style={{ ...inputStyle, width: 70 }}
+            />
             weeks
           </label>
 

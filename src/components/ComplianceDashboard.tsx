@@ -68,6 +68,7 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
   const rbtMinContacts = data.settings.rbtMinContactsPerMonth ?? 2;
   const pastIncomplete = useMemo(() => pastIncompleteAppointments(data), [data]);
   const targetPct = data.settings.supervisionDirectHoursPercent || 5;
+  const preferredPct = data.settings.supervisionPreferredMinPercent ?? 15;
   const techTargetPct = data.settings.supervisionTechHoursPercent ?? 0;
   const maxPct = data.settings.supervisionMaxHoursPercent;
 
@@ -144,7 +145,7 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
                 No clients yet. Add clients in Admin to start tracking compliance.
               </p>
             )}
-            {clientReports.map(r => <ClientCard key={r.client.id} report={r} targetPct={targetPct} maxPct={maxPct} />)}
+            {clientReports.map(r => <ClientCard key={r.client.id} report={r} targetPct={targetPct} preferredPct={preferredPct} maxPct={maxPct} />)}
           </div>
         </>
       )}
@@ -314,34 +315,69 @@ function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }: {
 
 // ---------- Per-client card ----------
 
-function ClientCard({ report, targetPct, maxPct }: { report: ClientCompliance; targetPct: number; maxPct?: number }) {
+// "Within 2 percentage-points of the minimum" → Risky.
+const RISKY_MARGIN = 2;
+
+// Status for the ACTUAL supervision section.
+function actualSectionStatus(pct: number, targetPct: number, preferredPct: number, maxPct?: number): { text: string; color: string } | null {
+  if (maxPct !== undefined && pct > maxPct) return { text: 'Reduce', color: CAP_OVER };
+  if (pct >= preferredPct) return { text: 'Ideal', color: '#15803d' };
+  if (pct >= targetPct) return { text: 'Good', color: '#15803d' };
+  return null;
+}
+
+// Status for the PROJECTED supervision section.
+function projectedSectionStatus(pct: number, targetPct: number, preferredPct: number, maxPct?: number): { text: string; color: string } {
+  if (maxPct !== undefined && pct > maxPct) return { text: 'Over Cap', color: CAP_OVER };
+  if (pct >= preferredPct && (maxPct === undefined || pct <= maxPct)) return { text: 'Ideal', color: '#15803d' };
+  if (pct >= targetPct + RISKY_MARGIN) return { text: 'OK', color: '#15803d' };
+  return { text: 'Risky', color: '#b91c1c' };
+}
+
+// Overall card badge — driven by projected (end-of-period outcome).
+function clientCardBadge(
+  actual: { pct: number },
+  projected: { pct: number },
+  targetPct: number,
+  preferredPct: number,
+  maxPct: number | undefined,
+  noDirect: boolean,
+): { text: string; bgColor: string } {
+  if (noDirect) return { text: 'Inactive', bgColor: '#6b7280' };
+  if (actual.pct < targetPct && projected.pct < targetPct)
+    return { text: 'Critical', bgColor: '#b91c1c' };
+  if (projected.pct < targetPct + RISKY_MARGIN)
+    return { text: 'Risky', bgColor: '#b91c1c' };
+  if (maxPct !== undefined && actual.pct > maxPct)
+    return { text: 'Reduce', bgColor: CAP_OVER };
+  if (projected.pct >= preferredPct && (maxPct === undefined || projected.pct <= maxPct))
+    return { text: 'Ideal', bgColor: '#15803d' };
+  return { text: 'OK', bgColor: '#15803d' };
+}
+
+function ClientCard({ report, targetPct, preferredPct, maxPct }: { report: ClientCompliance; targetPct: number; preferredPct: number; maxPct?: number }) {
   const { client, actual, projected } = report;
   const noDirect = actual.directHours === 0 && projected.directHours === 0;
 
-  // Status: green if actual already meets, yellow if projected meets but actual
-  // doesn't, red if even projected falls short. Inactive clients (no direct
-  // hours) get a neutral gray.
-  let status: 'green' | 'yellow' | 'red' | 'gray';
-  if (noDirect) status = 'gray';
-  else if (actual.pct >= targetPct) status = 'green';
-  else if (projected.pct >= targetPct) status = 'yellow';
-  else status = 'red';
+  const badge = clientCardBadge(actual, projected, targetPct, preferredPct, maxPct, noDirect);
+  const actualStatus = noDirect ? null : actualSectionStatus(actual.pct, targetPct, preferredPct, maxPct);
+  const projStatus = noDirect ? null : projectedSectionStatus(projected.pct, targetPct, preferredPct, maxPct);
 
-  const accentColor = statusColor(status);
+  const cardBorderColor = badge.bgColor;
 
   return (
     <div style={{
-      backgroundColor: 'white',
-      border: `2px solid ${accentColor}`,
+      backgroundColor: badge.bgColor === '#b91c1c' ? '#fff5f5' : 'white',
+      border: `2px solid ${cardBorderColor}`,
       borderRadius: 8, padding: 12,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>{client.name}</h3>
         <span style={{
           fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-          color: 'white', backgroundColor: accentColor,
+          color: 'white', backgroundColor: badge.bgColor,
           padding: '2px 8px', borderRadius: 10,
-        }}>{statusLabel(status)}</span>
+        }}>{badge.text}</span>
       </div>
 
       {noDirect ? (
@@ -350,8 +386,8 @@ function ClientCard({ report, targetPct, maxPct }: { report: ClientCompliance; t
         </p>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-          <Metric title="Actual" m={actual} targetPct={targetPct} accent={accentColor} maxPct={maxPct} />
-          <Metric title="Projected" m={projected} targetPct={targetPct} accent={accentColor} maxPct={maxPct} />
+          <Metric title="Actual" m={actual} targetPct={targetPct} sectionStatus={actualStatus} maxPct={maxPct} />
+          <Metric title="Projected" m={projected} targetPct={targetPct} sectionStatus={projStatus} maxPct={maxPct} />
         </div>
       )}
     </div>
@@ -507,34 +543,38 @@ function statusColor(s: 'green' | 'yellow' | 'red' | 'gray'): string {
     : '#6b7280';
 }
 
+
 // Distinct from the green/yellow/red status colors so the over-cap warning
 // doesn't get confused with the under-min status pill.
 const CAP_OVER = '#ea580c';
 
-function Metric({ title, m, targetPct, accent, maxPct }: {
+function Metric({ title, m, targetPct, sectionStatus, maxPct }: {
   title: string;
   m: { directHours: number; supervisionHours: number; requiredHours: number; pct: number; hoursToGo: number };
   targetPct: number;
-  accent: string;
+  sectionStatus: { text: string; color: string } | null;
   maxPct?: number;
 }) {
-  const fillPct = Math.min(100, m.pct);
-  const overCap = maxPct !== undefined && m.pct > maxPct;
-  const pctColor = overCap ? CAP_OVER : accent;
+  const fillPct = Math.min(100, (m.pct / targetPct) * 100);
+  const statusColor = sectionStatus?.color ?? '#b91c1c';
   return (
     <div>
       <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: '#6b7280', marginBottom: 4 }}>
         {title}
       </div>
-      <div style={{ fontSize: 18, fontWeight: 700, color: pctColor }}>
-        {m.pct.toFixed(1)}%
-        <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 400, marginLeft: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 18, fontWeight: 700, color: statusColor }}>
+          {m.pct.toFixed(1)}%
+        </span>
+        <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 400 }}>
           of {targetPct}% target
         </span>
-        {overCap && (
-          <div style={{ fontSize: 11, color: CAP_OVER, fontWeight: 600, marginTop: 2 }}>
-            ⚠ over {maxPct}% insurer cap
-          </div>
+        {sectionStatus && (
+          <span style={{
+            fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+            color: 'white', backgroundColor: sectionStatus.color,
+            padding: '1px 6px', borderRadius: 8,
+          }}>{sectionStatus.text}</span>
         )}
       </div>
       <div style={{
@@ -542,7 +582,7 @@ function Metric({ title, m, targetPct, accent, maxPct }: {
       }}>
         <div style={{
           height: '100%', width: `${fillPct}%`,
-          backgroundColor: accent, transition: 'width 200ms',
+          backgroundColor: statusColor, transition: 'width 200ms',
         }} />
       </div>
       <div style={{ fontSize: 11, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }}>
@@ -551,10 +591,10 @@ function Metric({ title, m, targetPct, accent, maxPct }: {
         <br />
         Required: <strong>{m.requiredHours.toFixed(1)}h</strong>
         {m.hoursToGo > 0 && (
-          <> · To go: <strong style={{ color: accent }}>{m.hoursToGo.toFixed(1)}h</strong></>
+          <> · To go: <strong style={{ color: statusColor }}>{m.hoursToGo.toFixed(1)}h</strong></>
         )}
         {m.hoursToGo === 0 && m.directHours > 0 && (
-          <> · ✓ on track</>
+          <> · ✓</>
         )}
       </div>
     </div>

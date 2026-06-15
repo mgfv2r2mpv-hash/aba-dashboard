@@ -187,8 +187,10 @@ ${JSON.stringify(inScope)}
 
 CLIENTS: ${JSON.stringify(anon.clients)}
 TECHNICIANS: ${JSON.stringify(anon.technicians)}
+${anon.blackouts.length ? `BLACKOUT DAYS (do not schedule on these dates for these entities): ${JSON.stringify(anon.blackouts)}` : ''}
+${anon.timeOff.length ? `BCBA TIME OFF (BCBA unavailable these days/hours): ${JSON.stringify(anon.timeOff)}` : ''}
 
-VALIDATION (do mentally before answering): For every op verify — (a) start ≥ NOW; (b) no double-book; (c) client/tech tokens exist in CLIENTS/TECHNICIANS; (d) apt tokens for move/remove exist in SCHEDULE; (e) skip any malformed token that looks like "CLIENT_nIENT_m" — those are corrupted and should be ignored.
+VALIDATION (do mentally before answering): For every op verify — (a) start ≥ NOW; (b) no double-book; (c) client/tech tokens exist in CLIENTS/TECHNICIANS; (d) apt tokens for move/remove exist in SCHEDULE; (e) proposed dates are not in BLACKOUT DAYS or BCBA TIME OFF; (f) skip any malformed token that looks like "CLIENT_nIENT_m" — those are corrupted and should be ignored.
 
 OUTPUT: Strict JSON only — no prose, no markdown. Exact schema (include only listed keys per op type):
 {"solutions":[{"summary":"short title","reasoning":"1-2 sentences","ops":[
@@ -243,6 +245,8 @@ ${JSON.stringify(inScope)}
 
 CLIENTS (JSON): ${JSON.stringify(anon.clients)}
 TECHNICIANS (JSON): ${JSON.stringify(anon.technicians)}
+${anon.blackouts.length ? `BLACKOUT DAYS (do not schedule on these dates for these entities): ${JSON.stringify(anon.blackouts)}` : ''}
+${anon.timeOff.length ? `BCBA TIME OFF (BCBA unavailable these days/hours): ${JSON.stringify(anon.timeOff)}` : ''}
 
 Produce UP TO 3 distinct options. Reply with STRICT JSON only (no prose, no markdown fence), shaped exactly:
 {"solutions":[{"summary":"short title","reasoning":"one or two sentences","ops":[

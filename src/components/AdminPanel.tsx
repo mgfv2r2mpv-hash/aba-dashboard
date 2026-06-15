@@ -25,7 +25,7 @@ const API_BASE = '/api';
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'auths' | 'blackouts' | 'timeoff' | 'settings'>('technicians');
+  const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'auths' | 'daysoff' | 'settings'>('technicians');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reordering, setReordering] = useState<null | 'clients' | 'technicians'>(null);
@@ -297,8 +297,7 @@ export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWi
         <button onClick={() => setActiveTab('technicians')} style={tabStyle(activeTab === 'technicians')}>Technicians</button>
         <button onClick={() => setActiveTab('clients')} style={tabStyle(activeTab === 'clients')}>Clients</button>
         <button onClick={() => setActiveTab('auths')} style={tabStyle(activeTab === 'auths')}>Auths</button>
-        <button onClick={() => setActiveTab('blackouts')} style={tabStyle(activeTab === 'blackouts')}>Blackouts</button>
-        <button onClick={() => setActiveTab('timeoff')} style={tabStyle(activeTab === 'timeoff')}>Time Off</button>
+        <button onClick={() => setActiveTab('daysoff')} style={tabStyle(activeTab === 'daysoff')}>Blocks & Time Off</button>
         <button onClick={() => setActiveTab('settings')} style={tabStyle(activeTab === 'settings')}>Settings</button>
       </div>
 
@@ -403,26 +402,27 @@ export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWi
           />
         )}
 
-        {activeTab === 'blackouts' && (
-          <BlackoutsTab
-            blackouts={data.blackouts || []}
-            technicians={data.technicians}
-            clients={data.clients}
-            savingId={savingId}
-            onAdd={addBlackout}
-            onRemove={removeBlackout}
-          />
-        )}
-
-        {activeTab === 'timeoff' && (
-          <TimeOffTab
-            timeOff={data.timeOff || []}
-            settings={data.settings}
-            appointments={data.appointments}
-            savingId={savingId}
-            onAdd={addTimeOff}
-            onRemove={removeTimeOff}
-          />
+        {activeTab === 'daysoff' && (
+          <>
+            <BlackoutsTab
+              blackouts={data.blackouts || []}
+              technicians={data.technicians}
+              clients={data.clients}
+              savingId={savingId}
+              onAdd={addBlackout}
+              onRemove={removeBlackout}
+            />
+            <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid #e5e7eb' }}>
+              <TimeOffTab
+                timeOff={data.timeOff || []}
+                settings={data.settings}
+                appointments={data.appointments}
+                savingId={savingId}
+                onAdd={addTimeOff}
+                onRemove={removeTimeOff}
+              />
+            </div>
+          </>
         )}
 
         {activeTab === 'settings' && (
@@ -2132,28 +2132,28 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
 
           {onClearData && (
             <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #e5e7eb' }}>
-              <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 8px' }}>
+              <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 6px' }}>
                 Clearing wipes the schedule loaded in the app. If you haven't saved
                 your work, <strong>download it first</strong> — this can't be undone.
               </p>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {onDownload && (
+              {onDownload && (
+                <div style={{ marginBottom: 8 }}>
                   <button
                     onClick={onDownload}
                     style={{
-                      padding: '8px 14px', backgroundColor: '#10b981', color: 'white',
-                      border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                      background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                      fontSize: 12, color: '#b91c1c', textDecoration: 'underline', fontWeight: 600,
                     }}
-                  >↓ Download schedule first (recommended)</button>
-                )}
-                <button
-                  onClick={onClearData}
-                  style={{
-                    padding: '8px 14px', backgroundColor: '#fee2e2', color: '#b91c1c',
-                    border: '1px solid #fca5a5', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                  }}
-                >Clear loaded data</button>
-              </div>
+                  >↓ Download schedule first</button>
+                </div>
+              )}
+              <button
+                onClick={onClearData}
+                style={{
+                  padding: '8px 14px', backgroundColor: '#fee2e2', color: '#b91c1c',
+                  border: '1px solid #fca5a5', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                }}
+              >Clear loaded data</button>
             </div>
           )}
         </SettingsSection>

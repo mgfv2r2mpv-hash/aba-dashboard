@@ -116,9 +116,20 @@ export function anonymizeAppointment(a: Appointment, map: AnonymizationMap): any
 
 // Scrub a free-text string of any names that appear in the schedule.
 // This is a defensive pass for conflict messages built from user data.
+//
+// We first protect any already-inserted CLIENT_n/TECH_n/APT_n tokens behind
+// null-byte placeholders so that short client names (e.g. "CL") can't corrupt
+// them when they are replaced globally (e.g. "CLIENT_1" → "CLIENT_4IENT_1").
 export function scrubText(text: string, data: ScheduleData, map: AnonymizationMap): string {
-  let result = text;
-  // Replace longest names first so "John Smith" beats "John"
+  // Step 1: stash existing tokens so name replacements can't touch them.
+  const saved: string[] = [];
+  let result = text.replace(/\b(CLIENT_\d+|TECH_\d+|APT_\d+)\b/g, (m) => {
+    const idx = saved.length;
+    saved.push(m);
+    return `\x00${idx}\x00`;
+  });
+
+  // Step 2: replace real names, longest first so "John Smith" beats "John".
   const replacements: { from: string; to: string }[] = [];
   data.clients.forEach(c => {
     if (c.name) replacements.push({ from: c.name, to: map.clients.get(c.name) || 'CLIENT_X' });
@@ -132,6 +143,9 @@ export function scrubText(text: string, data: ScheduleData, map: AnonymizationMa
     const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     result = result.replace(new RegExp(escaped, 'gi'), to);
   }
+
+  // Step 3: restore saved tokens.
+  result = result.replace(/\x00(\d+)\x00/g, (_, i) => saved[parseInt(i)] ?? '');
   return result;
 }
 

@@ -25,11 +25,11 @@ import DayReview from './components/DayReview';
 import CompleteTimePrompt from './components/CompleteTimePrompt';
 import AgendaRail from './components/AgendaRail';
 import ImportPreview from './components/ImportPreview';
-import { useMinWidth, useIsTablet } from './useMediaQuery';
+import { useMinWidth, useIsTablet, useIsLandscape } from './useMediaQuery';
 import LockScreen from './components/LockScreen';
 import PasswordPrompt from './components/PasswordPrompt';
 import { hasPin, setPin, verifyPin, changePin, saveSchedule, loadSchedule, saveAIConfig, loadAIConfig, clearAIConfig, isFaceIdEnabled, enableFaceId, disableFaceId, recoverPinViaBiometric, } from './appLock';
-import { isBiometricAvailable, biometricAuthenticate, getBiometryLabel } from './biometric';
+import { checkBiometryFull, biometricAuthenticate } from './biometric';
 import { pastIncompleteAppointments } from './compliance';
 import { buildCache, recomputeCache, summarize, } from './complianceCache';
 import { obfuscateKey, deobfuscateKey, encryptBytes, decryptBytes, isEncryptedSchedule, } from './clientCrypto';
@@ -131,6 +131,11 @@ export default function App() {
     const [pendingImport, setPendingImport] = useState(null);
     const detailPanelRef = React.useRef(null);
     const importInputRef = React.useRef(null);
+    const headerRef = React.useRef(null);
+    const mainScrollLastRef = React.useRef(0);
+    const [headerHidden, setHeaderHidden] = useState(false);
+    const [headerHeight, setHeaderHeight] = useState(56);
+    const isLandscape = useIsLandscape();
     // ---- App lock (native only) ----------------------------------------------
     // On a cold launch a PIN gates the app; the schedule is restored from an
     // at-rest blob encrypted under that PIN. `lockReady` gates the first render so
@@ -210,6 +215,37 @@ export default function App() {
     const draftStatus = React.useMemo(() => (scheduleData && draftActive ? solveDraft(scheduleData, draftOps, new Date(), scheduleData.settings) : null), [scheduleData, draftOps, draftActive]);
     const calendarAppointments = draftRender ? draftRender.appointments : (scheduleData?.appointments || []);
     const calendarMarks = draftRender ? draftRender.marks : undefined;
+    // Measure the header height (for the portrait fixed-header layout) and keep
+    // it updated if the content/safe-area changes (e.g. data load changes toolbar).
+    useEffect(() => {
+        const el = headerRef.current;
+        if (!el)
+            return;
+        const ro = new ResizeObserver(() => {
+            setHeaderHeight(el.offsetHeight);
+        });
+        ro.observe(el);
+        setHeaderHeight(el.offsetHeight);
+        return () => ro.disconnect();
+    });
+    // Reset header visibility when switching view, rotating, or scrolling to top.
+    useEffect(() => { setHeaderHidden(false); }, [view, isLandscape]);
+    const handleMainScroll = (e) => {
+        if (isLandscape)
+            return;
+        const el = e.currentTarget;
+        const curr = el.scrollTop;
+        const prev = mainScrollLastRef.current;
+        mainScrollLastRef.current = curr;
+        if (curr < 10) {
+            setHeaderHidden(false);
+            return;
+        }
+        if (curr > prev + 6)
+            setHeaderHidden(true);
+        else if (curr < prev - 4)
+            setHeaderHidden(false);
+    };
     // On narrow screens the right-side detail panel wraps below the calendar.
     // When the user taps an appointment, scroll the detail into view so they
     // notice it actually opened.
@@ -319,17 +355,22 @@ export default function App() {
     };
     // Decide the cold-launch lock state. Native always lands locked: into "create"
     // mode if no PIN exists yet (first run), otherwise "unlock". Web has no lock.
+    // All three reads are independent so we fire them in parallel to minimize the
+    // time to first render of the PIN screen.
     useEffect(() => {
         if (!isNative)
             return;
         (async () => {
-            const has = await hasPin();
+            const [has, biometry, faceIdOn] = await Promise.all([
+                hasPin(),
+                checkBiometryFull(),
+                isFaceIdEnabled(),
+            ]);
             setLockMode(has ? 'unlock' : 'create');
-            const bioAvailable = await isBiometricAvailable();
-            setFaceIdAvailable(bioAvailable);
-            if (bioAvailable)
-                setBiometryLabel(await getBiometryLabel());
-            setFaceIdEnabled(await isFaceIdEnabled());
+            setFaceIdAvailable(biometry.available);
+            if (biometry.available)
+                setBiometryLabel(biometry.label);
+            setFaceIdEnabled(faceIdOn);
             setLocked(true);
             setLockReady(true);
         })();
@@ -942,19 +983,27 @@ export default function App() {
             // doesn't slip under the camera housing.
             paddingLeft: 'env(safe-area-inset-left)',
             paddingRight: 'env(safe-area-inset-right)',
-        }, children: [_jsx("header", { style: {
+        }, children: [_jsx("header", { ref: headerRef, style: {
                     backgroundColor: '#1f2937',
                     color: 'white',
                     // Top padding includes the iOS status bar / notch inset so the
                     // title doesn't sit under the time/carrier indicators.
                     padding: 'calc(env(safe-area-inset-top) + 6px) 12px 6px',
                     boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                    position: 'sticky', top: 0, zIndex: 10,
+                    // Portrait: fixed + slide-hide on scroll. Landscape: sticky (no hiding).
+                    position: isLandscape ? 'sticky' : 'fixed',
+                    top: isLandscape ? 0 : (headerHidden ? -headerHeight : 0),
+                    left: isLandscape ? undefined : 0,
+                    right: isLandscape ? undefined : 0,
+                    width: isLandscape ? undefined : '100%',
+                    zIndex: 10,
                     flexShrink: 0,
-                }, children: _jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }, children: [_jsx("h1", { style: { fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }, children: "ABA Schedule" }), _jsxs("div", { style: { display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }, children: [aiSettings.apiKey && (_jsx("span", { title: `AI: ${aiSettings.model}`, style: {
+                    transition: isLandscape ? undefined : 'top 0.22s ease',
+                    boxSizing: 'border-box',
+                }, children: _jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }, children: [_jsx("h1", { style: { fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }, children: "SAssi - ABA Calendar" }), _jsxs("div", { style: { display: 'flex', gap: '4px', alignItems: 'center', flexShrink: 0 }, children: [aiSettings.apiKey && (_jsx("span", { title: `AI: ${aiSettings.model}`, style: {
                                         width: 8, height: 8, borderRadius: '50%',
                                         backgroundColor: '#10b981', display: 'inline-block',
-                                    } })), !scheduleData ? (_jsxs(_Fragment, { children: [compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6'), _jsx(FileUpload, { onUpload: handleFileUpload, loading: loading })] })) : (_jsxs(_Fragment, { children: [compactBtn('+', 'Add appointment', () => setShowAddAppointment(true), '#3b82f6'), compactBtn('🔧', hasIssues ? `Fix It — ${issueCount} issue${issueCount === 1 ? '' : 's'} to resolve` : 'Fix It — no issues found', () => setView('compliance'), '#ea580c', !hasIssues), compactBtn('✨', 'Wish It — AI schedule rework', () => setShowWish(true), '#7c3aed'), _jsx(ViewTabs, { view: view, onChange: setView, compSummary: compSummary })] }))] })] }) }), _jsx("div", { style: {
+                                    } })), !scheduleData ? (_jsxs(_Fragment, { children: [compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6'), _jsx(FileUpload, { onUpload: handleFileUpload, loading: loading })] })) : (_jsxs(_Fragment, { children: [compactBtn('🔧', hasIssues ? `Fix It — ${issueCount} issue${issueCount === 1 ? '' : 's'} to resolve` : 'Fix It — no issues found', () => setView('compliance'), '#ea580c', !hasIssues), compactBtn('✨', 'Wish It — AI schedule rework', () => setShowWish(true), '#7c3aed'), _jsx(ViewTabs, { view: view, onChange: setView, compSummary: compSummary })] }))] })] }) }), _jsx("div", { onScroll: handleMainScroll, style: {
                     display: 'flex', flex: 1, minHeight: 0,
                     // Narrow / non-schedule views keep a single scroll region for the whole
                     // post-header area: each child reports its natural height instead of
@@ -970,6 +1019,9 @@ export default function App() {
                     overflowX: 'hidden',
                     WebkitOverflowScrolling: 'touch',
                     paddingBottom: splitView ? 0 : 'env(safe-area-inset-bottom)',
+                    // Fixed header in portrait mode: push content down so it doesn't hide
+                    // behind the header. In landscape the header is sticky (in flow).
+                    paddingTop: isLandscape ? 0 : headerHeight,
                 }, children: scheduleData ? (_jsxs(_Fragment, { children: [view === 'schedule' && (_jsxs(_Fragment, { children: [_jsxs("div", { style: {
                                         flex: '1 1 320px', minWidth: 0,
                                         ...(splitView ? { overflowY: 'auto', minHeight: 0, WebkitOverflowScrolling: 'touch' } : {}),
@@ -978,7 +1030,7 @@ export default function App() {
                                                 padding: '8px 12px', backgroundColor: '#fef3c7',
                                                 border: '1px solid #fcd34d', borderRadius: 6, cursor: 'pointer',
                                                 fontSize: 13, fontWeight: 600, color: '#92400e', textAlign: 'left',
-                                            }, children: ["\uD83D\uDCCB ", pendingReview.length, " past session", pendingReview.length === 1 ? '' : 's', " awaiting review \u2014 complete or cancel them"] })), _jsx(Calendar, { appointments: calendarAppointments, technicians: scheduleData.technicians, clients: scheduleData.clients, settings: scheduleData.settings, timeOff: scheduleData.timeOff, onAppointmentChange: handleAppointmentChange, onSelectAppointment: setSelectedAppointment, onViewDateChange: setViewDate, onLensChange: setCalLens, hideTotals: dockPane, draftMarks: calendarMarks })] }), (() => {
+                                            }, children: ["\uD83D\uDCCB ", pendingReview.length, " past session", pendingReview.length === 1 ? '' : 's', " awaiting review \u2014 complete or cancel them"] })), _jsx(Calendar, { appointments: calendarAppointments, technicians: scheduleData.technicians, clients: scheduleData.clients, settings: scheduleData.settings, timeOff: scheduleData.timeOff, onAppointmentChange: handleAppointmentChange, onSelectAppointment: setSelectedAppointment, onViewDateChange: setViewDate, onLensChange: setCalLens, hideTotals: dockPane, draftMarks: calendarMarks, onAddAppointment: () => setShowAddAppointment(true) })] }), (() => {
                                     // Draft tray / conflicts / AI options / idle agenda — the
                                     // middle of the docked pane (and the only content of the narrow
                                     // in-flow pane; the selected appointment is a slide-up sheet there).

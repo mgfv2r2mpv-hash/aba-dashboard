@@ -29,6 +29,7 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
     const rbtMinContacts = data.settings.rbtMinContactsPerMonth ?? 2;
     const pastIncomplete = useMemo(() => pastIncompleteAppointments(data), [data]);
     const targetPct = data.settings.supervisionDirectHoursPercent || 5;
+    const preferredPct = data.settings.supervisionPreferredMinPercent ?? 15;
     const techTargetPct = data.settings.supervisionTechHoursPercent ?? 0;
     const maxPct = data.settings.supervisionMaxHoursPercent;
     const goPrev = () => setPeriodRef(new Date(periodRef.getFullYear(), periodRef.getMonth() - 1, 1));
@@ -40,7 +41,7 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
             background: compView === v ? '#1d4ed8' : 'transparent',
             color: compView === v ? 'white' : '#374151',
         }, children: label }));
-    return (_jsxs("div", { style: { flex: 1, padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }, children: [_jsxs("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0 }, children: ["Compliance (", period.label, ")"] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsxs("div", { style: { display: 'flex', background: '#f3f4f6', borderRadius: 6, padding: 2, marginRight: 4 }, children: [tabBtn('case', 'Cases'), tabBtn('staff', 'Staff')] }), _jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] })] }), aiSettings && onAcceptFix && onCustomizeFix && (_jsx(FixItPanel, { data: data, aiSettings: aiSettings, conflicts: conflicts, onAccept: onAcceptFix, onCustomize: onCustomizeFix })), conflicts.length > 0 && (_jsx(ScheduleWarnings, { conflicts: conflicts, appointments: data.appointments, onSelect: onSelectAppointment, mutedConflictKeys: mutedConflictKeys, onMuteConflict: onMuteConflict, onUnmuteConflict: onUnmuteConflict, onConfirmDismissConflict: onConfirmDismissConflict })), pastIncomplete.length > 0 && (_jsx(PastIncomplete, { items: pastIncomplete, onMarkComplete: onMarkComplete, onRequestCancel: onRequestCancel, onSelect: onSelectAppointment })), compView === 'case' && (_jsxs(_Fragment, { children: [_jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginBottom: 12 }, children: ["Supervision target: ", _jsxs("strong", { children: [targetPct, "%"] }), " of direct hours per client."] }), _jsxs("div", { style: { display: 'grid', gap: 12 }, children: [clientReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No clients yet. Add clients in Admin to start tracking compliance." })), clientReports.map(r => _jsx(ClientCard, { report: r, targetPct: targetPct, maxPct: maxPct }, r.client.id))] })] })), compView === 'staff' && (_jsxs(_Fragment, { children: [_jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginBottom: 12 }, children: ["RBTs must hit BACB ", _jsxs("strong", { children: [BACB_RBT_SUPERVISION_MIN_PERCENT, "%"] }), " AND the company target (", data.settings.supervisionRBTHoursPercent, "%), plus \u2265", rbtMinContacts, " supervision contacts/month. Non-RBT BTs follow the company-only target (", techTargetPct, "%) and require \u22651 contact/month if they have direct sessions."] }), _jsxs("div", { style: { display: 'grid', gap: 12 }, children: [techReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No technicians yet." })), techReports.map(r => (_jsx(TechCard, { report: r, maxPct: maxPct, contacts: techContactDays.get(r.tech.id), rbtMinContacts: rbtMinContacts }, r.tech.id)))] })] }))] }));
+    return (_jsxs("div", { style: { flex: 1, padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }, children: [_jsxs("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0 }, children: ["Compliance (", period.label, ")"] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsxs("div", { style: { display: 'flex', background: '#f3f4f6', borderRadius: 6, padding: 2, marginRight: 4 }, children: [tabBtn('case', 'Cases'), tabBtn('staff', 'Staff')] }), _jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] })] }), aiSettings && onAcceptFix && onCustomizeFix && (_jsx(FixItPanel, { data: data, aiSettings: aiSettings, conflicts: conflicts, onAccept: onAcceptFix, onCustomize: onCustomizeFix })), conflicts.length > 0 && (_jsx(ScheduleWarnings, { conflicts: conflicts, appointments: data.appointments, onSelect: onSelectAppointment, mutedConflictKeys: mutedConflictKeys, onMuteConflict: onMuteConflict, onUnmuteConflict: onUnmuteConflict, onConfirmDismissConflict: onConfirmDismissConflict })), pastIncomplete.length > 0 && (_jsx(PastIncomplete, { items: pastIncomplete, onMarkComplete: onMarkComplete, onRequestCancel: onRequestCancel, onSelect: onSelectAppointment })), compView === 'case' && (_jsxs(_Fragment, { children: [_jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginBottom: 12 }, children: ["Supervision target: ", _jsxs("strong", { children: [targetPct, "%"] }), " of direct hours per client."] }), _jsxs("div", { style: { display: 'grid', gap: 12 }, children: [clientReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No clients yet. Add clients in Admin to start tracking compliance." })), clientReports.map(r => _jsx(ClientCard, { report: r, targetPct: targetPct, preferredPct: preferredPct, maxPct: maxPct }, r.client.id))] })] })), compView === 'staff' && (_jsxs(_Fragment, { children: [_jsxs("p", { style: { fontSize: 12, color: '#6b7280', marginBottom: 12 }, children: ["RBTs must hit BACB ", _jsxs("strong", { children: [BACB_RBT_SUPERVISION_MIN_PERCENT, "%"] }), " AND the company target (", data.settings.supervisionRBTHoursPercent, "%), plus \u2265", rbtMinContacts, " supervision contacts/month. Non-RBT BTs follow the company-only target (", techTargetPct, "%) and require \u22651 contact/month if they have direct sessions."] }), _jsxs("div", { style: { display: 'grid', gap: 12 }, children: [techReports.length === 0 && (_jsx("p", { style: { color: '#9ca3af', textAlign: 'center', padding: 20 }, children: "No technicians yet." })), techReports.map(r => (_jsx(TechCard, { report: r, maxPct: maxPct, contacts: techContactDays.get(r.tech.id), rbtMinContacts: rbtMinContacts }, r.tech.id)))] })] }))] }));
 }
 // The calendar's schedule warnings, surfaced on the Compliance tab in a
 // collapsible area (collapsed by default so the compliance cards lead). Reuses
@@ -87,31 +88,58 @@ function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }) {
                 }, children: a.title }), _jsxs("div", { style: { fontSize: 11, color: '#6b7280' }, children: [new Date(a.startTime).toLocaleString(), " \u2192 ", new Date(a.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), a.client && _jsxs(_Fragment, { children: [" \u00B7 ", a.client] }), a.technician && _jsxs(_Fragment, { children: [" \u00B7 ", a.technician] })] }), _jsxs("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap' }, children: [_jsx(CompleteTimePrompt, { a: a, onComplete: onMarkComplete }), _jsx("button", { onClick: () => onRequestCancel(a), style: cancelBtn, children: "\u2715 Cancel" })] })] }));
 }
 // ---------- Per-client card ----------
-function ClientCard({ report, targetPct, maxPct }) {
+// "Within 2 percentage-points of the minimum" → Risky.
+const RISKY_MARGIN = 2;
+// Status for the ACTUAL supervision section.
+function actualSectionStatus(pct, targetPct, preferredPct, maxPct) {
+    if (maxPct !== undefined && pct > maxPct)
+        return { text: 'Reduce', color: CAP_OVER };
+    if (pct >= preferredPct)
+        return { text: 'Ideal', color: '#15803d' };
+    if (pct >= targetPct)
+        return { text: 'Good', color: '#15803d' };
+    return null;
+}
+// Status for the PROJECTED supervision section.
+function projectedSectionStatus(pct, targetPct, preferredPct, maxPct) {
+    if (maxPct !== undefined && pct > maxPct)
+        return { text: 'Over Cap', color: CAP_OVER };
+    if (pct >= preferredPct && (maxPct === undefined || pct <= maxPct))
+        return { text: 'Ideal', color: '#15803d' };
+    if (pct >= targetPct + RISKY_MARGIN)
+        return { text: 'OK', color: '#15803d' };
+    return { text: 'Risky', color: '#b91c1c' };
+}
+// Overall card badge — driven by projected (end-of-period outcome).
+function clientCardBadge(actual, projected, targetPct, preferredPct, maxPct, noDirect) {
+    if (noDirect)
+        return { text: 'Inactive', bgColor: '#6b7280' };
+    if (actual.pct < targetPct && projected.pct < targetPct)
+        return { text: 'Critical', bgColor: '#b91c1c' };
+    if (projected.pct < targetPct + RISKY_MARGIN)
+        return { text: 'Risky', bgColor: '#b91c1c' };
+    if (maxPct !== undefined && actual.pct > maxPct)
+        return { text: 'Reduce', bgColor: CAP_OVER };
+    if (projected.pct >= preferredPct && (maxPct === undefined || projected.pct <= maxPct))
+        return { text: 'Ideal', bgColor: '#15803d' };
+    return { text: 'OK', bgColor: '#15803d' };
+}
+function ClientCard({ report, targetPct, preferredPct, maxPct }) {
     const { client, actual, projected } = report;
     const noDirect = actual.directHours === 0 && projected.directHours === 0;
-    // Status: green if actual already meets, yellow if projected meets but actual
-    // doesn't, red if even projected falls short. Inactive clients (no direct
-    // hours) get a neutral gray.
-    let status;
-    if (noDirect)
-        status = 'gray';
-    else if (actual.pct >= targetPct)
-        status = 'green';
-    else if (projected.pct >= targetPct)
-        status = 'yellow';
-    else
-        status = 'red';
-    const accentColor = statusColor(status);
+    const badge = clientCardBadge(actual, projected, targetPct, preferredPct, maxPct, noDirect);
+    const actualStatus = noDirect ? null : actualSectionStatus(actual.pct, targetPct, preferredPct, maxPct);
+    const projStatus = noDirect ? null : projectedSectionStatus(projected.pct, targetPct, preferredPct, maxPct);
+    const cardBorderColor = badge.bgColor;
     return (_jsxs("div", { style: {
-            backgroundColor: 'white',
-            border: `2px solid ${accentColor}`,
+            backgroundColor: badge.bgColor === '#b91c1c' ? '#fff5f5' : 'white',
+            border: `2px solid ${cardBorderColor}`,
             borderRadius: 8, padding: 12,
         }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }, children: [_jsx("h3", { style: { fontSize: 15, fontWeight: 700, margin: 0 }, children: client.name }), _jsx("span", { style: {
                             fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-                            color: 'white', backgroundColor: accentColor,
+                            color: 'white', backgroundColor: badge.bgColor,
                             padding: '2px 8px', borderRadius: 10,
-                        }, children: statusLabel(status) })] }), noDirect ? (_jsxs("p", { style: { fontSize: 12, color: '#6b7280', margin: 0 }, children: ["No direct sessions in ", monthLabel(report), ". Nothing to supervise."] })) : (_jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }, children: [_jsx(Metric, { title: "Actual", m: actual, targetPct: targetPct, accent: accentColor, maxPct: maxPct }), _jsx(Metric, { title: "Projected", m: projected, targetPct: targetPct, accent: accentColor, maxPct: maxPct })] }))] }));
+                        }, children: badge.text })] }), noDirect ? (_jsxs("p", { style: { fontSize: 12, color: '#6b7280', margin: 0 }, children: ["No direct sessions in ", monthLabel(report), ". Nothing to supervise."] })) : (_jsxs("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }, children: [_jsx(Metric, { title: "Actual", m: actual, targetPct: targetPct, sectionStatus: actualStatus, maxPct: maxPct }), _jsx(Metric, { title: "Projected", m: projected, targetPct: targetPct, sectionStatus: projStatus, maxPct: maxPct })] }))] }));
 }
 function TechCard({ report, maxPct, contacts, rbtMinContacts }) {
     const { tech, actual, projected } = report;
@@ -181,16 +209,19 @@ function statusColor(s) {
 // Distinct from the green/yellow/red status colors so the over-cap warning
 // doesn't get confused with the under-min status pill.
 const CAP_OVER = '#ea580c';
-function Metric({ title, m, targetPct, accent, maxPct }) {
-    const fillPct = Math.min(100, m.pct);
-    const overCap = maxPct !== undefined && m.pct > maxPct;
-    const pctColor = overCap ? CAP_OVER : accent;
-    return (_jsxs("div", { children: [_jsx("div", { style: { fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: '#6b7280', marginBottom: 4 }, children: title }), _jsxs("div", { style: { fontSize: 18, fontWeight: 700, color: pctColor }, children: [m.pct.toFixed(1), "%", _jsxs("span", { style: { fontSize: 11, color: '#6b7280', fontWeight: 400, marginLeft: 6 }, children: ["of ", targetPct, "% target"] }), overCap && (_jsxs("div", { style: { fontSize: 11, color: CAP_OVER, fontWeight: 600, marginTop: 2 }, children: ["\u26A0 over ", maxPct, "% insurer cap"] }))] }), _jsx("div", { style: {
+function Metric({ title, m, targetPct, sectionStatus, maxPct }) {
+    const fillPct = Math.min(100, (m.pct / targetPct) * 100);
+    const statusColor = sectionStatus?.color ?? '#b91c1c';
+    return (_jsxs("div", { children: [_jsx("div", { style: { fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: '#6b7280', marginBottom: 4 }, children: title }), _jsxs("div", { style: { display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }, children: [_jsxs("span", { style: { fontSize: 18, fontWeight: 700, color: statusColor }, children: [m.pct.toFixed(1), "%"] }), _jsxs("span", { style: { fontSize: 11, color: '#6b7280', fontWeight: 400 }, children: ["of ", targetPct, "% target"] }), sectionStatus && (_jsx("span", { style: {
+                            fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                            color: 'white', backgroundColor: sectionStatus.color,
+                            padding: '1px 6px', borderRadius: 8,
+                        }, children: sectionStatus.text }))] }), _jsx("div", { style: {
                     marginTop: 6, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden',
                 }, children: _jsx("div", { style: {
                         height: '100%', width: `${fillPct}%`,
-                        backgroundColor: accent, transition: 'width 200ms',
-                    } }) }), _jsxs("div", { style: { fontSize: 11, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }, children: ["Direct: ", _jsxs("strong", { children: [m.directHours.toFixed(1), "h"] }), " \u00B7 Sup: ", _jsxs("strong", { children: [m.supervisionHours.toFixed(1), "h"] }), _jsx("br", {}), "Required: ", _jsxs("strong", { children: [m.requiredHours.toFixed(1), "h"] }), m.hoursToGo > 0 && (_jsxs(_Fragment, { children: [" \u00B7 To go: ", _jsxs("strong", { style: { color: accent }, children: [m.hoursToGo.toFixed(1), "h"] })] })), m.hoursToGo === 0 && m.directHours > 0 && (_jsx(_Fragment, { children: " \u00B7 \u2713 on track" }))] })] }));
+                        backgroundColor: statusColor, transition: 'width 200ms',
+                    } }) }), _jsxs("div", { style: { fontSize: 11, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }, children: ["Direct: ", _jsxs("strong", { children: [m.directHours.toFixed(1), "h"] }), " \u00B7 Sup: ", _jsxs("strong", { children: [m.supervisionHours.toFixed(1), "h"] }), _jsx("br", {}), "Required: ", _jsxs("strong", { children: [m.requiredHours.toFixed(1), "h"] }), m.hoursToGo > 0 && (_jsxs(_Fragment, { children: [" \u00B7 To go: ", _jsxs("strong", { style: { color: statusColor }, children: [m.hoursToGo.toFixed(1), "h"] })] })), m.hoursToGo === 0 && m.directHours > 0 && (_jsx(_Fragment, { children: " \u00B7 \u2713" }))] })] }));
 }
 function monthLabel(r) {
     // Just used in a display string; the metric carries enough context.

@@ -2,7 +2,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 import React, { useState, useEffect } from 'react';
 import { rollupHours, resolveUtilization, ptoHoursInRange, reduceRequirementForPto } from '../utilization';
 import { tileStyle, clientPastel, clientDarkBorder, legendStripeStyle } from '../calendarColors';
-import { useMinWidth } from '../useMediaQuery';
+import { useMinWidth, useIsLandscape } from '../useMediaQuery';
 import { startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay, } from 'date-fns';
 const VISIBLE_START_HOUR = 6;
 const VISIBLE_END_HOUR = 22;
@@ -12,19 +12,7 @@ const TIME_AXIS_WIDTH = 52;
 const TIME_AXIS_WIDTH_WIDE = 64;
 // Snap drag movements to 15-minute slots — matches typical scheduling resolution.
 const SNAP_MINUTES = 15;
-function useIsLandscape() {
-    const [landscape, setLandscape] = useState(() => typeof window === 'undefined' ? false : window.matchMedia('(orientation: landscape)').matches);
-    useEffect(() => {
-        if (typeof window === 'undefined')
-            return;
-        const mq = window.matchMedia('(orientation: landscape)');
-        const handler = (e) => setLandscape(e.matches);
-        mq.addEventListener('change', handler);
-        return () => mq.removeEventListener('change', handler);
-    }, []);
-    return landscape;
-}
-export default function Calendar({ appointments, technicians: _technicians, clients: _clients, settings, timeOff, onAppointmentChange, onSelectAppointment, onViewDateChange, onLensChange, hideTotals, draftMarks, }) {
+export default function Calendar({ appointments, technicians: _technicians, clients: _clients, settings, timeOff, onAppointmentChange, onSelectAppointment, onViewDateChange, onLensChange, hideTotals, draftMarks, onAddAppointment, }) {
     const [view, setView] = useState('month');
     const [lens, setLens] = useState('bcba');
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -98,7 +86,11 @@ export default function Calendar({ appointments, technicians: _technicians, clie
     return (_jsxs("div", { style: { padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: {
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     marginBottom: 16, gap: 8, flexWrap: 'wrap',
-                }, children: [_jsxs("div", { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }, children: [_jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: view === 'month', onClick: () => setView('month'), children: "Month" }), _jsx(ViewBtn, { active: view === 'week', onClick: () => setView('week'), children: "Week" }), _jsx(ViewBtn, { active: view === 'day', onClick: () => setView('day'), children: "Day" })] }), _jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: lens === 'bcba', onClick: () => setLens('bcba'), children: "BCBA" }), _jsx(ViewBtn, { active: lens === 'bt', onClick: () => setLens('bt'), children: "BT" })] })] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] }), _jsx("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }, children: headerLabel })] }), view === 'month' && (_jsx(MonthView, { currentDate: currentDate, appointments: lensAppts, lens: lens, settings: settings, timeOff: timeOff, onSelectAppointment: onSelectAppointment, onPickDay: setPickedDay, draftMarks: draftMarks, roomy: roomy })), view === 'month' && !hideTotals && (_jsx("div", { style: { marginTop: 16 }, children: _jsx(HoursSummary, { appointments: appointments, lens: lens, settings: settings, timeOff: timeOff, currentDate: currentDate }) })), view === 'week' && (_jsx(TimeGrid, { days: Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(currentDate, { weekStartsOn: 1 }), i)), appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks, hourHeight: hourHeight, axisWidth: axisWidth, roomy: roomy })), view === 'day' && (_jsx(TimeGrid, { days: [currentDate], appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks, hourHeight: hourHeight, axisWidth: axisWidth, roomy: roomy })), (view === 'week' || view === 'day') && !isLandscape && (_jsx("p", { style: { fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }, children: "Rotate to landscape to drag appointments to a new time." })), pickedDay && (_jsx("div", { onClick: () => setPickedDay(null), style: {
+                }, children: [_jsxs("div", { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }, children: [onAddAppointment && (_jsx("button", { onClick: onAddAppointment, "aria-label": "Add appointment", title: "Add appointment", style: {
+                                    padding: '5px 10px', backgroundColor: '#3b82f6', color: 'white',
+                                    border: 'none', borderRadius: 5, cursor: 'pointer',
+                                    fontSize: 16, fontWeight: 700, lineHeight: 1,
+                                }, children: "+" })), _jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: view === 'month', onClick: () => setView('month'), children: "Month" }), _jsx(ViewBtn, { active: view === 'week', onClick: () => setView('week'), children: "Week" }), _jsx(ViewBtn, { active: view === 'day', onClick: () => setView('day'), children: "Day" })] }), _jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: lens === 'bcba', onClick: () => setLens('bcba'), children: "BCBA" }), _jsx(ViewBtn, { active: lens === 'bt', onClick: () => setLens('bt'), children: "BT" })] })] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] }), _jsx("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }, children: headerLabel })] }), view === 'month' && (_jsx(MonthView, { currentDate: currentDate, appointments: lensAppts, lens: lens, settings: settings, timeOff: timeOff, onSelectAppointment: onSelectAppointment, onPickDay: setPickedDay, draftMarks: draftMarks, roomy: roomy })), view === 'month' && !hideTotals && (_jsx("div", { style: { marginTop: 16 }, children: _jsx(HoursSummary, { appointments: appointments, lens: lens, settings: settings, timeOff: timeOff, currentDate: currentDate }) })), view === 'week' && (_jsx(TimeGrid, { days: Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(currentDate, { weekStartsOn: 1 }), i)), appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks, hourHeight: hourHeight, axisWidth: axisWidth, roomy: roomy })), view === 'day' && (_jsx(TimeGrid, { days: [currentDate], appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks, hourHeight: hourHeight, axisWidth: axisWidth, roomy: roomy })), (view === 'week' || view === 'day') && !isLandscape && (_jsx("p", { style: { fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }, children: "Rotate to landscape to drag appointments to a new time." })), pickedDay && (_jsx("div", { onClick: () => setPickedDay(null), style: {
                     position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.35)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400, padding: 16,
                 }, children: _jsxs("div", { onClick: e => e.stopPropagation(), style: {

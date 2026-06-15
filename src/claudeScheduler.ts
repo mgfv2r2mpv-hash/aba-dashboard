@@ -116,76 +116,87 @@ export class ClaudeScheduler {
     const s = this.data.settings;
     const u = resolveUtilization(s.utilization);
 
-    // Per-case gaps (clients below their supervision target this month), minus the
-    // excluded ones. We send the gap so the model knows how much to close.
     const excluded = new Set(options.excludedClientIds);
     const clientGaps = computeClientCompliance(this.data, period)
       .filter(r => !excluded.has(r.client.id))
       .filter(r => r.projected.hoursToGo > 0 || r.actual.hoursToGo > 0)
       .map(r => {
         const token = this.anonMap.clients.get(r.client.id) || this.anonMap.clients.get(r.client.name) || 'CLIENT_?';
-        return `${token}: direct ${r.actual.directHours.toFixed(1)}h, supervision ${r.actual.supervisionHours.toFixed(1)}h, needs ~${r.projected.hoursToGo.toFixed(1)}h more supervision`;
+        return `${token}: direct ${r.actual.directHours.toFixed(1)}h, supervision ${r.actual.supervisionHours.toFixed(1)}h, needs ~${r.projected.hoursToGo.toFixed(1)}h more`;
       });
 
-    // Per-tech gaps (BACB + company supervision floors).
     const techGaps = computeTechCompliance(this.data, period)
       .filter(r => r.projected.companyHoursToGo > 0 || (r.projected.bacbHoursToGo ?? 0) > 0)
       .map(r => {
         const token = this.anonMap.technicians.get(r.tech.id) || this.anonMap.technicians.get(r.tech.name) || 'TECH_?';
-        const bacb = r.projected.bacbHoursToGo ? ` (BACB to-go ${r.projected.bacbHoursToGo.toFixed(1)}h)` : '';
-        return `${token}: direct ${r.actual.directHours.toFixed(1)}h, supervision ${r.actual.supervisionHours.toFixed(1)}h, company to-go ${r.projected.companyHoursToGo.toFixed(1)}h${bacb}`;
+        const bacb = r.projected.bacbHoursToGo ? `, BACB to-go ${r.projected.bacbHoursToGo.toFixed(1)}h` : '';
+        return `${token}: direct ${r.actual.directHours.toFixed(1)}h, supv ${r.actual.supervisionHours.toFixed(1)}h, company to-go ${r.projected.companyHoursToGo.toFixed(1)}h${bacb}`;
       });
 
-    // Only future, still-scheduled appointments inside the horizon (token budget).
-    const inScope = anon.appointments.filter((a: any) => {
-      const t = new Date(a.startTime).getTime();
-      return t >= now.getTime() && t <= horizonEnd.getTime();
-    });
+    // Compact appointment payload: only fields the model needs.
+    const inScope = anon.appointments
+      .filter((a: any) => {
+        const t = new Date(a.startTime).getTime();
+        return t >= now.getTime() && t <= horizonEnd.getTime();
+      })
+      .map((a: any) => ({
+        id: a.id, tech: a.technician, client: a.client,
+        start: a.startTime, end: a.endTime, type: a.type,
+        fixed: a.isFixed || undefined,
+        recur: a.isRecurring ? (a.recurringPattern || true) : undefined,
+      }));
 
     const strategies = allowedStrategies(options);
     const scrubbedConflicts = conflicts.map(c => scrubText(c, this.data, this.anonMap));
     const billableMin = u.bcbaWeeklyBillableMin ?? u.bcbaWeeklyBillableHours;
     const billableRule = options.softenBillableMinimum
-      ? `The BCBA's weekly billable minimum (${billableMin ?? 'n/a'}h) MAY be relaxed if it's the only way to close a gap — note it when you do.`
-      : `Keep the BCBA's weekly billable at/above ${billableMin ?? 'their requirement'}h.`;
+      ? `BCBA weekly billable (${billableMin ?? 'n/a'}h) MAY be relaxed as a last resort — flag it in reasoning.`
+      : `Keep BCBA weekly billable ≥ ${billableMin ?? 'required'}h.`;
 
-    return `
-You are an expert ABA (Applied Behavior Analysis) compliance assistant helping a BCBA close supervision and parent-training gaps while staying clinically compliant.
+    const priorityLines = [
+      options.prioritizeBtSupervision ? 'PRIORITY: Prefer adding BT supervision (named-BT direct + supervision overlap).' : '',
+      options.prioritizeParentTraining ? 'PRIORITY: Prefer adding parent-training sessions.' : '',
+    ].filter(Boolean);
 
-All people are opaque tokens (CLIENT_n, TECH_n, APT_n). Use these exact tokens in your reply. Do NOT invent names.
+    return `You are an ABA compliance assistant. Fix supervision gaps for the BCBA. All people are opaque tokens — use exact tokens, never invent names.
 
-CURRENT DATETIME: ${now.toISOString()}
-HORIZON: only add or change appointments from now through ${horizonEnd.toISOString().slice(0, 10)}.
+NOW: ${now.toISOString()}
+HORIZON: ${horizonEnd.toISOString().slice(0, 10)}
 
-COMPLIANCE GAPS TO CLOSE:
-Per case (client): supervision target ${s.supervisionDirectHoursPercent}% of direct hours.
-${clientGaps.length ? clientGaps.map(g => `- ${g}`).join('\n') : '- (no case gaps)'}
-Per technician: company target ${s.supervisionRBTHoursPercent}% (RBTs also have a BACB 5% floor).
-${techGaps.length ? techGaps.map(g => `- ${g}`).join('\n') : '- (no tech gaps)'}
+GAPS TO CLOSE:
+Case supervision (target ${s.supervisionDirectHoursPercent}% of direct hours):
+${clientGaps.length ? clientGaps.map(g => `  ${g}`).join('\n') : '  (none)'}
+Tech supervision (company ${s.supervisionRBTHoursPercent}%; RBTs also need BACB ≥5%):
+${techGaps.length ? techGaps.map(g => `  ${g}`).join('\n') : '  (none)'}
+${scrubbedConflicts.length ? `\nEXISTING WARNINGS:\n${scrubbedConflicts.map(c => `  ${c}`).join('\n')}` : ''}
 
-${scrubbedConflicts.length ? `EXISTING SCHEDULE WARNINGS:\n${scrubbedConflicts.map(c => `- ${c}`).join('\n')}\n` : ''}
-ALLOWED STRATEGIES (use ONLY these — the BCBA turned the rest off):
-${strategies.length ? strategies.map(t => `- ${t}`).join('\n') : '- (none selected — return one option whose ops are empty, explaining nothing can be proposed)'}
+ALLOWED STRATEGIES: ${strategies.length ? strategies.join(', ') : '(none — return one solution with empty ops explaining why)'}
+${priorityLines.length ? '\n' + priorityLines.join('\n') : ''}
 
-HARD RULES:
-- Never change, complete, or move any appointment that starts before CURRENT DATETIME.
-- Respect technician and client availability windows; never double-book a person; never move a technician off another client's session.
-- ${billableRule}
-- Prefer the fewest, smallest additions that close the gaps. Don't over-serve past the target.
-${options.prioritizeBtSupervision ? '- PRIORITY: Prefer solutions that add or maintain BT supervision coverage (supervised direct sessions with a named BT).' : ''}
-${options.prioritizeParentTraining ? '- PRIORITY: Prefer solutions that include parent training sessions.' : ''}
+HARD RULES — check every op against ALL of these before outputting:
+1. Never touch any appointment whose start < NOW.
+2. Never double-book a person; respect all availability windows.
+3. ${billableRule}
+4. Fewest/smallest additions that close the gap; do not over-serve above target.
+5. "add" ops must NOT include an "id" field — the app assigns IDs.
+6. "add" recurring: output only the first occurrence; the app expands the series.
+7. Each of the 3 solutions must be genuinely distinct (different gaps targeted, different slots, or different op types).
 
-APPOINTMENTS IN SCOPE (JSON): ${JSON.stringify(inScope)}
-CLIENTS (JSON): ${JSON.stringify(anon.clients)}
-TECHNICIANS (JSON): ${JSON.stringify(anon.technicians)}
+SCHEDULE IN HORIZON (compact JSON):
+${JSON.stringify(inScope)}
 
-Produce UP TO 3 distinct options. Reply with STRICT JSON only (no prose, no markdown fence), shaped exactly:
-{"solutions":[{"summary":"short title","reasoning":"one or two sentences","ops":[
-  {"op":"add","title":"...","type":"supervision|parent-training|case-planning|client-session","client":"CLIENT_n|null","tech":"TECH_n|null","start":"ISO","end":"ISO","recurring":true,"pattern":"weekly|biweekly"},
-  {"op":"move","apt":"APT_n","start":"ISO","end":"ISO"},
+CLIENTS: ${JSON.stringify(anon.clients)}
+TECHNICIANS: ${JSON.stringify(anon.technicians)}
+
+VALIDATION (do mentally before answering): For every op verify — (a) start ≥ NOW; (b) no double-book; (c) client/tech tokens exist in CLIENTS/TECHNICIANS; (d) apt tokens for move/remove exist in SCHEDULE; (e) skip any malformed token that looks like "CLIENT_nIENT_m" — those are corrupted and should be ignored.
+
+OUTPUT: Strict JSON only — no prose, no markdown. Exact schema (include only listed keys per op type):
+{"solutions":[{"summary":"short title","reasoning":"1-2 sentences","ops":[
+  {"op":"add","title":"...","type":"supervision|parent-training|case-planning|client-session","client":"CLIENT_n or null","tech":"TECH_n or null","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss","recurring":false,"pattern":null},
+  {"op":"move","apt":"APT_n","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss"},
   {"op":"remove","apt":"APT_n"}
 ]}]}
-Use only the op shapes above. ISO times must be local (no timezone suffix), e.g. 2026-06-19T17:00:00. If no compliant option exists within the allowed strategies, return a single option whose reasoning explains why and whose ops are an empty array.`;
+ISO times are local (no timezone suffix). If no compliant option exists, return one solution with empty ops and reasoning explaining why.`;
   }
 
   private buildWishPrompt(wish: WishRequest): string {

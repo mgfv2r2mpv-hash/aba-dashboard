@@ -360,7 +360,10 @@ function ClientCard({ report, targetPct, preferredPct, maxPct }: { report: Clien
   const noDirect = actual.directHours === 0 && projected.directHours === 0;
 
   const badge = clientCardBadge(actual, projected, targetPct, preferredPct, maxPct, noDirect);
-  const actualStatus = actualSectionStatus(actual.pct, targetPct, preferredPct, maxPct);
+  // When no sessions are completed yet, actual supervision % is not meaningful — show N/A.
+  const actualStatus = actual.directHours === 0
+    ? { text: 'N/A', color: '#6b7280' }
+    : actualSectionStatus(actual.pct, targetPct, preferredPct, maxPct);
   const projStatus = projectedSectionStatus(projected.pct, targetPct, preferredPct, maxPct);
 
   const cardBorderColor = badge.bgColor;

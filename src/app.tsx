@@ -1198,7 +1198,9 @@ export default function App() {
                 !hasIssues,
               )}
               {compactBtn('✨', 'Wish It — AI schedule rework', () => setShowWish(true), '#7c3aed')}
-              <ViewTabs view={view} onChange={setView} compSummary={compSummary} />
+              <ViewTabs view={view} onChange={setView} compSummary={compSummary}
+                conflictCount={activeConflicts.length}
+                conflictHasError={activeConflicts.some(c => c.severity === 'error')} />
             </>
           )}
         </div>
@@ -1573,10 +1575,12 @@ export default function App() {
 
 // Three-way segmented control for the active view. Sits inline in the header
 // at compact-button size so it doesn't blow up the chrome.
-function ViewTabs({ view, onChange, compSummary }: {
+function ViewTabs({ view, onChange, compSummary, conflictCount, conflictHasError }: {
   view: 'schedule' | 'admin' | 'compliance' | 'caseload';
   onChange: (v: 'schedule' | 'admin' | 'compliance' | 'caseload') => void;
   compSummary?: ComplianceSummary | null;
+  conflictCount?: number;
+  conflictHasError?: boolean;
 }) {
   const tabs: { key: 'schedule' | 'admin' | 'compliance' | 'caseload'; label: string; aria: string }[] = [
     { key: 'schedule', label: '🗓️ Cal', aria: 'Schedule' },
@@ -1584,11 +1588,13 @@ function ViewTabs({ view, onChange, compSummary }: {
     { key: 'caseload', label: '📈 Dash', aria: 'Dashboard' },
     { key: 'admin', label: '⚙️', aria: 'Admin' },
   ];
-  // Badge for Compliance tab: always visible, count left of label.
-  // Green = no issues; yellow = warnings only; red = any errors.
-  const badgeCount = compSummary ? compSummary.red + compSummary.yellow : 0;
-  const badgeColor = compSummary?.worst === 'red' ? '#ef4444'
-    : compSummary?.worst === 'yellow' ? '#f59e0b' : '#10b981';
+  // Badge for Compliance tab: total of schedule conflicts + compliance entities needing attention.
+  // Color: red if any errors (schedule or compliance red), yellow if only warnings, green if 0.
+  const compRed = compSummary?.red ?? 0;
+  const compYellow = compSummary?.yellow ?? 0;
+  const badgeCount = (conflictCount ?? 0) + compRed + compYellow;
+  const badgeColor = (conflictHasError || compRed > 0) ? '#ef4444'
+    : badgeCount > 0 ? '#f59e0b' : '#10b981';
 
   return (
     <div style={{ display: 'flex', borderRadius: 5, overflow: 'hidden', border: '1px solid #4b5563' }}>

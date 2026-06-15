@@ -136,12 +136,25 @@ function sameMonth(a: CompliancePeriod, b: CompliancePeriod): boolean {
 
 export type ComplianceStatus = 'green' | 'yellow' | 'red' | 'gray';
 
-export function clientStatus(report: ClientCompliance, targetPct: number): ComplianceStatus {
+// Margin around the minimum target: projected within 2 pp of the floor is "Risky."
+const RISKY_MARGIN = 2;
+
+export function clientStatus(
+  report: ClientCompliance,
+  targetPct: number,
+  preferredPct: number,
+  maxPct?: number,
+): ComplianceStatus {
   const { actual, projected } = report;
   if (actual.directHours === 0 && projected.directHours === 0) return 'gray';
-  if (actual.pct >= targetPct) return 'green';
-  if (projected.pct >= targetPct) return 'yellow';
-  return 'red';
+  // Both actual and projected below the floor → critical (red).
+  if (actual.pct < targetPct && projected.pct < targetPct) return 'red';
+  // Projected won't reach the floor (or is uncomfortably close) → risky (red).
+  if (projected.pct < targetPct + RISKY_MARGIN) return 'red';
+  // Actual is over the insurer cap → warrants attention (yellow).
+  if (maxPct !== undefined && actual.pct > maxPct) return 'yellow';
+  // Projected lands in the preferred band or better → green.
+  return 'green';
 }
 
 export function techStatus(report: TechCompliance): ComplianceStatus {
@@ -166,10 +179,12 @@ export interface ComplianceSummary {
 // defaults in when the company target isn't set, matching the dashboard.
 export function summarize(cache: ComplianceCache, data: ScheduleData): ComplianceSummary {
   const clientTarget = data.settings.supervisionDirectHoursPercent || 5;
+  const preferredPct = data.settings.supervisionPreferredMinPercent ?? 15;
+  const maxPct = data.settings.supervisionMaxHoursPercent;
   let red = 0;
   let yellow = 0;
   for (const r of cache.clients.values()) {
-    const s = clientStatus(r, clientTarget);
+    const s = clientStatus(r, clientTarget, preferredPct, maxPct);
     if (s === 'red') red++;
     else if (s === 'yellow') yellow++;
   }

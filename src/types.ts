@@ -168,10 +168,13 @@ export interface CompanySettings {
   cancellationReasons?: CancellationCode[];
   // Billable / utilization targets (BCBA weekly+monthly, BT weekly).
   utilization?: UtilizationSettings;
-  // BACB cadence: minimum distinct supervision contact-days per month for an
-  // RBT (at least one must observe service delivery — in this data model every
-  // counted contact is an observed overlap, so that's inherent). Default 2.
+  // BACB cadence: minimum supervision contacts per month for an RBT. Default 2.
   rbtMinContactsPerMonth?: number;
+  // Company minimum supervision contacts per month for non-RBT BTs. Default 1.
+  techMinContactsPerMonth?: number;
+  // When true (default), contacts are counted as distinct calendar days;
+  // when false, each qualifying supervision session counts as a separate contact.
+  contactsMustOccurOnSeparateDays?: boolean;
   // Billable-requirement hours removed per 1 hour of BCBA leave (Upgrade 1).
   // Default 1.0 — every PTO hour drops the week's requirement by an hour. A
   // company that assumes ~3 non-billable hours in an 8h day sets 0.625, so an

@@ -267,7 +267,7 @@ function parseSettings(
   for (const key of [
     'supervisionTechHoursPercent', 'supervisionMaxHoursPercent', 'supervisionFloorPercent',
     'supervisionPreferredMinPercent', 'supervisionPreferredMaxPercent', 'rbtMinContactsPerMonth',
-    'ptoBillableDeductionRatio',
+    'techMinContactsPerMonth', 'ptoBillableDeductionRatio',
   ] as const) {
     const v = num(row[key]);
     if (v !== undefined) (settings as any)[key] = v;
@@ -283,6 +283,10 @@ function parseSettings(
     if (v !== undefined) util[key] = v;
   }
   if (Object.keys(util).length) settings.utilization = util;
+
+  // Boolean setting: contacts must occur on separate days.
+  const sepDays = text(row.contactsMustOccurOnSeparateDays);
+  if (sepDays !== undefined) settings.contactsMustOccurOnSeparateDays = sepDays === 'TRUE';
 
   // Cancellation-notice thresholds (own columns).
   const unplanned = num(row.cancellationUnplannedHoursThreshold);
@@ -521,7 +525,8 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
   add('Settings',
     ['supervisionDirectHoursPercent', 'supervisionRBTHoursPercent', 'supervisionTechHoursPercent',
       'supervisionMaxHoursPercent', 'supervisionFloorPercent', 'supervisionPreferredMinPercent',
-      'supervisionPreferredMaxPercent', 'rbtMinContactsPerMonth', 'parentTrainingMinimum',
+      'supervisionPreferredMaxPercent', 'rbtMinContactsPerMonth', 'techMinContactsPerMonth',
+      'contactsMustOccurOnSeparateDays', 'parentTrainingMinimum',
       'parentTrainingTargetMin', 'parentTrainingTargetMax', 'parentTrainingPeriodUnit',
       'bcbaWeeklyBillableHours', 'btWeeklyDirectHours', 'bcbaMonthlyBillableHours',
       'bcbaMonthlyBillableHours5Week', 'bcbaWeeklyBillableMin',
@@ -533,7 +538,8 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
     [[
       s.supervisionDirectHoursPercent, s.supervisionRBTHoursPercent, W(s.supervisionTechHoursPercent),
       W(s.supervisionMaxHoursPercent), W(s.supervisionFloorPercent), W(s.supervisionPreferredMinPercent),
-      W(s.supervisionPreferredMaxPercent), W(s.rbtMinContactsPerMonth), s.parentTraining.minimumHours,
+      W(s.supervisionPreferredMaxPercent), W(s.rbtMinContactsPerMonth), W(s.techMinContactsPerMonth),
+      WB(s.contactsMustOccurOnSeparateDays), s.parentTraining.minimumHours,
       s.parentTraining.targetMinHours, s.parentTraining.targetMaxHours, s.parentTraining.periodUnit,
       W(u.bcbaWeeklyBillableHours), W(u.btWeeklyDirectHours), W(u.bcbaMonthlyBillableHours),
       W(u.bcbaMonthlyBillableHours5Week), W(u.bcbaWeeklyBillableMin),

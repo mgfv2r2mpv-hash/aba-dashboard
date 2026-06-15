@@ -99,6 +99,8 @@ export interface AnonymizedSchedule {
   clients: any[];
   appointments: any[];
   settings: any;
+  blackouts: any[];
+  timeOff: any[];
 }
 
 export function anonymizeSchedule(data: ScheduleData, map: AnonymizationMap): AnonymizedSchedule {
@@ -107,6 +109,14 @@ export function anonymizeSchedule(data: ScheduleData, map: AnonymizationMap): An
     clients: data.clients.map(c => scrubClient(c, map)),
     appointments: data.appointments.map(a => scrubAppointment(a, map)),
     settings: data.settings,
+    blackouts: (data.blackouts || []).map(b => ({
+      entity: b.entityType === 'client'
+        ? (map.clients.get(b.entityId) || map.clients.get(b.entityName || '') || 'CLIENT_unknown')
+        : (map.technicians.get(b.entityId) || map.technicians.get(b.entityName || '') || 'TECH_unknown'),
+      date: b.date,
+      ...(b.reason ? { reason: b.reason } : {}),
+    })),
+    timeOff: (data.timeOff || []).map(t => ({ date: t.date, hours: t.hours })),
   };
 }
 

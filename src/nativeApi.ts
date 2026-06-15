@@ -11,8 +11,6 @@
 import axios, { AxiosAdapter, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
 import { ScheduleData } from './types';
 import { ConstraintValidator } from './constraintValidator';
-import { generateExcelFile } from './excelHandler';
-
 let store: ScheduleData | null = null;
 
 // Deep-clone in/out so the store stays isolated from React state.
@@ -99,6 +97,7 @@ async function route(method: string, path: string, body: any): Promise<any> {
   if (m === 'POST' && path === '/api/download') {
     const data = requireData();
     const embeddedConfig = body?.embeddedConfig as string | undefined;
+    const { generateExcelFile } = await import('./excelHandler');
     const bytes = generateExcelFile(data, embeddedConfig);
     return new Blob([bytes as any], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

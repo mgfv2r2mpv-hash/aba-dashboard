@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import * as XLSX from 'xlsx';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { parseWorkbook } from './excelHandler';
 import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
 import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, Cancellation, cancellationReasonLabel } from './types';
@@ -552,6 +550,8 @@ export default function App() {
       }
 
       // Parse client-side (cheap, pure) — same parser the server/native use.
+      // Dynamic import keeps SheetJS (~800 KB) out of the critical startup bundle.
+      const [{ default: XLSX }, { parseWorkbook }] = await Promise.all([import('xlsx'), import('./excelHandler')]);
       const workbook = XLSX.read(bytes, { type: 'array' });
       const parsed = parseWorkbook(workbook);
 

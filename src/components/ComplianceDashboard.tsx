@@ -386,6 +386,11 @@ function overallBadge(
   if (actual === 'behind' || projected === 'behind')
     return { text: 'At Risk', bgColor: CAP_OVER, isCritical: false, isAmazing: false };
 
+  // Over cap but projected barely above minimum → the risky trajectory is
+  // the more actionable concern; the ⚠️ on the actual % already flags the cap.
+  if (actual === 'reduce' && projected === 'risky')
+    return { text: 'At Risk', bgColor: '#a16207', isCritical: false, isAmazing: false };
+
   // Over insurer cap (not a minimum problem, but a financial one).
   if (actual === 'reduce' || projected === 'overcap')
     return { text: 'Reduce', bgColor: CAP_OVER, isCritical: false, isAmazing: false };

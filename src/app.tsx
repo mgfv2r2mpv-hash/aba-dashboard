@@ -1169,35 +1169,38 @@ export default function App() {
         transition: isLandscape ? undefined : 'top 0.22s ease',
         boxSizing: 'border-box',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
+        {/* Row 1: app name + AI status dot */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
           <h1 style={{ fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>SAssi - ABA Calendar</h1>
-          <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexShrink: 0 }}>
-            {/* AI status: tiny dot only when on, hidden when off (it's not actionable info at a glance). */}
-            {aiSettings.apiKey && (
-              <span title={`AI: ${aiSettings.model}`} style={{
-                width: 8, height: 8, borderRadius: '50%',
-                backgroundColor: '#10b981', display: 'inline-block',
-              }} />
-            )}
-            {!scheduleData ? (
-              <>
-                {compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6')}
-                <FileUpload onUpload={handleFileUpload} loading={loading} />
-              </>
-            ) : (
-              <>
-                {compactBtn(
-                  '🔧',
-                  hasIssues ? `Fix It — ${issueCount} issue${issueCount === 1 ? '' : 's'} to resolve` : 'Fix It — no issues found',
-                  () => setView('compliance'),
-                  '#ea580c',
-                  !hasIssues,
-                )}
-                {compactBtn('✨', 'Wish It — AI schedule rework', () => setShowWish(true), '#7c3aed')}
-                <ViewTabs view={view} onChange={setView} compSummary={compSummary} />
-              </>
-            )}
-          </div>
+          <span
+            title={aiSettings.apiKey ? `AI: ${aiSettings.model}` : 'No AI key set — add in Settings'}
+            style={{
+              width: 8, height: 8, borderRadius: '50%',
+              backgroundColor: aiSettings.apiKey ? '#10b981' : '#ef4444',
+              display: 'inline-block', flexShrink: 0,
+            }}
+          />
+        </div>
+        {/* Row 2: action buttons + view tabs, all in one line */}
+        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+          {!scheduleData ? (
+            <>
+              {compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6')}
+              <FileUpload onUpload={handleFileUpload} loading={loading} />
+            </>
+          ) : (
+            <>
+              {compactBtn(
+                '🔧',
+                hasIssues ? `Fix It — ${issueCount} issue${issueCount === 1 ? '' : 's'} to resolve` : 'Fix It — no issues found',
+                () => setView('compliance'),
+                '#ea580c',
+                !hasIssues,
+              )}
+              {compactBtn('✨', 'Wish It — AI schedule rework', () => setShowWish(true), '#7c3aed')}
+              <ViewTabs view={view} onChange={setView} compSummary={compSummary} />
+            </>
+          )}
         </div>
       </header>
 
@@ -1579,48 +1582,42 @@ function ViewTabs({ view, onChange, compSummary }: {
     { key: 'schedule', label: '🗓️ Cal', aria: 'Schedule' },
     { key: 'compliance', label: 'Comp', aria: 'Compliance' },
     { key: 'caseload', label: '📈 Dash', aria: 'Dashboard' },
-    { key: 'admin', label: '⚙️ Config', aria: 'Admin' },
+    { key: 'admin', label: '⚙️', aria: 'Admin' },
   ];
-  // Live count of clients/techs needing attention this month, updated on every
-  // appointment change. Red = behind even projected; amber = projected ok only.
-  const attention = compSummary ? compSummary.red + compSummary.yellow : 0;
+  // Badge for Compliance tab: always visible, count left of label.
+  // Green = no issues; yellow = warnings only; red = any errors.
+  const badgeCount = compSummary ? compSummary.red + compSummary.yellow : 0;
   const badgeColor = compSummary?.worst === 'red' ? '#ef4444'
     : compSummary?.worst === 'yellow' ? '#f59e0b' : '#10b981';
+
   return (
     <div style={{ display: 'flex', borderRadius: 5, overflow: 'hidden', border: '1px solid #4b5563' }}>
       {tabs.map(t => {
         const active = t.key === view;
-        const showBadge = t.key === 'compliance' && !!compSummary;
+        const isComp = t.key === 'compliance';
         return (
           <button
             key={t.key}
             onClick={() => onChange(t.key)}
-            aria-label={showBadge && attention > 0 ? `${t.aria} — ${attention} need attention` : t.aria}
-            title={showBadge && attention > 0 ? `${attention} client(s)/tech(s) need attention this month` : t.aria}
+            aria-label={isComp && badgeCount > 0 ? `${t.aria} — ${badgeCount} need attention` : t.aria}
+            title={isComp && badgeCount > 0 ? `${badgeCount} client(s)/tech(s) need attention this month` : t.aria}
             style={{
-              position: 'relative',
               padding: '5px 9px', border: 'none',
               backgroundColor: active ? '#6366f1' : 'transparent',
               color: 'white', cursor: 'pointer',
               fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', lineHeight: 1.2,
-              display: 'inline-flex', alignItems: 'center', gap: 5,
+              display: 'inline-flex', alignItems: 'center', gap: 4,
             }}
           >
-            {t.label}
-            {showBadge && (
-              attention > 0 ? (
-                <span style={{
-                  minWidth: 15, height: 15, padding: '0 4px', borderRadius: 8,
-                  backgroundColor: badgeColor, color: 'white',
-                  fontSize: 10, fontWeight: 700, lineHeight: '15px', textAlign: 'center',
-                }}>{attention}</span>
-              ) : (
-                <span style={{
-                  width: 8, height: 8, borderRadius: '50%',
-                  backgroundColor: badgeColor, display: 'inline-block',
-                }} />
-              )
+            {isComp && (
+              <span style={{
+                minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9,
+                backgroundColor: badgeColor, color: 'white',
+                fontSize: 11, fontWeight: 700,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              }}>{badgeCount}</span>
             )}
+            {t.label}
           </button>
         );
       })}

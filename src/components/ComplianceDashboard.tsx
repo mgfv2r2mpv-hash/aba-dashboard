@@ -318,12 +318,12 @@ function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }: {
 // "Within 2 percentage-points of the minimum" → Risky.
 const RISKY_MARGIN = 2;
 
-// Status for the ACTUAL supervision section.
-function actualSectionStatus(pct: number, targetPct: number, preferredPct: number, maxPct?: number): { text: string; color: string } | null {
+// Status for the ACTUAL supervision section — always non-null so a badge is always shown.
+function actualSectionStatus(pct: number, targetPct: number, preferredPct: number, maxPct?: number): { text: string; color: string } {
   if (maxPct !== undefined && pct > maxPct) return { text: 'Reduce', color: CAP_OVER };
   if (pct >= preferredPct) return { text: 'Ideal', color: '#15803d' };
   if (pct >= targetPct) return { text: 'Good', color: '#15803d' };
-  return null;
+  return { text: 'Behind', color: '#b91c1c' };
 }
 
 // Status for the PROJECTED supervision section.
@@ -360,8 +360,8 @@ function ClientCard({ report, targetPct, preferredPct, maxPct }: { report: Clien
   const noDirect = actual.directHours === 0 && projected.directHours === 0;
 
   const badge = clientCardBadge(actual, projected, targetPct, preferredPct, maxPct, noDirect);
-  const actualStatus = noDirect ? null : actualSectionStatus(actual.pct, targetPct, preferredPct, maxPct);
-  const projStatus = noDirect ? null : projectedSectionStatus(projected.pct, targetPct, preferredPct, maxPct);
+  const actualStatus = actualSectionStatus(actual.pct, targetPct, preferredPct, maxPct);
+  const projStatus = projectedSectionStatus(projected.pct, targetPct, preferredPct, maxPct);
 
   const cardBorderColor = badge.bgColor;
 
@@ -385,7 +385,7 @@ function ClientCard({ report, targetPct, preferredPct, maxPct }: { report: Clien
           No direct sessions in {monthLabel(report)}. Nothing to supervise.
         </p>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, alignItems: 'start' }}>
           <Metric title="Actual" m={actual} targetPct={targetPct} sectionStatus={actualStatus} maxPct={maxPct} />
           <Metric title="Projected" m={projected} targetPct={targetPct} sectionStatus={projStatus} maxPct={maxPct} />
         </div>
@@ -552,38 +552,37 @@ function Metric({ title, m, targetPct, sectionStatus, maxPct }: {
   title: string;
   m: { directHours: number; supervisionHours: number; requiredHours: number; pct: number; hoursToGo: number };
   targetPct: number;
-  sectionStatus: { text: string; color: string } | null;
+  sectionStatus: { text: string; color: string };
   maxPct?: number;
 }) {
   const fillPct = Math.min(100, (m.pct / targetPct) * 100);
-  const statusColor = sectionStatus?.color ?? '#b91c1c';
+  const { color: statusColor, text: statusText } = sectionStatus;
   return (
     <div>
-      <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: '#6b7280', marginBottom: 4 }}>
+      {/* Section title */}
+      <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: '#6b7280', marginBottom: 2 }}>
         {title}
       </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+      {/* Percentage + "of X% target" — no badge here so height is consistent */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
         <span style={{ fontSize: 18, fontWeight: 700, color: statusColor }}>
           {m.pct.toFixed(1)}%
         </span>
         <span style={{ fontSize: 11, color: '#6b7280', fontWeight: 400 }}>
           of {targetPct}% target
         </span>
-        {sectionStatus && (
-          <span style={{
-            fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-            color: 'white', backgroundColor: sectionStatus.color,
-            padding: '1px 6px', borderRadius: 8,
-          }}>{sectionStatus.text}</span>
-        )}
       </div>
-      <div style={{
-        marginTop: 6, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden',
-      }}>
-        <div style={{
-          height: '100%', width: `${fillPct}%`,
-          backgroundColor: statusColor, transition: 'width 200ms',
-        }} />
+      {/* Badge on its own fixed-height row — keeps bar vertically aligned across columns */}
+      <div style={{ height: 22, display: 'flex', alignItems: 'center', marginTop: 3 }}>
+        <span style={{
+          fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+          color: 'white', backgroundColor: statusColor,
+          padding: '2px 7px', borderRadius: 8,
+        }}>{statusText}</span>
+      </div>
+      {/* Bar — always at the same vertical position */}
+      <div style={{ height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${fillPct}%`, backgroundColor: statusColor, transition: 'width 200ms' }} />
       </div>
       <div style={{ fontSize: 11, color: '#6b7280', marginTop: 6, lineHeight: 1.5 }}>
         Direct: <strong>{m.directHours.toFixed(1)}h</strong> ·

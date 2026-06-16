@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, Appointment } from '../types';
+import { AISettings, ClaudeModel } from './Settings';
 import { resolvePtoConfig, activeBuckets, ptoBucketLabel, computePtoBalances } from '../pto';
 import { computeAuthUsage, computeReportDates } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
@@ -17,14 +18,25 @@ interface AdminPanelProps {
   onDownload?: () => void;
   // Clear the loaded schedule from the app (confirmed before wiping).
   onClearData?: () => void;
-  // Open the AI Settings modal (moved here from the top-bar gear).
-  onOpenAISettings?: () => void;
+  // AI settings and security/auth handlers.
+  aiSettings?: AISettings;
+  onSaveAISettings?: (settings: AISettings) => void | Promise<void>;
+  onClearKey?: () => void;
+  onRequestUnlock?: () => Promise<boolean>;
+  faceIdAvailable?: boolean;
+  faceIdEnabled?: boolean;
+  biometryLabel?: string;
+  onToggleFaceId?: (on: boolean) => void;
 }
 
 const API_BASE = '/api';
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings }: AdminPanelProps) {
+export default function AdminPanel({
+  data, onDataChange, onImportFile, onRerunWizard, onDownload, onClearData,
+  aiSettings, onSaveAISettings, onClearKey, onRequestUnlock,
+  faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId
+}: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'auths' | 'daysoff' | 'settings'>('technicians');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -434,7 +446,14 @@ export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWi
             onRerunWizard={onRerunWizard}
             onDownload={onDownload}
             onClearData={onClearData}
-            onOpenAISettings={onOpenAISettings}
+            aiSettings={aiSettings}
+            onSaveAISettings={onSaveAISettings}
+            onClearKey={onClearKey}
+            onRequestUnlock={onRequestUnlock}
+            faceIdAvailable={faceIdAvailable}
+            faceIdEnabled={faceIdEnabled}
+            biometryLabel={biometryLabel}
+            onToggleFaceId={onToggleFaceId}
           />
         )}
       </div>
@@ -1762,13 +1781,13 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
                     </label>
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
                       <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours</span>
-                      <input type="text" inputMode="decimal" value={String(r.hours)} onChange={e => updateRule(r.id, { hours: parseFloat(e.target.value) || 0 })} placeholder="0" style={inputStyle} />
+                      <input type="number" min="0" step="0.25" value={String(r.hours)} onChange={e => updateRule(r.id, { hours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
                     </label>
                     {r.kind === 'everyNWeeks' && (
                       <>
                         <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
                           <span style={{ fontSize: '11px', color: '#6b7280' }}>Every (wks)</span>
-                          <input type="text" inputMode="numeric" value={String(r.everyWeeks ?? 1)} onChange={e => updateRule(r.id, { everyWeeks: Math.max(1, parseInt(e.target.value) || 1) })} placeholder="1" style={inputStyle} />
+                          <input type="number" min="1" step="1" value={String(r.everyWeeks ?? 1)} onChange={e => updateRule(r.id, { everyWeeks: Math.max(1, parseInt(e.target.value) || 1) })} style={inputStyle} />
                         </label>
                         <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 110px' }}>
                           <span style={{ fontSize: '11px', color: '#6b7280' }}>On</span>
@@ -1854,7 +1873,7 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
                   </label>
                   <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
                     <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours</span>
-                    <input type="text" inputMode="decimal" value={String(b.hours)} onChange={e => updateBalance(i, { hours: parseFloat(e.target.value) || 0 })} placeholder="0" style={inputStyle} />
+                    <input type="number" step="0.25" value={String(b.hours)} onChange={e => updateBalance(i, { hours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
                   </label>
                   <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 150px' }}>
                     <span style={{ fontSize: '11px', color: '#6b7280' }}>As of</span>
@@ -1872,7 +1891,10 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
   );
 }
 
-function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings }: {
+function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard, onDownload, onClearData,
+  aiSettings, onSaveAISettings, onClearKey, onRequestUnlock,
+  faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId
+}: {
   settings: CompanySettings;
   saving: boolean;
   onSave: (next: CompanySettings) => void | Promise<boolean | void>;
@@ -1880,7 +1902,14 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   onRerunWizard?: () => void;
   onDownload?: () => void;
   onClearData?: () => void;
-  onOpenAISettings?: () => void;
+  aiSettings?: AISettings;
+  onSaveAISettings?: (settings: AISettings) => void | Promise<void>;
+  onClearKey?: () => void;
+  onRequestUnlock?: () => Promise<boolean>;
+  faceIdAvailable?: boolean;
+  faceIdEnabled?: boolean;
+  biometryLabel?: string;
+  onToggleFaceId?: (on: boolean) => void;
 }) {
   const [justSaved, setJustSaved] = useState(false);
   const s = (n: number | undefined) => (n === undefined ? '' : String(n));
@@ -1921,6 +1950,27 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   const [casePlanHrs, setCasePlanHrs] = useState(s(bsd.casePlanningHours));
   const [parentTrainHrs, setParentTrainHrs] = useState(s(bsd.parentTrainingHours));
   const [otherHrs, setOtherHrs] = useState(s(bsd.otherHours));
+
+  // AI settings, schedule password, and PIN/Face ID
+  const [model, setModel] = useState<ClaudeModel>(aiSettings?.model ?? 'claude-sonnet-4-6');
+  const [showKey, setShowKey] = useState(false);
+  const hasExistingKey = !!aiSettings?.apiKey;
+  const [replacingKey, setReplacingKey] = useState(!hasExistingKey);
+  const [apiKey, setApiKey] = useState('');
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+
+  const [currentPw, setCurrentPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [changingPw, setChangingPw] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const hasExistingPw = false; // TODO: need to persist schedulePassword through AdminPanel
+
+  // Track whether key state has been saved to know when to move AI settings position
+  const [keySavedState, setKeySavedState] = useState(hasExistingKey);
+  useEffect(() => {
+    setKeySavedState(hasExistingKey);
+  }, [hasExistingKey]);
 
   const num = (str: string, fallback: number) => {
     const n = parseFloat(str);
@@ -1975,7 +2025,21 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
     };
     setJustSaved(false);
     const ok = await onSave(next);
-    if (ok !== false) { setJustSaved(true); window.setTimeout(() => setJustSaved(false), 2500); }
+    if (ok !== false) {
+      // Handle AI settings save
+      if (replacingKey && apiKey.trim()) {
+        const newSettings: AISettings = { apiKey: apiKey.trim(), model };
+        await onSaveAISettings?.(newSettings);
+        setKeySavedState(true);
+        setReplacingKey(false);
+        setApiKey('');
+      } else if (replacingKey && !apiKey.trim() && hasExistingKey) {
+        // Keep existing key if field is blank
+        setReplacingKey(false);
+      }
+      setJustSaved(true);
+      window.setTimeout(() => setJustSaved(false), 2500);
+    }
   };
 
   // Shared save control — rendered at the top AND bottom so the long form can be
@@ -1995,6 +2059,115 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
         <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>SAssi App Settings</h3>
         {saveBar}
       </div>
+
+      {/* AI settings at TOP if no key yet */}
+      {!keySavedState && aiSettings && onSaveAISettings && (
+        <AISettingsSection
+          model={model}
+          onModelChange={setModel}
+          hasExistingKey={hasExistingKey}
+          replacingKey={replacingKey}
+          apiKey={apiKey}
+          onApiKeyChange={setApiKey}
+          showKey={showKey}
+          onShowKeyChange={setShowKey}
+          onReplaceKey={async () => {
+            if (onRequestUnlock && !(await onRequestUnlock())) {
+              setUnlockError('Could not verify — key unchanged.');
+              return;
+            }
+            setApiKey('');
+            setShowKey(false);
+            setReplacingKey(true);
+            setUnlockError(null);
+          }}
+          onClearKey={onClearKey}
+          unlockError={unlockError}
+        />
+      )}
+
+      {/* PIN/App Lock section */}
+      {faceIdAvailable !== undefined && (
+        <SettingsSection title="App Lock">
+          <div style={{ padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px', fontSize: '13px' }}>
+            <p style={{ marginBottom: '12px', color: '#6b7280', fontSize: '12px' }}>
+              A PIN locks the app on launch. There is no recovery if you forget it.
+            </p>
+            <button style={{
+              padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+              background: 'white', cursor: 'pointer', fontSize: '13px',
+            }}>
+              Change PIN
+            </button>
+            {faceIdAvailable && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={faceIdEnabled || false}
+                  onChange={(e) => onToggleFaceId?.(e.target.checked)}
+                />
+                <span style={{ fontSize: '13px' }}>Unlock with {biometryLabel || 'Face ID'}</span>
+              </label>
+            )}
+          </div>
+        </SettingsSection>
+      )}
+
+      {/* Schedule Password section */}
+      <SettingsSection title="Schedule Password (optional)">
+        <div style={{ padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px', fontSize: '13px' }}>
+          <p style={{ marginBottom: '12px', color: '#6b7280', fontSize: '12px' }}>
+            Encrypts your downloaded schedule file. Leave blank for a normal readable file.
+          </p>
+          {hasExistingPw && !changingPw ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '13px', color: '#374151' }}>🔒 Password is set.</span>
+              <button
+                onClick={() => { setChangingPw(true); setPwError(null); }}
+                style={{
+                  padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                  background: 'white', cursor: 'pointer', fontSize: '13px',
+                }}
+              >
+                Change…
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {hasExistingPw && (
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  placeholder="Current password"
+                  value={currentPw}
+                  onChange={(e) => { setCurrentPw(e.target.value); setPwError(null); }}
+                  autoComplete="off"
+                  style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}
+                />
+              )}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  placeholder={hasExistingPw ? 'New password (blank to remove)' : 'Leave blank for no encryption'}
+                  value={newPw}
+                  onChange={(e) => { setNewPw(e.target.value); setPwError(null); }}
+                  autoComplete="off"
+                  style={{ flex: 1, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}
+                />
+                <button
+                  onClick={() => setShowPw(!showPw)}
+                  style={{
+                    padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                    background: 'white', cursor: 'pointer', fontSize: '13px',
+                  }}
+                >
+                  {showPw ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              {pwError && <p style={{ fontSize: '12px', color: '#dc2626', margin: 0 }}>{pwError}</p>}
+            </div>
+          )}
+        </div>
+      </SettingsSection>
 
       <SettingsSection title="Supervision targets">
         <NumField label="Per-case Company Min. (% of Direct Service Hours)" value={directPct} onChange={setDirectPct} suffix="%" defaultValue={5} />
@@ -2099,28 +2272,36 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
         <NumField label="Other" value={otherHrs} onChange={setOtherHrs} suffix="h" />
       </SettingsSection>
 
-      {onOpenAISettings && (
-        <SettingsSection title="AI">
-          <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
-            Your Claude API key and model power "Fix It" and "Wish It". The key stays
-            in this browser session and rides inside downloaded schedules, lightly
-            obfuscated.
-          </p>
-          <div>
-            <button
-              onClick={onOpenAISettings}
-              style={{
-                padding: '8px 14px', backgroundColor: '#374151', color: 'white',
-                border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-              }}
-            >⚙ AI Model & Key</button>
-          </div>
-        </SettingsSection>
-      )}
 
       <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
         Clinician availability is still configured in the Setup Wizard.
       </p>
+
+      {/* AI settings at BOTTOM if key is already saved */}
+      {keySavedState && aiSettings && onSaveAISettings && (
+        <AISettingsSection
+          model={model}
+          onModelChange={setModel}
+          hasExistingKey={hasExistingKey}
+          replacingKey={replacingKey}
+          apiKey={apiKey}
+          onApiKeyChange={setApiKey}
+          showKey={showKey}
+          onShowKeyChange={setShowKey}
+          onReplaceKey={async () => {
+            if (onRequestUnlock && !(await onRequestUnlock())) {
+              setUnlockError('Could not verify — key unchanged.');
+              return;
+            }
+            setApiKey('');
+            setShowKey(false);
+            setReplacingKey(true);
+            setUnlockError(null);
+          }}
+          onClearKey={onClearKey}
+          unlockError={unlockError}
+        />
+      )}
 
       {(onImportFile || onRerunWizard || onDownload || onClearData) && (
         <SettingsSection title="Data">
@@ -2201,6 +2382,146 @@ function SettingsSection({ title, children }: { title: string; children: React.R
       <p style={{ fontSize: '13px', fontWeight: 700, color: '#111827', marginBottom: '12px' }}>{title}</p>
       <div style={{ display: 'grid', gap: '12px' }}>{children}</div>
     </div>
+  );
+}
+
+const MODEL_OPTIONS: { value: ClaudeModel; label: string; description: string }[] = [
+  {
+    value: 'claude-opus-4-8',
+    label: 'Opus 4.8',
+    description: 'Best for complex multi-week scheduling. Slower, more expensive.',
+  },
+  {
+    value: 'claude-sonnet-4-6',
+    label: 'Sonnet 4.6',
+    description: 'Balanced quality, speed, and cost. Recommended for most cases.',
+  },
+  {
+    value: 'claude-haiku-4-5-20251001',
+    label: 'Haiku 4.5',
+    description: 'Fastest and cheapest. Good for simple single-week conflicts.',
+  },
+];
+
+function AISettingsSection({ model, onModelChange, hasExistingKey, replacingKey, apiKey, onApiKeyChange, showKey, onShowKeyChange, onReplaceKey, onClearKey, unlockError }: {
+  model: ClaudeModel;
+  onModelChange: (m: ClaudeModel) => void;
+  hasExistingKey: boolean;
+  replacingKey: boolean;
+  apiKey: string;
+  onApiKeyChange: (key: string) => void;
+  showKey: boolean;
+  onShowKeyChange: (show: boolean) => void;
+  onReplaceKey: () => void;
+  onClearKey?: () => void;
+  unlockError: string | null;
+}) {
+  return (
+    <SettingsSection title="AI Integration">
+      <div>
+        <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px', fontSize: '13px' }}>Claude Model</label>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {MODEL_OPTIONS.map(opt => (
+            <label
+              key={opt.value}
+              style={{
+                display: 'flex',
+                gap: '10px',
+                padding: '10px',
+                border: model === opt.value ? '2px solid #3b82f6' : '1px solid #e5e7eb',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                backgroundColor: model === opt.value ? '#eff6ff' : 'white',
+              }}
+            >
+              <input
+                type="radio"
+                name="model"
+                value={opt.value}
+                checked={model === opt.value}
+                onChange={() => onModelChange(opt.value)}
+                style={{ marginTop: '4px' }}
+              />
+              <div>
+                <div style={{ fontWeight: '600', fontSize: '13px' }}>{opt.label}</div>
+                <div style={{ fontSize: '12px', color: '#6b7280' }}>{opt.description}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px', fontSize: '13px' }}>Claude API Key</label>
+        {hasExistingKey && !replacingKey ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '13px', color: '#374151' }}>🔒 API key is set.</span>
+            <button
+              onClick={onReplaceKey}
+              style={{
+                padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                background: 'white', cursor: 'pointer', fontSize: '13px',
+              }}
+            >
+              Replace…
+            </button>
+            {onClearKey && (
+              <button
+                onClick={() => { onClearKey(); onApiKeyChange(''); }}
+                style={{
+                  padding: '6px 12px',
+                  background: '#fee2e2',
+                  color: '#dc2626',
+                  border: '1px solid #fca5a5',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                }}
+              >
+                Clear stored key
+              </button>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={apiKey}
+              onChange={(e) => onApiKeyChange(e.target.value)}
+              placeholder={hasExistingKey ? 'Enter a new key' : 'sk-ant-...'}
+              autoComplete="off"
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '6px',
+                fontSize: '13px',
+                fontFamily: 'monospace',
+              }}
+            />
+            <button
+              onClick={() => onShowKeyChange(!showKey)}
+              style={{
+                padding: '8px 12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '6px',
+                background: 'white',
+                cursor: 'pointer',
+                fontSize: '13px',
+              }}
+            >
+              {showKey ? 'Hide' : 'Show'}
+            </button>
+          </div>
+        )}
+        {unlockError && (
+          <p style={{ fontSize: '12px', color: '#dc2626', marginTop: '6px' }}>{unlockError}</p>
+        )}
+        <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px' }}>
+          Your key is sent per-request via header and never stored on the server.
+        </p>
+      </div>
+    </SettingsSection>
   );
 }
 

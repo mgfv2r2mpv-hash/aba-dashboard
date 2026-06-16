@@ -321,11 +321,16 @@ Single-week: <yes|no>
   }
 
   private containsRawNames(prompt: string): boolean {
+    // Whole-word match only — a plain substring check false-positives whenever
+    // a client/tech name (ABA practices commonly use 2-letter initials, e.g.
+    // "CL", "EC") happens to sit inside one of our own CLIENT_n/TECH_n tokens
+    // ("CL"IENT_1, T"EC"H_1), aborting every call even though nothing leaked.
+    const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     for (const c of this.data.clients) {
-      if (c.name && c.name.length > 1 && prompt.includes(c.name)) return true;
+      if (c.name && c.name.length > 1 && new RegExp(`\\b${escape(c.name)}\\b`, 'i').test(prompt)) return true;
     }
     for (const t of this.data.technicians) {
-      if (t.name && t.name.length > 1 && prompt.includes(t.name)) return true;
+      if (t.name && t.name.length > 1 && new RegExp(`\\b${escape(t.name)}\\b`, 'i').test(prompt)) return true;
     }
     return false;
   }

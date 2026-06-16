@@ -375,7 +375,11 @@ export default function App() {
   // the scheduleData/viewDate effect, so we don't set them here.)
   const commitFull = (next: ScheduleData) => {
     setScheduleData(next);
-    setCompCache(buildCache(next));
+    // Defer the compliance cache build to the next task so the schedule renders
+    // first — buildCache can block the main thread for several seconds on large
+    // appointment sets, which triggers iOS's "unresponsive WebContent" watchdog.
+    setCompCache(null);
+    setTimeout(() => setCompCache(buildCache(next)), 0);
   };
 
   // Decide the cold-launch lock state. Native always lands locked: into "create"

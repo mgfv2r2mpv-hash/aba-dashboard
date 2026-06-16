@@ -31,8 +31,6 @@ interface CalendarProps {
   // When a draft is open, marks staged appointments (add/move/shorten/remove)
   // so they render as "proposed"/tombstoned rather than committed sessions.
   draftMarks?: Map<string, DraftMark>;
-  // Opens the add-appointment form; surfaced in the calendar toolbar.
-  onAddAppointment?: () => void;
 }
 
 type View = 'month' | 'week' | 'day' | 'clients';
@@ -63,7 +61,6 @@ export default function Calendar({
   onLensChange,
   hideTotals,
   draftMarks,
-  onAddAppointment,
 }: CalendarProps) {
   const [view, setView] = useState<View>('month');
   const [lens, setLens] = useState<Lens>('bcba');
@@ -160,18 +157,6 @@ export default function Calendar({
         marginBottom: 16, gap: 8, flexWrap: 'wrap',
       }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {onAddAppointment && (
-            <button
-              onClick={onAddAppointment}
-              aria-label="Add appointment"
-              title="Add appointment"
-              style={{
-                padding: '5px 10px', backgroundColor: '#3b82f6', color: 'white',
-                border: 'none', borderRadius: 5, cursor: 'pointer',
-                fontSize: 16, fontWeight: 700, lineHeight: 1,
-              }}
-            >+</button>
-          )}
           <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
             <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
             <ViewBtn active={view === 'week'} onClick={() => setView('week')}>Week</ViewBtn>

@@ -1185,9 +1185,21 @@ export default function App() {
               <FileUpload onUpload={handleFileUpload} loading={loading} />
             </>
           ) : (
-            <NavButtons view={view} onChange={setView} compSummary={compSummary}
-              conflictCount={activeConflicts.length}
-              conflictHasError={activeConflicts.some(c => c.severity === 'error')} />
+            <>
+              <button
+                onClick={() => setShowAddAppointment(true)}
+                aria-label="Add appointment"
+                title="Add appointment"
+                style={{
+                  padding: '5px 10px', backgroundColor: '#3b82f6', color: 'white',
+                  border: 'none', borderRadius: 5, cursor: 'pointer',
+                  fontSize: 16, fontWeight: 700, lineHeight: 1,
+                }}
+              >+</button>
+              <NavButtons view={view} onChange={setView} compSummary={compSummary}
+                conflictCount={activeConflicts.length}
+                conflictHasError={activeConflicts.some(c => c.severity === 'error')} />
+            </>
           )}
         </div>
       </header>
@@ -1247,7 +1259,6 @@ export default function App() {
                     onLensChange={setCalLens}
                     hideTotals={dockPane}
                     draftMarks={calendarMarks}
-                    onAddAppointment={() => setShowAddAppointment(true)}
                   />
                 </div>
                 {(() => {

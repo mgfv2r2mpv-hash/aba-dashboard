@@ -17,7 +17,6 @@ const WishComposer = React.lazy(() => import('./components/WishComposer'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
 const ComplianceDashboard = React.lazy(() => import('./components/ComplianceDashboard'));
 const CaseloadView = React.lazy(() => import('./components/CaseloadView'));
-const Settings = React.lazy(() => import('./components/Settings'));
 const SetupWizard = React.lazy(() => import('./components/SetupWizard'));
 import CancellationDialog from './components/CancellationDialog';
 import DayReview from './components/DayReview';
@@ -117,7 +116,6 @@ export default function App() {
   const [solutions, setSolutions] = useState<ScheduleSolution[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [view, setView] = useState<'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish'>('schedule');
-  const [showSettings, setShowSettings] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
   // Wish view is now a full page (view === 'wish') rather than a modal.
@@ -1424,7 +1422,14 @@ export default function App() {
                   onRerunWizard={() => setShowWizard(true)}
                   onDownload={handleDownload}
                   onClearData={handleClearData}
-                  onOpenAISettings={() => setShowSettings(true)}
+                  aiSettings={aiSettings}
+                  onSaveAISettings={handleAISettingsSave}
+                  onClearKey={handleClearKey}
+                  onRequestUnlock={authenticateForKey}
+                  faceIdAvailable={faceIdAvailable}
+                  faceIdEnabled={faceIdEnabled}
+                  biometryLabel={biometryLabel}
+                  onToggleFaceId={handleToggleFaceId}
                 />
               </React.Suspense>
             )}
@@ -1492,25 +1497,6 @@ export default function App() {
           </div>
         )}
       </div>
-
-      {showSettings && (
-        <React.Suspense fallback={null}>
-          <Settings
-            settings={aiSettings}
-            onSave={handleAISettingsSave}
-            onClose={() => setShowSettings(false)}
-            onClearKey={handleClearKey}
-            onRequestUnlock={authenticateForKey}
-            lock={isNative ? {
-              faceIdAvailable,
-              faceIdEnabled,
-              biometryLabel,
-              onChangePin: () => { setShowSettings(false); setChangingPin(true); },
-              onToggleFaceId: handleToggleFaceId,
-            } : undefined}
-          />
-        </React.Suspense>
-      )}
 
       {showWizard && (
         <React.Suspense fallback={null}>

@@ -2,6 +2,7 @@ import { ScheduleData } from './types';
 export interface StoredAIConfig {
     apiKey: string;
     model: string;
+    schedulePassword?: string;
 }
 export declare function hasPin(): Promise<boolean>;
 export declare function setPin(pin: string): Promise<void>;

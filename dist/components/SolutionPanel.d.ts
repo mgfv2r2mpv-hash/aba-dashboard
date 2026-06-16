@@ -6,6 +6,6 @@ interface SolutionPanelProps {
     onReject?: () => void;
     heading?: string;
 }
-export default function SolutionPanel({ solutions, onAccept, onCustomize, onReject, heading }: SolutionPanelProps): any;
+export default function SolutionPanel({ solutions, onAccept, onCustomize, onReject, heading }: SolutionPanelProps): import("react/jsx-runtime").JSX.Element;
 export {};
 //# sourceMappingURL=SolutionPanel.d.ts.map

@@ -4,5 +4,5 @@ export default function DayReview({ appointments, onComplete, onRequestCancel, o
     onComplete: (a: Appointment) => void;
     onRequestCancel: (a: Appointment) => void;
     onClose: () => void;
-}): any;
+}): import("react/jsx-runtime").JSX.Element;
 //# sourceMappingURL=DayReview.d.ts.map

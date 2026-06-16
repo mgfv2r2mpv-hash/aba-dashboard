@@ -9,7 +9,6 @@
 //   - /api/upload is handled in app.tsx via xlsx + parseWorkbook directly.
 import axios from 'axios';
 import { ConstraintValidator } from './constraintValidator';
-import { generateExcelFile } from './excelHandler';
 let store = null;
 // Deep-clone in/out so the store stays isolated from React state.
 // Without this, mutations like `store.technicians.push(...)` would leak
@@ -84,6 +83,7 @@ async function route(method, path, body) {
     if (m === 'POST' && path === '/api/download') {
         const data = requireData();
         const embeddedConfig = body?.embeddedConfig;
+        const { generateExcelFile } = await import('./excelHandler');
         const bytes = generateExcelFile(data, embeddedConfig);
         return new Blob([bytes], {
             type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

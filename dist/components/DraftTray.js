@@ -1,5 +1,4 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import React from 'react';
 const BADGE = {
     green: { color: '#16a34a', symbol: '✔' },
     yellow: { color: '#f59e0b', symbol: '!' },

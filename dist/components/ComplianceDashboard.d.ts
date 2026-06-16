@@ -16,6 +16,6 @@ interface Props {
     onAcceptFix?: (sol: WishSolution) => void | Promise<void>;
     onCustomizeFix?: (sol: WishSolution) => void;
 }
-export default function ComplianceDashboard({ data, cache, conflicts, aiSettings, mutedConflictKeys, onMuteConflict, onUnmuteConflict, onConfirmDismissConflict, onMarkComplete, onRequestCancel, onSelectAppointment, onAcceptFix, onCustomizeFix }: Props): any;
+export default function ComplianceDashboard({ data, cache, conflicts, aiSettings, mutedConflictKeys, onMuteConflict, onUnmuteConflict, onConfirmDismissConflict, onMarkComplete, onRequestCancel, onSelectAppointment, onAcceptFix, onCustomizeFix }: Props): import("react/jsx-runtime").JSX.Element;
 export {};
 //# sourceMappingURL=ComplianceDashboard.d.ts.map

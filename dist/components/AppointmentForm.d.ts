@@ -12,6 +12,6 @@ interface AppointmentFormProps {
     onCancel: () => void;
     variant?: 'modal' | 'inline';
 }
-export default function AppointmentForm({ appointment, allAppointments, authorizations, technicians, clients, settings, initialType, onSave, onDelete, onCancel, variant, }: AppointmentFormProps): any;
+export default function AppointmentForm({ appointment, allAppointments, authorizations, technicians, clients, settings, initialType, onSave, onDelete, onCancel, variant, }: AppointmentFormProps): import("react/jsx-runtime").JSX.Element;
 export {};
 //# sourceMappingURL=AppointmentForm.d.ts.map

@@ -11,6 +11,6 @@ interface ConflictPanelProps {
     onUnmute?: (key: string) => void;
     onConfirmDismiss?: (key: string) => void;
 }
-export default function ConflictPanel({ conflicts, appointments, onSelectAppointment, fill, mutedKeys, onMute, onUnmute, onConfirmDismiss }: ConflictPanelProps): any;
+export default function ConflictPanel({ conflicts, appointments, onSelectAppointment, fill, mutedKeys, onMute, onUnmute, onConfirmDismiss }: ConflictPanelProps): import("react/jsx-runtime").JSX.Element;
 export {};
 //# sourceMappingURL=ConflictPanel.d.ts.map

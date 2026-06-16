@@ -4,5 +4,5 @@ export default function CompleteTimePrompt({ a, onComplete, label, flex }: {
     onComplete: (a: Appointment) => void;
     label?: string;
     flex?: string;
-}): any;
+}): import("react/jsx-runtime").JSX.Element;
 //# sourceMappingURL=CompleteTimePrompt.d.ts.map

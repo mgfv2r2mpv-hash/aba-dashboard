@@ -6,6 +6,6 @@ interface Props {
     onConfirm: () => void;
     onCancel: () => void;
 }
-export default function ImportPreview({ current, next, fileName, onConfirm, onCancel }: Props): any;
+export default function ImportPreview({ current, next, fileName, onConfirm, onCancel }: Props): import("react/jsx-runtime").JSX.Element;
 export {};
 //# sourceMappingURL=ImportPreview.d.ts.map

@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { computeClientCompliance, computeTechCompliance, computeTechContactDays, pastIncompleteAppointments, monthPeriod, } from '../compliance';
 import { BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
 import CompleteTimePrompt from './CompleteTimePrompt';

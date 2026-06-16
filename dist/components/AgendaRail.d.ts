@@ -3,5 +3,5 @@ export default function AgendaRail({ appointments, date, onSelect }: {
     appointments: Appointment[];
     date: Date;
     onSelect: (a: Appointment) => void;
-}): any;
+}): import("react/jsx-runtime").JSX.Element;
 //# sourceMappingURL=AgendaRail.d.ts.map

@@ -46,7 +46,7 @@ import {
 } from './draft';
 import { solveDraft, DraftStatus, PrioritizationChoice } from './draftSolver';
 import DraftTray from './components/DraftTray';
-import { applyWishSolution, wishSolutionToDraft } from './wish';
+import { wishSolutionToDraft } from './wish';
 
 // Route axios /api/* calls through an in-memory store on iOS/Android,
 // since the Express server isn't reachable from inside the WebView.
@@ -685,12 +685,34 @@ export default function App() {
 
   const rejectAiSet = () => setSolutions([]);
 
+  // Shared by Wish It / Fix It Accept: the model's own ops can still
+  // double-book a tech/BCBA/client against each other or the live schedule, so
+  // run them through solveDraft (the same conflict check the draft tray uses)
+  // before trusting an Accept to commit straight away. A red grade means a hard
+  // conflict remains — stage it into the draft tray instead so the BCBA sees it
+  // and must resolve or explicitly "Save Anyway", rather than silently landing
+  // an overlapping appointment on the calendar.
+  const commitWishLikeSolution = async (sol: WishSolution): Promise<boolean> => {
+    if (!scheduleData) return false;
+    const { ops, blackouts } = wishSolutionToDraft(sol, scheduleData);
+    const status = solveDraft(scheduleData, ops, new Date(), scheduleData.settings);
+    if (status.grade === 'red') {
+      if (blackouts.length) await commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] });
+      stageOps(ops);
+      return false;
+    }
+    const resolved = status.resolved || applyOps(scheduleData, ops);
+    const next = blackouts.length ? { ...resolved, blackouts: [...(resolved.blackouts || []), ...blackouts] } : resolved;
+    await commitScheduleData(next);
+    return true;
+  };
+
   // Wish It: Accept applies the whole solution (ops + any blackouts); Customize
   // loads the appointment ops into the editable draft (and commits any blackouts,
   // which aren't editable in the tray) so the BCBA can tweak before accepting.
   const acceptWish = async (sol: WishSolution) => {
     if (!scheduleData) return;
-    await commitScheduleData(applyWishSolution(scheduleData, sol));
+    if (!(await commitWishLikeSolution(sol))) return;
     setView('schedule'); setSelectedAppointment(null);
   };
 
@@ -708,7 +730,7 @@ export default function App() {
   // (Accept) is visible.
   const acceptFix = async (sol: WishSolution) => {
     if (!scheduleData) return;
-    await commitScheduleData(applyWishSolution(scheduleData, sol));
+    await commitWishLikeSolution(sol);
     setView('schedule');
   };
 

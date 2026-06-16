@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import React, { useState, useEffect } from 'react';
 import { rollupHours, resolveUtilization, ptoHoursInRange, reduceRequirementForPto } from '../utilization';
-import { tileStyle, clientPastel, clientDarkBorder, legendStripeStyle } from '../calendarColors';
+import { tileStyle, clientPastel, clientDarkBorder, legendStripeStyle, clientAvailBarStyle } from '../calendarColors';
 import { useMinWidth, useIsLandscape } from '../useMediaQuery';
 import { startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek, format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay, } from 'date-fns';
 const VISIBLE_START_HOUR = 6;
@@ -12,11 +12,12 @@ const TIME_AXIS_WIDTH = 52;
 const TIME_AXIS_WIDTH_WIDE = 64;
 // Snap drag movements to 15-minute slots — matches typical scheduling resolution.
 const SNAP_MINUTES = 15;
-export default function Calendar({ appointments, technicians: _technicians, clients: _clients, settings, timeOff, onAppointmentChange, onSelectAppointment, onViewDateChange, onLensChange, hideTotals, draftMarks, onAddAppointment, }) {
+export default function Calendar({ appointments, technicians: _technicians, clients, settings, timeOff, onAppointmentChange, onSelectAppointment, onViewDateChange, onLensChange, hideTotals, draftMarks, onAddAppointment, }) {
     const [view, setView] = useState('month');
     const [lens, setLens] = useState('bcba');
     const [currentDate, setCurrentDate] = useState(new Date());
     const [pickedDay, setPickedDay] = useState(null);
+    const [selectedClientIds, setSelectedClientIds] = useState([]);
     const isLandscape = useIsLandscape();
     // iPad and up: roomier rows, wider time axis, richer tiles, taller month cells.
     const roomy = useMinWidth(820);
@@ -65,10 +66,10 @@ export default function Calendar({ appointments, technicians: _technicians, clie
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [appointments, view]);
     const goPrev = () => setCurrentDate(view === 'month' ? subMonths(currentDate, 1)
-        : view === 'week' ? subWeeks(currentDate, 1)
+        : (view === 'week' || view === 'clients') ? subWeeks(currentDate, 1)
             : addDays(currentDate, -1));
     const goNext = () => setCurrentDate(view === 'month' ? addMonths(currentDate, 1)
-        : view === 'week' ? addWeeks(currentDate, 1)
+        : (view === 'week' || view === 'clients') ? addWeeks(currentDate, 1)
             : addDays(currentDate, 1));
     const goToday = () => setCurrentDate(new Date());
     const headerLabel = view === 'month'
@@ -83,6 +84,10 @@ export default function Calendar({ appointments, technicians: _technicians, clie
                     ? `${format(ws, 'MMM d')} to ${format(we, 'd, yyyy')}`
                     : `${format(ws, 'MMM d')} to ${format(we, 'MMM d, yyyy')}`;
             })();
+    const weekDays = Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(currentDate, { weekStartsOn: 1 }), i));
+    const filteredClients = selectedClientIds.length === 0
+        ? clients
+        : clients.filter(c => selectedClientIds.includes(c.id));
     return (_jsxs("div", { style: { padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }, children: [_jsxs("div", { style: {
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     marginBottom: 16, gap: 8, flexWrap: 'wrap',
@@ -90,7 +95,33 @@ export default function Calendar({ appointments, technicians: _technicians, clie
                                     padding: '5px 10px', backgroundColor: '#3b82f6', color: 'white',
                                     border: 'none', borderRadius: 5, cursor: 'pointer',
                                     fontSize: 16, fontWeight: 700, lineHeight: 1,
-                                }, children: "+" })), _jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: view === 'month', onClick: () => setView('month'), children: "Month" }), _jsx(ViewBtn, { active: view === 'week', onClick: () => setView('week'), children: "Week" }), _jsx(ViewBtn, { active: view === 'day', onClick: () => setView('day'), children: "Day" })] }), _jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: lens === 'bcba', onClick: () => setLens('bcba'), children: "BCBA" }), _jsx(ViewBtn, { active: lens === 'bt', onClick: () => setLens('bt'), children: "BT" })] })] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] }), _jsx("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }, children: headerLabel })] }), view === 'month' && (_jsx(MonthView, { currentDate: currentDate, appointments: lensAppts, lens: lens, settings: settings, timeOff: timeOff, onSelectAppointment: onSelectAppointment, onPickDay: setPickedDay, draftMarks: draftMarks, roomy: roomy })), view === 'month' && !hideTotals && (_jsx("div", { style: { marginTop: 16 }, children: _jsx(HoursSummary, { appointments: appointments, lens: lens, settings: settings, timeOff: timeOff, currentDate: currentDate }) })), view === 'week' && (_jsx(TimeGrid, { days: Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(currentDate, { weekStartsOn: 1 }), i)), appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks, hourHeight: hourHeight, axisWidth: axisWidth, roomy: roomy })), view === 'day' && (_jsx(TimeGrid, { days: [currentDate], appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks, hourHeight: hourHeight, axisWidth: axisWidth, roomy: roomy })), (view === 'week' || view === 'day') && !isLandscape && (_jsx("p", { style: { fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }, children: "Rotate to landscape to drag appointments to a new time." })), pickedDay && (_jsx("div", { onClick: () => setPickedDay(null), style: {
+                                }, children: "+" })), _jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: view === 'month', onClick: () => setView('month'), children: "Month" }), _jsx(ViewBtn, { active: view === 'week', onClick: () => setView('week'), children: "Week" }), _jsx(ViewBtn, { active: view === 'day', onClick: () => setView('day'), children: "Day" }), _jsx(ViewBtn, { active: view === 'clients', onClick: () => setView('clients'), children: "Clients" })] }), view !== 'clients' && (_jsxs("div", { style: { display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }, children: [_jsx(ViewBtn, { active: lens === 'bcba', onClick: () => setLens('bcba'), children: "BCBA" }), _jsx(ViewBtn, { active: lens === 'bt', onClick: () => setLens('bt'), children: "BT" })] }))] }), _jsxs("div", { style: { display: 'flex', gap: 6, alignItems: 'center' }, children: [_jsx(NavBtn, { onClick: goPrev, children: "\u2190" }), _jsx(NavBtn, { onClick: goToday, children: "Today" }), _jsx(NavBtn, { onClick: goNext, children: "\u2192" })] }), _jsx("h2", { style: { fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }, children: headerLabel })] }), view === 'clients' && (_jsxs("div", { style: {
+                    display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8, marginBottom: 8,
+                    alignItems: 'center', WebkitOverflowScrolling: 'touch', flexWrap: 'nowrap',
+                }, children: [_jsx("button", { onClick: () => setSelectedClientIds([]), style: {
+                            padding: '4px 12px', borderRadius: 14,
+                            border: selectedClientIds.length === 0 ? 'none' : '1px solid #d1d5db',
+                            backgroundColor: selectedClientIds.length === 0 ? '#3b82f6' : '#f9fafb',
+                            color: selectedClientIds.length === 0 ? 'white' : '#374151',
+                            cursor: 'pointer', fontSize: 12, fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap',
+                        }, children: "All clients" }), clients.map(c => {
+                        const selected = selectedClientIds.includes(c.id);
+                        const hasWindows = Object.values(c.availabilityWindows).some(w => w && w.length > 0);
+                        const s = clientAvailBarStyle(c.name);
+                        return (_jsxs("button", { onClick: () => setSelectedClientIds(prev => prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]), style: {
+                                display: 'inline-flex', alignItems: 'center', gap: 5,
+                                padding: '4px 10px', borderRadius: 14,
+                                border: selected ? `2px solid ${s.borderColor}` : '1px solid #d1d5db',
+                                backgroundColor: selected ? s.backgroundColor : '#f9fafb',
+                                color: selected ? s.color : hasWindows ? '#374151' : '#9ca3af',
+                                cursor: 'pointer', fontSize: 12, fontWeight: selected ? 700 : 500,
+                                flexShrink: 0, whiteSpace: 'nowrap', opacity: hasWindows ? 1 : 0.6,
+                            }, children: [_jsx("span", { style: {
+                                        width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                                        backgroundColor: hasWindows ? s.borderColor : '#d1d5db',
+                                        display: 'inline-block',
+                                    } }), c.name, selected && _jsx("span", { style: { fontSize: 9, marginLeft: 2 }, children: "\u2715" })] }, c.id));
+                    })] })), view === 'month' && (_jsx(MonthView, { currentDate: currentDate, appointments: lensAppts, lens: lens, settings: settings, timeOff: timeOff, onSelectAppointment: onSelectAppointment, onPickDay: setPickedDay, draftMarks: draftMarks, roomy: roomy })), view === 'month' && !hideTotals && (_jsx("div", { style: { marginTop: 16 }, children: _jsx(HoursSummary, { appointments: appointments, lens: lens, settings: settings, timeOff: timeOff, currentDate: currentDate }) })), view === 'week' && (_jsx(TimeGrid, { days: weekDays, appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks, hourHeight: hourHeight, axisWidth: axisWidth, roomy: roomy })), view === 'day' && (_jsx(TimeGrid, { days: [currentDate], appointments: lensAppts, onSelectAppointment: onSelectAppointment, onAppointmentChange: onAppointmentChange, dragEnabled: isLandscape, draftMarks: draftMarks, hourHeight: hourHeight, axisWidth: axisWidth, roomy: roomy })), view === 'clients' && (_jsx(ClientAvailMatrix, { clients: filteredClients, weekDays: weekDays, appointments: appointments })), (view === 'week' || view === 'day') && !isLandscape && (_jsx("p", { style: { fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }, children: "Rotate to landscape to drag appointments to a new time." })), pickedDay && (_jsx("div", { onClick: () => setPickedDay(null), style: {
                     position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.35)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400, padding: 16,
                 }, children: _jsxs("div", { onClick: e => e.stopPropagation(), style: {
@@ -669,6 +700,121 @@ function formatHourLabel(h) {
     if (h < 12)
         return `${h}a`;
     return `${h - 12}p`;
+}
+// ---------- Client Availability Matrix ----------
+const AVAIL_CELL_START_MINS = VISIBLE_START_HOUR * 60;
+const AVAIL_CELL_TOTAL_MINS = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * 60;
+const AVAIL_ROW_HEIGHT = 48;
+const AVAIL_LABEL_WIDTH = 128;
+function ClientAvailMatrix({ clients, weekDays, appointments }) {
+    const today = new Date();
+    if (clients.length === 0) {
+        return (_jsx("div", { style: { textAlign: 'center', color: '#6b7280', padding: '48px 20px', fontSize: 14 }, children: "No clients to display. Add clients via Admin or adjust the filter above." }));
+    }
+    return (_jsx("div", { style: { overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #e5e7eb', borderRadius: 6 }, children: _jsxs("div", { style: { minWidth: 560 }, children: [_jsxs("div", { style: { display: 'flex', borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }, children: [_jsx("div", { style: { width: AVAIL_LABEL_WIDTH, flexShrink: 0 } }), weekDays.map(day => {
+                            const isToday = isSameDay(day, today);
+                            return (_jsxs("div", { style: {
+                                    flex: 1, textAlign: 'center', padding: '6px 4px',
+                                    fontSize: 11, fontWeight: 600,
+                                    color: isToday ? '#3b82f6' : '#374151',
+                                    backgroundColor: isToday ? '#eff6ff' : 'transparent',
+                                    borderLeft: '1px solid #e5e7eb',
+                                }, children: [_jsx("div", { children: format(day, 'EEE') }), _jsx("div", { style: { fontSize: 15 }, children: format(day, 'd') })] }, day.toISOString()));
+                        })] }), clients.map((client, idx) => {
+                    const s = clientAvailBarStyle(client.name);
+                    return (_jsxs("div", { style: {
+                            display: 'flex',
+                            borderTop: idx > 0 ? '1px solid #e5e7eb' : undefined,
+                        }, children: [_jsxs("div", { style: {
+                                    width: AVAIL_LABEL_WIDTH, flexShrink: 0,
+                                    display: 'flex', alignItems: 'center', gap: 6,
+                                    padding: '0 8px', height: AVAIL_ROW_HEIGHT,
+                                    backgroundColor: '#f9fafb', borderRight: '1px solid #e5e7eb',
+                                }, children: [_jsx("span", { style: {
+                                            width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
+                                            backgroundColor: s.backgroundColor,
+                                            border: `2px solid ${s.borderColor}`,
+                                            display: 'inline-block',
+                                        } }), _jsx("span", { style: {
+                                            fontSize: 11, fontWeight: 600, color: '#374151',
+                                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                        }, children: client.name })] }), weekDays.map(day => {
+                                const dateISO = format(day, 'yyyy-MM-dd');
+                                const dayAppts = appointments.filter(a => (a.client === client.name || a.client === client.id) &&
+                                    a.startTime.startsWith(dateISO) &&
+                                    a.status !== 'canceled');
+                                return (_jsx(ClientAvailCell, { client: client, date: day, appointments: dayAppts, isToday: isSameDay(day, today) }, day.toISOString()));
+                            })] }, client.id));
+                })] }) }));
+}
+function ClientAvailCell({ client, date, appointments, isToday }) {
+    const dayOfWeek = format(date, 'EEEE');
+    const windows = client.availabilityWindows[dayOfWeek] ?? [];
+    const s = clientAvailBarStyle(client.name);
+    const toMins = (hhmm) => {
+        const [h, m] = hhmm.split(':').map(Number);
+        return h * 60 + (m || 0);
+    };
+    const barLeft = (startHHMM) => {
+        const pct = Math.max(0, (toMins(startHHMM) - AVAIL_CELL_START_MINS) / AVAIL_CELL_TOTAL_MINS * 100);
+        return `${pct}%`;
+    };
+    const barWidth = (startHHMM, endHHMM) => {
+        const s0 = Math.max(toMins(startHHMM), AVAIL_CELL_START_MINS);
+        const e0 = Math.min(toMins(endHHMM), AVAIL_CELL_START_MINS + AVAIL_CELL_TOTAL_MINS);
+        return `${Math.max(0, (e0 - s0) / AVAIL_CELL_TOTAL_MINS * 100)}%`;
+    };
+    const fmtHHMM = (hhmm) => {
+        const [h, m] = hhmm.split(':').map(Number);
+        const suffix = h >= 12 ? 'PM' : 'AM';
+        const h12 = h % 12 || 12;
+        return m ? `${h12}:${String(m).padStart(2, '0')} ${suffix}` : `${h12} ${suffix}`;
+    };
+    return (_jsxs("div", { style: {
+            flex: 1, height: AVAIL_ROW_HEIGHT, position: 'relative',
+            borderLeft: '1px solid #e5e7eb',
+            backgroundColor: isToday ? '#fafbff' : '#fff',
+            overflow: 'hidden',
+        }, children: [windows.map((w, i) => (_jsx("div", { title: `${client.name} · ${fmtHHMM(w.start)} – ${fmtHHMM(w.end)}`, style: {
+                    position: 'absolute',
+                    top: 7, bottom: 7,
+                    left: barLeft(w.start),
+                    width: barWidth(w.start, w.end),
+                    backgroundColor: s.backgroundColor,
+                    border: `1px solid ${s.borderColor}`,
+                    borderRadius: 4,
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    paddingLeft: 5,
+                    boxSizing: 'border-box',
+                    minWidth: 4,
+                }, children: _jsx("span", { style: {
+                        fontSize: 10, fontWeight: 700, color: s.color,
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        userSelect: 'none',
+                    }, children: client.name }) }, i))), appointments.map((apt, i) => {
+                const start = new Date(apt.startTime);
+                const end = new Date(apt.endTime);
+                const startMins = start.getHours() * 60 + start.getMinutes();
+                const endMins = end.getHours() * 60 + end.getMinutes();
+                const clampedStart = Math.max(startMins, AVAIL_CELL_START_MINS);
+                const clampedEnd = Math.min(endMins, AVAIL_CELL_START_MINS + AVAIL_CELL_TOTAL_MINS);
+                if (clampedEnd <= clampedStart)
+                    return null;
+                const left = `${(clampedStart - AVAIL_CELL_START_MINS) / AVAIL_CELL_TOTAL_MINS * 100}%`;
+                const width = `${(clampedEnd - clampedStart) / AVAIL_CELL_TOTAL_MINS * 100}%`;
+                return (_jsx("div", { title: `Booked: ${apt.title} · ${format(start, 'h:mm')}–${format(end, 'h:mm a')}`, style: {
+                        position: 'absolute',
+                        top: 11, bottom: 11,
+                        left, width,
+                        backgroundColor: s.borderColor,
+                        opacity: 0.5,
+                        borderRadius: 3,
+                        zIndex: 1,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                    } }, apt.id || i));
+            })] }));
 }
 // ---------- Toolbar buttons ----------
 function ViewBtn({ active, onClick, children }) {

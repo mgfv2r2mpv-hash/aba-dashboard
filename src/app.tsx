@@ -9,14 +9,16 @@ import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolu
 import Calendar, { HoursSummary } from './components/Calendar';
 import ConflictPanel, { conflictKey } from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
-import WishComposer from './components/WishComposer';
-import AdminPanel from './components/AdminPanel';
-import ComplianceDashboard from './components/ComplianceDashboard';
-import CaseloadView from './components/CaseloadView';
 import FileUpload from './components/FileUpload';
-import Settings, { AISettings, ClaudeModel } from './components/Settings';
+import { AISettings, ClaudeModel } from './components/Settings';
 import AppointmentForm from './components/AppointmentForm';
-import SetupWizard from './components/SetupWizard';
+
+const WishComposer = React.lazy(() => import('./components/WishComposer'));
+const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
+const ComplianceDashboard = React.lazy(() => import('./components/ComplianceDashboard'));
+const CaseloadView = React.lazy(() => import('./components/CaseloadView'));
+const Settings = React.lazy(() => import('./components/Settings'));
+const SetupWizard = React.lazy(() => import('./components/SetupWizard'));
 import CancellationDialog from './components/CancellationDialog';
 import DayReview from './components/DayReview';
 import CompleteTimePrompt from './components/CompleteTimePrompt';
@@ -45,7 +47,6 @@ import {
 } from './draft';
 import { solveDraft, DraftStatus, PrioritizationChoice } from './draftSolver';
 import DraftTray from './components/DraftTray';
-import { ClaudeScheduler } from './claudeScheduler';
 import { applyWishSolution, wishSolutionToDraft } from './wish';
 
 // Route axios /api/* calls through an in-memory store on iOS/Android,
@@ -650,6 +651,7 @@ export default function App() {
     setAiLoading(true);
     try {
       const messages = new ConstraintValidator(preview).validateSchedule().map(c => c.message);
+      const { ClaudeScheduler } = await import('./claudeScheduler');
       const scheduler = new ClaudeScheduler(aiSettings.apiKey, preview, aiSettings.model);
       const sols = await scheduler.generateSolutions(changed, messages);
       setSolutions(sols);
@@ -1411,44 +1413,52 @@ export default function App() {
               </>
             )}
             {view === 'admin' && (
-              <AdminPanel
-                data={scheduleData}
-                onDataChange={commitFull}
-                onImportFile={triggerImportPicker}
-                onRerunWizard={() => setShowWizard(true)}
-                onDownload={handleDownload}
-                onClearData={handleClearData}
-                onOpenAISettings={() => setShowSettings(true)}
-              />
+              <React.Suspense fallback={null}>
+                <AdminPanel
+                  data={scheduleData}
+                  onDataChange={commitFull}
+                  onImportFile={triggerImportPicker}
+                  onRerunWizard={() => setShowWizard(true)}
+                  onDownload={handleDownload}
+                  onClearData={handleClearData}
+                  onOpenAISettings={() => setShowSettings(true)}
+                />
+              </React.Suspense>
             )}
             {view === 'compliance' && (
-              <ComplianceDashboard
-                data={scheduleData}
-                cache={compCache}
-                conflicts={visibleConflicts}
-                aiSettings={aiSettings}
-                mutedConflictKeys={mutedConflicts}
-                onMuteConflict={muteConflict}
-                onUnmuteConflict={unmuteConflict}
-                onConfirmDismissConflict={confirmDismissConflict}
-                onMarkComplete={handleMarkComplete}
-                onRequestCancel={(a) => setCancelTarget(a)}
-                onSelectAppointment={(a) => { setView('schedule'); setSelectedAppointment(a); }}
-                onAcceptFix={acceptFix}
-                onCustomizeFix={customizeFix}
-              />
+              <React.Suspense fallback={null}>
+                <ComplianceDashboard
+                  data={scheduleData}
+                  cache={compCache}
+                  conflicts={visibleConflicts}
+                  aiSettings={aiSettings}
+                  mutedConflictKeys={mutedConflicts}
+                  onMuteConflict={muteConflict}
+                  onUnmuteConflict={unmuteConflict}
+                  onConfirmDismissConflict={confirmDismissConflict}
+                  onMarkComplete={handleMarkComplete}
+                  onRequestCancel={(a) => setCancelTarget(a)}
+                  onSelectAppointment={(a) => { setView('schedule'); setSelectedAppointment(a); }}
+                  onAcceptFix={acceptFix}
+                  onCustomizeFix={customizeFix}
+                />
+              </React.Suspense>
             )}
             {view === 'caseload' && (
-              <CaseloadView data={scheduleData} now={viewDate} />
+              <React.Suspense fallback={null}>
+                <CaseloadView data={scheduleData} now={viewDate} />
+              </React.Suspense>
             )}
             {view === 'wish' && (
-              <WishComposer
-                data={scheduleData}
-                aiSettings={aiSettings}
-                onAccept={acceptWish}
-                onCustomize={customizeWish}
-                onClose={() => setView('schedule')}
-              />
+              <React.Suspense fallback={null}>
+                <WishComposer
+                  data={scheduleData}
+                  aiSettings={aiSettings}
+                  onAccept={acceptWish}
+                  onCustomize={customizeWish}
+                  onClose={() => setView('schedule')}
+                />
+              </React.Suspense>
             )}
           </>
         ) : (
@@ -1481,28 +1491,32 @@ export default function App() {
       </div>
 
       {showSettings && (
-        <Settings
-          settings={aiSettings}
-          onSave={handleAISettingsSave}
-          onClose={() => setShowSettings(false)}
-          onClearKey={handleClearKey}
-          onRequestUnlock={authenticateForKey}
-          lock={isNative ? {
-            faceIdAvailable,
-            faceIdEnabled,
-            biometryLabel,
-            onChangePin: () => { setShowSettings(false); setChangingPin(true); },
-            onToggleFaceId: handleToggleFaceId,
-          } : undefined}
-        />
+        <React.Suspense fallback={null}>
+          <Settings
+            settings={aiSettings}
+            onSave={handleAISettingsSave}
+            onClose={() => setShowSettings(false)}
+            onClearKey={handleClearKey}
+            onRequestUnlock={authenticateForKey}
+            lock={isNative ? {
+              faceIdAvailable,
+              faceIdEnabled,
+              biometryLabel,
+              onChangePin: () => { setShowSettings(false); setChangingPin(true); },
+              onToggleFaceId: handleToggleFaceId,
+            } : undefined}
+          />
+        </React.Suspense>
       )}
 
       {showWizard && (
-        <SetupWizard
-          onComplete={handleWizardComplete}
-          onCancel={() => setShowWizard(false)}
-          initialData={scheduleData || undefined}
-        />
+        <React.Suspense fallback={null}>
+          <SetupWizard
+            onComplete={handleWizardComplete}
+            onCancel={() => setShowWizard(false)}
+            initialData={scheduleData || undefined}
+          />
+        </React.Suspense>
       )}
 
       {/* Hidden picker for Admin → "Upload schedule…". The header FileUpload

@@ -152,6 +152,112 @@ export default function Settings({ settings, onSave, onClose, onClearKey, onRequ
         {/* Scrollable body */}
         <div ref={scrollRef} onScroll={handleScroll} style={{ padding: '0 20px 80px', overflowY: 'auto', flex: 1 }}>
 
+        {/* ── App Lock (PIN) — at top of settings ── */}
+        {lock && (
+          <div style={{ marginBottom: '24px', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
+            <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+              App Lock
+            </label>
+            <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '12px' }}>
+              A PIN locks the app on launch and encrypts your schedule on this
+              device. There is no recovery if you forget it.
+            </p>
+            <button
+              onClick={lock.onChangePin}
+              style={{
+                padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                background: 'white', cursor: 'pointer', fontSize: '13px',
+              }}
+            >
+              Change PIN
+            </button>
+            {lock.faceIdAvailable && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={lock.faceIdEnabled}
+                  onChange={(e) => lock.onToggleFaceId(e.target.checked)}
+                />
+                <span style={{ fontSize: '13px' }}>Unlock with {lock.biometryLabel || 'Face ID'}</span>
+              </label>
+            )}
+          </div>
+        )}
+
+        {/* ── Schedule Password (file encryption) ── */}
+        <div style={{ marginBottom: '24px', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
+          <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
+            Schedule Password (optional)
+          </label>
+          <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
+            Encrypts your downloaded schedule file. Opening it anywhere — including
+            in this app on another device — requires this password. Leave blank to
+            download a normal, readable file.
+          </p>
+
+          {hasExistingPw && !changingPw ? (
+            // Never re-display a set password. Offer a guarded change instead.
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '13px', color: '#374151' }}>🔒 Password is set.</span>
+              <button
+                onClick={() => { setChangingPw(true); setPwError(null); }}
+                style={{
+                  padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                  background: 'white', cursor: 'pointer', fontSize: '13px',
+                }}
+              >
+                Change…
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {hasExistingPw && (
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  placeholder="Current password"
+                  value={currentPw}
+                  onChange={(e) => { setCurrentPw(e.target.value); setPwError(null); }}
+                  autoComplete="off"
+                  style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px' }}
+                />
+              )}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  placeholder={hasExistingPw ? 'New password (blank to remove)' : 'Leave blank for no encryption'}
+                  value={newPw}
+                  onChange={(e) => { setNewPw(e.target.value); setPwError(null); }}
+                  autoComplete="off"
+                  style={{ flex: 1, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px' }}
+                />
+                <button
+                  onClick={() => setShowPw(!showPw)}
+                  style={{
+                    padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                    background: 'white', cursor: 'pointer',
+                  }}
+                >
+                  {showPw ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              {hasExistingPw && (
+                <p style={{ fontSize: '11px', color: '#b45309', margin: 0 }}>
+                  Changing this won't re-encrypt files already exported with the old
+                  password — keep the old one to open those.
+                </p>
+              )}
+              {pwError && <p style={{ fontSize: '12px', color: '#dc2626', margin: 0 }}>{pwError}</p>}
+            </div>
+          )}
+        </div>
+
+        {/* ── AI Integration ── */}
+        <div style={{ marginBottom: '8px', borderTop: '1px solid #e5e7eb', paddingTop: '20px' }}>
+          <label style={{ display: 'block', fontWeight: '700', fontSize: '13px', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px' }}>
+            AI Integration
+          </label>
+        </div>
+
         {/* Model Toggle */}
         <div style={{ marginBottom: '24px' }}>
           <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>Claude Model</label>
@@ -262,105 +368,6 @@ export default function Settings({ settings, onSave, onClose, onClearKey, onRequ
             It is sent per-request via header and never stored on the server.
           </p>
         </div>
-
-        {/* Schedule password (whole-file encryption) */}
-        <div style={{ marginBottom: '24px', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
-          <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
-            Schedule Password (optional)
-          </label>
-          <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
-            Encrypts your downloaded schedule file. Opening it anywhere — including
-            in this app on another device — requires this password. Leave blank to
-            download a normal, readable file.
-          </p>
-
-          {hasExistingPw && !changingPw ? (
-            // Never re-display a set password. Offer a guarded change instead.
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ fontSize: '13px', color: '#374151' }}>🔒 Password is set.</span>
-              <button
-                onClick={() => { setChangingPw(true); setPwError(null); }}
-                style={{
-                  padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
-                  background: 'white', cursor: 'pointer', fontSize: '13px',
-                }}
-              >
-                Change…
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {hasExistingPw && (
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  placeholder="Current password"
-                  value={currentPw}
-                  onChange={(e) => { setCurrentPw(e.target.value); setPwError(null); }}
-                  autoComplete="off"
-                  style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px' }}
-                />
-              )}
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  placeholder={hasExistingPw ? 'New password (blank to remove)' : 'Leave blank for no encryption'}
-                  value={newPw}
-                  onChange={(e) => { setNewPw(e.target.value); setPwError(null); }}
-                  autoComplete="off"
-                  style={{ flex: 1, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px' }}
-                />
-                <button
-                  onClick={() => setShowPw(!showPw)}
-                  style={{
-                    padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
-                    background: 'white', cursor: 'pointer',
-                  }}
-                >
-                  {showPw ? 'Hide' : 'Show'}
-                </button>
-              </div>
-              {hasExistingPw && (
-                <p style={{ fontSize: '11px', color: '#b45309', margin: 0 }}>
-                  Changing this won't re-encrypt files already exported with the old
-                  password — keep the old one to open those.
-                </p>
-              )}
-              {pwError && <p style={{ fontSize: '12px', color: '#dc2626', margin: 0 }}>{pwError}</p>}
-            </div>
-          )}
-        </div>
-
-        {/* App lock (native only) */}
-        {lock && (
-          <div style={{ marginBottom: '24px', padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
-            <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px' }}>
-              App Lock
-            </label>
-            <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '12px' }}>
-              A PIN locks the app on launch and encrypts your schedule on this
-              device. There is no recovery if you forget it.
-            </p>
-            <button
-              onClick={lock.onChangePin}
-              style={{
-                padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
-                background: 'white', cursor: 'pointer', fontSize: '13px',
-              }}
-            >
-              Change PIN
-            </button>
-            {lock.faceIdAvailable && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={lock.faceIdEnabled}
-                  onChange={(e) => lock.onToggleFaceId(e.target.checked)}
-                />
-                <span style={{ fontSize: '13px' }}>Unlock with {lock.biometryLabel || 'Face ID'}</span>
-              </label>
-            )}
-          </div>
-        )}
 
         </div>{/* end scrollable body */}
 

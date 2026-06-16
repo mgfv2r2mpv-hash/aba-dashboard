@@ -25,11 +25,12 @@ const AICONFIG_KEY = 'aiconfig.enc';
 const FACEID_KEY = 'faceid.enabled';
 const PIN_STASH_KEY = 'pin.stash';
 
-// The AI config we persist at rest. The API key is the only sensitive part;
-// the model preference rides along so it survives a cold launch too.
+// The AI config we persist at rest. The API key is the sensitive part;
+// model and schedulePassword ride along so they survive upgrades/reinstalls.
 export interface StoredAIConfig {
   apiKey: string;
   model: string;
+  schedulePassword?: string;
 }
 
 // Constant sealed under the PIN. Decrypting back to this exact string proves the

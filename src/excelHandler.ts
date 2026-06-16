@@ -83,6 +83,10 @@ export function parseExcelFile(filePath: string): ParsedSchedule {
   return parseWorkbook(XLSX.readFile(filePath));
 }
 
+export function parseBytes(bytes: Uint8Array): ParsedSchedule {
+  return parseWorkbook(XLSX.read(bytes, { type: 'array' }));
+}
+
 export function parseWorkbook(workbook: XLSX.WorkBook): ParsedSchedule {
   const meta = rowsOf(workbook, '_Meta')[0] || {};
 

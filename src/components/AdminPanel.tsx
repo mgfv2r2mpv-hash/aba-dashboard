@@ -1781,13 +1781,13 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
                     </label>
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
                       <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours</span>
-                      <input type="number" min="0" step="0.25" value={String(r.hours)} onChange={e => updateRule(r.id, { hours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                      <input type="text" inputMode="decimal" value={String(r.hours)} onChange={e => updateRule(r.id, { hours: parseFloat(e.target.value) || 0 })} placeholder="0" style={inputStyle} />
                     </label>
                     {r.kind === 'everyNWeeks' && (
                       <>
                         <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
                           <span style={{ fontSize: '11px', color: '#6b7280' }}>Every (wks)</span>
-                          <input type="number" min="1" step="1" value={String(r.everyWeeks ?? 1)} onChange={e => updateRule(r.id, { everyWeeks: Math.max(1, parseInt(e.target.value) || 1) })} style={inputStyle} />
+                          <input type="text" inputMode="numeric" value={String(r.everyWeeks ?? 1)} onChange={e => updateRule(r.id, { everyWeeks: Math.max(1, parseInt(e.target.value) || 1) })} placeholder="1" style={inputStyle} />
                         </label>
                         <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 110px' }}>
                           <span style={{ fontSize: '11px', color: '#6b7280' }}>On</span>
@@ -1873,7 +1873,7 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
                   </label>
                   <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
                     <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours</span>
-                    <input type="number" step="0.25" value={String(b.hours)} onChange={e => updateBalance(i, { hours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                    <input type="text" inputMode="decimal" value={String(b.hours)} onChange={e => updateBalance(i, { hours: parseFloat(e.target.value) || 0 })} placeholder="0" style={inputStyle} />
                   </label>
                   <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 150px' }}>
                     <span style={{ fontSize: '11px', color: '#6b7280' }}>As of</span>

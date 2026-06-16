@@ -26,6 +26,20 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, 'dist-client'),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          // Anthropic SDK loads lazily (only when AI is used), so keep it
+          // out of the main bundle entirely.
+          if (id.includes('@anthropic-ai')) return 'vendor-anthropic';
+          // date-fns is only needed by the Calendar view.
+          if (id.includes('date-fns')) return 'vendor-date-fns';
+          // React runtime is always needed — bundle it separately so the
+          // browser caches it independently of app code.
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) return 'vendor-react';
+        },
+      },
+    },
   },
   resolve: {
     alias: {

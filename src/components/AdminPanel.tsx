@@ -1964,7 +1964,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   const [showPw, setShowPw] = useState(false);
   const [changingPw, setChangingPw] = useState(false);
   const [pwError, setPwError] = useState<string | null>(null);
-  const hasExistingPw = false; // TODO: need to persist schedulePassword through AdminPanel
+  const hasExistingPw = !!aiSettings?.schedulePassword;
 
   // Track whether key state has been saved to know when to move AI settings position
   const [keySavedState, setKeySavedState] = useState(hasExistingKey);
@@ -2023,19 +2023,39 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
         otherHours: num(otherHrs, DEFAULT_BCBA_SESSION_DEFAULTS.otherHours),
       },
     };
+    // Validate schedule password change before saving
+    let schedulePassword = aiSettings?.schedulePassword;
+    if (changingPw) {
+      if (hasExistingPw && currentPw !== aiSettings?.schedulePassword) {
+        setPwError('Current password is incorrect.');
+        return;
+      }
+      schedulePassword = newPw.trim() || undefined;
+    }
+
     setJustSaved(false);
     const ok = await onSave(next);
     if (ok !== false) {
-      // Handle AI settings save
+      // Resolve final API key
+      const finalKey = replacingKey ? (apiKey.trim() || aiSettings?.apiKey || '') : (aiSettings?.apiKey || '');
+      const finalModel = model;
+
+      // Save AI settings (key, model, schedulePassword) in one shot
+      if (onSaveAISettings && (finalKey !== aiSettings?.apiKey || finalModel !== aiSettings?.model || schedulePassword !== aiSettings?.schedulePassword)) {
+        await onSaveAISettings({ apiKey: finalKey, model: finalModel, schedulePassword });
+      }
+
       if (replacingKey && apiKey.trim()) {
-        const newSettings: AISettings = { apiKey: apiKey.trim(), model };
-        await onSaveAISettings?.(newSettings);
         setKeySavedState(true);
         setReplacingKey(false);
         setApiKey('');
       } else if (replacingKey && !apiKey.trim() && hasExistingKey) {
-        // Keep existing key if field is blank
         setReplacingKey(false);
+      }
+      if (changingPw) {
+        setChangingPw(false);
+        setCurrentPw('');
+        setNewPw('');
       }
       setJustSaved(true);
       window.setTimeout(() => setJustSaved(false), 2500);

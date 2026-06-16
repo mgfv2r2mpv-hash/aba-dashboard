@@ -175,7 +175,7 @@ ${priorityLines.length ? '\n' + priorityLines.join('\n') : ''}
 
 HARD RULES — check every op against ALL of these before outputting:
 1. Never touch any appointment whose start < NOW.
-2. Never double-book a person; respect all availability windows.
+2. Never double-book a person; respect all availability windows. The BCBA is not listed in CLIENTS/TECHNICIANS but is the implicit actor on EVERY supervision/parent-training/case-planning/reassessment item — new or already in SCHEDULE IN HORIZON. Two such items (any client/tech combination) must never overlap in time, since the same BCBA can't run both. Diff every new add/move against (a) the other ops in the same solution and (b) every existing supervision/parent-training/case-planning/reassessment row in the schedule.
 3. ${billableRule}
 4. Fewest/smallest additions that close the gap; do not over-serve above target.
 5. "add" ops must NOT include an "id" field — the app assigns IDs.
@@ -190,7 +190,7 @@ TECHNICIANS: ${JSON.stringify(anon.technicians)}
 ${anon.blackouts.length ? `BLACKOUT DAYS (each entry blocks only the named entity — other people on that date are unaffected): ${JSON.stringify(anon.blackouts)}` : ''}
 ${anon.timeOff.length ? `BCBA TIME OFF (BCBA unavailable these days/hours): ${JSON.stringify(anon.timeOff)}` : ''}
 
-VALIDATION (do mentally before answering): For every op verify — (a) start ≥ NOW; (b) no double-book; (c) client/tech tokens exist in CLIENTS/TECHNICIANS; (d) apt tokens for move/remove exist in SCHEDULE; (e) proposed date+entity combination is not in BLACKOUT DAYS (each blackout only blocks its named entity, not the whole day); (f) BCBA not scheduled on TIME OFF dates; (g) skip any malformed token that looks like "CLIENT_nIENT_m" — those are corrupted and should be ignored.
+VALIDATION (do mentally before answering): For every op verify — (a) start ≥ NOW; (b) no double-book of any tech or client; (b2) no two supervision/parent-training/case-planning/reassessment items (new ops AND existing schedule rows) overlap in time — the BCBA runs all of them and can only be in one at a time; (c) client/tech tokens exist in CLIENTS/TECHNICIANS; (d) apt tokens for move/remove exist in SCHEDULE; (e) proposed date+entity combination is not in BLACKOUT DAYS (each blackout only blocks its named entity, not the whole day); (f) BCBA not scheduled on TIME OFF dates; (g) skip any malformed token that looks like "CLIENT_nIENT_m" — those are corrupted and should be ignored.
 
 OUTPUT: Strict JSON only — no prose, no markdown. Exact schema (include only listed keys per op type):
 {"solutions":[{"summary":"short title","reasoning":"1-2 sentences","ops":[
@@ -239,7 +239,7 @@ HARD RULES:
 2. Items marked fixed cannot be moved. Respect technician and client availability windows.
 3. Keep BCBA weekly billable ≥ required; supervision ${s.supervisionDirectHoursPercent}% of direct + ${s.supervisionRBTHoursPercent}% of RBT hours; parent training ≥ ${s.parentTraining.minimumHours}h per ${s.parentTraining.periodUnit}.
 4. Prefer minimal change: move as few sessions as possible, keep recurring slots stable.
-5. Never double-book a person.
+5. Never double-book a person. The BCBA is not listed in CLIENTS/TECHNICIANS but is the implicit actor on EVERY supervision/parent-training/case-planning/reassessment item — new or already in SCHEDULE IN HORIZON. Two such items (any client/tech combination) must never overlap in time. Diff every new add/move against (a) the other ops in the same solution and (b) every existing supervision/parent-training/case-planning/reassessment row in the schedule.
 6. "add" ops must NOT include an "id" field — the app assigns IDs.
 7. Each of the ≤3 solutions must be genuinely distinct.
 ${wish.shaveDown ? `8. SHAVE DOWN: where a case or RBT is OVER-served, you may shorten supervision toward the binding minimum — LARGEST of preferred-min ${s.supervisionPreferredMinPercent ?? 15}%, floor ${s.supervisionFloorPercent ?? 10}%, and BACB 5%. Never trim below that minimum.` : ''}
@@ -254,7 +254,7 @@ TECHNICIANS: ${JSON.stringify(anon.technicians)}
 ${anon.blackouts.length ? `BLACKOUT DAYS (each entry blocks only the named entity): ${JSON.stringify(anon.blackouts)}` : ''}
 ${anon.timeOff.length ? `BCBA TIME OFF: ${JSON.stringify(anon.timeOff)}` : ''}
 
-VALIDATION (do mentally before answering): For every op verify — (a) start ≥ NOW; (b) no double-book; (c) client/tech tokens exist in CLIENTS/TECHNICIANS; (d) apt tokens for move/remove exist in SCHEDULE; (e) proposed date+entity not in BLACKOUT DAYS; (f) BCBA not scheduled on TIME OFF; (g) skip any malformed token like "CLIENT_nIENT_m" — those are corrupted.
+VALIDATION (do mentally before answering): For every op verify — (a) start ≥ NOW; (b) no double-book of any tech or client; (b2) no two supervision/parent-training/case-planning/reassessment items (new ops AND existing schedule rows) overlap in time — the BCBA runs all of them and can only be in one at a time; (c) client/tech tokens exist in CLIENTS/TECHNICIANS; (d) apt tokens for move/remove exist in SCHEDULE; (e) proposed date+entity not in BLACKOUT DAYS; (f) BCBA not scheduled on TIME OFF; (g) skip any malformed token like "CLIENT_nIENT_m" — those are corrupted.
 
 OUTPUT: Strict JSON only — no prose, no markdown. Exact schema (include only listed keys per op type):
 {"solutions":[{"summary":"short title","reasoning":"1-2 sentences","ops":[

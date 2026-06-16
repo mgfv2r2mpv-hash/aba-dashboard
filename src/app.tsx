@@ -1164,8 +1164,8 @@ export default function App() {
       }}>
         {/* Row 1: app name + AI status dot + Settings gear */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-          <img src="/logo.png" alt="Assi" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} />
-          <h1 style={{ fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>Assi - ABA Calendar</h1>
+          <img src="/logo.png" alt="SAssi" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} />
+          <h1 style={{ fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>SAssi - ABA Calendar</h1>
           <span
             title={aiSettings.apiKey ? `AI: ${aiSettings.model}` : 'No AI key set — add in Settings'}
             style={{

@@ -988,7 +988,7 @@ export default function App() {
                     zIndex: 10,
                     flexShrink: 0,
                     boxSizing: 'border-box',
-                }, children: [_jsxs("div", { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }, children: [_jsx("img", { src: "/logo.png", alt: "Assi", style: { width: 22, height: 22, borderRadius: 5, flexShrink: 0 } }), _jsx("h1", { style: { fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }, children: "Assi - ABA Calendar" }), _jsx("span", { title: aiSettings.apiKey ? `AI: ${aiSettings.model}` : 'No AI key set — add in Settings', style: {
+                }, children: [_jsxs("div", { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }, children: [_jsx("img", { src: "/logo.png", alt: "SAssi", style: { width: 22, height: 22, borderRadius: 5, flexShrink: 0 } }), _jsx("h1", { style: { fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }, children: "SAssi - ABA Calendar" }), _jsx("span", { title: aiSettings.apiKey ? `AI: ${aiSettings.model}` : 'No AI key set — add in Settings', style: {
                                     width: 8, height: 8, borderRadius: '50%',
                                     backgroundColor: aiSettings.apiKey ? '#10b981' : '#ef4444',
                                     display: 'inline-block', flexShrink: 0,

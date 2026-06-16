@@ -32,6 +32,18 @@ export function clientDarkBorder(name?: string): string {
   return `hsl(${clientHue(name)} 55% 62%)`;
 }
 
+// Background, border, and text color for a client availability bar in the
+// Clients matrix view. Solid pastel fill since each client has its own row.
+export function clientAvailBarStyle(name?: string): { backgroundColor: string; borderColor: string; color: string } {
+  if (!name) return { backgroundColor: '#e5e7eb', borderColor: '#9ca3af', color: '#374151' };
+  const hue = clientHue(name);
+  return {
+    backgroundColor: `hsl(${hue} 72% 88%)`,
+    borderColor: `hsl(${hue} 55% 62%)`,
+    color: `hsl(${hue} 45% 28%)`,
+  };
+}
+
 export function staffBold(name?: string): string {
   if (!name) return '#6b7280';
   return `hsl(${staffHue(name)} 62% 42%)`;

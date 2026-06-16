@@ -73,9 +73,8 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
 
   return (
     <div style={{ padding: 20, maxWidth: 600, margin: '0 auto', boxSizing: 'border-box' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+      <div style={{ marginBottom: 6 }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>✨ Wish It</h2>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>✕</button>
       </div>
         <p style={{ fontSize: 13, color: '#6b7280', marginTop: 0 }}>
           Describe a goal; the AI proposes up to 3 compliant ways to reshape your schedule. Pick one to apply or customize.

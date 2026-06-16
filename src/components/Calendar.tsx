@@ -257,7 +257,7 @@ export default function Calendar({
           appointments={lensAppts}
           onSelectAppointment={onSelectAppointment}
           onAppointmentChange={onAppointmentChange}
-          dragEnabled={isLandscape}
+          dragEnabled={true}
           draftMarks={draftMarks}
           hourHeight={hourHeight}
           axisWidth={axisWidth}
@@ -270,7 +270,7 @@ export default function Calendar({
           appointments={lensAppts}
           onSelectAppointment={onSelectAppointment}
           onAppointmentChange={onAppointmentChange}
-          dragEnabled={isLandscape}
+          dragEnabled={true}
           draftMarks={draftMarks}
           hourHeight={hourHeight}
           axisWidth={axisWidth}

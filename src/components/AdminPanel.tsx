@@ -2113,7 +2113,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
                 padding: '8px 14px', backgroundColor: '#374151', color: 'white',
                 border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
               }}
-            >⚙ AI Settings</button>
+            >⚙ AI Model & Key</button>
           </div>
         </SettingsSection>
       )}

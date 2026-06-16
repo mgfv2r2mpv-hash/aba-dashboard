@@ -152,7 +152,6 @@ export default function App() {
   const headerRef = React.useRef<HTMLElement | null>(null);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const mainScrollLastRef = React.useRef(0);
-  const [headerHidden, setHeaderHidden] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(56);
   const isLandscape = useIsLandscape();
 
@@ -264,18 +263,8 @@ export default function App() {
     return () => ro.disconnect();
   });
 
-  // Reset header visibility when switching view, rotating, or scrolling to top.
-  useEffect(() => { setHeaderHidden(false); }, [view, isLandscape]);
-
   const handleMainScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    if (isLandscape) return;
-    const el = e.currentTarget;
-    const curr = el.scrollTop;
-    const prev = mainScrollLastRef.current;
-    mainScrollLastRef.current = curr;
-    if (curr < 10) { setHeaderHidden(false); return; }
-    if (curr > prev + 6) setHeaderHidden(true);
-    else if (curr < prev - 4) setHeaderHidden(false);
+    mainScrollLastRef.current = e.currentTarget.scrollTop;
   };
 
   // On narrow screens the right-side detail panel wraps below the calendar.
@@ -313,7 +302,7 @@ export default function App() {
     // (Native + unlocked only; web has no at-rest store.)
     const pin = unlockedPinRef.current;
     if (isNative && pin) {
-      if (settings.apiKey) void saveAIConfig({ apiKey: settings.apiKey, model: settings.model }, pin);
+      if (settings.apiKey) void saveAIConfig({ apiKey: settings.apiKey, model: settings.model, schedulePassword: settings.schedulePassword }, pin);
       else void clearAIConfig();
     }
   };
@@ -425,6 +414,7 @@ export default function App() {
         ...aiSettings,
         apiKey: aiConfig.apiKey,
         model: (aiConfig.model as ClaudeModel) || aiSettings.model || 'claude-sonnet-4-6',
+        schedulePassword: aiConfig.schedulePassword,
       };
       setAiSettings(restoredSettings);
       saveSessionSettings(restoredSettings);
@@ -456,8 +446,8 @@ export default function App() {
   // Re-key to a new PIN from inside the app (already authenticated by being in).
   const handleChangePin = async (pin: string) => {
     await changePin(pin, scheduleData);
-    // Re-seal the API key under the new PIN so it stays recoverable on unlock.
-    if (aiSettings.apiKey) await saveAIConfig({ apiKey: aiSettings.apiKey, model: aiSettings.model }, pin);
+    // Re-seal the AI config under the new PIN so it stays recoverable on unlock.
+    if (aiSettings.apiKey) await saveAIConfig({ apiKey: aiSettings.apiKey, model: aiSettings.model, schedulePassword: aiSettings.schedulePassword }, pin);
     else await clearAIConfig();
     unlockedPinRef.current = pin;
     setChangingPin(false);
@@ -1162,20 +1152,20 @@ export default function App() {
         // title doesn't sit under the time/carrier indicators.
         padding: 'calc(env(safe-area-inset-top) + 6px) 12px 6px',
         boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-        // Portrait: fixed + slide-hide on scroll. Landscape: sticky (no hiding).
+        // Both orientations: sticky/fixed at top, never scrolls off-screen.
         position: isLandscape ? 'sticky' : 'fixed',
-        top: isLandscape ? 0 : (headerHidden ? -headerHeight : 0),
+        top: 0,
         left: isLandscape ? undefined : 0,
         right: isLandscape ? undefined : 0,
         width: isLandscape ? undefined : '100%',
         zIndex: 10,
         flexShrink: 0,
-        transition: isLandscape ? undefined : 'top 0.22s ease',
         boxSizing: 'border-box',
       }}>
-        {/* Row 1: app name + AI status dot */}
+        {/* Row 1: app name + AI status dot + Settings gear */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-          <h1 style={{ fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>SAssi - ABA Calendar</h1>
+          <img src="/logo.png" alt="Assi" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} />
+          <h1 style={{ fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>Assi - ABA Calendar</h1>
           <span
             title={aiSettings.apiKey ? `AI: ${aiSettings.model}` : 'No AI key set — add in Settings'}
             style={{
@@ -1184,6 +1174,15 @@ export default function App() {
               display: 'inline-block', flexShrink: 0,
             }}
           />
+          <button
+            onClick={() => setShowSettings(true)}
+            title="Settings"
+            style={{
+              marginLeft: 'auto', background: 'none', border: 'none', color: 'white',
+              cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '2px 4px',
+              opacity: 0.8,
+            }}
+          >⚙</button>
         </div>
         {/* Row 2: nav buttons */}
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -1319,14 +1318,14 @@ export default function App() {
                   // inline edits, all animated. Overflow in any band scrolls
                   // within the band, never growing the frozen pane.
                   if (splitView) {
-                    const canCollapse = isLandscape;
-                    const collapsed = canCollapse && panelCollapsed;
+                    const canCollapse = true;
+                    const collapsed = panelCollapsed;
                     return (
                       <div style={{
                         position: 'relative',
                         flex: '0 0 auto',
-                        width: canCollapse ? (collapsed ? 20 : 400) : 380,
-                        transition: canCollapse ? 'width 0.25s ease' : undefined,
+                        width: collapsed ? 20 : 400,
+                        transition: 'width 0.25s ease',
                         minHeight: 0, height: '100%',
                         overflow: 'hidden',
                       }}>
@@ -1337,9 +1336,7 @@ export default function App() {
                             style={{
                               position: 'absolute', left: 0, top: 40,
                               width: 20, height: 48, zIndex: 20,
-                              clipPath: collapsed
-                                ? 'polygon(0% 0%, 100% 50%, 0% 100%)'
-                                : 'polygon(100% 0%, 0% 50%, 100% 100%)',
+                              clipPath: 'polygon(100% 0%, 0% 50%, 100% 100%)',
                               backgroundColor: '#94a3b8',
                               border: 'none', cursor: 'pointer', padding: 0,
                             }}
@@ -1347,7 +1344,7 @@ export default function App() {
                         )}
                         <div ref={detailPanelRef} style={{
                           position: 'absolute',
-                          left: canCollapse ? 20 : 0, top: 0, bottom: 0,
+                          left: 20, top: 0, bottom: 0,
                           width: 380,
                           borderLeft: '1px solid #e5e7eb',
                           display: 'flex', flexDirection: 'column',

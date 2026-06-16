@@ -206,56 +206,64 @@ ISO times are local (no timezone suffix). If no compliant option exists, return 
     const horizonWeeks = wish.horizonWeeks && wish.horizonWeeks > 0 ? wish.horizonWeeks : 8;
     const horizonEnd = new Date(now.getTime() + horizonWeeks * 7 * 86400000);
     const anon = anonymizeSchedule(this.data, this.anonMap);
-
-    // Token budget: only future, still-scheduled appointments inside the horizon.
-    const inScope = anon.appointments.filter((a: any) => {
-      const t = new Date(a.startTime).getTime();
-      return t >= now.getTime() && t <= horizonEnd.getTime();
-    });
-
     const s = this.data.settings;
+
+    // Compact payload: only fields the model needs, same as Fix It.
+    const inScope = anon.appointments
+      .filter((a: any) => {
+        const t = new Date(a.startTime).getTime();
+        return t >= now.getTime() && t <= horizonEnd.getTime();
+      })
+      .map((a: any) => ({
+        id: a.id, tech: a.technician || undefined, client: a.client || undefined,
+        start: a.startTime, end: a.endTime, type: a.type,
+        fixed: a.isFixed || undefined,
+        recur: a.isRecurring ? (a.recurringPattern || true) : undefined,
+      }));
+
     const clinicianAvail = s.clinicianAvailability
       ? Object.entries(s.clinicianAvailability).map(([d, ws]) => `${d}: ${(ws as any[]).map(w => `${w.start}-${w.end}`).join(', ')}`).join('; ')
       : 'not specified';
 
-    return `
-You are an expert ABA (Applied Behavior Analysis) scheduler helping a BCBA reshape their own schedule to honor a goal while staying clinically compliant.
+    return `You are an ABA scheduler helping a BCBA reshape their schedule toward a goal. All people are opaque tokens — use exact tokens, never invent names.
 
-All people are opaque tokens (CLIENT_n, TECH_n, APT_n). Use these exact tokens in your reply. Do NOT invent names.
-
-CURRENT DATETIME: ${now.toISOString()}
-HORIZON: only change appointments from now through ${horizonEnd.toISOString().slice(0, 10)}.
+NOW: ${now.toISOString()}
+HORIZON: ${horizonEnd.toISOString().slice(0, 10)}
 
 THE WISH:
 ${summarizeWish(wish)}
 ${wish.note ? `Extra detail: ${scrubText(wish.note, this.data, this.anonMap)}` : ''}
 
 HARD RULES:
-- Never change, complete, or move any appointment that starts before CURRENT DATETIME.
-- Items marked fixed cannot be moved. Respect technician and client availability windows.
-- Keep the BCBA's weekly billable hours at/above their requirement; supervision ${s.supervisionDirectHoursPercent}% of direct + ${s.supervisionRBTHoursPercent}% of RBT hours; parent training >= ${s.parentTraining.minimumHours}h per ${s.parentTraining.periodUnit}.
-- Prefer minimal week-to-week change: move as few sessions as possible and keep recurring slots stable.
-- Never double-book a person; never move a technician off another client's session.
-${wish.shaveDown ? `- SHAVE DOWN: where a case or RBT is OVER-served on supervision (above the preferred band), you may shorten or trim those supervision sessions toward the binding minimum — the LARGEST of preferred-min ${s.supervisionPreferredMinPercent ?? 15}%, company floor ${s.supervisionFloorPercent ?? 10}%, and (for RBTs) the BACB 5% floor — to free capacity for the wish. Never trim below that binding minimum.` : ''}
+1. Never touch any appointment whose start < NOW.
+2. Items marked fixed cannot be moved. Respect technician and client availability windows.
+3. Keep BCBA weekly billable ≥ required; supervision ${s.supervisionDirectHoursPercent}% of direct + ${s.supervisionRBTHoursPercent}% of RBT hours; parent training ≥ ${s.parentTraining.minimumHours}h per ${s.parentTraining.periodUnit}.
+4. Prefer minimal change: move as few sessions as possible, keep recurring slots stable.
+5. Never double-book a person.
+6. "add" ops must NOT include an "id" field — the app assigns IDs.
+7. Each of the ≤3 solutions must be genuinely distinct.
+${wish.shaveDown ? `8. SHAVE DOWN: where a case or RBT is OVER-served, you may shorten supervision toward the binding minimum — LARGEST of preferred-min ${s.supervisionPreferredMinPercent ?? 15}%, floor ${s.supervisionFloorPercent ?? 10}%, and BACB 5%. Never trim below that minimum.` : ''}
 
-BCBA (clinician) availability: ${clinicianAvail}
+BCBA availability: ${clinicianAvail}
 
-APPOINTMENTS IN SCOPE (JSON):
+SCHEDULE IN HORIZON (compact JSON):
 ${JSON.stringify(inScope)}
 
-CLIENTS (JSON): ${JSON.stringify(anon.clients)}
-TECHNICIANS (JSON): ${JSON.stringify(anon.technicians)}
-${anon.blackouts.length ? `BLACKOUT DAYS (each entry blocks only the named entity — other people on that date are unaffected): ${JSON.stringify(anon.blackouts)}` : ''}
-${anon.timeOff.length ? `BCBA TIME OFF (BCBA unavailable these days/hours): ${JSON.stringify(anon.timeOff)}` : ''}
+CLIENTS: ${JSON.stringify(anon.clients)}
+TECHNICIANS: ${JSON.stringify(anon.technicians)}
+${anon.blackouts.length ? `BLACKOUT DAYS (each entry blocks only the named entity): ${JSON.stringify(anon.blackouts)}` : ''}
+${anon.timeOff.length ? `BCBA TIME OFF: ${JSON.stringify(anon.timeOff)}` : ''}
 
-Produce UP TO 3 distinct options. Reply with STRICT JSON only (no prose, no markdown fence), shaped exactly:
-{"solutions":[{"summary":"short title","reasoning":"one or two sentences","ops":[
-  {"op":"move","apt":"APT_n","start":"ISO","end":"ISO"},
+VALIDATION (do mentally before answering): For every op verify — (a) start ≥ NOW; (b) no double-book; (c) client/tech tokens exist in CLIENTS/TECHNICIANS; (d) apt tokens for move/remove exist in SCHEDULE; (e) proposed date+entity not in BLACKOUT DAYS; (f) BCBA not scheduled on TIME OFF; (g) skip any malformed token like "CLIENT_nIENT_m" — those are corrupted.
+
+OUTPUT: Strict JSON only — no prose, no markdown. Exact schema (include only listed keys per op type):
+{"solutions":[{"summary":"short title","reasoning":"1-2 sentences","ops":[
+  {"op":"move","apt":"APT_n","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss"},
   {"op":"remove","apt":"APT_n"},
-  {"op":"add","title":"...","type":"parent-training|supervision|client-session|case-planning|reassessment|internal-task|other","client":"CLIENT_n|null","tech":"TECH_n|null","start":"ISO","end":"ISO","recurring":true,"pattern":"weekly|biweekly"},
+  {"op":"add","title":"...","type":"supervision|parent-training|case-planning|client-session|reassessment|other","client":"CLIENT_n or null","tech":"TECH_n or null","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss","recurring":false,"pattern":null},
   {"op":"blackout","entityType":"client|technician","entity":"CLIENT_n|TECH_n","date":"YYYY-MM-DD","reason":"..."}
 ]}]}
-Use only the op shapes above. ISO times must be local (no timezone suffix), e.g. 2026-06-19T17:00:00. Omit an op array entry rather than guessing. If the wish can't be met compliantly, return a single option whose reasoning explains why and whose ops are an empty array.`;
+ISO times are local (no timezone suffix). If the wish can't be met compliantly, return one solution with empty ops and reasoning explaining why.`;
   }
 
   private buildPrompt(appointment: Appointment, conflicts: string[]): string {

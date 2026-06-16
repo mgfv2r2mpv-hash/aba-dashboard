@@ -6,6 +6,6 @@ interface LockScreenProps {
     biometricAuto?: boolean;
     biometryLabel?: string;
 }
-export default function LockScreen({ mode, onCreate, onVerify, onBiometric, biometricAuto, biometryLabel }: LockScreenProps): any;
+export default function LockScreen({ mode, onCreate, onVerify, onBiometric, biometricAuto, biometryLabel }: LockScreenProps): import("react/jsx-runtime").JSX.Element;
 export {};
 //# sourceMappingURL=LockScreen.d.ts.map

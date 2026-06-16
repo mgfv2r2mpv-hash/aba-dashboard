@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 // Modal replacement for window.prompt() on the schedule-decrypt path. Using a
 // real <form> with a password <input autocomplete="current-password"> lets iOS
 // surface the Passwords key above the keyboard, unlike prompt() which can't.

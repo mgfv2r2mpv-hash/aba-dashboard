@@ -1,5 +1,5 @@
 import { jsxs as _jsxs, jsx as _jsx, Fragment as _Fragment } from "react/jsx-runtime";
-import React, { useState } from 'react';
+import { useState } from 'react';
 export default function SolutionPanel({ solutions, onAccept, onCustomize, onReject, heading }) {
     const [expanded, setExpanded] = useState(0);
     return (_jsxs("div", { style: { padding: '16px', overflow: 'auto', flex: 1 }, children: [_jsxs("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: 8 }, children: [_jsxs("h3", { style: { margin: 0 }, children: ["\uD83D\uDCA1 ", heading || 'AI options'] }), onReject && (_jsx("button", { onClick: onReject, style: {

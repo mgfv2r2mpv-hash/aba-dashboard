@@ -309,9 +309,11 @@ export function solveDraft(base, ops, now, settings) {
         return { grade: 'green', label: 'no conflict; within hours', resolved,
             movedIds: [...movedIds], choices: [], needsChoice: false, aiEligible: false };
     }
-    // Not clean (or below floor). If below floor → red regardless.
+    // Below billable floor: warn but allow BCBA to Accept (yellow, not a hard block).
+    // A remove op that drops hours below minimum is still staged as a violation in
+    // the draft tray label so the BCBA sees it before confirming.
     if (belowFloor) {
-        return { grade: 'red', label: 'billable below minimum', resolved: undefined,
+        return { grade: 'yellow', label: 'warning: billable below minimum', resolved,
             movedIds: [...movedIds], choices: [], needsChoice: false, aiEligible: true };
     }
     // Conflicts remain after mobile reshuffle. If every remaining conflict offers

@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { DEFAULT_FIXIT_OPTIONS } from '../types';
 import { ClaudeScheduler } from '../claudeScheduler';
 import { summarizeFixIt } from '../fixit';

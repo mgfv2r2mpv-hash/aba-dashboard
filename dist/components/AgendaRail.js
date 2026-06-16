@@ -1,5 +1,4 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import React from 'react';
 import { clientPastel } from '../calendarColors';
 import { format, isSameDay } from 'date-fns';
 // Default content for the docked context pane on wide screens, shown when no

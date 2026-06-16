@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { CANCELLATION_SOURCES, CANCELLATION_REASONS, activeCancellationCodes, DEFAULT_CANCELLATION_NOTICE, } from '../types';
 // For client-session/internal-task: BCBA isn't a participant, so don't offer
 // Cancel-BCBA. For everything else (supervision, parent-training, other) all

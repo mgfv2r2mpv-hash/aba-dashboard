@@ -8,6 +8,6 @@ interface AdminPanelProps {
     onClearData?: () => void;
     onOpenAISettings?: () => void;
 }
-export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings }: AdminPanelProps): any;
+export default function AdminPanel({ data, onDataChange, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings }: AdminPanelProps): import("react/jsx-runtime").JSX.Element;
 export {};
 //# sourceMappingURL=AdminPanel.d.ts.map

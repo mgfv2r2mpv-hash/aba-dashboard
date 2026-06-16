@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { DEFAULT_BCBA_SESSION_DEFAULTS } from '../types';
 import { makeupCandidates, findAuthFor } from '../authorization';
 import { v4 as uuidv4 } from 'uuid';

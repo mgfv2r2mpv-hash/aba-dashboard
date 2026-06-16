@@ -19,6 +19,6 @@ interface SettingsProps {
     onRequestUnlock?: () => Promise<boolean>;
     lock?: LockControls;
 }
-export default function Settings({ settings, onSave, onClose, onClearKey, onRequestUnlock, lock }: SettingsProps): any;
+export default function Settings({ settings, onSave, onClose, onClearKey, onRequestUnlock, lock }: SettingsProps): import("react/jsx-runtime").JSX.Element;
 export {};
 //# sourceMappingURL=Settings.d.ts.map

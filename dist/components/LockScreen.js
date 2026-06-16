@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 const PIN_MIN = 4;
 const PIN_MAX = 8;
 const isDigits = (s) => /^[0-9]*$/.test(s);

@@ -1,2 +1,2 @@
-export default function App(): any;
+export default function App(): import("react/jsx-runtime").JSX.Element;
 //# sourceMappingURL=app.d.ts.map

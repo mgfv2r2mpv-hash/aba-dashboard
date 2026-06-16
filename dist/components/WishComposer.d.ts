@@ -7,6 +7,6 @@ interface Props {
     onCustomize: (sol: WishSolution) => void;
     onClose: () => void;
 }
-export default function WishComposer({ data, aiSettings, onAccept, onCustomize, onClose }: Props): any;
+export default function WishComposer({ data, aiSettings, onAccept, onCustomize, onClose }: Props): import("react/jsx-runtime").JSX.Element;
 export {};
 //# sourceMappingURL=WishComposer.d.ts.map

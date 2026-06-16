@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "build:server": "tsc",
     "build:client": "vite build",
-    "cap:ios": "npm run build:client && npx cap copy ios",
+    "cap:ios": "npx capacitor-assets generate --ios && npm run build:client && npx cap copy ios",
     "start": "node dist/server.js",
     "dev": "nodemon --exec ts-node src/server.ts",
     "dev:client": "vite"
@@ -39,6 +39,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.4.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",

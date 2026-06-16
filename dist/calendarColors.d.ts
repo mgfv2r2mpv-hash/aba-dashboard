@@ -1,5 +1,10 @@
 export declare function clientPastel(name?: string): string;
 export declare function clientDarkBorder(name?: string): string;
+export declare function clientAvailBarStyle(name?: string): {
+    backgroundColor: string;
+    borderColor: string;
+    color: string;
+};
 export declare function staffBold(name?: string): string;
 export declare function tileStyle(clientName?: string, techName?: string): {
     backgroundColor: string;

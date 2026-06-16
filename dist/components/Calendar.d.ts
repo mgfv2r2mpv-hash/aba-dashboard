@@ -15,7 +15,7 @@ interface CalendarProps {
     onAddAppointment?: () => void;
 }
 type Lens = 'bcba' | 'bt';
-export default function Calendar({ appointments, technicians: _technicians, clients: _clients, settings, timeOff, onAppointmentChange, onSelectAppointment, onViewDateChange, onLensChange, hideTotals, draftMarks, onAddAppointment, }: CalendarProps): any;
+export default function Calendar({ appointments, technicians: _technicians, clients, settings, timeOff, onAppointmentChange, onSelectAppointment, onViewDateChange, onLensChange, hideTotals, draftMarks, onAddAppointment, }: CalendarProps): any;
 export declare function HoursSummary({ appointments, lens, settings, timeOff, currentDate }: {
     appointments: Appointment[];
     lens: Lens;

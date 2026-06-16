@@ -1962,12 +1962,12 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   const [apiKey, setApiKey] = useState('');
   const [unlockError, setUnlockError] = useState<string | null>(null);
 
+  const hasExistingPw = !!aiSettings?.schedulePassword;
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [showPw, setShowPw] = useState(false);
-  const [changingPw, setChangingPw] = useState(false);
+  const [changingPw, setChangingPw] = useState(!hasExistingPw);
   const [pwError, setPwError] = useState<string | null>(null);
-  const hasExistingPw = !!aiSettings?.schedulePassword;
 
   // Track whether key state has been saved to know when to move AI settings position.
   // Also reset replacingKey when the key is cleared externally (e.g. via Clear button).

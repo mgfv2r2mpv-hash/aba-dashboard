@@ -544,9 +544,8 @@ export default function App() {
 
       // Parse client-side (cheap, pure) — same parser the server/native use.
       // Dynamic import keeps SheetJS (~800 KB) out of the critical startup bundle.
-      const [{ default: XLSX }, { parseWorkbook }] = await Promise.all([import('xlsx'), import('./excelHandler')]);
-      const workbook = XLSX.read(bytes, { type: 'array' });
-      const parsed = parseWorkbook(workbook);
+      const { parseBytes } = await import('./excelHandler');
+      const parsed = parseBytes(bytes);
 
       if (scheduleData) {
         // Replacing a loaded schedule — stage it and let the user confirm.

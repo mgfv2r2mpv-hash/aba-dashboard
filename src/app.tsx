@@ -1166,7 +1166,7 @@ export default function App() {
         flexShrink: 0,
         boxSizing: 'border-box',
       }}>
-        {/* Row 1: app name + AI status dot + Settings gear */}
+        {/* Row 1: app name + AI status dot */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
           <h1 style={{ fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>SAssi - ABA Calendar</h1>
           <span
@@ -1177,15 +1177,6 @@ export default function App() {
               display: 'inline-block', flexShrink: 0,
             }}
           />
-          <button
-            onClick={() => setShowSettings(true)}
-            title="Settings"
-            style={{
-              marginLeft: 'auto', background: 'none', border: 'none', color: 'white',
-              cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '2px 4px',
-              opacity: 0.8,
-            }}
-          >⚙</button>
         </div>
         {/* Row 2: nav buttons */}
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>

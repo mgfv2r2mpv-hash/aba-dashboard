@@ -1430,6 +1430,7 @@ export default function App() {
                   faceIdEnabled={faceIdEnabled}
                   biometryLabel={biometryLabel}
                   onToggleFaceId={handleToggleFaceId}
+                  onChangePin={() => setChangingPin(true)}
                 />
               </React.Suspense>
             )}

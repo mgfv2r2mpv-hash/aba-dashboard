@@ -27,6 +27,7 @@ interface AdminPanelProps {
   faceIdEnabled?: boolean;
   biometryLabel?: string;
   onToggleFaceId?: (on: boolean) => void;
+  onChangePin?: () => void;
 }
 
 const API_BASE = '/api';
@@ -35,7 +36,7 @@ const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday
 export default function AdminPanel({
   data, onDataChange, onImportFile, onRerunWizard, onDownload, onClearData,
   aiSettings, onSaveAISettings, onClearKey, onRequestUnlock,
-  faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId
+  faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin
 }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'auths' | 'daysoff' | 'settings'>('technicians');
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -454,6 +455,7 @@ export default function AdminPanel({
             faceIdEnabled={faceIdEnabled}
             biometryLabel={biometryLabel}
             onToggleFaceId={onToggleFaceId}
+            onChangePin={onChangePin}
           />
         )}
       </div>
@@ -1893,7 +1895,7 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
 
 function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard, onDownload, onClearData,
   aiSettings, onSaveAISettings, onClearKey, onRequestUnlock,
-  faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId
+  faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin
 }: {
   settings: CompanySettings;
   saving: boolean;
@@ -1910,6 +1912,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   faceIdEnabled?: boolean;
   biometryLabel?: string;
   onToggleFaceId?: (on: boolean) => void;
+  onChangePin?: () => void;
 }) {
   const [justSaved, setJustSaved] = useState(false);
   const s = (n: number | undefined) => (n === undefined ? '' : String(n));
@@ -1966,10 +1969,12 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   const [pwError, setPwError] = useState<string | null>(null);
   const hasExistingPw = !!aiSettings?.schedulePassword;
 
-  // Track whether key state has been saved to know when to move AI settings position
+  // Track whether key state has been saved to know when to move AI settings position.
+  // Also reset replacingKey when the key is cleared externally (e.g. via Clear button).
   const [keySavedState, setKeySavedState] = useState(hasExistingKey);
   useEffect(() => {
     setKeySavedState(hasExistingKey);
+    if (!hasExistingKey) setReplacingKey(true);
   }, [hasExistingKey]);
 
   const num = (str: string, fallback: number) => {
@@ -2113,10 +2118,13 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
             <p style={{ marginBottom: '12px', color: '#6b7280', fontSize: '12px' }}>
               A PIN locks the app on launch. There is no recovery if you forget it.
             </p>
-            <button style={{
-              padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
-              background: 'white', cursor: 'pointer', fontSize: '13px',
-            }}>
+            <button
+              onClick={onChangePin}
+              style={{
+                padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                background: 'white', cursor: 'pointer', fontSize: '13px',
+              }}
+            >
               Change PIN
             </button>
             {faceIdAvailable && (

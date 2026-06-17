@@ -10,7 +10,7 @@ const nm = (pkg: string) => path.resolve(__dirname, 'node_modules', pkg);
 // (react, xlsx, …) can't walk up to webportal/node_modules via normal Node
 // resolution.  Alias every shared package to the local copy.
 const pkgAliases = [
-  'react', 'react/jsx-runtime', 'react-dom', 'date-fns', 'uuid', 'xlsx',
+  '@anthropic-ai/sdk', 'react', 'react/jsx-runtime', 'react-dom', 'date-fns', 'uuid', 'xlsx',
 ].reduce((acc, pkg) => ({ ...acc, [pkg]: nm(pkg) }), {} as Record<string, string>);
 
 export default defineConfig({
@@ -21,9 +21,6 @@ export default defineConfig({
       '@shared': path.resolve(__dirname, '../src'),
       // Capacitor stub — useMediaQuery.ts uses registerPlugin('Device')
       '@capacitor/core': path.resolve(__dirname, 'src/stubs/capacitorCore.ts'),
-      // Anthropic SDK stub — ComplianceDashboard → FixItPanel → claudeScheduler
-      // pulls in the SDK import; we stub it since the portal is read-only
-      '@anthropic-ai/sdk': path.resolve(__dirname, 'src/stubs/anthropicSdk.ts'),
       // Force all bare package imports (including those from ../src) to webportal's copy
       ...pkgAliases,
     },

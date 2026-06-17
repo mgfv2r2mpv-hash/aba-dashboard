@@ -64,7 +64,7 @@ export function conflictTitle(c: ScheduleConflict): string {
         return 'Concurrent Booking';
       return 'Scheduling Issue';
     default:
-      return c.type.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+      return (c.type as string).replace(/-/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
   }
 }
 

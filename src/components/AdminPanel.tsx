@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, Appointment } from '../types';
 import { AISettings, ClaudeModel } from './Settings';
@@ -8,9 +7,33 @@ import { computeAuthUsage, computeReportDates } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 import { resolveUtilization } from '../utilization';
 
+// Platform-specific persistence adapter. Each method is optional: absent = apply
+// change locally only (webportal saves via encrypted download; native app must
+// provide all methods so changes reach the Express server).
+export interface AdminPersist {
+  technician?(id: string, full: Technician): Promise<Technician>;
+  addTechnician?(t: Technician): Promise<Technician>;
+  deleteTechnician?(id: string): Promise<void>;
+  client?(id: string, full: Client): Promise<Client>;
+  addClient?(c: Client): Promise<Client>;
+  deleteClient?(id: string): Promise<void>;
+  blackout?(b: Blackout): Promise<Blackout>;
+  deleteBlackout?(id: string): Promise<void>;
+  timeOff?(t: TimeOff): Promise<TimeOff>;
+  deleteTimeOff?(id: string): Promise<void>;
+  settings?(s: CompanySettings): Promise<CompanySettings>;
+  auth?(a: Authorization): Promise<Authorization>;
+  deleteAuth?(id: string): Promise<void>;
+  usage?(u: ManualUsage): Promise<ManualUsage>;
+  deleteUsage?(id: string): Promise<void>;
+  reorder?(entity: 'clients' | 'technicians', ids: string[]): Promise<void>;
+}
+
 interface AdminPanelProps {
   data: ScheduleData;
   onDataChange: (data: ScheduleData) => void;
+  // Platform-specific persistence; absent = local state only (webportal mode).
+  persist?: AdminPersist;
   // Data-lifecycle actions surfaced at the bottom of the Settings tab.
   onImportFile?: () => void;
   onRerunWizard?: () => void;
@@ -29,15 +52,9 @@ interface AdminPanelProps {
   onToggleFaceId?: (on: boolean) => void;
   onChangePin?: () => void;
 }
-
-const API_BASE = '/api';
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-export default function AdminPanel({
-  data, onDataChange, onImportFile, onRerunWizard, onDownload, onClearData,
-  aiSettings, onSaveAISettings, onClearKey, onRequestUnlock,
-  faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin
-}: AdminPanelProps) {
+export default function AdminPanel({ data, onDataChange, persist, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings }: AdminPanelProps) {
   const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'auths' | 'daysoff' | 'settings'>('technicians');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,13 +64,14 @@ export default function AdminPanel({
     setSavingId(id);
     setError(null);
     try {
-      const res = await axios.post(`${API_BASE}/admin/technician/${id}`, patch);
-      const updated = { ...data };
-      const idx = updated.technicians.findIndex(t => t.id === id);
-      if (idx >= 0) updated.technicians[idx] = res.data.technician;
-      onDataChange(updated);
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+      const idx = data.technicians.findIndex(t => t.id === id);
+      if (idx < 0) return;
+      let merged: Technician = { ...data.technicians[idx], ...patch };
+      if (persist?.technician) merged = await persist.technician(id, merged);
+      const technicians = data.technicians.map((t, i) => i === idx ? merged : t);
+      onDataChange({ ...data, technicians });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
@@ -63,51 +81,42 @@ export default function AdminPanel({
     setSavingId(id);
     setError(null);
     try {
-      const res = await axios.post(`${API_BASE}/admin/client/${id}`, patch);
-      const updated = { ...data };
-      const idx = updated.clients.findIndex(c => c.id === id);
-      if (idx >= 0) updated.clients[idx] = res.data.client;
-      onDataChange(updated);
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+      const idx = data.clients.findIndex(c => c.id === id);
+      if (idx < 0) return;
+      let merged: Client = { ...data.clients[idx], ...patch };
+      if (persist?.client) merged = await persist.client(id, merged);
+      const clients = data.clients.map((c, i) => i === idx ? merged : c);
+      onDataChange({ ...data, clients });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
   };
 
   const addTechnician = async () => {
-    const newTech: Technician = {
-      id: uuidv4(),
-      name: `Tech ${data.technicians.length + 1}`,
-      isRBT: false,
-      assignments: [],
-      availability: {},
-    };
+    const newTech: Technician = { id: uuidv4(), name: `Tech ${data.technicians.length + 1}`, isRBT: false, assignments: [], availability: {} };
     setSavingId(newTech.id);
     setError(null);
     try {
-      const res = await axios.post(`${API_BASE}/admin/technicians`, newTech);
-      onDataChange({ ...data, technicians: [...data.technicians, res.data.technician] });
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+      const saved = persist?.addTechnician ? await persist.addTechnician(newTech) : newTech;
+      onDataChange({ ...data, technicians: [...data.technicians, saved] });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
   };
 
   const addClient = async () => {
-    const newClient: Client = {
-      id: uuidv4(),
-      name: `Client ${data.clients.length + 1}`,
-      availabilityWindows: {},
-    };
+    const newClient: Client = { id: uuidv4(), name: `Client ${data.clients.length + 1}`, availabilityWindows: {} };
     setSavingId(newClient.id);
     setError(null);
     try {
-      const res = await axios.post(`${API_BASE}/admin/clients`, newClient);
-      onDataChange({ ...data, clients: [...data.clients, res.data.client] });
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+      const saved = persist?.addClient ? await persist.addClient(newClient) : newClient;
+      onDataChange({ ...data, clients: [...data.clients, saved] });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
@@ -118,10 +127,10 @@ export default function AdminPanel({
     setSavingId(id);
     setError(null);
     try {
-      await axios.delete(`${API_BASE}/admin/technician/${id}`);
+      await persist?.deleteTechnician?.(id);
       onDataChange({ ...data, technicians: data.technicians.filter(t => t.id !== id) });
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
@@ -132,10 +141,10 @@ export default function AdminPanel({
     setSavingId(id);
     setError(null);
     try {
-      await axios.delete(`${API_BASE}/admin/client/${id}`);
+      await persist?.deleteClient?.(id);
       onDataChange({ ...data, clients: data.clients.filter(c => c.id !== id) });
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
@@ -145,11 +154,10 @@ export default function AdminPanel({
     setSavingId(blackout.id);
     setError(null);
     try {
-      const res = await axios.post(`${API_BASE}/admin/blackout`, blackout);
-      const saved: Blackout = res.data.blackout || blackout;
+      const saved = persist?.blackout ? await persist.blackout(blackout) : blackout;
       onDataChange({ ...data, blackouts: [...(data.blackouts || []), saved] });
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
@@ -159,10 +167,10 @@ export default function AdminPanel({
     setSavingId(id);
     setError(null);
     try {
-      await axios.delete(`${API_BASE}/admin/blackout/${id}`);
+      await persist?.deleteBlackout?.(id);
       onDataChange({ ...data, blackouts: (data.blackouts || []).filter(b => b.id !== id) });
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
@@ -172,11 +180,10 @@ export default function AdminPanel({
     setSavingId(t.id);
     setError(null);
     try {
-      const res = await axios.post(`${API_BASE}/admin/time-off`, t);
-      const saved: TimeOff = res.data.timeOff || t;
+      const saved = persist?.timeOff ? await persist.timeOff(t) : t;
       onDataChange({ ...data, timeOff: [...(data.timeOff || []), saved] });
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
@@ -186,10 +193,10 @@ export default function AdminPanel({
     setSavingId(id);
     setError(null);
     try {
-      await axios.delete(`${API_BASE}/admin/time-off/${id}`);
+      await persist?.deleteTimeOff?.(id);
       onDataChange({ ...data, timeOff: (data.timeOff || []).filter(t => t.id !== id) });
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
@@ -199,11 +206,11 @@ export default function AdminPanel({
     setSavingId('settings');
     setError(null);
     try {
-      const res = await axios.post(`${API_BASE}/admin/settings`, next);
-      onDataChange({ ...data, settings: res.data.settings });
+      const saved = persist?.settings ? await persist.settings(next) : next;
+      onDataChange({ ...data, settings: saved });
       return true;
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
       return false;
     } finally {
       setSavingId(null);
@@ -214,15 +221,14 @@ export default function AdminPanel({
     setSavingId(auth.id);
     setError(null);
     try {
-      const res = await axios.post(`${API_BASE}/admin/authorization`, auth);
-      const saved: Authorization = res.data.authorization || auth;
+      const saved = persist?.auth ? await persist.auth(auth) : auth;
       const list = data.authorizations || [];
       const next = list.some(a => a.id === saved.id)
         ? list.map(a => a.id === saved.id ? saved : a)
         : [...list, saved];
       onDataChange({ ...data, authorizations: next });
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
@@ -233,10 +239,10 @@ export default function AdminPanel({
     setSavingId(id);
     setError(null);
     try {
-      await axios.delete(`${API_BASE}/admin/authorization/${id}`);
+      await persist?.deleteAuth?.(id);
       onDataChange({ ...data, authorizations: (data.authorizations || []).filter(a => a.id !== id) });
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
@@ -246,15 +252,14 @@ export default function AdminPanel({
     setSavingId(usage.id);
     setError(null);
     try {
-      const res = await axios.post(`${API_BASE}/admin/manual-usage`, usage);
-      const saved: ManualUsage = res.data.usage || usage;
+      const saved = persist?.usage ? await persist.usage(usage) : usage;
       const list = data.manualUsage || [];
       const next = list.some(u => u.id === saved.id)
         ? list.map(u => u.id === saved.id ? saved : u)
         : [...list, saved];
       onDataChange({ ...data, manualUsage: next });
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
@@ -264,10 +269,10 @@ export default function AdminPanel({
     setSavingId(id);
     setError(null);
     try {
-      await axios.delete(`${API_BASE}/admin/manual-usage/${id}`);
+      await persist?.deleteUsage?.(id);
       onDataChange({ ...data, manualUsage: (data.manualUsage || []).filter(u => u.id !== id) });
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingId(null);
     }
@@ -276,13 +281,13 @@ export default function AdminPanel({
   const reorderEntity = async (entity: 'clients' | 'technicians', orderedIds: string[]) => {
     setError(null);
     try {
-      await axios.post(`${API_BASE}/admin/reorder`, { entity, order: orderedIds });
+      await persist?.reorder?.(entity, orderedIds);
       const list = entity === 'clients' ? data.clients : data.technicians;
       const byId = new Map(list.map(x => [x.id, x]));
       const reordered = orderedIds.map(id => byId.get(id)).filter(Boolean);
       onDataChange({ ...data, [entity]: reordered } as ScheduleData);
-    } catch (e: any) {
-      setError(e.response?.data?.error || e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 

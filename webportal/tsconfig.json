@@ -12,8 +12,18 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "noUncheckedSideEffectImports": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
     "paths": {
-      "@shared/*": ["../src/*"]
+      "@shared/*": ["../src/*"],
+      "@anthropic-ai/sdk": ["./node_modules/@anthropic-ai/sdk"],
+      "@capacitor/core": ["./src/stubs/capacitorCore"],
+      "react": ["./node_modules/@types/react"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "uuid": ["./node_modules/uuid"],
+      "date-fns": ["./node_modules/date-fns"],
+      "xlsx": ["./node_modules/xlsx"]
     }
   },
   "include": ["src"]

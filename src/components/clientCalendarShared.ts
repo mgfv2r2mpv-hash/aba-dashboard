@@ -56,3 +56,39 @@ export const TIER_LABEL: Record<SessionTier, string> = {
   parentTraining: 'Parent training',
   other: 'Other',
 };
+
+// Lay overlapping time intervals into side-by-side lanes so their labels never
+// stack on top of each other. Items are ordered by start time, then by sortKey
+// (alphabetical) for exact ties, and each is given a lane index plus the total
+// lane count of its overlap cluster — so a renderer can size width = 1/lanes and
+// offset left = lane/lanes. Non-overlapping items collapse back to a single lane.
+export interface Laned { lane: number; lanes: number; }
+
+export function assignLanes<T extends { startMin: number; endMin: number; sortKey: string }>(items: T[]): (T & Laned)[] {
+  const sorted = [...items].sort((a, b) => a.startMin - b.startMin || a.sortKey.localeCompare(b.sortKey));
+  const out: (T & Laned)[] = [];
+  let cluster: (T & Laned)[] = [];
+  let colEnds: number[] = [];
+  let clusterEnd = -Infinity;
+
+  const flush = () => {
+    if (!cluster.length) return;
+    const lanes = cluster.reduce((mx, it) => Math.max(mx, it.lane + 1), 0);
+    cluster.forEach(it => { it.lanes = lanes; });
+    out.push(...cluster);
+    cluster = [];
+    colEnds = [];
+    clusterEnd = -Infinity;
+  };
+
+  for (const it of sorted) {
+    if (cluster.length && it.startMin >= clusterEnd) flush();
+    let lane = colEnds.findIndex(end => end <= it.startMin);
+    if (lane === -1) { lane = colEnds.length; colEnds.push(it.endMin); }
+    else colEnds[lane] = it.endMin;
+    cluster.push({ ...it, lane, lanes: 1 });
+    clusterEnd = Math.max(clusterEnd, it.endMin);
+  }
+  flush();
+  return out;
+}

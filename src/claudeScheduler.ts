@@ -201,7 +201,7 @@ OUTPUT: Strict JSON only — no prose, no markdown. Exact schema (include only l
 ISO times are local (no timezone suffix). If no compliant option exists, return one solution with empty ops and reasoning explaining why.`;
   }
 
-  private buildWishPrompt(wish: WishRequest): string {
+  buildWishPrompt(wish: WishRequest): string {
     const now = new Date();
     const horizonWeeks = wish.horizonWeeks && wish.horizonWeeks > 0 ? wish.horizonWeeks : 8;
     const horizonEnd = new Date(now.getTime() + horizonWeeks * 7 * 86400000);
@@ -231,8 +231,10 @@ NOW: ${now.toISOString()}
 HORIZON: ${horizonEnd.toISOString().slice(0, 10)}
 
 THE WISH:
-${summarizeWish(wish)}
-${wish.note ? `Extra detail: ${scrubText(wish.note, this.data, this.anonMap)}` : ''}
+${wish.kind === 'freeform'
+  ? scrubText(summarizeWish(wish), this.data, this.anonMap)
+  : summarizeWish(wish)}
+${wish.kind !== 'freeform' && wish.note ? `Extra detail: ${scrubText(wish.note, this.data, this.anonMap)}` : ''}
 
 HARD RULES:
 1. Never touch any appointment whose start < NOW.

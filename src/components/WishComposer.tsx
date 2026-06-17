@@ -55,8 +55,21 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [solutions, setSolutions] = useState<WishSolution[] | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const upd = (patch: Partial<WishRequest>) => setWish(w => ({ ...w, ...patch }));
+
+  const copyPrompt = async () => {
+    try {
+      const scheduler = new ClaudeScheduler(aiSettings.apiKey || 'preview', data, aiSettings.model);
+      const prompt = scheduler.buildWishPrompt(wish);
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Could not copy prompt to clipboard.');
+    }
+  };
 
   const generate = async () => {
     if (!aiSettings.apiKey) { setError('Add your Claude API key in Settings first.'); return; }
@@ -224,9 +237,16 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
         {/* Footer */}
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 16 }}>
           <button onClick={onClose} style={{ padding: '8px 16px', background: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
-          <button onClick={generate} disabled={loading} style={{ padding: '8px 16px', background: loading ? '#a78bfa' : '#7c3aed', color: 'white', border: 'none', borderRadius: 6, cursor: loading ? 'default' : 'pointer', fontWeight: 600 }}>
-            {loading ? 'Thinking…' : solutions ? 'Regenerate' : 'Generate options'}
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={copyPrompt}
+              title="Copy the prompt that will be sent to Claude"
+              style={{ padding: '8px 14px', background: 'white', color: copied ? '#059669' : '#374151', border: `1px solid ${copied ? '#6ee7b7' : '#d1d5db'}`, borderRadius: 6, cursor: 'pointer', fontSize: 13, transition: 'all 0.15s' }}
+            >{copied ? '✓ Copied' : '⎘ Copy prompt'}</button>
+            <button onClick={generate} disabled={loading} style={{ padding: '8px 16px', background: loading ? '#a78bfa' : '#7c3aed', color: 'white', border: 'none', borderRadius: 6, cursor: loading ? 'default' : 'pointer', fontWeight: 600 }}>
+              {loading ? 'Thinking…' : solutions ? 'Regenerate' : 'Generate options'}
+            </button>
+          </div>
         </div>
     </div>
   );

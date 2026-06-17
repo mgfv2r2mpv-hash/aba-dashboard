@@ -423,6 +423,22 @@ export default function App() {
     })();
   }, [isNative]);
 
+  // Self-heal biometry availability when the app returns to the foreground. If a
+  // cold-launch check ever lands wrong (the Face ID setting would vanish and the
+  // unlock prompt wouldn't fire), re-checking on resume restores it.
+  useEffect(() => {
+    if (!isNative) return;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      void checkBiometryFull().then(b => {
+        setFaceIdAvailable(b.available);
+        if (b.available) setBiometryLabel(b.label);
+      });
+    };
+    document.addEventListener('visibilitychange', refresh);
+    return () => document.removeEventListener('visibilitychange', refresh);
+  }, [isNative]);
+
   // Restore the at-rest schedule with the just-entered PIN and drop the gate.
   const unlockWith = async (pin: string) => {
     unlockedPinRef.current = pin;

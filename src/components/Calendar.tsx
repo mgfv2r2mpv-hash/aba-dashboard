@@ -52,6 +52,10 @@ const TIME_AXIS_WIDTH = 52;
 const TIME_AXIS_WIDTH_WIDE = 64;
 // Snap drag movements to 15-minute slots — matches typical scheduling resolution.
 const SNAP_MINUTES = 15;
+// A tile must be held this long (without moving) before it's "picked up" for a
+// drag-move. A quick touch scrolls/selects instead — fixes grab-happy drags.
+const LONG_PRESS_MS = 350;
+const PICKUP_CANCEL_PX = 10;
 
 
 export default function Calendar({
@@ -714,27 +718,57 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
       if (newStart === ds.apt.startTime && newEnd === ds.apt.endTime) return;
       onAppointmentChange({ ...ds.apt, startTime: newStart, endTime: newEnd });
     };
+    // While a tile is picked up, block native scrolling so the finger drags the
+    // tile instead of panning the grid (the pickup was a stationary long-press,
+    // so no scroll is in flight when this engages).
+    const blockScroll = (e: TouchEvent) => { if (e.cancelable) e.preventDefault(); };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
+    window.addEventListener('touchmove', blockScroll, { passive: false });
     return () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
+      window.removeEventListener('touchmove', blockScroll);
     };
   }, [dragState, onAppointmentChange, hourHeight]);
 
+  // Long-press to pick up a tile, THEN drag. We do NOT preventDefault on
+  // pointer-down, so a quick swipe over a tile scrolls the grid as normal.
+  // Only a stationary hold for LONG_PRESS_MS arms the drag; any movement past
+  // PICKUP_CANCEL_PX before then cancels (it was a scroll), and an early release
+  // is a tap (selects via onClick).
   const beginDrag = (apt: Appointment, e: React.PointerEvent) => {
     if (!dragEnabled) return;
-    // Locked = canceled or completed. The legacy isFixed field is ignored.
     if (apt.status === 'canceled' || apt.status === 'completed') return;
-    e.preventDefault();
-    e.stopPropagation();
-    const day = apt.startTime.slice(0, 10);
-    setDragState({
-      apt, startY: e.clientY, deltaMin: 0,
-      targetDayISO: day, cursorX: e.clientX, cursorY: e.clientY,
-    });
+    const startX = e.clientX, startY = e.clientY;
+    let armed = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+    const onMove = (ev: PointerEvent) => {
+      if (armed) return;
+      if (Math.abs(ev.clientX - startX) > PICKUP_CANCEL_PX || Math.abs(ev.clientY - startY) > PICKUP_CANCEL_PX) {
+        cleanup(); // moved before the hold completed → it's a scroll, not a pickup
+      }
+    };
+    const onUp = () => cleanup(); // released before the hold → tap (onClick selects)
+    const timer = setTimeout(() => {
+      armed = true;
+      cleanup();
+      try { navigator.vibrate?.(12); } catch { /* no haptics on this platform */ }
+      setDragState({
+        apt, startY, deltaMin: 0,
+        targetDayISO: apt.startTime.slice(0, 10), cursorX: startX, cursorY: startY,
+      });
+    }, LONG_PRESS_MS);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   };
 
   // Sticky cells keep the time axis pinned to the left while day columns

@@ -47,6 +47,40 @@ export async function isBiometricAvailable(): Promise<boolean> {
   }
 }
 
+// Persist last confirmed biometry state across cold launches. On subsequent
+// launches the WebView boots faster (iOS caches it), so JS may run before
+// LAContext is ready — the retry window can exhaust before the system is up.
+// We cache "available + label" so the toggle stays visible on cold launch even
+// if the live check fires too early. Cache is only cleared when we get a
+// *definitive* unavailable signal (real error code), not a transient one.
+const CACHE_KEY = 'bio_avail';
+const CACHE_LABEL_KEY = 'bio_label';
+
+export function getCachedBiometryAvailable(): boolean {
+  try { return localStorage.getItem(CACHE_KEY) === '1'; } catch { return false; }
+}
+
+export function getCachedBiometryLabel(): BiometryLabel {
+  try {
+    const s = localStorage.getItem(CACHE_LABEL_KEY);
+    if (s === 'Face ID' || s === 'Touch ID') return s as BiometryLabel;
+  } catch {}
+  return 'biometric unlock';
+}
+
+function persistBiometry(available: boolean, label: BiometryLabel, definitive: boolean) {
+  try {
+    if (available) {
+      localStorage.setItem(CACHE_KEY, '1');
+      localStorage.setItem(CACHE_LABEL_KEY, label);
+    } else if (definitive) {
+      localStorage.removeItem(CACHE_KEY);
+      localStorage.removeItem(CACHE_LABEL_KEY);
+    }
+    // If unavailable but NOT definitive (transient), leave cache unchanged.
+  } catch {}
+}
+
 // Single native call returning both availability and hardware label — use this
 // instead of calling isBiometricAvailable() then getBiometryLabel() separately.
 //
@@ -57,13 +91,16 @@ export async function isBiometricAvailable(): Promise<boolean> {
 // launch after the first. So we retry until we get a *definitive* answer:
 // available, or unavailable WITH a real error code (e.g. not enrolled). A
 // not-ready-looking result (threw, or false + no code + type none) is retried.
-const READY_ATTEMPTS = 6;
-const READY_DELAY_MS = 120;
+// If all retries exhaust without a definitive answer, we fall back to the last
+// cached state (set from any prior launch where biometry was confirmed working).
+const READY_ATTEMPTS = 10;
+const READY_DELAY_MS = 200;
 const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 export async function checkBiometryFull(): Promise<{ available: boolean; label: BiometryLabel; reason?: string }> {
   if (!Capacitor.isNativePlatform()) return { available: false, label: 'biometric unlock' };
   let last = { available: false, label: 'biometric unlock' as BiometryLabel, reason: undefined as string | undefined };
+  let definitiveUnavailable = false;
   for (let attempt = 0; attempt < READY_ATTEMPTS; attempt++) {
     try {
       const res = await Native.checkBiometry();
@@ -73,13 +110,33 @@ export async function checkBiometryFull(): Promise<{ available: boolean; label: 
         : 'biometric unlock';
       last = { available, label, reason: res?.reason };
       const code = res?.code || res?.errorCode || '';
-      // Definitive: it's available, or it's unavailable for a concrete reason
-      // (not enrolled / not available) rather than because we asked too early.
-      if (available || (code && res?.biometryType)) return last;
+      if (available) {
+        persistBiometry(true, label, true);
+        return last;
+      }
+      // Definitive unavailable: real error code (not enrolled, locked out, etc.)
+      if (code && res?.biometryType) {
+        definitiveUnavailable = true;
+        break;
+      }
+      // else: transient — keep retrying
     } catch (e) {
       if (attempt === READY_ATTEMPTS - 1) console.warn('[biometric] checkBiometry threw:', e);
     }
     await delay(READY_DELAY_MS);
+  }
+
+  if (definitiveUnavailable) {
+    persistBiometry(false, 'biometric unlock', true);
+    return last;
+  }
+
+  // All retries exhausted with no definitive answer (LAContext still warming up).
+  // Fall back to the last cached state rather than showing "unavailable".
+  const cachedAvail = getCachedBiometryAvailable();
+  if (cachedAvail) {
+    const cachedLabel = getCachedBiometryLabel();
+    return { available: true, label: cachedLabel };
   }
   return last;
 }

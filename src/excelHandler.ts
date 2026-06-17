@@ -197,10 +197,20 @@ function applyAssignments(workbook: XLSX.WorkBook, technicians: Technician[], _c
   for (const row of rowsOf(workbook, 'Assignments')) {
     const t = techOf(row.techId); const tech = t && techMap.get(t.id);
     if (!tech || isBlank(row.clientId)) continue;
+    // Optional per-case availability is stored as a JSON blob in one column so
+    // the normalized Availability sheet can stay single-owner.
+    let availability: Technician['assignments'][number]['availability'];
+    if (!isBlank(row.availability)) {
+      try {
+        const parsed = JSON.parse(String(row.availability));
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) availability = parsed;
+      } catch { /* malformed → treat as no per-case restriction */ }
+    }
     tech.assignments.push({
       clientId: String(row.clientId),
       hoursPerWeek: num(row.hoursPerWeek) ?? 0,
       billable: bool3(row.billable) ?? true,
+      ...(availability ? { availability } : {}),
     });
   }
 }
@@ -520,9 +530,11 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
   // Assignments (normalized).
   const clientName = makeNameLookup(data.clients);
   const asgRows: any[][] = [];
-  data.technicians.forEach(t => (t.assignments || []).forEach(a =>
-    asgRows.push([t.id, t.name, a.clientId, clientName(a.clientId), W(a.hoursPerWeek), WB(a.billable)])));
-  add('Assignments', ['techId', 'techName', 'clientId', 'clientName', 'hoursPerWeek', 'billable'], asgRows);
+  data.technicians.forEach(t => (t.assignments || []).forEach(a => {
+    const av = a.availability && Object.keys(a.availability).length > 0 ? JSON.stringify(a.availability) : '';
+    asgRows.push([t.id, t.name, a.clientId, clientName(a.clientId), W(a.hoursPerWeek), WB(a.billable), av]);
+  }));
+  add('Assignments', ['techId', 'techName', 'clientId', 'clientName', 'hoursPerWeek', 'billable', 'availability'], asgRows);
 
   // Settings (single row, de-JSON'd).
   const s = data.settings; const u = s.utilization || {}; const cn = s.cancellationNotice;

@@ -480,6 +480,8 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
   const [editing, setEditing] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
   const [hoursDraft, setHoursDraft] = useState<{ [idx: number]: string }>({});
+  // Which assignment row (if any) is editing its per-case availability.
+  const [availIdx, setAvailIdx] = useState<number | null>(null);
 
   const assignments = tech.assignments || [];
   const safeClients = clients || [];
@@ -570,36 +572,81 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
             <div style={{ width: '32px', flexShrink: 0 }} />
           </div>
         )}
-        {assignments.map((a, idx) => (
-          <div key={idx} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
-            <select
-              value={a.clientId}
-              onChange={(e) => updateAssignment(idx, { clientId: e.target.value })}
-              style={{ ...inputStyle, flex: 2, width: 'auto', minWidth: 0 }}
-            >
-              <option value="">— Pick client —</option>
-              {safeClients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-            </select>
-            <input
-              type="number"
-              step="0.5"
-              min="0"
-              value={hoursDraft[idx] ?? String(a.hoursPerWeek)}
-              onChange={(e) => setHoursDraft({ ...hoursDraft, [idx]: e.target.value })}
-              onBlur={(e) => commitHours(idx, e.target.value)}
-              style={{ ...inputStyle, flex: 1, width: 'auto', minWidth: 0 }}
-            />
-            <button
-              onClick={() => removeAssignment(idx)}
-              style={{
-                width: '32px', height: '32px', padding: 0, backgroundColor: '#fee2e2', color: '#dc2626',
-                border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
-                fontSize: '18px', lineHeight: 1,
-              }}
-              aria-label="Remove assignment"
-            >×</button>
-          </div>
-        ))}
+        {assignments.map((a, idx) => {
+          const caseDays = Object.values(a.availability || {}).filter(w => w && (w as TimeWindow[]).length > 0).length;
+          const isEditingAvail = availIdx === idx;
+          return (
+            <div key={idx} style={{ border: '1px solid #eef0f2', borderRadius: 8, padding: '8px', marginBottom: '8px', background: '#fcfcfd' }}>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <select
+                  value={a.clientId}
+                  onChange={(e) => updateAssignment(idx, { clientId: e.target.value })}
+                  style={{ ...inputStyle, flex: 2, width: 'auto', minWidth: 0 }}
+                >
+                  <option value="">— Pick client —</option>
+                  {safeClients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  value={hoursDraft[idx] ?? String(a.hoursPerWeek)}
+                  onChange={(e) => setHoursDraft({ ...hoursDraft, [idx]: e.target.value })}
+                  onBlur={(e) => commitHours(idx, e.target.value)}
+                  style={{ ...inputStyle, flex: 1, width: 'auto', minWidth: 0 }}
+                />
+                <button
+                  onClick={() => removeAssignment(idx)}
+                  style={{
+                    width: '32px', height: '32px', padding: 0, backgroundColor: '#fee2e2', color: '#dc2626',
+                    border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
+                    fontSize: '18px', lineHeight: 1,
+                  }}
+                  aria-label="Remove assignment"
+                >×</button>
+              </div>
+
+              {/* Per-case availability — when this BT can only serve THIS client at
+                  specific times (beyond their general availability). */}
+              <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 11, color: caseDays > 0 ? '#3b82f6' : '#9ca3af', fontWeight: 600 }}>
+                  {caseDays > 0
+                    ? `Case-specific availability · ${caseDays} day${caseDays === 1 ? '' : 's'}`
+                    : 'Uses general availability for this case'}
+                </span>
+                {!isEditingAvail && (
+                  <button onClick={() => setAvailIdx(idx)} style={{ ...chipBtn, padding: '3px 8px', fontSize: 11 }}>
+                    {caseDays > 0 ? 'Edit case hours' : '+ Limit to specific times'}
+                  </button>
+                )}
+                {caseDays > 0 && !isEditingAvail && (
+                  <button
+                    onClick={() => updateAssignment(idx, { availability: undefined })}
+                    style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
+                  >Clear</button>
+                )}
+              </div>
+              {caseDays > 0 && !isEditingAvail && (
+                <div style={{ marginTop: 4 }}>
+                  <AvailabilitySummary windows={a.availability} />
+                </div>
+              )}
+              {isEditingAvail && (
+                <div style={{ marginTop: 6 }}>
+                  <AvailabilityEditor
+                    initial={a.availability || {}}
+                    onSave={(av) => {
+                      const hasAny = Object.values(av).some(w => w && (w as TimeWindow[]).length > 0);
+                      updateAssignment(idx, { availability: hasAny ? av : undefined });
+                      setAvailIdx(null);
+                    }}
+                    onCancel={() => setAvailIdx(null)}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
         <button
           onClick={addAssignment}
           style={{

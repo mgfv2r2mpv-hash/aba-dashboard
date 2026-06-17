@@ -14,6 +14,8 @@ import { parseWishSolutions } from './wish';
 import { allowedStrategies } from './fixit';
 import { computeClientCompliance, computeTechCompliance, monthPeriod } from './compliance';
 import { resolveUtilization } from './utilization';
+import { buildFillContext } from './fillSchedule';
+import { startOfWeek } from 'date-fns';
 
 export type ClaudeModel = 'claude-opus-4-8' | 'claude-sonnet-4-6' | 'claude-haiku-4-5-20251001';
 
@@ -225,6 +227,28 @@ ISO times are local (no timezone suffix). If no compliant option exists, return 
       ? Object.entries(s.clinicianAvailability).map(([d, ws]) => `${d}: ${(ws as any[]).map(w => `${w.start}-${w.end}`).join(', ')}`).join('; ')
       : 'not specified';
 
+    // "Fill my Schedule" injects the local solver's facts (per-case utilization
+    // gaps + open direct windows), anonymized to tokens, so the model assembles +
+    // ranks 3 variants from real feasibility rather than guessing.
+    let fillBlock = '';
+    if (wish.kind === 'fillSchedule') {
+      const weekStart = startOfWeek(now, { weekStartsOn: 1 });
+      const ctx = buildFillContext(this.data, weekStart);
+      const tok = (m: Map<string, string>, id: string, name: string) => m.get(id) || m.get(name) || name;
+      const cases = ctx.underserved.map(u =>
+        `${tok(this.anonMap.clients, u.clientId, u.clientName)}: target ${u.targetDirectHrs}h, scheduled ${u.scheduledDirectHrs}h, gap ${u.gapHrs}h`);
+      const windows = ctx.windows.map(w =>
+        `${tok(this.anonMap.clients, w.clientId, w.clientName)} ${w.date}(${w.day.slice(0, 3)}) ${w.start}-${w.end} [${w.techs.map(t => tok(this.anonMap.technicians, t.id, t.name)).join(',')}]`);
+      fillBlock = `
+
+FILL MY SCHEDULE — maximize DIRECT-service case utilization for the week of ${ctx.weekStart}. Bring each underserved case toward 100% of its weekly direct target by ADDING client-session (direct) ops inside the OPEN WINDOWS below, assigning one of the eligible techs listed for that window.
+- Do NOT move or remove anything on the BCBA's own schedule (supervision / parent-training / case-planning / reassessment). You MAY ADD supervision when it helps a case meet its supervision %. You MAY ADD parent-training ONLY within the time span of an already-scheduled or newly-added session — never as a standalone window.
+- Stay strictly inside each open window; only assign a tech listed as eligible for that window; never double-book a tech or client.
+UNDERSERVED CASES (token: target, scheduled, gap): ${cases.join(' | ') || 'none'}
+OPEN DIRECT WINDOWS (token date(day) start-end [eligible techs]): ${windows.join(' | ') || 'none'}
+The 3 solutions should differ in how they trade techs/slots while maximizing total filled direct hours.`;
+    }
+
     return `You are an ABA scheduler helping a BCBA reshape their schedule toward a goal. All people are opaque tokens — use exact tokens, never invent names.
 
 NOW: ${now.toISOString()}
@@ -247,7 +271,7 @@ HARD RULES:
 ${wish.shaveDown ? `8. SHAVE DOWN: where a case or RBT is OVER-served, you may shorten supervision toward the binding minimum — LARGEST of preferred-min ${s.supervisionPreferredMinPercent ?? 15}%, floor ${s.supervisionFloorPercent ?? 10}%, and BACB 5%. Never trim below that minimum.` : ''}
 
 BCBA availability: ${clinicianAvail}
-
+${fillBlock}
 SCHEDULE IN HORIZON (compact JSON):
 ${JSON.stringify(inScope)}
 

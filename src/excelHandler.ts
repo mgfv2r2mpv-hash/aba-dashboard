@@ -476,7 +476,7 @@ function parseManualUsage(workbook: XLSX.WorkBook): ManualUsage[] {
 // stable; compression:true so the zip is actually compressed (~5x smaller).
 // ===========================================================================
 
-export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): Buffer {
+function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBook {
   const wb = XLSX.utils.book_new();
   const add = (name: string, headers: string[], rows: any[][]) =>
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([headers, ...rows]), name);
@@ -615,7 +615,19 @@ export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): 
   add('ManualUsage', ['id', 'clientId', 'bucket', 'hours', 'date', 'note'],
     (data.manualUsage || []).map(u => [u.id, u.clientId, u.bucket, u.hours, u.date, W(u.note)]));
 
-  return XLSX.write(wb, { bookType: 'xlsx', type: 'buffer', compression: true });
+  return wb;
+}
+
+// Node.js path — used by the Express server and native build scripts.
+export function generateExcelFile(data: ScheduleData, embeddedConfig?: string): Buffer {
+  return XLSX.write(buildWorkbook(data, embeddedConfig), { bookType: 'xlsx', type: 'buffer', compression: true });
+}
+
+// Browser/worker path — returns Uint8Array so no Node Buffer polyfill is needed.
+export function generateExcelBytes(data: ScheduleData, embeddedConfig?: string): Uint8Array {
+  return new Uint8Array(
+    XLSX.write(buildWorkbook(data, embeddedConfig), { bookType: 'xlsx', type: 'array', compression: true })
+  );
 }
 
 function makeNameLookup(clients: { id: string; name: string }[]) {

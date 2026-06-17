@@ -10,7 +10,7 @@ import Calendar, { HoursSummary } from './components/Calendar';
 import ConflictPanel, { conflictKey } from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
 import WishComposer from './components/WishComposer';
-import AdminPanel from './components/AdminPanel';
+import AdminPanel, { AdminPersist } from './components/AdminPanel';
 import ComplianceDashboard from './components/ComplianceDashboard';
 import CaseloadView from './components/CaseloadView';
 import FileUpload from './components/FileUpload';
@@ -375,6 +375,25 @@ export default function App() {
   const commitFull = (next: ScheduleData) => {
     setScheduleData(next);
     setCompCache(buildCache(next));
+  };
+
+  const serverPersist: AdminPersist = {
+    technician: async (id, full) => (await axios.post(`/api/admin/technician/${id}`, full)).data.technician,
+    addTechnician: async (t) => (await axios.post('/api/admin/technicians', t)).data.technician,
+    deleteTechnician: async (id) => { await axios.delete(`/api/admin/technician/${id}`); },
+    client: async (id, full) => (await axios.post(`/api/admin/client/${id}`, full)).data.client,
+    addClient: async (c) => (await axios.post('/api/admin/clients', c)).data.client,
+    deleteClient: async (id) => { await axios.delete(`/api/admin/client/${id}`); },
+    blackout: async (b) => (await axios.post('/api/admin/blackout', b)).data.blackout ?? b,
+    deleteBlackout: async (id) => { await axios.delete(`/api/admin/blackout/${id}`); },
+    timeOff: async (t) => (await axios.post('/api/admin/time-off', t)).data.timeOff ?? t,
+    deleteTimeOff: async (id) => { await axios.delete(`/api/admin/time-off/${id}`); },
+    settings: async (s) => (await axios.post('/api/admin/settings', s)).data.settings,
+    auth: async (a) => (await axios.post('/api/admin/authorization', a)).data.authorization ?? a,
+    deleteAuth: async (id) => { await axios.delete(`/api/admin/authorization/${id}`); },
+    usage: async (u) => (await axios.post('/api/admin/manual-usage', u)).data.usage ?? u,
+    deleteUsage: async (id) => { await axios.delete(`/api/admin/manual-usage/${id}`); },
+    reorder: async (entity, ids) => { await axios.post('/api/admin/reorder', { entity, order: ids }); },
   };
 
   // Decide the cold-launch lock state. Native always lands locked: into "create"
@@ -1414,6 +1433,7 @@ export default function App() {
               <AdminPanel
                 data={scheduleData}
                 onDataChange={commitFull}
+                persist={serverPersist}
                 onImportFile={triggerImportPicker}
                 onRerunWizard={() => setShowWizard(true)}
                 onDownload={handleDownload}

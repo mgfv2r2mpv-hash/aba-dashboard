@@ -3,7 +3,8 @@ import { ScheduleData, ScheduleConflict, WishSolution, WishOp, FixItOptions, DEF
 import { AISettings } from './Settings';
 import { ClaudeScheduler } from '../claudeScheduler';
 import { summarizeFixIt } from '../fixit';
-import { wishSolutionToDraft } from '../wish';
+import { wishSolutionToDraft, computeSolutionImpact } from '../wish';
+import ImpactSummary from './ImpactSummary';
 
 // "Fix It" 🔧 — the compliance-remediation panel that sits at the top of the
 // Compliance tab. The BCBA picks which clinical tools the AI may use and which
@@ -226,10 +227,12 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {solutions.map((sol, i) => {
                   const d = wishSolutionToDraft(sol, data);
+                  const impact = computeSolutionImpact(data, sol);
                   return (
                     <div key={sol.id} style={{ border: '1px solid #fed7aa', background: 'white', borderRadius: 8, padding: 12 }}>
                       <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Option {i + 1}: {sol.summary}</div>
                       {sol.reasoning && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{sol.reasoning}</div>}
+                      <ImpactSummary impact={impact} />
                       {sol.ops.length > 0 && (
                         <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#374151' }}>
                           {sol.ops.map((o, j) => <li key={j}>{opText(o)}</li>)}

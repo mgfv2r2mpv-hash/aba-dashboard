@@ -6,7 +6,8 @@
 // JSON reply into WishSolutions, and converting a chosen solution into the draft
 // ops + blackouts the rest of the app already knows how to preview and commit.
 
-import { WishRequest, WishSolution, WishOp, ScheduleData, Appointment, Blackout } from './types';
+import { WishRequest, WishSolution, WishOp, ScheduleData, Appointment, Blackout, Client, Technician } from './types';
+import { computeClientCompliance, computeTechCompliance, monthPeriod, CompliancePeriod } from './compliance';
 import { DraftOp, newAddOp, newMoveOp, newRemoveOp, applyOps } from './draft';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -187,4 +188,101 @@ export function applyWishSolution(base: ScheduleData, sol: WishSolution): Schedu
   const { ops, blackouts } = wishSolutionToDraft(sol, base);
   const withOps = applyOps(base, ops);
   return blackouts.length ? { ...withOps, blackouts: [...(withOps.blackouts || []), ...blackouts] } : withOps;
+}
+
+// ── Per-solution compliance impact ───────────────────────────────────────────
+// Simulates applying a WishSolution and diffs the projected compliance state
+// before/after. All metrics use the projected scope (all non-canceled sessions,
+// not just past ones) so the BCBA sees the full-period picture. Only entries
+// with a meaningful change (≥0.1pp or ≥0.05h) are included so the display
+// stays focused on what actually shifted.
+
+export interface ClientImpact {
+  client: Client;
+  beforePct: number;
+  afterPct: number;
+  deltaPct: number;        // pp gained (positive = better)
+  beforeSupHours: number;
+  afterSupHours: number;
+  deltaSupHours: number;   // supervision hours gained
+  hoursToGoAfter: number;  // remaining gap after the solution
+}
+
+export interface TechImpact {
+  tech: Technician;
+  beforePct: number;
+  afterPct: number;
+  deltaPct: number;
+  hoursToGoAfter: number;
+}
+
+export interface SolutionImpact {
+  clientImpacts: ClientImpact[];
+  techImpacts: TechImpact[];
+  sessionsAdded: number;
+  sessionsRemoved: number;
+}
+
+export function computeSolutionImpact(
+  base: ScheduleData,
+  sol: WishSolution,
+  period?: CompliancePeriod,
+): SolutionImpact {
+  const p = period ?? monthPeriod(new Date());
+  const now = new Date();
+
+  const clientsBefore = computeClientCompliance(base, p, now);
+  const techsBefore   = computeTechCompliance(base, p, now);
+
+  const hypothetical  = applyWishSolution(base, sol);
+
+  const clientsAfter  = computeClientCompliance(hypothetical, p, now);
+  const techsAfter    = computeTechCompliance(hypothetical, p, now);
+
+  let sessionsAdded = 0;
+  let sessionsRemoved = 0;
+  for (const op of sol.ops) {
+    if (op.op === 'add') sessionsAdded++;
+    else if (op.op === 'remove') sessionsRemoved++;
+  }
+
+  const afterClientMap = new Map(clientsAfter.map(c => [c.client.id, c]));
+  const clientImpacts: ClientImpact[] = [];
+  for (const before of clientsBefore) {
+    const after = afterClientMap.get(before.client.id);
+    if (!after) continue;
+    const deltaPct     = after.projected.pct - before.projected.pct;
+    const deltaSupHours = after.projected.supervisionHours - before.projected.supervisionHours;
+    if (Math.abs(deltaPct) >= 0.1 || Math.abs(deltaSupHours) >= 0.05) {
+      clientImpacts.push({
+        client: before.client,
+        beforePct: before.projected.pct,
+        afterPct: after.projected.pct,
+        deltaPct,
+        beforeSupHours: before.projected.supervisionHours,
+        afterSupHours: after.projected.supervisionHours,
+        deltaSupHours,
+        hoursToGoAfter: after.projected.hoursToGo,
+      });
+    }
+  }
+
+  const afterTechMap = new Map(techsAfter.map(t => [t.tech.id, t]));
+  const techImpacts: TechImpact[] = [];
+  for (const before of techsBefore) {
+    const after = afterTechMap.get(before.tech.id);
+    if (!after) continue;
+    const deltaPct = after.projected.pct - before.projected.pct;
+    if (Math.abs(deltaPct) >= 0.1) {
+      techImpacts.push({
+        tech: before.tech,
+        beforePct: before.projected.pct,
+        afterPct: after.projected.pct,
+        deltaPct,
+        hoursToGoAfter: after.projected.companyHoursToGo,
+      });
+    }
+  }
+
+  return { clientImpacts, techImpacts, sessionsAdded, sessionsRemoved };
 }

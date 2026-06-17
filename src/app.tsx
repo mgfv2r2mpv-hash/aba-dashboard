@@ -24,6 +24,7 @@ const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
 const ComplianceDashboard = React.lazy(() => import('./components/ComplianceDashboard'));
 const CaseloadView = React.lazy(() => import('./components/CaseloadView'));
 const SetupWizard = React.lazy(() => import('./components/SetupWizard'));
+const CprView = React.lazy(() => import('./components/CprView'));
 import { useMinWidth, useIsTablet, useIsLandscape } from './useMediaQuery';
 import LockScreen from './components/LockScreen';
 import PasswordPrompt from './components/PasswordPrompt';
@@ -117,7 +118,7 @@ export default function App() {
   const [mutedConflicts, setMutedConflicts] = useState<string[]>([]);
   const [solutions, setSolutions] = useState<ScheduleSolution[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [view, setView] = useState<'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish'>('schedule');
+  const [view, setView] = useState<'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish' | 'cpr'>('schedule');
   const [showWizard, setShowWizard] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
@@ -1279,6 +1280,7 @@ export default function App() {
             <>
               {compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6')}
               <FileUpload onUpload={handleFileUpload} loading={loading} />
+              {compactBtn('CPR', 'CPR & Analysis', () => setView('cpr'), view === 'cpr' ? '#6366f1' : '#374151')}
             </>
           ) : (
             <>
@@ -1323,7 +1325,11 @@ export default function App() {
           // behind the header. In landscape the header is sticky (in flow).
           paddingTop: isLandscape ? 0 : headerHeight,
         }}>
-        {scheduleData ? (
+        {view === 'cpr' ? (
+          <React.Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>Loading…</div>}>
+            <CprView />
+          </React.Suspense>
+        ) : scheduleData ? (
           <>
             {view === 'schedule' && (
               <>
@@ -1733,8 +1739,8 @@ export default function App() {
 // Three-way segmented control for the active view. Sits inline in the header
 // at compact-button size so it doesn't blow up the chrome.
 function NavButtons({ view, onChange, compSummary, conflictCount, conflictHasError }: {
-  view: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish';
-  onChange: (v: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish') => void;
+  view: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish' | 'cpr';
+  onChange: (v: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish' | 'cpr') => void;
   compSummary?: ComplianceSummary | null;
   conflictCount?: number;
   conflictHasError?: boolean;
@@ -1747,7 +1753,7 @@ function NavButtons({ view, onChange, compSummary, conflictCount, conflictHasErr
 
   const btn = (
     label: string,
-    key: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish',
+    key: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish' | 'cpr',
     badge?: React.ReactNode,
   ) => {
     const active = view === key;
@@ -1783,6 +1789,7 @@ function NavButtons({ view, onChange, compSummary, conflictCount, conflictHasErr
         }}>{badgeCount}</span>
       ))}
       {btn('✨Wish', 'wish')}
+      {btn('CPR', 'cpr')}
       {btn('⚙️Admin', 'admin')}
     </>
   );

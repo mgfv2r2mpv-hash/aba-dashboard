@@ -75,6 +75,18 @@ export async function clearLock(): Promise<void> {
   await deleteBlob(PIN_STASH_KEY);
 }
 
+// Drop every at-rest blob EXCEPT the verifier. Used when creating a brand-new
+// PIN: any pre-existing schedule/AI-config was sealed under a PIN we can no
+// longer read, so it is unrecoverable garbage. Clearing it guarantees a fresh
+// PIN behaves like a fresh install — no stale or inaccessible data lingers
+// under the new key. (The verifier is written separately by setPin.)
+export async function clearStaleAtRest(): Promise<void> {
+  await deleteBlob(SCHEDULE_KEY);
+  await deleteBlob(AICONFIG_KEY);
+  await deleteBlob(FACEID_KEY);
+  await deleteBlob(PIN_STASH_KEY);
+}
+
 // ---- At-rest schedule -----------------------------------------------------
 
 export async function saveSchedule(data: ScheduleData, pin: string): Promise<void> {

@@ -32,6 +32,7 @@ import {
   saveSchedule, loadSchedule,
   saveAIConfig, loadAIConfig, clearAIConfig,
   isFaceIdEnabled, enableFaceId, disableFaceId, recoverPinViaBiometric,
+  clearStaleAtRest,
 } from './appLock';
 import { isBiometricAvailable, checkBiometryFull, biometricAuthenticate, getBiometryLabel, BiometryLabel } from './biometric';
 import { pastIncompleteAppointments } from './compliance';
@@ -447,8 +448,18 @@ export default function App() {
   };
 
   const handleCreatePin = async (pin: string) => {
+    // Creating a PIN means we found no readable verifier — treat this as a fresh
+    // install. Wipe any orphaned at-rest blobs (sealed under a PIN we can't read,
+    // so unrecoverable) and reset in-memory state so no stale schedule or API key
+    // is shown under the new PIN. Errors surface to LockScreen (no silent fail).
+    await clearStaleAtRest();
     await setPin(pin);
     unlockedPinRef.current = pin;
+    const fresh: AISettings = { apiKey: '', model: aiSettings.model || 'claude-sonnet-4-6' };
+    setScheduleData(null);
+    setNativeStore(null as unknown as ScheduleData);
+    setAiSettings(fresh);
+    saveSessionSettings(fresh);
     setLockMode('unlock');
     setLocked(false);
   };

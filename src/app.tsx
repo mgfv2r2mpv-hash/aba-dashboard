@@ -34,7 +34,7 @@ import {
   isFaceIdEnabled, enableFaceId, disableFaceId, recoverPinViaBiometric,
   clearStaleAtRest,
 } from './appLock';
-import { isBiometricAvailable, checkBiometryFull, biometricAuthenticate, getBiometryLabel, BiometryLabel } from './biometric';
+import { isBiometricAvailable, checkBiometryFull, biometricAuthenticate, getBiometryLabel, BiometryLabel, getCachedBiometryAvailable, getCachedBiometryLabel } from './biometric';
 import { pastIncompleteAppointments } from './compliance';
 import {
   ComplianceCache, ComplianceSummary, ApptChange,
@@ -166,10 +166,13 @@ export default function App() {
   const [locked, setLocked] = useState(false);
   const [lockMode, setLockMode] = useState<'create' | 'unlock'>('unlock');
   const [changingPin, setChangingPin] = useState(false);
-  const [faceIdAvailable, setFaceIdAvailable] = useState(false);
+  // Seed from localStorage cache so the toggle is visible immediately on cold
+  // launch — the async check below will confirm/update, but this prevents the
+  // toggle from vanishing on subsequent launches while LAContext warms up.
+  const [faceIdAvailable, setFaceIdAvailable] = useState(() => isNative && getCachedBiometryAvailable());
   const [faceIdEnabled, setFaceIdEnabled] = useState(false);
   // What to call the device's biometry in UI copy ("Face ID" / "Touch ID").
-  const [biometryLabel, setBiometryLabel] = useState<BiometryLabel>('biometric unlock');
+  const [biometryLabel, setBiometryLabel] = useState<BiometryLabel>(() => isNative ? getCachedBiometryLabel() : 'biometric unlock');
   // The unlocked PIN, kept in memory only, so we can re-encrypt on each change.
   const unlockedPinRef = React.useRef<string | null>(null);
 
@@ -1021,7 +1024,7 @@ export default function App() {
         mode={lockMode}
         onCreate={handleCreatePin}
         onVerify={handleVerifyPin}
-        onBiometric={lockMode === 'unlock' && faceIdEnabled && faceIdAvailable ? handleBiometricUnlock : undefined}
+        onBiometric={lockMode === 'unlock' && faceIdEnabled ? handleBiometricUnlock : undefined}
         biometricAuto
         biometryLabel={biometryLabel}
       />

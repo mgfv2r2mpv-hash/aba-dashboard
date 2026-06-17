@@ -10,7 +10,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Client, Blackout, Appointment } from '../types';
 import { clientPastel, clientDarkBorder, clientAvailBarStyle, tileStyle } from '../calendarColors';
 import {
-  format, addDays, addWeeks, subWeeks, addMonths, subMonths,
+  format, addDays,
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, isSameDay, isSameMonth,
 } from 'date-fns';
@@ -30,6 +30,13 @@ interface Props {
   clients: Client[];
   appointments: Appointment[];
   blackouts: Blackout[];
+  // Sub-view + date are owned by the parent Calendar toolbar (shared with the
+  // BCBA/BT lenses), so the Case view no longer renders its own view switch,
+  // nav, or heading.
+  view: Sub;
+  date: Date;
+  // A month-cell tap asks the parent to jump to the Day view for that date.
+  onPickDay: (d: Date) => void;
 }
 
 function getWeekDays(d: Date): Date[] {
@@ -39,9 +46,7 @@ function getWeekDays(d: Date): Date[] {
 
 const fmtTime = (d: Date) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
-export default function ClientCalendarView({ clients, appointments, blackouts }: Props) {
-  const [sub, setSub] = useState<Sub>('week');
-  const [date, setDate] = useState(new Date());
+export default function ClientCalendarView({ clients, appointments, blackouts, view, date, onPickDay }: Props) {
   const [selIds, setSelIds] = useState<Set<string>>(() => new Set(clients.map(c => c.id)));
   const [highlightId, setHighlightId] = useState<string | null>(null);
 
@@ -58,44 +63,11 @@ export default function ClientCalendarView({ clients, appointments, blackouts }:
   const noneSel = selIds.size === 0;
 
   const weekDays = useMemo(() => getWeekDays(date), [date]);
-  const weekLabel = (() => {
-    const [s, e] = [weekDays[0], weekDays[6]];
-    return s.getMonth() === e.getMonth()
-      ? format(s, 'MMMM d') + '–' + format(e, 'd, yyyy')
-      : format(s, 'MMM d') + ' – ' + format(e, 'MMM d, yyyy');
-  })();
-
-  const goPrev = () => setDate(d => sub === 'month' ? subMonths(d, 1) : sub === 'week' ? subWeeks(d, 1) : addDays(d, -1));
-  const goNext = () => setDate(d => sub === 'month' ? addMonths(d, 1) : sub === 'week' ? addWeeks(d, 1) : addDays(d, 1));
 
   return (
-    <div style={{ padding: 'clamp(8px,3vw,24px)', boxSizing: 'border-box' }}>
+    <div style={{ padding: 'clamp(8px,3vw,24px)', boxSizing: 'border-box', paddingTop: 0 }}>
 
-      {/* Toolbar */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
-        <div style={{ display: 'flex', border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
-          {(['month', 'week', 'day'] as Sub[]).map(v => (
-            <button key={v} onClick={() => setSub(v)} style={{
-              padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-              background: sub === v ? '#3b82f6' : 'white', color: sub === v ? 'white' : '#374151',
-            }}>{v[0].toUpperCase() + v.slice(1)}</button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
-          {[{ label: '←', fn: goPrev }, { label: 'Today', fn: () => setDate(new Date()) }, { label: '→', fn: goNext }].map(({ label, fn }) => (
-            <button key={label} onClick={fn} style={{
-              padding: '6px 12px', background: '#e5e7eb', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 13,
-            }}>{label}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* Heading */}
-      <h2 style={{ fontSize: 17, fontWeight: 700, margin: '0 0 10px', textAlign: 'center', color: '#111827' }}>
-        {sub === 'month' ? format(date, 'MMMM yyyy') : sub === 'week' ? weekLabel : format(date, 'EEEE, MMMM d, yyyy')}
-      </h2>
-
-      {/* Client filter pills */}
+      {/* Client filter pills (view switch, nav + heading live in the parent toolbar) */}
       <div style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 6, marginBottom: 10, flexWrap: 'nowrap', WebkitOverflowScrolling: 'touch' as any }}>
         <Pill active={allSel}  color="#3b82f6" onClick={() => setSelIds(new Set(clients.map(c => c.id)))}>All</Pill>
         <Pill active={noneSel} color="#6b7280" onClick={() => setSelIds(new Set())}>None</Pill>
@@ -119,17 +91,16 @@ export default function ClientCalendarView({ clients, appointments, blackouts }:
       </div>
 
       {/* Content */}
-      {sub === 'month' && (
-        <ClientMonthView date={date} blackouts={blackouts} clients={visible}
-          onPickDay={d => { setDate(d); setSub('day'); }} />
+      {view === 'month' && (
+        <ClientMonthView date={date} blackouts={blackouts} clients={visible} onPickDay={onPickDay} />
       )}
-      {sub === 'week' && (
+      {view === 'week' && (
         <>
           <WeekTimeGrid days={weekDays} clients={visible} appointments={appointments} blackouts={blackouts} highlightId={highlightId} />
           <AvailabilityHeatmap days={weekDays} clients={visible} appointments={appointments} highlightId={highlightId} onHighlight={setHighlightId} />
         </>
       )}
-      {sub === 'day' && (
+      {view === 'day' && (
         <DayClientGrid date={date} clients={visible} appointments={appointments} blackouts={blackouts} />
       )}
     </div>

@@ -176,31 +176,26 @@ export default function Calendar({
               }}
             >+</button>
           )}
-          {lens !== 'client' && (
-            <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
-              <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
-              <ViewBtn active={view === 'week'} onClick={() => setView('week')}>Week</ViewBtn>
-              <ViewBtn active={view === 'day'} onClick={() => setView('day')}>Day</ViewBtn>
-            </div>
-          )}
+          <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
+            <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
+            {/* The Case Week view carries the availability/schedule heatmap. */}
+            <ViewBtn active={view === 'week'} onClick={() => setView('week')}>{lens === 'client' ? 'Week 🌡️' : 'Week'}</ViewBtn>
+            <ViewBtn active={view === 'day'} onClick={() => setView('day')}>Day</ViewBtn>
+          </div>
           <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
             <ViewBtn active={lens === 'bcba'} onClick={() => setLens('bcba')}>BCBA</ViewBtn>
             <ViewBtn active={lens === 'bt'} onClick={() => setLens('bt')}>BT</ViewBtn>
             <ViewBtn active={lens === 'client'} onClick={() => setLens('client')}>Case</ViewBtn>
           </div>
         </div>
-        {lens !== 'client' && (
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <NavBtn onClick={goPrev}>←</NavBtn>
-            <NavBtn onClick={goToday}>Today</NavBtn>
-            <NavBtn onClick={goNext}>→</NavBtn>
-          </div>
-        )}
-        {lens !== 'client' && (
-          <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }}>
-            {headerLabel}
-          </h2>
-        )}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <NavBtn onClick={goPrev}>←</NavBtn>
+          <NavBtn onClick={goToday}>Today</NavBtn>
+          <NavBtn onClick={goNext}>→</NavBtn>
+        </div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }}>
+          {headerLabel}
+        </h2>
       </div>
 
       {lens === 'client' && (
@@ -208,6 +203,9 @@ export default function Calendar({
           clients={clients}
           appointments={appointments}
           blackouts={blackouts ?? []}
+          view={view}
+          date={currentDate}
+          onPickDay={(d) => { setCurrentDate(d); setView('day'); }}
         />
       )}
       {lens !== 'client' && view === 'month' && (

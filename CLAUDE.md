@@ -1,5 +1,20 @@
 # Project notes for Claude
 
+## Coding methodology
+
+Think like the laziest senior dev in the room. **The best code is the code you never wrote.**
+
+- **Reuse before reinvent:** Use existing libraries, frameworks, and patterns. Copy-paste with confidence.
+- **Simplest solution wins:** Pick the minimal approach that solves the problem. Avoid over-engineering and premature optimization.
+- **Ship fast:** Get to done. Iterate later. Refactor only when something breaks.
+- **Minimal diffs:** Every line should earn its place. No "while we're here" cleanups.
+- **Trust tech users:** Assume app users are semi-confident with tech. Don't explain clinical rationale; focus on UI clarity for scheduling/compliance decisions.
+
+**Non-negotiable guards (never sacrifice for efficiency):**
+- Data security: encryption, at-rest keys, access gates never bypass.
+- AI tool safety: anonymization, validation, and prompt hardening stay strict.
+- Compliance logic: BCBA-confirmed rules in `src/compliance.ts` and constraint validators are law.
+
 ## Git workflow — read this first
 
 The harness proxy on this repo **denies direct pushes to `main`** with HTTP 403
@@ -27,136 +42,37 @@ ask before each merge.
 
 ## Repo essentials
 
-- iOS build flow: `npm run cap:ios` runs `vite build` then `npx cap copy ios`.
-  Don't track `dist-client/` (already in `.gitignore`).
-- The Capacitor WebView at `capacitor://localhost` has no Express server inside
-  it, so all `/api/*` calls are short-circuited through `src/nativeApi.ts` —
-  an axios adapter that routes them to an in-memory ScheduleData store. Keep
-  any new server endpoints mirrored there.
-- Build stamp is injected via Vite `define` (`__BUILD_TIME__`) and shown in
-  the empty-state footer; useful for confirming the device isn't running a
-  stale `ios/App/App/public/` copy.
+- **iOS build:** `npm run cap:ios` → vite build → `npx cap copy ios`. Don't track `dist-client/`.
+- **Native API routing:** Capacitor WebView has no server. All `/api/*` calls route through `src/nativeApi.ts` (axios adapter → in-memory ScheduleData). Mirror new endpoints there.
+- **Build stamp:** Vite-injected `__BUILD_TIME__` in footer shows current version (useful for detecting stale iOS builds).
 
 ## Excel workbook format (v2, normalized — `src/excelHandler.ts`)
 
-- `SCHEMA_VERSION = 2`. A `_Meta` sheet (`schemaVersion`, `id`, `lastModified`,
-  `exportedAt`, `appName`) marks the format. The parser understands **v2 only**.
-- **PTO (Upgrades 1–2):** BCBA leave lives in a `TimeOff` sheet (one row per
-  leave day: `date,hours,bucket,note`). `Settings.ptoBillableDeductionRatio`
-  (default 1.0) shaves the BCBA weekly/monthly billable requirement by
-  `hours*ratio` (floored at 0) — read by the hours ribbon/grid AND the draft
-  grader (`draftSolver`). Bucket/accrual config is `Settings.pto{Mode,Buckets,
-  UnpaidEnabled}` cols + `PtoAccruals` + `PtoOpeningBalances` sheets; logic lives
-  in `src/pto.ts` (`computePtoBalances`, `accruedForRule`). Mode `unlimited`
-  (default) tracks used-only; `accrual` reports opening+accrued−used. All four
-  accrual kinds compute: date-based (`semimonthly`,`everyNWeeks`) and hours-based
-  (`perConvertedHours`,`perConvertedBonus`), where **converted = completed
-  billable BCBA hours** (`convertedBcbaHours` via `rollupHours(...).completed`) so
-  balances move as sessions are completed/reopened. `computePtoBalances` takes
-  `appointments` (and optional goal hours) for this. `perConvertedBonus` pays
-  `bonusHours` each time `bonusConsecutiveIntervals` consecutive `bonusInterval`s
-  (week/month) are each "at criterion", then the streak resets; criterion is
-  user-chosen — either converted ≥ `bonusPerExtraHours`, or converted ≥ the
-  billable goal × (1 + `bonusPercentAboveGoal`/100). Round-trip + logic covered by
-  `scripts/verify-excel.ts` and `scripts/verify-pto.ts`.
-- **Normalized, relational sheets:** `Clients`/`Technicians` hold scalars only;
-  availability lives in one `Availability` sheet (`ownerType client|technician|
-  clinician, ownerId, ownerName, day, start, end`, one row per window — this also
-  replaces the old `settings.clinicianAvailability` JSON); tech-client links live
-  in `Assignments`; cancellations live in `Cancellations` (child of canceled
-  appointments). `Settings` is fully de-JSON'd (utilization, cancellation-notice,
-  and report-lead fields are plain columns). `Authorizations`/`ManualUsage`/
-  `Blackouts` unchanged. Company-customized cancellation **reason codes** live in
-  a `CancellationCodes` sheet (`value`, `label`, `retired`), one row per code —
-  empty/absent falls back to the built-in `CANCELLATION_REASONS`. Edited in
-  Admin → Settings; reason `value`s are stable ids (retire, don't delete, so
-  historical `Cancellations.reason` keep resolving via `cancellationReasonLabel`).
-- Generated with `aoa_to_sheet` + explicit header arrays (stable column order) and
-  **`XLSX.write(..., { compression: true })`** — the old generator stored the zip
-  uncompressed (a real ~4–5x size bug: 463 KB → ~120 KB for the same data).
-- Child sheets reference owners by id, falling back to name (mirrors the app's
-  `find(x => x.id===v || x.name===v)`); denormalized name columns are for human
-  readability only.
-- **Legacy v1 files** (per-day `*Start/*End/*Windows`, `client1..hours10`,
-  inline cancellation columns, JSON-packed Settings) are upgraded once via
-  `scripts/migrate-legacy-xlsx.ts <in> <out> [data.json]`, which carries a
-  self-contained v1 reader and folds the dead `reportLeadWeeks*` settings into
-  the modern `reportDraftLead`/`reportFinalLead`.
-- The bundled sample (`public-assets/sample_schedule.xlsx`) is regenerated from
-  the `src/sampleSchedule.json` fixture via `npx tsx src/createSampleData.ts`.
-  Round-trip coverage: `npx tsx scripts/verify-excel.ts`.
-- Connectors (`nativeApi.ts`, `server.ts`, `app.tsx`) are pass-throughs over
-  `parseWorkbook`/`generateExcelFile` — unchanged by the format rework.
+- **Schema:** `SCHEMA_VERSION = 2`, marked by `_Meta` sheet. Parser understands v2 only.
+- **PTO:** BCBA leave in `TimeOff` sheet (date,hours,bucket,note). `Settings.ptoBillableDeductionRatio` (default 1.0) shaves weekly/monthly billable requirement. Accrual config: `Settings.pto{Mode,Buckets,UnpaidEnabled}` + `PtoAccruals`/`PtoOpeningBalances` sheets. Logic in `src/pto.ts` — modes: `unlimited` (tracks used), `accrual` (opening+accrued−used). Four kinds: date-based (`semimonthly`,`everyNWeeks`) and hours-based (`perConvertedHours`,`perConvertedBonus`). **Converted = completed billable BCBA hours** — balances move as sessions complete/reopen. `perConvertedBonus` pays when N consecutive intervals hit criterion. Verified in `scripts/verify-excel.ts` / `scripts/verify-pto.ts`.
+- **Normalized sheets:** `Clients`/`Technicians` (scalars); `Availability` (one row per window: ownerType, ownerId, ownerName, day, start, end); `Assignments` (tech-client links); `Cancellations`; `Settings` (de-JSON'd). `Authorizations`/`ManualUsage`/`Blackouts` unchanged. Company **reason codes** in `CancellationCodes` (value,label,retired) — fallback to built-in. Reason `value`s are stable IDs (retire, never delete).
+- **Compression:** `XLSX.write(..., { compression: true })` — old uncompressed was 4–5x larger (463 KB → ~120 KB).
+- **References:** Child sheets use id or name fallback (mirrors `find(x => x.id===v || x.name===v)`).
+- **Legacy:** v1 files upgraded once via `scripts/migrate-legacy-xlsx.ts`. Self-contained v1 reader folds `reportLeadWeeks*` into modern `reportDraftLead`/`reportFinalLead`.
+- **Sample:** Generated from `src/sampleSchedule.json` via `npx tsx src/createSampleData.ts`. Round-trip via `npx tsx scripts/verify-excel.ts`.
 
 ## App lock & at-rest persistence (native only)
 
-- On native, the app locks on **cold launch only** (no background/foreground
-  re-lock — deliberately the simplest behavior). Web has no lock.
-- A numeric PIN is the gate. The PIN is **never stored**: both the `pin.verifier`
-  blob (a known constant) and the `schedule.enc` blob (the whole `ScheduleData`)
-  are AES-GCM, key PBKDF2-derived from the PIN via `clientCrypto`. A correct PIN
-  is the one that decrypts them. See `src/appLock.ts` + `src/secureStore.ts`
-  (blobs live in `Directory.Data`, namespaced `lock_*`).
-- First launch with no verifier → LockScreen "create" mode (a PIN is mandatory
-  on native, so the at-rest key always exists before any save). The schedule is
-  re-encrypted on every change (debounced 400ms in `app.tsx`) and restored on
-  unlock — this is the ONLY cross-launch persistence (there's no GET on mount).
-- **Face ID / Touch ID is activated** (package added). `@aparajita/capacitor-
-  biometric-auth` (v9, peer-compatible with Capacitor 8) is now a dependency;
-  `src/biometric.ts` still reaches it via `registerPlugin('BiometricAuth')` (no
-  static import, so the web build never pulls it in — web reports unavailable and
-  has no lock). `getBiometryLabel()` maps the iOS `biometryType` (1 Touch ID,
-  2 Face ID) to UI copy so the LockScreen button and Settings toggle name the
-  real hardware. **Remaining Mac-only steps to run on device:** `npm install` →
-  `npx cap sync ios` (installs the pod) → add `NSFaceIDUsageDescription` to
-  `ios/App/App/Info.plist` (the iOS project isn't in this repo; Face ID crashes
-  without the key, Touch ID needs none). Opting in (Settings → App Lock) stashes
-  the PIN under app-constant obfuscation (`pin.stash`) so a biometric success can
-  recover it — a deliberate convenience/strength tradeoff, off by default. The
-  same gate guards revealing/replacing the stored API key.
-- **Claude API key persistence.** The key follows the schedule two ways: (1) it
-  rides inside the workbook in a `_Config` sheet, app-obfuscated (`obfuscateKey`,
-  not the user PIN) so a download→upload round-trip restores it with no prompt —
-  `loadEmbeddedKey` routes the recovered key through `handleAISettingsSave`; and
-  (2) on native it's **sealed at rest under the app PIN** (`aiconfig.enc` blob via
-  `saveAIConfig`/`loadAIConfig` in `appLock.ts`, re-keyed by `changePin`, cleared
-  by `clearLock`), recovered on unlock so it survives cold launch. In Settings the
-  key is **never re-displayed once set** (mirrors the schedule-password UX): it
-  shows "🔒 API key is set" with Replace…/Clear. Replacing is gated by
-  `onRequestUnlock` → on native, Face ID (if enabled) or PIN via `verifyPin`; web
-  has no lock so it's allowed outright. A blank field on Save keeps the existing
-  key (use Clear to remove), so a stray Save never wipes it.
-- The schedule-decrypt prompt is a real `<form>` (`PasswordPrompt.tsx`,
-  `autocomplete="current-password"`) not `window.prompt`, so iOS offers AutoFill.
+- **Lock gate:** Numeric PIN, **never stored**. Both `pin.verifier` (constant) and `schedule.enc` (ScheduleData) are AES-GCM, key PBKDF2-derived from PIN via `clientCrypto`. Correct PIN = decryption success. See `src/appLock.ts` + `src/secureStore.ts` (blobs in `Directory.Data`, namespaced `lock_*`). Cold launch only; web has no lock.
+- **Lifecycle:** First launch → LockScreen "create" mode (PIN mandatory on native). Schedule re-encrypted every change (debounced 400ms) on unlock → only cross-launch persistence (no GET on mount).
+- **Biometric:** `@aparajita/capacitor-biometric-auth` v9 (Capacitor 8 compatible). `src/biometric.ts` via `registerPlugin('BiometricAuth')` (no static import → web build safe). `getBiometryLabel()` maps iOS type (1=Touch, 2=Face) to UI. Opt-in stashes PIN under obfuscation (`pin.stash`) for biometric recovery — convenience/strength tradeoff, off by default. **Setup:** `npm install` → `npx cap sync ios` → add `NSFaceIDUsageDescription` to `ios/App/App/Info.plist` (Face ID requires it; Touch ID doesn't).
+- **Claude API key:** Two paths: (1) **workbook embed** (`_Config` sheet, app-obfuscated via `obfuscateKey`) for download→upload round-trip (no prompt); (2) **native at-rest** (`aiconfig.enc` blob via `saveAIConfig`/`loadAIConfig`, re-keyed on PIN change, cleared on lock clear). **Display:** Never shown after set ("🔒 API key is set" + Replace/Clear). Replace gated by `onRequestUnlock` (Face ID or PIN). Blank field on save = keep existing. Stores `schedulePassword` alongside for persistence across reinstalls.
+- **Schedule password:** Optional whole-file encryption (workbook download). Never re-displayed; stored encrypted at rest. Changing requires current password (gate).
+- **AutoFill:** Schedule-decrypt prompt is real `<form>` (`PasswordPrompt.tsx`, `autocomplete="current-password"`) for iOS AutoFill support.
 
 ## Compliance rules (BCBA-confirmed; do not re-derive)
 
-- **Supervision credit = time-overlap with a BT's direct** (`countsAsSupervision`).
-  Only supervision, parent-training, and case-planning count, never other types.
-  A **supervision** session implies the client is present, so the BT is INFERRED —
-  it credits overlap with any of that client's directs (no BT need be named). A
-  **parent-training / case-planning** can be caregiver-only, so it counts ONLY when
-  it NAMES the observed BT (`technician` field) and overlaps that BT's direct. No
-  qualifying overlap → 0. Partial overlap → partial credit (the BT leaves, parent
-  training continues). These all stay **BCBA billable** — `bucketOf` keys the
-  BT/BCBA split on TYPE (BCBA session types never become BT direct hours), so a
-  supervised BT named on a parent-training doesn't leak into BT direct totals. A
-  BCBA session overlapping a BT direct is concurrent care, never a double-book.
-- Per-client (case): numerator = each counting session tagged with the client ×
-  its overlap with the relevant BT's directs for that client (inferred for
-  supervision; the named BT for PT/CoC), capped at the session's duration;
-  denominator = the client's direct hours.
-- Per-RBT (`computeTechCompliance`): denominator = ALL of that RBT's direct hours;
-  numerator = overlap of inferred-supervision (its client matching this RBT's
-  direct) + sessions that name this RBT, with that RBT's directs. RBTs must hit
-  BOTH the BACB 5% floor and the company target; non-RBT BTs the company target.
-- A completed appointment never raises an availability conflict (it already
-  happened). Touching sessions (one ends exactly when the next starts) don't
-  overlap — never a billable double-book.
-- Insurer cap (`supervisionMaxHoursPercent`, typically 20%) is a display-only
-  warning — over-cap ratios render in orange but don't change green/yellow/red
-  status, since min and max are orthogonal axes.
-- Deferred: authorization-utilization tracking, fieldwork hours for trainees.
+- **Supervision credit = BT direct time-overlap** (`countsAsSupervision`). Only supervision, parent-training, case-planning count. **Supervision** (client present) → BT **inferred**, credit any overlap with that client's directs. **PT/CoC** (caregiver-only) → counts only when **names BT** (`technician` field) and overlaps that BT's direct. No overlap → 0. Partial → proportional. Stays **BCBA billable** (type keys BT/BCBA split via `bucketOf`; no leakage to BT direct). BCBA+BT direct overlap = concurrent care, not double-book.
+- **Per-client:** numerator = counting session × BT direct overlap (inferred or named), capped at session duration; denominator = client direct hours.
+- **Per-RBT** (`computeTechCompliance`): denominator = ALL RBT directs; numerator = inferred-supervision overlap + named-on-session overlap. RBTs hit BOTH BACB 5% floor AND company target; non-RBT BTs hit company target only.
+- **Completed appointments** never conflict (past event). Touching (end=next.start) don't overlap.
+- **Insurer cap** (`supervisionMaxHoursPercent`, ~20%) = display warning only (orange, doesn't change green/yellow/red).
+- **Deferred:** authorization-utilization, fieldwork hours.
 
 ## Phases (per QA discussions)
 
@@ -167,17 +83,5 @@ ask before each merge.
 
 ## AI scheduling — "Fix It" vs "Wish It"
 
-- **Fix It** (existing): `ClaudeScheduler.generateSolutions(changedAppt, conflicts)`
-  resolves a conflict the user already created; returns `ScheduleSolution[]`
-  (moves only), text-parsed.
-- **Wish It** (Change 3, `src/wish.ts` + `WishComposer.tsx`): goal-driven rework.
-  A structured NL composer (`WishRequest`: vacation / clearWindow / addRecurring /
-  freeform + fields) keeps the prompt compact. `ClaudeScheduler.generateWishSolutions`
-  sends the anonymized in-horizon schedule and asks for **strict JSON** ops
-  (move/add/remove/blackout); `parseWishSolutions` de-anonymizes via the reverse
-  map **per-field** (never string-replacing the whole reply — that would mangle
-  ISO timestamps). A chosen `WishSolution` → `wishSolutionToDraft` (draft ops +
-  blackouts): **Accept** applies all via `applyWishSolution`+commit; **Customize**
-  stages the appointment ops into the draft tray (blackouts commit immediately).
-  Pure logic unit-tested in `scripts/verify-wish.ts`. The live Anthropic call is
-  unrunnable without an API key, so all risk lives in the tested pure functions.
+- **Fix It:** `ClaudeScheduler.generateSolutions(changedAppt, conflicts)` → conflict resolution (moves only), text-parsed.
+- **Wish It:** Goal-driven rework (`src/wish.ts` + `WishComposer.tsx`). Structured NL composer (`WishRequest`: vacation/clearWindow/addRecurring/freeform + fields) keeps prompt compact. `generateWishSolutions` sends anonymized in-horizon schedule, asks **strict JSON ops** (move/add/remove/blackout). `parseWishSolutions` de-anonymizes **per-field** (never full string-replace → preserves ISO timestamps). `WishSolution` → `wishSolutionToDraft` (draft ops + blackouts): **Accept** commits all; **Customize** stages ops into draft tray (blackouts commit immediately). Pure logic unit-tested in `scripts/verify-wish.ts`. **AI safety:** Anonymization via anonymizer.ts + validation guard + token inspection. Compact appointment payload (id/start/end/type/client/tech/fixed/recur only).

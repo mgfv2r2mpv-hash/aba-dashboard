@@ -15,7 +15,6 @@ import AdminPanel from './components/AdminPanel';
 import ComplianceDashboard from './components/ComplianceDashboard';
 import CaseloadView from './components/CaseloadView';
 import FileUpload from './components/FileUpload';
-import Settings from './components/Settings';
 import AppointmentForm from './components/AppointmentForm';
 import SetupWizard from './components/SetupWizard';
 import CancellationDialog from './components/CancellationDialog';
@@ -96,7 +95,6 @@ export default function App() {
     const [solutions, setSolutions] = useState([]);
     const [selectedAppointment, setSelectedAppointment] = useState(null);
     const [view, setView] = useState('schedule');
-    const [showSettings, setShowSettings] = useState(false);
     const [showWizard, setShowWizard] = useState(false);
     const [showAddAppointment, setShowAddAppointment] = useState(false);
     // Wish view is now a full page (view === 'wish') rather than a modal.
@@ -988,15 +986,11 @@ export default function App() {
                     zIndex: 10,
                     flexShrink: 0,
                     boxSizing: 'border-box',
-                }, children: [_jsxs("div", { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }, children: [_jsx("img", { src: "/logo.png", alt: "Assi", style: { width: 22, height: 22, borderRadius: 5, flexShrink: 0 } }), _jsx("h1", { style: { fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }, children: "Assi - ABA Calendar" }), _jsx("span", { title: aiSettings.apiKey ? `AI: ${aiSettings.model}` : 'No AI key set — add in Settings', style: {
+                }, children: [_jsxs("div", { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }, children: [_jsx("img", { src: "/logo.png", alt: "SAssi", style: { width: 22, height: 22, borderRadius: 5, flexShrink: 0 } }), _jsx("h1", { style: { fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }, children: "SAssi - ABA Calendar" }), _jsx("span", { title: aiSettings.apiKey ? `AI: ${aiSettings.model}` : 'No AI key set — add in Settings', style: {
                                     width: 8, height: 8, borderRadius: '50%',
                                     backgroundColor: aiSettings.apiKey ? '#10b981' : '#ef4444',
                                     display: 'inline-block', flexShrink: 0,
-                                } }), _jsx("button", { onClick: () => setShowSettings(true), title: "Settings", style: {
-                                    marginLeft: 'auto', background: 'none', border: 'none', color: 'white',
-                                    cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '2px 4px',
-                                    opacity: 0.8,
-                                }, children: "\u2699" })] }), _jsx("div", { style: { display: 'flex', gap: '4px', alignItems: 'center' }, children: !scheduleData ? (_jsxs(_Fragment, { children: [compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6'), _jsx(FileUpload, { onUpload: handleFileUpload, loading: loading })] })) : (_jsx(NavButtons, { view: view, onChange: setView, compSummary: compSummary, conflictCount: activeConflicts.length, conflictHasError: activeConflicts.some(c => c.severity === 'error') })) })] }), _jsx("div", { onScroll: handleMainScroll, style: {
+                                } })] }), _jsx("div", { style: { display: 'flex', gap: '4px', alignItems: 'center' }, children: !scheduleData ? (_jsxs(_Fragment, { children: [compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6'), _jsx(FileUpload, { onUpload: handleFileUpload, loading: loading })] })) : (_jsx(NavButtons, { view: view, onChange: setView, compSummary: compSummary, conflictCount: activeConflicts.length, conflictHasError: activeConflicts.some(c => c.severity === 'error') })) })] }), _jsx("div", { onScroll: handleMainScroll, style: {
                     display: 'flex', flex: 1, minHeight: 0,
                     // Narrow / non-schedule views keep a single scroll region for the whole
                     // post-header area: each child reports its natural height instead of
@@ -1083,7 +1077,7 @@ export default function App() {
                                         transform: selectedAppointment ? 'translateY(0)' : 'translateY(100%)',
                                         transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                                         paddingBottom: 'env(safe-area-inset-bottom)',
-                                    }, children: _jsx("div", { style: { flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }, children: selectedAppointment && renderDetailOrEdit(selectedAppointment) }) }))] })), view === 'admin' && (_jsx(AdminPanel, { data: scheduleData, onDataChange: commitFull, onImportFile: triggerImportPicker, onRerunWizard: () => setShowWizard(true), onDownload: handleDownload, onClearData: handleClearData, onOpenAISettings: () => setShowSettings(true) })), view === 'compliance' && (_jsx(ComplianceDashboard, { data: scheduleData, cache: compCache, conflicts: visibleConflicts, aiSettings: aiSettings, mutedConflictKeys: mutedConflicts, onMuteConflict: muteConflict, onUnmuteConflict: unmuteConflict, onConfirmDismissConflict: confirmDismissConflict, onMarkComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onSelectAppointment: (a) => { setView('schedule'); setSelectedAppointment(a); }, onAcceptFix: acceptFix, onCustomizeFix: customizeFix })), view === 'caseload' && (_jsx(CaseloadView, { data: scheduleData, now: viewDate })), view === 'wish' && (_jsx(WishComposer, { data: scheduleData, aiSettings: aiSettings, onAccept: acceptWish, onCustomize: customizeWish, onClose: () => setView('schedule') }))] })) : (_jsxs("div", { style: {
+                                    }, children: _jsx("div", { style: { flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }, children: selectedAppointment && renderDetailOrEdit(selectedAppointment) }) }))] })), view === 'admin' && (_jsx(AdminPanel, { data: scheduleData, onDataChange: commitFull, onImportFile: triggerImportPicker, onRerunWizard: () => setShowWizard(true), onDownload: handleDownload, onClearData: handleClearData })), view === 'compliance' && (_jsx(ComplianceDashboard, { data: scheduleData, cache: compCache, conflicts: visibleConflicts, aiSettings: aiSettings, mutedConflictKeys: mutedConflicts, onMuteConflict: muteConflict, onUnmuteConflict: unmuteConflict, onConfirmDismissConflict: confirmDismissConflict, onMarkComplete: handleMarkComplete, onRequestCancel: (a) => setCancelTarget(a), onSelectAppointment: (a) => { setView('schedule'); setSelectedAppointment(a); }, onAcceptFix: acceptFix, onCustomizeFix: customizeFix })), view === 'caseload' && (_jsx(CaseloadView, { data: scheduleData, now: viewDate })), view === 'wish' && (_jsx(WishComposer, { data: scheduleData, aiSettings: aiSettings, onAccept: acceptWish, onCustomize: customizeWish, onClose: () => setView('schedule') }))] })) : (_jsxs("div", { style: {
                         flex: 1,
                         display: 'flex',
                         alignItems: 'center',
@@ -1093,13 +1087,7 @@ export default function App() {
                         gap: '16px',
                         padding: '0 24px',
                         textAlign: 'center',
-                    }, children: [_jsx("p", { children: "Upload an Excel file or run the Setup Wizard to get started." }), _jsxs("p", { style: { fontSize: '12px', maxWidth: '320px' }, children: ["A sample schedule (", _jsx("code", { children: "sample_schedule.xlsx" }), ") is in this app's Documents folder \u2014 pick it from Files via Upload Schedule."] }), debugMsg && (_jsx("p", { style: { fontSize: '12px', color: '#b91c1c', maxWidth: '320px', backgroundColor: '#fee2e2', padding: '8px', borderRadius: '4px' }, children: debugMsg })), _jsxs("p", { style: { fontSize: '10px', color: '#d1d5db', fontFamily: 'monospace' }, children: ["build ", BUILD_STAMP, " \u00B7 native ", String(Capacitor.isNativePlatform())] })] })) }), showSettings && (_jsx(Settings, { settings: aiSettings, onSave: handleAISettingsSave, onClose: () => setShowSettings(false), onClearKey: handleClearKey, onRequestUnlock: authenticateForKey, lock: isNative ? {
-                    faceIdAvailable,
-                    faceIdEnabled,
-                    biometryLabel,
-                    onChangePin: () => { setShowSettings(false); setChangingPin(true); },
-                    onToggleFaceId: handleToggleFaceId,
-                } : undefined })), showWizard && (_jsx(SetupWizard, { onComplete: handleWizardComplete, onCancel: () => setShowWizard(false), initialData: scheduleData || undefined })), _jsx("input", { ref: importInputRef, type: "file", accept: ".xlsx,.xls", style: { display: 'none' }, onChange: e => {
+                    }, children: [_jsx("p", { children: "Upload an Excel file or run the Setup Wizard to get started." }), _jsxs("p", { style: { fontSize: '12px', maxWidth: '320px' }, children: ["A sample schedule (", _jsx("code", { children: "sample_schedule.xlsx" }), ") is in this app's Documents folder \u2014 pick it from Files via Upload Schedule."] }), debugMsg && (_jsx("p", { style: { fontSize: '12px', color: '#b91c1c', maxWidth: '320px', backgroundColor: '#fee2e2', padding: '8px', borderRadius: '4px' }, children: debugMsg })), _jsxs("p", { style: { fontSize: '10px', color: '#d1d5db', fontFamily: 'monospace' }, children: ["build ", BUILD_STAMP, " \u00B7 native ", String(Capacitor.isNativePlatform())] })] })) }), showWizard && (_jsx(SetupWizard, { onComplete: handleWizardComplete, onCancel: () => setShowWizard(false), initialData: scheduleData || undefined })), _jsx("input", { ref: importInputRef, type: "file", accept: ".xlsx,.xls", style: { display: 'none' }, onChange: e => {
                     const file = e.target.files?.[0];
                     e.target.value = '';
                     if (file)

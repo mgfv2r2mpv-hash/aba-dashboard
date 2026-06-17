@@ -591,11 +591,12 @@ function TechCard({ report, maxPct, contacts, rbtMinContacts, btMinContacts }: {
   const noDirect = actual.directHours === 0 && projected.directHours === 0;
   const minContacts = tech.isRBT ? (rbtMinContacts ?? 2) : (btMinContacts ?? 1);
   const contactsRequired = !noDirect ? minContacts : 0;
-  const contactsBehind = contacts !== undefined && contactsRequired > 0 && contacts.projected < contactsRequired;
+  const actualContactsBehind = contacts !== undefined && contactsRequired > 0 && contacts.actual < contactsRequired;
+  const projectedContactsBehind = contacts !== undefined && contactsRequired > 0 && contacts.projected < contactsRequired;
 
   const status = techStatus(actual, projected, tech.isRBT, noDirect);
-  const overallStatus = (status === 'green' && contactsBehind) ? 'yellow'
-    : (status === 'yellow' && contactsBehind) ? 'red'
+  const overallStatus = (status === 'green' && projectedContactsBehind) ? 'atRisk'
+    : (status === 'yellow' && projectedContactsBehind) ? 'red'
     : status;
   const accent = statusColor(overallStatus);
 
@@ -633,12 +634,16 @@ function TechCard({ report, maxPct, contacts, rbtMinContacts, btMinContacts }: {
           </div>
           {contacts !== undefined && contactsRequired > 0 && (
             <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>
-              Supervision contacts: <strong style={{ color: contactsBehind ? accent : '#15803d' }}>
-                {contacts.actual} actual / {contacts.projected} projected
+              Supervision contacts: <strong style={{ color: actualContactsBehind ? '#6b7280' : '#15803d' }}>
+                {contacts.actual} actual
+              </strong>
+              {' / '}
+              <strong style={{ color: projectedContactsBehind ? '#b91c1c' : '#15803d' }}>
+                {contacts.projected} projected
               </strong>
               {' '}(need {contactsRequired}/month)
-              {contactsBehind && <span style={{ color: accent, fontWeight: 600 }}> — behind</span>}
-              {!contactsBehind && contacts.projected >= contactsRequired && <span style={{ color: '#15803d' }}> ✓</span>}
+              {projectedContactsBehind && <span style={{ color: '#b91c1c', fontWeight: 600 }}> — behind</span>}
+              {!projectedContactsBehind && <span style={{ color: '#15803d' }}> ✓</span>}
             </div>
           )}
         </>
@@ -706,20 +711,24 @@ function techStatus(
   projected: TechComplianceMetrics,
   isRBT: boolean,
   noDirect: boolean,
-): 'green' | 'yellow' | 'red' | 'gray' {
+): 'green' | 'atRisk' | 'yellow' | 'red' | 'gray' {
   if (noDirect) return 'gray';
   const passes = (m: TechComplianceMetrics) => {
     const bacbOk = !isRBT || (m.bacbHoursToGo ?? 0) === 0;
     const companyOk = m.companyHoursToGo === 0;
     return bacbOk && companyOk;
   };
-  if (passes(actual)) return 'green';
-  if (passes(projected)) return 'yellow';
+  const actualGood = passes(actual);
+  const projectedGood = passes(projected);
+  if (actualGood && projectedGood) return 'green';
+  if (actualGood && !projectedGood) return 'atRisk';
+  if (!actualGood && projectedGood) return 'yellow';
   return 'red';
 }
 
-function statusColor(s: 'green' | 'yellow' | 'red' | 'gray'): string {
+function statusColor(s: 'green' | 'atRisk' | 'yellow' | 'red' | 'gray'): string {
   return s === 'green' ? '#15803d'
+    : s === 'atRisk' ? '#c2410c'
     : s === 'yellow' ? '#a16207'
     : s === 'red' ? '#b91c1c'
     : '#6b7280';
@@ -791,9 +800,10 @@ function monthLabel(r: ClientCompliance): string {
   return 'this period';
 }
 
-function statusLabel(s: 'green' | 'yellow' | 'red' | 'gray'): string {
+function statusLabel(s: 'green' | 'atRisk' | 'yellow' | 'red' | 'gray'): string {
   switch (s) {
     case 'green': return 'on track';
+    case 'atRisk': return 'at risk';
     case 'yellow': return 'projected ok';
     case 'red': return 'behind';
     case 'gray': return 'inactive';

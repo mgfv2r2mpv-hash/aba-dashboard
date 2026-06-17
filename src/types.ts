@@ -101,6 +101,9 @@ export interface UtilizationSettings {
   // billable hours below this is graded red ("billable below minimum"). When
   // unset, the weekly target above doubles as the floor.
   bcbaWeeklyBillableMin?: number;
+  // Client-level utilization targets.
+  clientUtilizationPercent?: number;      // % of auth'd direct hours to hit (default 80)
+  minClientSessionHoursPerWeek?: number;  // minimum direct hours/wk per client (default 10)
 }
 
 export interface CompanySettings {

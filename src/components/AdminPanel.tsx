@@ -51,11 +51,12 @@ interface AdminPanelProps {
   biometryLabel?: string;
   onToggleFaceId?: (on: boolean) => void;
   onChangePin?: () => void;
+  onOpenAISettings?: () => void;
 }
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-export default function AdminPanel({ data, onDataChange, persist, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'technicians' | 'clients' | 'auths' | 'daysoff' | 'settings'>('technicians');
+export default function AdminPanel({ data, onDataChange, persist, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings, aiSettings, onSaveAISettings, onClearKey, onRequestUnlock, faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin }: AdminPanelProps) {
+  const [activeTab, setActiveTab] = useState<'settings' | 'technicians' | 'clients' | 'auths' | 'daysoff'>('settings');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reordering, setReordering] = useState<null | 'clients' | 'technicians'>(null);
@@ -312,11 +313,11 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9f9f9' }}>
+        <button onClick={() => setActiveTab('settings')} style={tabStyle(activeTab === 'settings')}>Settings</button>
         <button onClick={() => setActiveTab('technicians')} style={tabStyle(activeTab === 'technicians')}>Technicians</button>
         <button onClick={() => setActiveTab('clients')} style={tabStyle(activeTab === 'clients')}>Clients</button>
         <button onClick={() => setActiveTab('auths')} style={tabStyle(activeTab === 'auths')}>Auths</button>
-        <button onClick={() => setActiveTab('daysoff')} style={tabStyle(activeTab === 'daysoff')}>Blocks & Time Off</button>
-        <button onClick={() => setActiveTab('settings')} style={tabStyle(activeTab === 'settings')}>Settings</button>
+        <button onClick={() => setActiveTab('daysoff')} style={tabStyle(activeTab === 'daysoff')}>Time Off</button>
       </div>
 
       {error && (
@@ -1951,6 +1952,9 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   const [codes, setCodes] = useState<CancellationCode[]>(() => resolveCancellationCodes(settings).map(c => ({ ...c })));
   const [ptoRatio, setPtoRatio] = useState(s(settings.ptoBillableDeductionRatio ?? DEFAULT_PTO_DEDUCTION_RATIO));
   const [ptoCfg, setPtoCfg] = useState<PtoConfig>(() => resolvePtoConfig(settings.pto));
+  const [clientUtilPct, setClientUtilPct] = useState(s(settings.utilization?.clientUtilizationPercent ?? 80));
+  const [minClientSessionHrs, setMinClientSessionHrs] = useState(s(settings.utilization?.minClientSessionHoursPerWeek ?? 10));
+
   // BCBA (non-direct) session-length defaults — auto-fill a new appointment's end.
   const bsd = settings.bcbaSessionDefaults || DEFAULT_BCBA_SESSION_DEFAULTS;
   const [supPct, setSupPct] = useState(s(bsd.supervisionPercentOfWeeklyDirect));
@@ -2014,6 +2018,8 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
         btWeeklyDirectHours: num(btWeekly, u.btWeeklyDirectHours),
         bcbaMonthlyBillableHours: num(bcbaMonthly, u.bcbaMonthlyBillableHours),
         bcbaMonthlyBillableHours5Week: num(bcbaMonthly5, u.bcbaMonthlyBillableHours5Week),
+        clientUtilizationPercent: num(clientUtilPct, 80),
+        minClientSessionHoursPerWeek: num(minClientSessionHrs, 10),
       },
       rbtMinContactsPerMonth: num(minContacts, 2),
       techMinContactsPerMonth: num(techMinContacts, 1),
@@ -2083,6 +2089,117 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
     </div>
   );
 
+  const aiSection = (
+    <AISettingsSection
+      model={model}
+      onModelChange={setModel}
+      hasExistingKey={hasExistingKey}
+      replacingKey={replacingKey}
+      apiKey={apiKey}
+      onApiKeyChange={setApiKey}
+      showKey={showKey}
+      onShowKeyChange={setShowKey}
+      onReplaceKey={async () => {
+        if (onRequestUnlock && !(await onRequestUnlock())) {
+          setUnlockError('Could not verify — key unchanged.');
+          return;
+        }
+        setApiKey('');
+        setShowKey(false);
+        setReplacingKey(true);
+        setUnlockError(null);
+      }}
+      onClearKey={onClearKey}
+      unlockError={unlockError}
+    />
+  );
+
+  const schedulePwSection = (
+    <SettingsSection title="😇 Schedule Password (HIPAA)">
+      <div style={{ padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px', fontSize: '13px' }}>
+        <p style={{ marginBottom: '12px', color: '#6b7280', fontSize: '12px' }}>
+          Encrypts your downloaded schedule file. Leave blank for a normal readable file.
+        </p>
+        {hasExistingPw && !changingPw ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '13px', color: '#374151' }}>🔒 Password is set.</span>
+            <button
+              onClick={() => { setChangingPw(true); setPwError(null); }}
+              style={{
+                padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                background: 'white', cursor: 'pointer', fontSize: '13px',
+              }}
+            >
+              Change…
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {hasExistingPw && (
+              <input
+                type={showPw ? 'text' : 'password'}
+                placeholder="Current password"
+                value={currentPw}
+                onChange={(e) => { setCurrentPw(e.target.value); setPwError(null); }}
+                autoComplete="off"
+                style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}
+              />
+            )}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type={showPw ? 'text' : 'password'}
+                placeholder={hasExistingPw ? 'New password (blank to remove)' : 'Leave blank for no encryption'}
+                value={newPw}
+                onChange={(e) => { setNewPw(e.target.value); setPwError(null); }}
+                autoComplete="off"
+                style={{ flex: 1, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}
+              />
+              <button
+                onClick={() => setShowPw(!showPw)}
+                style={{
+                  padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                  background: 'white', cursor: 'pointer', fontSize: '13px',
+                }}
+              >
+                {showPw ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {pwError && <p style={{ fontSize: '12px', color: '#dc2626', margin: 0 }}>{pwError}</p>}
+          </div>
+        )}
+      </div>
+    </SettingsSection>
+  );
+
+  const appLockSection = faceIdAvailable !== undefined ? (
+    <SettingsSection title="😇 App Lock (HIPAA)">
+      <div style={{ padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px', fontSize: '13px' }}>
+        <p style={{ marginBottom: '12px', color: '#6b7280', fontSize: '12px' }}>
+          A PIN locks the app on launch. There is no recovery if you forget it.
+        </p>
+        <button
+          onClick={onChangePin}
+          style={{
+            padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+            background: 'white', cursor: 'pointer', fontSize: '13px',
+          }}
+        >
+          Change PIN
+        </button>
+        {faceIdAvailable && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={faceIdEnabled || false}
+              onChange={(e) => onToggleFaceId?.(e.target.checked)}
+            />
+            <span style={{ fontSize: '13px' }}>Unlock with {biometryLabel || 'Face ID / Touch ID'}</span>
+          </label>
+        )}
+      </div>
+    </SettingsSection>
+  ) : null;
+
   return (
     <div style={{ maxWidth: 640 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: 8, flexWrap: 'wrap' }}>
@@ -2090,119 +2207,83 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
         {saveBar}
       </div>
 
-      {/* AI settings at TOP if no key yet */}
-      {!keySavedState && aiSettings && onSaveAISettings && (
-        <AISettingsSection
-          model={model}
-          onModelChange={setModel}
-          hasExistingKey={hasExistingKey}
-          replacingKey={replacingKey}
-          apiKey={apiKey}
-          onApiKeyChange={setApiKey}
-          showKey={showKey}
-          onShowKeyChange={setShowKey}
-          onReplaceKey={async () => {
-            if (onRequestUnlock && !(await onRequestUnlock())) {
-              setUnlockError('Could not verify — key unchanged.');
-              return;
-            }
-            setApiKey('');
-            setShowKey(false);
-            setReplacingKey(true);
-            setUnlockError(null);
-          }}
-          onClearKey={onClearKey}
-          unlockError={unlockError}
-        />
-      )}
-
-      {/* PIN/App Lock section */}
-      {faceIdAvailable !== undefined && (
-        <SettingsSection title="App Lock">
-          <div style={{ padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px', fontSize: '13px' }}>
-            <p style={{ marginBottom: '12px', color: '#6b7280', fontSize: '12px' }}>
-              A PIN locks the app on launch. There is no recovery if you forget it.
-            </p>
-            <button
-              onClick={onChangePin}
-              style={{
-                padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
-                background: 'white', cursor: 'pointer', fontSize: '13px',
-              }}
-            >
-              Change PIN
-            </button>
-            {faceIdAvailable && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={faceIdEnabled || false}
-                  onChange={(e) => onToggleFaceId?.(e.target.checked)}
-                />
-                <span style={{ fontSize: '13px' }}>Unlock with {biometryLabel || 'Face ID'}</span>
-              </label>
+      {/* ── TOP: Data always first ── */}
+      {(onImportFile || onRerunWizard || onDownload || onClearData) && (
+        <SettingsSection title="Data">
+          <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+            Re-run the wizard to edit company settings, clients, and technicians
+            (your appointments are kept), or load a different schedule file.
+            Neither replaces your current data until you confirm.
+          </p>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {onRerunWizard && (
+              <button
+                onClick={onRerunWizard}
+                style={{
+                  padding: '8px 14px', backgroundColor: '#8b5cf6', color: 'white',
+                  border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                }}
+              >Re-run wizard</button>
+            )}
+            {onImportFile && (
+              <button
+                onClick={onImportFile}
+                style={{
+                  padding: '8px 14px', backgroundColor: '#3b82f6', color: 'white',
+                  border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                }}
+              >Upload schedule…</button>
+            )}
+            {onDownload && (
+              <button
+                onClick={onDownload}
+                style={{
+                  padding: '8px 14px', backgroundColor: '#10b981', color: 'white',
+                  border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                }}
+              >↓ Download schedule</button>
             )}
           </div>
+          {onClearData && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #e5e7eb' }}>
+              <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 6px' }}>
+                Clearing wipes the schedule loaded in the app. If you haven't saved
+                your work, <strong>download it first</strong> — this can't be undone.
+              </p>
+              {onDownload && (
+                <div style={{ marginBottom: 8 }}>
+                  <button
+                    onClick={onDownload}
+                    style={{
+                      background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                      fontSize: 12, color: '#b91c1c', textDecoration: 'underline', fontWeight: 600,
+                    }}
+                  >↓ Download schedule first</button>
+                </div>
+              )}
+              <button
+                onClick={onClearData}
+                style={{
+                  padding: '8px 14px', backgroundColor: '#fee2e2', color: '#b91c1c',
+                  border: '1px solid #fca5a5', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                }}
+              >Clear loaded data</button>
+            </div>
+          )}
         </SettingsSection>
       )}
 
-      {/* Schedule Password section */}
-      <SettingsSection title="Schedule Password (optional)">
-        <div style={{ padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px', fontSize: '13px' }}>
-          <p style={{ marginBottom: '12px', color: '#6b7280', fontSize: '12px' }}>
-            Encrypts your downloaded schedule file. Leave blank for a normal readable file.
-          </p>
-          {hasExistingPw && !changingPw ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ fontSize: '13px', color: '#374151' }}>🔒 Password is set.</span>
-              <button
-                onClick={() => { setChangingPw(true); setPwError(null); }}
-                style={{
-                  padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
-                  background: 'white', cursor: 'pointer', fontSize: '13px',
-                }}
-              >
-                Change…
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {hasExistingPw && (
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  placeholder="Current password"
-                  value={currentPw}
-                  onChange={(e) => { setCurrentPw(e.target.value); setPwError(null); }}
-                  autoComplete="off"
-                  style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}
-                />
-              )}
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  type={showPw ? 'text' : 'password'}
-                  placeholder={hasExistingPw ? 'New password (blank to remove)' : 'Leave blank for no encryption'}
-                  value={newPw}
-                  onChange={(e) => { setNewPw(e.target.value); setPwError(null); }}
-                  autoComplete="off"
-                  style={{ flex: 1, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}
-                />
-                <button
-                  onClick={() => setShowPw(!showPw)}
-                  style={{
-                    padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
-                    background: 'white', cursor: 'pointer', fontSize: '13px',
-                  }}
-                >
-                  {showPw ? 'Hide' : 'Show'}
-                </button>
-              </div>
-              {pwError && <p style={{ fontSize: '12px', color: '#dc2626', margin: 0 }}>{pwError}</p>}
-            </div>
-          )}
-        </div>
-      </SettingsSection>
+      {/* AI Integration CTA — top when not yet configured */}
+      {!keySavedState && aiSettings && onSaveAISettings && aiSection}
 
-      <SettingsSection title="Supervision targets">
+      {/* Schedule Password CTA — top when not set */}
+      {!hasExistingPw && schedulePwSection}
+
+      {/* App Lock — always visible on native */}
+      {appLockSection}
+
+      {/* ── MIDDLE: core compliance / practice settings ── */}
+      <SettingsSection title="Supervision Targets">
         <NumField label="Per-case Company Min. (% of Direct Service Hours)" value={directPct} onChange={setDirectPct} suffix="%" defaultValue={5} />
         <NumField label="Per-Credentialed BT Company Min. (% of Direct Service Hours)" value={rbtPct} onChange={setRbtPct} suffix="%" defaultValue={5} hint="BACB floor is 5%." />
         <NumField label="Per-BT Company Min. (% of Direct Service Hours)" value={techPct} onChange={setTechPct} suffix="%" placeholder="—" />
@@ -2242,6 +2323,53 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
         <NumField label="BCBA Preferred Sup. Max. (% of Direct Hours)" value={prefMaxPct} onChange={setPrefMaxPct} suffix="%" defaultValue={20} />
       </SettingsSection>
 
+      <SettingsSection title="Parent Training Targets">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Period</span>
+          <select value={periodUnit} onChange={e => setPeriodUnit(e.target.value as TrainingPeriodUnit)} style={inputStyle}>
+            <option value="week">Per week</option>
+            <option value="month">Per month</option>
+            <option value="sixMonths">Per 6 months</option>
+            <option value="year">Per year</option>
+          </select>
+        </div>
+        <NumField label={`Minimum hours / ${periodUnit}`} value={ptMin} onChange={setPtMin} suffix="h" />
+        <NumField label={`Target min hours / ${periodUnit}`} value={ptTargetMin} onChange={setPtTargetMin} suffix="h" />
+        <NumField label={`Target max hours / ${periodUnit}`} value={ptTargetMax} onChange={setPtTargetMax} suffix="h" />
+      </SettingsSection>
+
+      <SettingsSection title="Billable &amp; Utilization Targets">
+        <NumField label="BCBA fully-utilized weekly billables" value={bcbaWeekly} onChange={setBcbaWeekly} suffix="h/wk" />
+        <NumField label="BT fully-utilized weekly direct hours" value={btWeekly} onChange={setBtWeekly} suffix="h/wk" hint="Aggregate BT direct hours your caseload generates." />
+        <NumField label="BCBA monthly goal (4-week month)" value={bcbaMonthly} onChange={setBcbaMonthly} suffix="h/mo" />
+        <NumField label="BCBA monthly goal (5-week month)" value={bcbaMonthly5} onChange={setBcbaMonthly5} suffix="h/mo" hint="Used when the month spans 5+ weeks." />
+        <NumField label="Client utilization % (direct service hrs in auth)" value={clientUtilPct} onChange={setClientUtilPct} suffix="%" defaultValue={80} hint="Target % of authorized direct-service hours to fill. Default 80%." />
+        <NumField label="Min client session hours / wk" value={minClientSessionHrs} onChange={setMinClientSessionHrs} suffix="h/wk" defaultValue={10} hint="Minimum weekly direct-service hours per client. Default 10 h." />
+      </SettingsSection>
+
+      <SettingsSection title="Cancellation Codes">
+        <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 4px' }}>
+          Added, edited, or retired codes apply to the cancel dialog once you press <strong>Save settings</strong>.
+        </p>
+        <CancellationCodesEditor codes={codes} onChange={setCodes} />
+      </SettingsSection>
+
+      <SettingsSection title="Cancellation Notice">
+        <NumField label="Unplanned: adequate notice if more than" value={unplannedHrs} onChange={setUnplannedHrs} suffix="hours" />
+        <NumField label="Planned: adequate notice if more than" value={plannedDays} onChange={setPlannedDays} suffix="days" />
+      </SettingsSection>
+
+      {/* ── BOTTOM: already-configured security items (management) ── */}
+
+      {/* AI Integration — bottom when key is set */}
+      {keySavedState && aiSettings && onSaveAISettings && aiSection}
+
+      {/* App Lock — bottom management when on native */}
+      {faceIdAvailable !== undefined && appLockSection}
+
+      {/* Schedule Password — bottom management when set */}
+      {hasExistingPw && schedulePwSection}
+
       <SettingsSection title="Time off">
         <NumField
           label="Billable requirement removed per PTO hour"
@@ -2258,45 +2386,9 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
         <LeadField label="Final draft due" value={finalLeadVal} unit={finalLeadUnit} onChangeValue={setFinalLeadVal} onChangeUnit={setFinalLeadUnit} />
       </SettingsSection>
 
-      <SettingsSection title="Parent training">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Period</span>
-          <select value={periodUnit} onChange={e => setPeriodUnit(e.target.value as TrainingPeriodUnit)} style={inputStyle}>
-            <option value="week">Per week</option>
-            <option value="month">Per month</option>
-            <option value="sixMonths">Per 6 months</option>
-            <option value="year">Per year</option>
-          </select>
-        </div>
-        <NumField label={`Minimum hours / ${periodUnit}`} value={ptMin} onChange={setPtMin} suffix="h" />
-        <NumField label={`Target min hours / ${periodUnit}`} value={ptTargetMin} onChange={setPtTargetMin} suffix="h" />
-        <NumField label={`Target max hours / ${periodUnit}`} value={ptTargetMax} onChange={setPtTargetMax} suffix="h" />
-      </SettingsSection>
-
-      <SettingsSection title="Cancellation notice thresholds">
-        <NumField label="Unplanned: adequate notice if more than" value={unplannedHrs} onChange={setUnplannedHrs} suffix="hours" />
-        <NumField label="Planned: adequate notice if more than" value={plannedDays} onChange={setPlannedDays} suffix="days" />
-      </SettingsSection>
-
-      <SettingsSection title="Cancellation reason codes">
-        <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 4px' }}>
-          Added, edited, or retired codes apply to the cancel dialog once you press <strong>Save settings</strong>.
-        </p>
-        <CancellationCodesEditor codes={codes} onChange={setCodes} />
-      </SettingsSection>
-
-      <SettingsSection title="Billable / utilization targets">
-        <NumField label="BCBA fully-utilized weekly billables" value={bcbaWeekly} onChange={setBcbaWeekly} suffix="h/wk" />
-        <NumField label="BT fully-utilized weekly direct hours" value={btWeekly} onChange={setBtWeekly} suffix="h/wk" hint="Aggregate BT direct hours your caseload generates." />
-        <NumField label="BCBA monthly goal (4-week month)" value={bcbaMonthly} onChange={setBcbaMonthly} suffix="h/mo" />
-        <NumField label="BCBA monthly goal (5-week month)" value={bcbaMonthly5} onChange={setBcbaMonthly5} suffix="h/mo" hint="Used when the month spans 5+ weeks." />
-      </SettingsSection>
-
       <SettingsSection title="BCBA session-length defaults">
         <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 4px' }}>
-          Auto-fills a new appointment's end time the moment you pick its type. Direct
-          (client) sessions still draw their length from the client's authorized weekly
-          direct rate.
+          Auto-fills a new appointment's end time the moment you pick its type.
         </p>
         <NumField label="Supervision (% of weekly direct hours)" value={supPct} onChange={setSupPct} suffix="%" hint="Default 20%. Computed per case from the client's authorized weekly direct hours." />
         <NumField label="Reassessment" value={reassessHrs} onChange={setReassessHrs} suffix="h" />
@@ -2305,102 +2397,9 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
         <NumField label="Other" value={otherHrs} onChange={setOtherHrs} suffix="h" />
       </SettingsSection>
 
-
       <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
         Clinician availability is still configured in the Setup Wizard.
       </p>
-
-      {/* AI settings at BOTTOM if key is already saved */}
-      {keySavedState && aiSettings && onSaveAISettings && (
-        <AISettingsSection
-          model={model}
-          onModelChange={setModel}
-          hasExistingKey={hasExistingKey}
-          replacingKey={replacingKey}
-          apiKey={apiKey}
-          onApiKeyChange={setApiKey}
-          showKey={showKey}
-          onShowKeyChange={setShowKey}
-          onReplaceKey={async () => {
-            if (onRequestUnlock && !(await onRequestUnlock())) {
-              setUnlockError('Could not verify — key unchanged.');
-              return;
-            }
-            setApiKey('');
-            setShowKey(false);
-            setReplacingKey(true);
-            setUnlockError(null);
-          }}
-          onClearKey={onClearKey}
-          unlockError={unlockError}
-        />
-      )}
-
-      {(onImportFile || onRerunWizard || onDownload || onClearData) && (
-        <SettingsSection title="Data">
-          <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
-            Re-run the wizard to edit company settings, clients, and technicians
-            (your appointments are kept), or load a different schedule file.
-            Neither replaces your current data until you confirm.
-          </p>
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {onRerunWizard && (
-              <button
-                onClick={onRerunWizard}
-                style={{
-                  padding: '8px 14px', backgroundColor: '#8b5cf6', color: 'white',
-                  border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                }}
-              >Re-run wizard</button>
-            )}
-            {onImportFile && (
-              <button
-                onClick={onImportFile}
-                style={{
-                  padding: '8px 14px', backgroundColor: '#3b82f6', color: 'white',
-                  border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                }}
-              >Upload schedule…</button>
-            )}
-            {onDownload && (
-              <button
-                onClick={onDownload}
-                style={{
-                  padding: '8px 14px', backgroundColor: '#10b981', color: 'white',
-                  border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                }}
-              >↓ Download schedule</button>
-            )}
-          </div>
-
-          {onClearData && (
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #e5e7eb' }}>
-              <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 6px' }}>
-                Clearing wipes the schedule loaded in the app. If you haven't saved
-                your work, <strong>download it first</strong> — this can't be undone.
-              </p>
-              {onDownload && (
-                <div style={{ marginBottom: 8 }}>
-                  <button
-                    onClick={onDownload}
-                    style={{
-                      background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                      fontSize: 12, color: '#b91c1c', textDecoration: 'underline', fontWeight: 600,
-                    }}
-                  >↓ Download schedule first</button>
-                </div>
-              )}
-              <button
-                onClick={onClearData}
-                style={{
-                  padding: '8px 14px', backgroundColor: '#fee2e2', color: '#b91c1c',
-                  border: '1px solid #fca5a5', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                }}
-              >Clear loaded data</button>
-            </div>
-          )}
-        </SettingsSection>
-      )}
 
       <div style={{ marginTop: '8px', paddingTop: '12px', borderTop: '1px solid #e5e7eb' }}>
         {saveBar}

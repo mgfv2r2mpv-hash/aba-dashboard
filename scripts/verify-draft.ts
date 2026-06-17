@@ -104,8 +104,10 @@ console.log('solveDraft grading');
   const bcbaSession = appt({ type: 'parent-training', client: 'C1', date: '2026-06-18', start: '10:00', end: '12:00' });
   const red = makeData([bcbaSession], { bcbaWeeklyBillableHours: 5, bcbaWeeklyBillableMin: 1.5 });
   const sRed = solveDraft(red, [newRemoveOp(bcbaSession.id)], NOW, red.settings);
-  check('remove BCBA session below floor → red', sRed.grade === 'red' && sRed.label === 'billable below minimum', `${sRed.grade}/${sRed.label}`);
-  check('red is AI-eligible', sRed.aiEligible);
+  // Below the billable floor is a warn-but-allow yellow (BCBA can still Accept),
+  // and AI-eligible so the escalation button is offered.
+  check('remove BCBA session below floor → yellow warning', sRed.grade === 'yellow' && sRed.label.includes('below minimum'), `${sRed.grade}/${sRed.label}`);
+  check('below-floor warning is AI-eligible', sRed.aiEligible);
 
   // PTO polish (Upgrade 1): the same removal on a week with enough BCBA leave to
   // zero out the floor is NOT red — leave lowers the requirement (2h PTO × 1.0 ≥
@@ -129,6 +131,67 @@ console.log('solveDraft grading');
   const committed = applyOps(green, [newAddOp(add)]);
   const sched = new ConstraintValidator(committed, NOW).validateSchedule().filter(c => c.type === 'availability-conflict');
   check('accepted green arrangement has no availability conflicts', sched.length === 0, `${sched.length}`);
+}
+
+// ---------------------------------------------------------------------------
+// Moving a session into a gap between availability windows is NOT a time clash.
+// It must grade yellow ("confirm; outside set availability") and keep the move
+// where the user put it — never silently snap back, never collapse to red.
+console.log('out-of-availability move');
+{
+  const DATE = '2026-06-17'; // Wed, in-week
+  const at = (h: string) => `${DATE}T${h}:00`;
+  // Client/tech available only 9–10 and 11:30–12:30 — a gap at 10–11.
+  const gap = { Wednesday: [{ start: '09:00', end: '10:00' }, { start: '11:30', end: '12:30' }] } as any;
+  const util = { bcbaWeeklyBillableHours: 1, bcbaWeeklyBillableMin: 0 }; // neutralize floor/target
+  const mk = (windows: any, appts: Appointment[]): ScheduleData => ({
+    id: 'd', version: 1,
+    clients: [{ id: 'C1', name: 'C1', availabilityWindows: windows }],
+    technicians: [{ id: 'T1', name: 'T1', isRBT: true, assignments: [{ clientId: 'C1', hoursPerWeek: 10, billable: true }], availability: windows }],
+    settings: { ...baseSettings, utilization: util }, appointments: appts, lastModified: NOW.toISOString(),
+  } as ScheduleData);
+
+  // No-tech (BCBA) session — used to red straight out as "no in-week solution".
+  const bcba = appt({ type: 'case-planning', client: 'C1', date: DATE, start: '09:00', end: '10:00' });
+  const other = appt({ type: 'case-planning', client: 'C1', date: DATE, start: '11:30', end: '12:30' });
+  const movedB = { ...bcba, startTime: at('10:00'), endTime: at('11:00') };
+  const sB = solveDraft(mk(gap, [bcba, other]), [{ id: 'op1', kind: 'move', targetId: bcba.id, appt: movedB }], NOW, { ...baseSettings, utilization: util });
+  check('no-tech move into availability gap → yellow confirm (was red)',
+    sB.grade === 'yellow' && sB.label.includes('outside set availability'), `${sB.grade}/${sB.label}`);
+  check('no-tech availability-yellow is not AI-eligible', !sB.aiEligible);
+  const keptB = sB.resolved?.appointments.find(a => a.id === bcba.id);
+  check('no-tech move is kept at 10–11 (not reverted)', keptB?.startTime === at('10:00'), keptB?.startTime);
+
+  // Mobile (tech) session — used to silently snap back to 9–10 and read green.
+  const direct = appt({ type: 'client-session', client: 'C1', technician: 'T1', date: DATE, start: '09:00', end: '10:00' });
+  const other2 = appt({ type: 'client-session', client: 'C1', technician: 'T1', date: DATE, start: '11:30', end: '12:30' });
+  const movedD = { ...direct, startTime: at('10:00'), endTime: at('11:00') };
+  const sD = solveDraft(mk(gap, [direct, other2]), [{ id: 'op2', kind: 'move', targetId: direct.id, appt: movedD }], NOW, { ...baseSettings, utilization: util });
+  check('mobile move into availability gap → yellow confirm (no snap-back)',
+    sD.grade === 'yellow' && sD.label.includes('outside set availability'), `${sD.grade}/${sD.label}`);
+  const keptD = sD.resolved?.appointments.find(a => a.id === direct.id);
+  check('mobile move is kept at 10–11 (not snapped back to 9–10)', keptD?.startTime === at('10:00'), keptD?.startTime);
+
+  // Sanity: with wide availability the same move is a clean green at 10–11.
+  const wideW = { Wednesday: [{ start: '08:00', end: '18:00' }] } as any;
+  const sG = solveDraft(mk(wideW, [direct, other2]), [{ id: 'op3', kind: 'move', targetId: direct.id, appt: movedD }], NOW, { ...baseSettings, utilization: util });
+  check('same move within a wide window → green at 10–11', sG.grade === 'green', `${sG.grade}/${sG.label}`);
+
+  // A genuine double-book still surfaces the human trade-off (yellow w/ choice),
+  // never quietly green.
+  const block = appt({ type: 'case-planning', client: 'C1', date: DATE, start: '11:00', end: '12:00' });
+  const clash = appt({ type: 'case-planning', client: 'C1', date: DATE, start: '11:30', end: '12:30' });
+  const moveOnto = { ...block, startTime: at('11:30'), endTime: at('12:30') };
+  const sY = solveDraft(mk(wideW, [block, clash]), [{ id: 'op4', kind: 'move', targetId: block.id, appt: moveOnto }], NOW, { ...baseSettings, utilization: util });
+  check('overlapping BCBA sessions → yellow with a choice', sY.grade === 'yellow' && sY.needsChoice && sY.choices.length > 0, `${sY.grade}/${sY.label}`);
+
+  // A blackout collision is still a hard red (no in-week solution).
+  const blocked: ScheduleData = {
+    ...mk(wideW, [direct, other2]),
+    blackouts: [{ date: DATE, entityType: 'client', entityId: 'C1' } as any],
+  };
+  const sBlk = solveDraft(blocked, [{ id: 'op5', kind: 'move', targetId: direct.id, appt: movedD }], NOW, { ...baseSettings, utilization: util });
+  check('move onto a blackout day → still red', sBlk.grade === 'red' && sBlk.label.includes('no in-week solution'), `${sBlk.grade}/${sBlk.label}`);
 }
 
 // ---------------------------------------------------------------------------

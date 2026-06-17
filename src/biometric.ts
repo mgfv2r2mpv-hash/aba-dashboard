@@ -20,12 +20,17 @@ const TOUCH_ID = 1;
 const FACE_ID = 2;
 
 interface BiometricAuthNativePlugin {
-  checkBiometry(): Promise<{ isAvailable: boolean; biometryType: number }>;
+  checkBiometry(): Promise<{
+    isAvailable: boolean;
+    biometryType: number;
+    reason?: string;
+    errorCode?: string;
+  }>;
   internalAuthenticate(options: { reason?: string; cancelTitle?: string }): Promise<void>;
 }
 
-// Bind to the native plugin name exposed by the pod (see CAP_PLUGIN in the
-// package's ios/Plugin/Plugin.m).
+// Bind to the native plugin name exposed by the pod (see @objc(BiometricAuthNative)
+// in the package's ios/Plugin/Plugin.swift).
 const Native = registerPlugin<BiometricAuthNativePlugin>('BiometricAuthNative');
 
 // User-facing label for whatever biometry the device exposes, for UI copy.
@@ -43,7 +48,7 @@ export async function isBiometricAvailable(): Promise<boolean> {
 
 // Single native call returning both availability and hardware label — use this
 // instead of calling isBiometricAvailable() then getBiometryLabel() separately.
-export async function checkBiometryFull(): Promise<{ available: boolean; label: BiometryLabel }> {
+export async function checkBiometryFull(): Promise<{ available: boolean; label: BiometryLabel; reason?: string }> {
   if (!Capacitor.isNativePlatform()) return { available: false, label: 'biometric unlock' };
   try {
     const res = await Native.checkBiometry();
@@ -51,8 +56,12 @@ export async function checkBiometryFull(): Promise<{ available: boolean; label: 
     const label: BiometryLabel = res?.biometryType === TOUCH_ID ? 'Touch ID'
       : res?.biometryType === FACE_ID ? 'Face ID'
       : 'biometric unlock';
-    return { available, label };
-  } catch {
+    if (!available && res?.reason) {
+      console.warn('[biometric] unavailable —', res.reason, res.errorCode ?? '');
+    }
+    return { available, label, reason: res?.reason };
+  } catch (e) {
+    console.warn('[biometric] checkBiometry threw:', e);
     return { available: false, label: 'biometric unlock' };
   }
 }

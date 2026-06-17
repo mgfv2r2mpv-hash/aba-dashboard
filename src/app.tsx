@@ -14,9 +14,14 @@ import AdminPanel, { AdminPersist } from './components/AdminPanel';
 import ComplianceDashboard from './components/ComplianceDashboard';
 import CaseloadView from './components/CaseloadView';
 import FileUpload from './components/FileUpload';
-import Settings, { AISettings, ClaudeModel } from './components/Settings';
+import { AISettings, ClaudeModel } from './components/Settings';
 import AppointmentForm from './components/AppointmentForm';
-import SetupWizard from './components/SetupWizard';
+
+const WishComposer = React.lazy(() => import('./components/WishComposer'));
+const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
+const ComplianceDashboard = React.lazy(() => import('./components/ComplianceDashboard'));
+const CaseloadView = React.lazy(() => import('./components/CaseloadView'));
+const SetupWizard = React.lazy(() => import('./components/SetupWizard'));
 import CancellationDialog from './components/CancellationDialog';
 import DayReview from './components/DayReview';
 import CompleteTimePrompt from './components/CompleteTimePrompt';
@@ -45,8 +50,7 @@ import {
 } from './draft';
 import { solveDraft, DraftStatus, PrioritizationChoice } from './draftSolver';
 import DraftTray from './components/DraftTray';
-import { ClaudeScheduler } from './claudeScheduler';
-import { applyWishSolution, wishSolutionToDraft } from './wish';
+import { wishSolutionToDraft } from './wish';
 
 // Route axios /api/* calls through an in-memory store on iOS/Android,
 // since the Express server isn't reachable from inside the WebView.
@@ -116,7 +120,6 @@ export default function App() {
   const [solutions, setSolutions] = useState<ScheduleSolution[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [view, setView] = useState<'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish'>('schedule');
-  const [showSettings, setShowSettings] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
   // Wish view is now a full page (view === 'wish') rather than a modal.
@@ -374,7 +377,11 @@ export default function App() {
   // the scheduleData/viewDate effect, so we don't set them here.)
   const commitFull = (next: ScheduleData) => {
     setScheduleData(next);
-    setCompCache(buildCache(next));
+    // Defer the compliance cache build to the next task so the schedule renders
+    // first — buildCache can block the main thread for several seconds on large
+    // appointment sets, which triggers iOS's "unresponsive WebContent" watchdog.
+    setCompCache(null);
+    setTimeout(() => setCompCache(buildCache(next)), 0);
   };
 
   const serverPersist: AdminPersist = {
@@ -560,9 +567,8 @@ export default function App() {
 
       // Parse client-side (cheap, pure) — same parser the server/native use.
       // Dynamic import keeps SheetJS (~800 KB) out of the critical startup bundle.
-      const [{ default: XLSX }, { parseWorkbook }] = await Promise.all([import('xlsx'), import('./excelHandler')]);
-      const workbook = XLSX.read(bytes, { type: 'array' });
-      const parsed = parseWorkbook(workbook);
+      const { parseBytes } = await import('./excelHandler');
+      const parsed = parseBytes(bytes);
 
       if (scheduleData) {
         // Replacing a loaded schedule — stage it and let the user confirm.
@@ -669,6 +675,7 @@ export default function App() {
     setAiLoading(true);
     try {
       const messages = new ConstraintValidator(preview).validateSchedule().map(c => c.message);
+      const { ClaudeScheduler } = await import('./claudeScheduler');
       const scheduler = new ClaudeScheduler(aiSettings.apiKey, preview, aiSettings.model);
       const sols = await scheduler.generateSolutions(changed, messages);
       setSolutions(sols);
@@ -701,12 +708,34 @@ export default function App() {
 
   const rejectAiSet = () => setSolutions([]);
 
+  // Shared by Wish It / Fix It Accept: the model's own ops can still
+  // double-book a tech/BCBA/client against each other or the live schedule, so
+  // run them through solveDraft (the same conflict check the draft tray uses)
+  // before trusting an Accept to commit straight away. A red grade means a hard
+  // conflict remains — stage it into the draft tray instead so the BCBA sees it
+  // and must resolve or explicitly "Save Anyway", rather than silently landing
+  // an overlapping appointment on the calendar.
+  const commitWishLikeSolution = async (sol: WishSolution): Promise<boolean> => {
+    if (!scheduleData) return false;
+    const { ops, blackouts } = wishSolutionToDraft(sol, scheduleData);
+    const status = solveDraft(scheduleData, ops, new Date(), scheduleData.settings);
+    if (status.grade === 'red') {
+      if (blackouts.length) await commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] });
+      stageOps(ops);
+      return false;
+    }
+    const resolved = status.resolved || applyOps(scheduleData, ops);
+    const next = blackouts.length ? { ...resolved, blackouts: [...(resolved.blackouts || []), ...blackouts] } : resolved;
+    await commitScheduleData(next);
+    return true;
+  };
+
   // Wish It: Accept applies the whole solution (ops + any blackouts); Customize
   // loads the appointment ops into the editable draft (and commits any blackouts,
   // which aren't editable in the tray) so the BCBA can tweak before accepting.
   const acceptWish = async (sol: WishSolution) => {
     if (!scheduleData) return;
-    await commitScheduleData(applyWishSolution(scheduleData, sol));
+    if (!(await commitWishLikeSolution(sol))) return;
     setView('schedule'); setSelectedAppointment(null);
   };
 
@@ -724,7 +753,7 @@ export default function App() {
   // (Accept) is visible.
   const acceptFix = async (sol: WishSolution) => {
     if (!scheduleData) return;
-    await commitScheduleData(applyWishSolution(scheduleData, sol));
+    await commitWishLikeSolution(sol);
     setView('schedule');
   };
 
@@ -1181,10 +1210,9 @@ export default function App() {
         flexShrink: 0,
         boxSizing: 'border-box',
       }}>
-        {/* Row 1: app name + AI status dot + Settings gear */}
+        {/* Row 1: app name + AI status dot */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-          <img src="/logo.png" alt="Assi" style={{ width: 22, height: 22, borderRadius: 5, flexShrink: 0 }} />
-          <h1 style={{ fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>Assi - ABA Calendar</h1>
+          <h1 style={{ fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>SAssi - ABA Calendar</h1>
           <span
             title={aiSettings.apiKey ? `AI: ${aiSettings.model}` : 'No AI key set — add in Settings'}
             style={{
@@ -1193,15 +1221,6 @@ export default function App() {
               display: 'inline-block', flexShrink: 0,
             }}
           />
-          <button
-            onClick={() => setShowSettings(true)}
-            title="Settings"
-            style={{
-              marginLeft: 'auto', background: 'none', border: 'none', color: 'white',
-              cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '2px 4px',
-              opacity: 0.8,
-            }}
-          >⚙</button>
         </div>
         {/* Row 2: nav buttons */}
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -1211,9 +1230,21 @@ export default function App() {
               <FileUpload onUpload={handleFileUpload} loading={loading} />
             </>
           ) : (
-            <NavButtons view={view} onChange={setView} compSummary={compSummary}
-              conflictCount={activeConflicts.length}
-              conflictHasError={activeConflicts.some(c => c.severity === 'error')} />
+            <>
+              <button
+                onClick={() => setShowAddAppointment(true)}
+                aria-label="Add appointment"
+                title="Add appointment"
+                style={{
+                  padding: '5px 10px', backgroundColor: '#3b82f6', color: 'white',
+                  border: 'none', borderRadius: 5, cursor: 'pointer',
+                  fontSize: 16, fontWeight: 700, lineHeight: 1,
+                }}
+              >+</button>
+              <NavButtons view={view} onChange={setView} compSummary={compSummary}
+                conflictCount={activeConflicts.length}
+                conflictHasError={activeConflicts.some(c => c.severity === 'error')} />
+            </>
           )}
         </div>
       </header>
@@ -1273,7 +1304,6 @@ export default function App() {
                     onLensChange={setCalLens}
                     hideTotals={dockPane}
                     draftMarks={calendarMarks}
-                    onAddAppointment={() => setShowAddAppointment(true)}
                   />
                 </div>
                 {(() => {
@@ -1442,33 +1472,39 @@ export default function App() {
               />
             )}
             {view === 'compliance' && (
-              <ComplianceDashboard
-                data={scheduleData}
-                cache={compCache}
-                conflicts={visibleConflicts}
-                aiSettings={aiSettings}
-                mutedConflictKeys={mutedConflicts}
-                onMuteConflict={muteConflict}
-                onUnmuteConflict={unmuteConflict}
-                onConfirmDismissConflict={confirmDismissConflict}
-                onMarkComplete={handleMarkComplete}
-                onRequestCancel={(a) => setCancelTarget(a)}
-                onSelectAppointment={(a) => { setView('schedule'); setSelectedAppointment(a); }}
-                onAcceptFix={acceptFix}
-                onCustomizeFix={customizeFix}
-              />
+              <React.Suspense fallback={null}>
+                <ComplianceDashboard
+                  data={scheduleData}
+                  cache={compCache}
+                  conflicts={visibleConflicts}
+                  aiSettings={aiSettings}
+                  mutedConflictKeys={mutedConflicts}
+                  onMuteConflict={muteConflict}
+                  onUnmuteConflict={unmuteConflict}
+                  onConfirmDismissConflict={confirmDismissConflict}
+                  onMarkComplete={handleMarkComplete}
+                  onRequestCancel={(a) => setCancelTarget(a)}
+                  onSelectAppointment={(a) => { setView('schedule'); setSelectedAppointment(a); }}
+                  onAcceptFix={acceptFix}
+                  onCustomizeFix={customizeFix}
+                />
+              </React.Suspense>
             )}
             {view === 'caseload' && (
-              <CaseloadView data={scheduleData} now={viewDate} />
+              <React.Suspense fallback={null}>
+                <CaseloadView data={scheduleData} now={viewDate} />
+              </React.Suspense>
             )}
             {view === 'wish' && (
-              <WishComposer
-                data={scheduleData}
-                aiSettings={aiSettings}
-                onAccept={acceptWish}
-                onCustomize={customizeWish}
-                onClose={() => setView('schedule')}
-              />
+              <React.Suspense fallback={null}>
+                <WishComposer
+                  data={scheduleData}
+                  aiSettings={aiSettings}
+                  onAccept={acceptWish}
+                  onCustomize={customizeWish}
+                  onClose={() => setView('schedule')}
+                />
+              </React.Suspense>
             )}
           </>
         ) : (
@@ -1500,29 +1536,14 @@ export default function App() {
         )}
       </div>
 
-      {showSettings && (
-        <Settings
-          settings={aiSettings}
-          onSave={handleAISettingsSave}
-          onClose={() => setShowSettings(false)}
-          onClearKey={handleClearKey}
-          onRequestUnlock={authenticateForKey}
-          lock={isNative ? {
-            faceIdAvailable,
-            faceIdEnabled,
-            biometryLabel,
-            onChangePin: () => { setShowSettings(false); setChangingPin(true); },
-            onToggleFaceId: handleToggleFaceId,
-          } : undefined}
-        />
-      )}
-
       {showWizard && (
-        <SetupWizard
-          onComplete={handleWizardComplete}
-          onCancel={() => setShowWizard(false)}
-          initialData={scheduleData || undefined}
-        />
+        <React.Suspense fallback={null}>
+          <SetupWizard
+            onComplete={handleWizardComplete}
+            onCancel={() => setShowWizard(false)}
+            initialData={scheduleData || undefined}
+          />
+        </React.Suspense>
       )}
 
       {/* Hidden picker for Admin → "Upload schedule…". The header FileUpload

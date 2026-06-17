@@ -31,8 +31,6 @@ interface CalendarProps {
   // When a draft is open, marks staged appointments (add/move/shorten/remove)
   // so they render as "proposed"/tombstoned rather than committed sessions.
   draftMarks?: Map<string, DraftMark>;
-  // Opens the add-appointment form; surfaced in the calendar toolbar.
-  onAddAppointment?: () => void;
 }
 
 type View = 'month' | 'week' | 'day' | 'clients';
@@ -63,13 +61,13 @@ export default function Calendar({
   onLensChange,
   hideTotals,
   draftMarks,
-  onAddAppointment,
 }: CalendarProps) {
   const [view, setView] = useState<View>('month');
   const [lens, setLens] = useState<Lens>('bcba');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [pickedDay, setPickedDay] = useState<Date | null>(null);
   const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]);
+  const [clientsPivot, setClientsPivot] = useState(false);
   const isLandscape = useIsLandscape();
   // iPad and up: roomier rows, wider time axis, richer tiles, taller month cells.
   const roomy = useMinWidth(820);
@@ -160,18 +158,6 @@ export default function Calendar({
         marginBottom: 16, gap: 8, flexWrap: 'wrap',
       }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {onAddAppointment && (
-            <button
-              onClick={onAddAppointment}
-              aria-label="Add appointment"
-              title="Add appointment"
-              style={{
-                padding: '5px 10px', backgroundColor: '#3b82f6', color: 'white',
-                border: 'none', borderRadius: 5, cursor: 'pointer',
-                fontSize: 16, fontWeight: 700, lineHeight: 1,
-              }}
-            >+</button>
-          )}
           <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
             <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
             <ViewBtn active={view === 'week'} onClick={() => setView('week')}>Week</ViewBtn>
@@ -182,6 +168,12 @@ export default function Calendar({
             <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
               <ViewBtn active={lens === 'bcba'} onClick={() => setLens('bcba')}>BCBA</ViewBtn>
               <ViewBtn active={lens === 'bt'} onClick={() => setLens('bt')}>BT</ViewBtn>
+            </div>
+          )}
+          {view === 'clients' && (
+            <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
+              <ViewBtn active={!clientsPivot} onClick={() => setClientsPivot(false)}>Days ▸ cols</ViewBtn>
+              <ViewBtn active={clientsPivot} onClick={() => setClientsPivot(true)}>Pivot ⤲</ViewBtn>
             </div>
           )}
         </div>
@@ -282,6 +274,7 @@ export default function Calendar({
           clients={filteredClients}
           weekDays={weekDays}
           appointments={appointments}
+          pivot={clientsPivot}
         />
       )}
       {(view === 'week' || view === 'day') && !isLandscape && (
@@ -1229,13 +1222,64 @@ function formatHourLabel(h: number): string {
 
 const AVAIL_CELL_START_MINS = VISIBLE_START_HOUR * 60;
 const AVAIL_CELL_TOTAL_MINS = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * 60;
-const AVAIL_ROW_HEIGHT = 48;
-const AVAIL_LABEL_WIDTH = 128;
+const AVAIL_LABEL_WIDTH = 60;            // slim label gutter (was 128)
+// Lane thickness along the cross-axis. When time runs horizontally (default)
+// a client lane only needs to be tall enough for a flush colored box; when it
+// runs vertically (pivoted) each day band must hold the whole 6a–10p column.
+const AVAIL_LANE_H = 40;
+const AVAIL_LANE_V = 132;
 
-function ClientAvailMatrix({ clients, weekDays, appointments }: {
+const HALF_PCT = (30 / AVAIL_CELL_TOTAL_MINS) * 100;     // half-hour band width
+const FULL_PCT = (60 / AVAIL_CELL_TOTAL_MINS) * 100;
+const QUARTER_PCT = (15 / AVAIL_CELL_TOTAL_MINS) * 100;  // quarter-hour ticks
+
+const toMins = (hhmm: string): number => {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + (m || 0);
+};
+const fmtHHMM = (hhmm: string): string => {
+  const [h, m] = hhmm.split(':').map(Number);
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  return m ? `${h12}:${String(m).padStart(2, '0')} ${suffix}` : `${h12} ${suffix}`;
+};
+
+// Faint alternating half-hour grey bands drawn along the time axis. `horiz`
+// = time runs left→right (vertical bands); otherwise time runs top→bottom and
+// the bands "pivot with the axes" into horizontal stripes.
+function timeBandStyle(horiz: boolean): React.CSSProperties {
+  const dir = horiz ? 'to right' : 'to bottom';
+  const band = 'rgba(100,116,139,0.07)';
+  return {
+    backgroundImage: `repeating-linear-gradient(${dir}, ${band} 0 ${HALF_PCT}%, transparent ${HALF_PCT}% ${FULL_PCT}%)`,
+  };
+}
+
+// Dotted grey quarter-hour gridlines as a single masked overlay (no per-tick
+// DOM). The line gradient lays down a hairline every 15 min; the mask chops
+// each line into dots along the cross-axis. WKWebView (Capacitor) supports
+// -webkit-mask-image.
+function quarterTickStyle(horiz: boolean): React.CSSProperties {
+  const lineDir = horiz ? 'to right' : 'to bottom';
+  const dashDir = horiz ? 'to bottom' : 'to right';
+  const line = 'rgba(100,116,139,0.5)';
+  const lines = `repeating-linear-gradient(${lineDir}, transparent 0, transparent calc(${QUARTER_PCT}% - 1px), ${line} calc(${QUARTER_PCT}% - 1px), ${line} ${QUARTER_PCT}%)`;
+  const dash = `repeating-linear-gradient(${dashDir}, #000 0 2px, transparent 2px 5px)`;
+  return {
+    position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0,
+    backgroundImage: lines,
+    WebkitMaskImage: dash, maskImage: dash,
+  } as React.CSSProperties;
+}
+
+const DAY_COL_MIN = 76;
+const CLIENT_COL_MIN = 54;
+
+function ClientAvailMatrix({ clients, weekDays, appointments, pivot }: {
   clients: Client[];
   weekDays: Date[];
   appointments: Appointment[];
+  pivot: boolean;
 }) {
   const today = new Date();
 
@@ -1247,71 +1291,118 @@ function ClientAvailMatrix({ clients, weekDays, appointments }: {
     );
   }
 
+  // Default: clients are rows, days are columns, time runs left→right within a
+  // lane. Pivoted: days are rows (Mon top), clients are columns, time runs
+  // top→bottom. The colored boxes always fill the full cross-thickness of their
+  // lane so same-time neighbours sit flush against the shared edge.
+  const horiz = !pivot;
+  const colCount = pivot ? clients.length : weekDays.length;
+  const colMin = pivot ? CLIENT_COL_MIN : DAY_COL_MIN;
+  const laneThickness = pivot ? AVAIL_LANE_V : AVAIL_LANE_H;
+  const minWidth = AVAIL_LABEL_WIDTH + colCount * colMin;
+
+  // Column headers — clients (pivot) or days (default).
+  const headerCells = pivot
+    ? clients.map(client => {
+        const s = clientAvailBarStyle(client.name);
+        return (
+          <div key={client.id} title={client.name} style={{
+            flex: 1, minWidth: colMin, textAlign: 'center', padding: '5px 3px',
+            fontSize: 11, fontWeight: 700, color: s.color,
+            backgroundColor: s.backgroundColor, borderLeft: `1px solid ${s.borderColor}`,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{client.name}</div>
+        );
+      })
+    : weekDays.map(day => {
+        const isToday = isSameDay(day, today);
+        return (
+          <div key={day.toISOString()} style={{
+            flex: 1, minWidth: colMin, textAlign: 'center', padding: '6px 4px',
+            fontSize: 11, fontWeight: 600,
+            color: isToday ? '#3b82f6' : '#374151',
+            backgroundColor: isToday ? '#eff6ff' : 'transparent',
+            borderLeft: '1px solid #e5e7eb',
+          }}>
+            <div>{format(day, 'EEE')}</div>
+            <div style={{ fontSize: 15 }}>{format(day, 'd')}</div>
+          </div>
+        );
+      });
+
+  // One body row per row-entity (client in default, day in pivot).
+  const rowEntities = pivot ? weekDays : clients;
+  const colEntities = pivot ? clients : weekDays;
+
   return (
+    <>
     <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as any, border: '1px solid #e5e7eb', borderRadius: 6 }}>
-      <div style={{ minWidth: 560 }}>
+      <div style={{ minWidth }}>
         {/* Header row */}
         <div style={{ display: 'flex', borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
           <div style={{ width: AVAIL_LABEL_WIDTH, flexShrink: 0 }} />
-          {weekDays.map(day => {
-            const isToday = isSameDay(day, today);
-            return (
-              <div key={day.toISOString()} style={{
-                flex: 1, textAlign: 'center', padding: '6px 4px',
-                fontSize: 11, fontWeight: 600,
-                color: isToday ? '#3b82f6' : '#374151',
-                backgroundColor: isToday ? '#eff6ff' : 'transparent',
-                borderLeft: '1px solid #e5e7eb',
-              }}>
-                <div>{format(day, 'EEE')}</div>
-                <div style={{ fontSize: 15 }}>{format(day, 'd')}</div>
-              </div>
-            );
-          })}
+          {headerCells}
         </div>
 
-        {/* Client rows */}
-        {clients.map((client, idx) => {
-          const s = clientAvailBarStyle(client.name);
+        {/* Body rows */}
+        {rowEntities.map((rowEnt, idx) => {
+          const rowClient = pivot ? null : (rowEnt as Client);
+          const rowDay = pivot ? (rowEnt as Date) : null;
+          const rowIsToday = rowDay ? isSameDay(rowDay, today) : false;
+          const labelStyle = clientAvailBarStyle(rowClient?.name);
           return (
-            <div key={client.id} style={{
+            <div key={pivot ? (rowEnt as Date).toISOString() : (rowEnt as Client).id} style={{
               display: 'flex',
               borderTop: idx > 0 ? '1px solid #e5e7eb' : undefined,
             }}>
-              {/* Client label */}
+              {/* Row label gutter */}
               <div style={{
                 width: AVAIL_LABEL_WIDTH, flexShrink: 0,
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '0 8px', height: AVAIL_ROW_HEIGHT,
-                backgroundColor: '#f9fafb', borderRight: '1px solid #e5e7eb',
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '0 6px', height: laneThickness,
+                backgroundColor: rowIsToday ? '#eff6ff' : '#f9fafb',
+                borderRight: '1px solid #e5e7eb',
               }}>
-                <span style={{
-                  width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
-                  backgroundColor: s.backgroundColor,
-                  border: `2px solid ${s.borderColor}`,
-                  display: 'inline-block',
-                }} />
-                <span style={{
-                  fontSize: 11, fontWeight: 600, color: '#374151',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>{client.name}</span>
+                {rowClient && (
+                  <span style={{
+                    width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
+                    backgroundColor: labelStyle.backgroundColor,
+                    border: `2px solid ${labelStyle.borderColor}`,
+                  }} />
+                )}
+                {rowClient ? (
+                  <span style={{
+                    fontSize: 11, fontWeight: 600, color: '#374151',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{rowClient.name}</span>
+                ) : (
+                  <span style={{ fontSize: 11, fontWeight: 600, color: rowIsToday ? '#3b82f6' : '#374151' }}>
+                    {format(rowDay!, 'EEE')} <span style={{ color: '#9ca3af' }}>{format(rowDay!, 'd')}</span>
+                  </span>
+                )}
               </div>
 
-              {/* Day cells */}
-              {weekDays.map(day => {
+              {/* Lane cells */}
+              {colEntities.map(colEnt => {
+                const client = (pivot ? colEnt : rowEnt) as Client;
+                const day = (pivot ? rowEnt : colEnt) as Date;
                 const dateISO = format(day, 'yyyy-MM-dd');
                 const dayAppts = appointments.filter(a =>
                   (a.client === client.name || a.client === client.id) &&
                   a.startTime.startsWith(dateISO) &&
                   a.status !== 'canceled'
                 );
+                const cellIsToday = isSameDay(day, today);
                 return (
                   <ClientAvailCell
-                    key={day.toISOString()}
+                    key={pivot ? client.id : day.toISOString()}
                     client={client}
                     date={day}
                     appointments={dayAppts}
-                    isToday={isSameDay(day, today)}
+                    isToday={cellIsToday}
+                    horiz={horiz}
+                    thickness={laneThickness}
+                    colMin={colMin}
                   />
                 );
               })}
@@ -1320,103 +1411,94 @@ function ClientAvailMatrix({ clients, weekDays, appointments }: {
         })}
       </div>
     </div>
+    <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 6 }}>
+      Each lane spans {formatHourLabel(VISIBLE_START_HOUR)}–{formatHourLabel(VISIBLE_END_HOUR)} ·
+      shaded half-hour bands, dotted quarter-hour ticks · solid box = availability, darker = booked
+    </p>
+    </>
   );
 }
 
-function ClientAvailCell({ client, date, appointments, isToday }: {
+function ClientAvailCell({ client, date, appointments, isToday, horiz, thickness, colMin }: {
   client: Client;
   date: Date;
   appointments: Appointment[];
   isToday: boolean;
+  horiz: boolean;
+  thickness: number;
+  colMin: number;
 }) {
   const dayOfWeek = format(date, 'EEEE') as DayOfWeek;
   const windows = client.availabilityWindows[dayOfWeek] ?? [];
   const s = clientAvailBarStyle(client.name);
 
-  const toMins = (hhmm: string): number => {
-    const [h, m] = hhmm.split(':').map(Number);
-    return h * 60 + (m || 0);
+  const startPct = (mins: number) =>
+    Math.max(0, (mins - AVAIL_CELL_START_MINS) / AVAIL_CELL_TOTAL_MINS * 100);
+  const spanPct = (startMins: number, endMins: number) => {
+    const s0 = Math.max(startMins, AVAIL_CELL_START_MINS);
+    const e0 = Math.min(endMins, AVAIL_CELL_START_MINS + AVAIL_CELL_TOTAL_MINS);
+    return Math.max(0, (e0 - s0) / AVAIL_CELL_TOTAL_MINS * 100);
   };
 
-  const barLeft = (startHHMM: string): string => {
-    const pct = Math.max(0, (toMins(startHHMM) - AVAIL_CELL_START_MINS) / AVAIL_CELL_TOTAL_MINS * 100);
-    return `${pct}%`;
-  };
-  const barWidth = (startHHMM: string, endHHMM: string): string => {
-    const s0 = Math.max(toMins(startHHMM), AVAIL_CELL_START_MINS);
-    const e0 = Math.min(toMins(endHHMM), AVAIL_CELL_START_MINS + AVAIL_CELL_TOTAL_MINS);
-    return `${Math.max(0, (e0 - s0) / AVAIL_CELL_TOTAL_MINS * 100)}%`;
-  };
-
-  const fmtHHMM = (hhmm: string): string => {
-    const [h, m] = hhmm.split(':').map(Number);
-    const suffix = h >= 12 ? 'PM' : 'AM';
-    const h12 = h % 12 || 12;
-    return m ? `${h12}:${String(m).padStart(2, '0')} ${suffix}` : `${h12} ${suffix}`;
+  // Position a box along the time axis (horiz => left/width, vert => top/height)
+  // while filling the full cross-thickness so neighbours sit flush.
+  const place = (startMins: number, endMins: number, inset: number): React.CSSProperties => {
+    const off = `${startPct(startMins)}%`;
+    const len = `${spanPct(startMins, endMins)}%`;
+    return horiz
+      ? { left: off, width: len, top: inset, bottom: inset }
+      : { top: off, height: len, left: inset, right: inset };
   };
 
   return (
     <div style={{
-      flex: 1, height: AVAIL_ROW_HEIGHT, position: 'relative',
+      flex: 1, minWidth: colMin, height: thickness, position: 'relative',
       borderLeft: '1px solid #e5e7eb',
       backgroundColor: isToday ? '#fafbff' : '#fff',
       overflow: 'hidden',
+      ...timeBandStyle(horiz),
     }}>
-      {/* Availability windows */}
-      {windows.map((w, i) => (
-        <div
-          key={i}
-          title={`${client.name} · ${fmtHHMM(w.start)} – ${fmtHHMM(w.end)}`}
-          style={{
-            position: 'absolute',
-            top: 7, bottom: 7,
-            left: barLeft(w.start),
-            width: barWidth(w.start, w.end),
-            backgroundColor: s.backgroundColor,
-            border: `1px solid ${s.borderColor}`,
-            borderRadius: 4,
-            overflow: 'hidden',
-            display: 'flex',
-            alignItems: 'center',
-            paddingLeft: 5,
-            boxSizing: 'border-box',
-            minWidth: 4,
-          }}
-        >
-          <span style={{
-            fontSize: 10, fontWeight: 700, color: s.color,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            userSelect: 'none',
-          }}>
-            {client.name}
-          </span>
-        </div>
-      ))}
+      {/* Dotted quarter-hour gridlines */}
+      <div style={quarterTickStyle(horiz)} />
 
-      {/* Booked appointments — darker overlay on top of availability bars */}
+      {/* Availability windows — full-thickness colored boxes (flush w/ neighbours) */}
+      {windows.map((w, i) => {
+        if (spanPct(toMins(w.start), toMins(w.end)) <= 0) return null;
+        return (
+          <div
+            key={i}
+            title={`${client.name} · ${fmtHHMM(w.start)} – ${fmtHHMM(w.end)}`}
+            style={{
+              position: 'absolute',
+              ...place(toMins(w.start), toMins(w.end), 0),
+              backgroundColor: s.backgroundColor,
+              border: `1px solid ${s.borderColor}`,
+              boxSizing: 'border-box',
+              zIndex: 1,
+            }}
+          />
+        );
+      })}
+
+      {/* Booked appointments — darker inset overlay on top of availability */}
       {appointments.map((apt, i) => {
         const start = new Date(apt.startTime);
         const end = new Date(apt.endTime);
         const startMins = start.getHours() * 60 + start.getMinutes();
         const endMins = end.getHours() * 60 + end.getMinutes();
-        const clampedStart = Math.max(startMins, AVAIL_CELL_START_MINS);
-        const clampedEnd = Math.min(endMins, AVAIL_CELL_START_MINS + AVAIL_CELL_TOTAL_MINS);
-        if (clampedEnd <= clampedStart) return null;
-        const left = `${(clampedStart - AVAIL_CELL_START_MINS) / AVAIL_CELL_TOTAL_MINS * 100}%`;
-        const width = `${(clampedEnd - clampedStart) / AVAIL_CELL_TOTAL_MINS * 100}%`;
+        if (spanPct(startMins, endMins) <= 0) return null;
         return (
           <div
             key={apt.id || i}
             title={`Booked: ${apt.title} · ${format(start, 'h:mm')}–${format(end, 'h:mm a')}`}
             style={{
               position: 'absolute',
-              top: 11, bottom: 11,
-              left, width,
+              ...place(startMins, endMins, 4),
               backgroundColor: s.borderColor,
-              opacity: 0.5,
-              borderRadius: 3,
-              zIndex: 1,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+              opacity: 0.55,
+              borderRadius: 2,
+              zIndex: 2,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
             }}
           />
         );

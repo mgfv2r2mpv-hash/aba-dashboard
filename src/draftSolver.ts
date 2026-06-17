@@ -205,10 +205,13 @@ function reshuffleMobile(
     if (conflicts.length === 0) return { data: working, movedIds, clean: true };
 
     // Find a mobile session inside any conflict whose relocation strictly
-    // reduces the conflict count.
+    // reduces the conflict count. Only DOUBLE-BOOKS drive a relocation — an
+    // out-of-availability slot is left where the user put it (graded as a
+    // yellow "confirm" below) rather than silently snapped back into a window.
     let improved = false;
     outer:
     for (const c of conflicts) {
+      if (c.kind !== 'double-book') continue;
       for (const id of c.ids) {
         const idx = working.appointments.findIndex(a => a.id === id);
         if (idx < 0) continue;
@@ -365,19 +368,39 @@ export function solveDraft(
       movedIds: [...movedIds], choices: [], needsChoice: false, aiEligible: true };
   }
 
-  // Conflicts remain after mobile reshuffle. If every remaining conflict offers
-  // a human trade-off (shorten / move a family session), it's yellow with
-  // choices; otherwise there's no in-week solution → red.
+  // Conflicts remain after the mobile reshuffle. Separate the genuinely
+  // unsolvable from the merely-needs-a-human-OK:
+  //   • a blackout collision, or a double-book the engine can neither move nor
+  //     offer a shorten/move-family trade-off for → red, no in-week solution.
+  //   • a double-book that DOES offer a trade-off → yellow, BCBA picks first.
+  //   • an out-of-availability slot that clashes with nothing (the move just
+  //     sits outside the client/tech's set windows) → yellow "confirm", the
+  //     same lenient treatment an out-of-window parent-training slot gets. The
+  //     move is kept where the user put it, not silently relocated.
   const remaining = focusedConflicts(resolved, weeks);
-  const choices = buildChoices(resolved, remaining, nowMs);
-  const everyConflictHasChoice = remaining.every(c =>
-    c.kind === 'double-book' && c.ids.some(id => choices.some(ch => ch.appointmentId === id)));
+  const doubleBooks = remaining.filter(c => c.kind === 'double-book');
+  const hasBlackout = remaining.some(c => c.kind === 'blackout');
+  const hasAvailability = remaining.some(c => c.kind === 'availability');
+  const choices = buildChoices(resolved, doubleBooks, nowMs);
+  const everyDoubleBookHasChoice = doubleBooks.every(c =>
+    c.ids.some(id => choices.some(ch => ch.appointmentId === id)));
 
-  if (choices.length > 0 && everyConflictHasChoice) {
+  if (hasBlackout || (doubleBooks.length > 0 && !everyDoubleBookHasChoice)) {
+    return { grade: 'red', label: 'no in-week solution', resolved: undefined,
+      movedIds: [...movedIds], choices, needsChoice: false, aiEligible: true };
+  }
+
+  if (doubleBooks.length > 0) {
     return { grade: 'yellow', label: 'confirmation needed', resolved,
       movedIds: [...movedIds], choices, needsChoice: true, aiEligible: false };
   }
 
+  if (hasAvailability) {
+    return { grade: 'yellow', label: 'confirmation needed; outside set availability', resolved,
+      movedIds: [...movedIds], choices: [], needsChoice: false, aiEligible: false };
+  }
+
+  // No classifiable conflict left (defensive — a clean board returns above).
   return { grade: 'red', label: 'no in-week solution', resolved: undefined,
     movedIds: [...movedIds], choices, needsChoice: false, aiEligible: true };
 }

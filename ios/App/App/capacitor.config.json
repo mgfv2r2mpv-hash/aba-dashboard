@@ -1,0 +1,10 @@
+{
+	"appId": "com.abascheduling",
+	"appName": "ABA Scheduling Assistant",
+	"webDir": "dist-client",
+	"packageClassList": [
+		"BiometricAuthNative",
+		"FilesystemPlugin",
+		"SharePlugin"
+	]
+}

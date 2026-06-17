@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Appointment, Technician, Client, CompanySettings, TimeOff, DayOfWeek } from '../types';
+import { Appointment, Technician, Client, CompanySettings, TimeOff, Blackout } from '../types';
+import ClientCalendarView from './ClientCalendarView';
 import { DraftMark } from '../draft';
 import { rollupHours, resolveUtilization, HoursByStatus, ptoHoursInRange, reduceRequirementForPto } from '../utilization';
-import { tileStyle, clientPastel, clientDarkBorder, legendStripeStyle, clientAvailBarStyle } from '../calendarColors';
+import { tileStyle, clientPastel, clientDarkBorder, legendStripeStyle } from '../calendarColors';
 import { useMinWidth, useIsLandscape } from '../useMediaQuery';
 import {
   startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek,
@@ -13,6 +14,7 @@ interface CalendarProps {
   appointments: Appointment[];
   technicians: Technician[];
   clients: Client[];
+  blackouts?: Blackout[];
   settings?: CompanySettings;
   // BCBA leave; reduces the BCBA weekly/monthly billable requirement shown in
   // the hours ribbon and the in-grid Sunday total (Upgrade 1).
@@ -22,9 +24,9 @@ interface CalendarProps {
   // Reports the currently-viewed date (month/week anchor) so the parent can
   // scope month-bound concerns (e.g. conflict checks) to what's on screen.
   onViewDateChange?: (date: Date) => void;
-  // Reports the active lens (bcba/bt) so the parent can render the hours
+  // Reports the active lens (bcba/bt/client) so the parent can render the hours
   // totals in a docked side pane instead of inline.
-  onLensChange?: (lens: 'bcba' | 'bt') => void;
+  onLensChange?: (lens: 'bcba' | 'bt' | 'client') => void;
   // When true, the parent renders the hours totals in the docked pane, so the
   // calendar suppresses its own inline ribbon.
   hideTotals?: boolean;
@@ -33,11 +35,11 @@ interface CalendarProps {
   draftMarks?: Map<string, DraftMark>;
 }
 
-type View = 'month' | 'week' | 'day' | 'clients';
+type View = 'month' | 'week' | 'day';
 // Which slice of the schedule the calendar shows. BT = appointments assigned to
 // a technician (direct service); BCBA = appointments with no technician (the
 // clinician's own: supervision, BCBA-run parent training, etc.).
-type Lens = 'bcba' | 'bt';
+type Lens = 'bcba' | 'bt' | 'client';
 
 const VISIBLE_START_HOUR = 6;
 const VISIBLE_END_HOUR = 22;
@@ -53,6 +55,7 @@ export default function Calendar({
   appointments,
   technicians: _technicians,
   clients,
+  blackouts,
   settings,
   timeOff,
   onAppointmentChange,
@@ -66,8 +69,6 @@ export default function Calendar({
   const [lens, setLens] = useState<Lens>('bcba');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [pickedDay, setPickedDay] = useState<Date | null>(null);
-  const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]);
-  const [clientsPivot, setClientsPivot] = useState(false);
   const isLandscape = useIsLandscape();
   // iPad and up: roomier rows, wider time axis, richer tiles, taller month cells.
   const roomy = useMinWidth(820);
@@ -121,12 +122,12 @@ export default function Calendar({
 
   const goPrev = () => setCurrentDate(
     view === 'month' ? subMonths(currentDate, 1)
-    : (view === 'week' || view === 'clients') ? subWeeks(currentDate, 1)
+    : view === 'week' ? subWeeks(currentDate, 1)
     : addDays(currentDate, -1)
   );
   const goNext = () => setCurrentDate(
     view === 'month' ? addMonths(currentDate, 1)
-    : (view === 'week' || view === 'clients') ? addWeeks(currentDate, 1)
+    : view === 'week' ? addWeeks(currentDate, 1)
     : addDays(currentDate, 1)
   );
   const goToday = () => setCurrentDate(new Date());
@@ -147,9 +148,6 @@ export default function Calendar({
   const weekDays = Array.from({ length: 7 }, (_, i) =>
     addDays(startOfWeek(currentDate, { weekStartsOn: 1 }), i)
   );
-  const filteredClients = selectedClientIds.length === 0
-    ? clients
-    : clients.filter(c => selectedClientIds.includes(c.id));
 
   return (
     <div style={{ padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }}>
@@ -158,92 +156,61 @@ export default function Calendar({
         marginBottom: 16, gap: 8, flexWrap: 'wrap',
       }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {onAddAppointment && (
+            <button
+              onClick={onAddAppointment}
+              aria-label="Add appointment"
+              title="Add appointment"
+              style={{
+                padding: '5px 10px', backgroundColor: '#3b82f6', color: 'white',
+                border: 'none', borderRadius: 5, cursor: 'pointer',
+                fontSize: 16, fontWeight: 700, lineHeight: 1,
+              }}
+            >+</button>
+          )}
+          {lens !== 'client' && (
+            <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
+              <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
+              <ViewBtn active={view === 'week'} onClick={() => setView('week')}>Week</ViewBtn>
+              <ViewBtn active={view === 'day'} onClick={() => setView('day')}>Day</ViewBtn>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
-            <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
-            <ViewBtn active={view === 'week'} onClick={() => setView('week')}>Week</ViewBtn>
-            <ViewBtn active={view === 'day'} onClick={() => setView('day')}>Day</ViewBtn>
-            <ViewBtn active={view === 'clients'} onClick={() => setView('clients')}>Clients</ViewBtn>
+            <ViewBtn active={lens === 'bcba'} onClick={() => setLens('bcba')}>BCBA</ViewBtn>
+            <ViewBtn active={lens === 'bt'} onClick={() => setLens('bt')}>BT</ViewBtn>
+            <ViewBtn active={lens === 'client'} onClick={() => setLens('client')}>Case</ViewBtn>
           </div>
-          {view !== 'clients' && (
-            <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
-              <ViewBtn active={lens === 'bcba'} onClick={() => setLens('bcba')}>BCBA</ViewBtn>
-              <ViewBtn active={lens === 'bt'} onClick={() => setLens('bt')}>BT</ViewBtn>
-            </div>
-          )}
-          {view === 'clients' && (
-            <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
-              <ViewBtn active={!clientsPivot} onClick={() => setClientsPivot(false)}>Days ▸ cols</ViewBtn>
-              <ViewBtn active={clientsPivot} onClick={() => setClientsPivot(true)}>Pivot ⤲</ViewBtn>
-            </div>
-          )}
         </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <NavBtn onClick={goPrev}>←</NavBtn>
-          <NavBtn onClick={goToday}>Today</NavBtn>
-          <NavBtn onClick={goNext}>→</NavBtn>
-        </div>
-        <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }}>
-          {headerLabel}
-        </h2>
+        {lens !== 'client' && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <NavBtn onClick={goPrev}>←</NavBtn>
+            <NavBtn onClick={goToday}>Today</NavBtn>
+            <NavBtn onClick={goNext}>→</NavBtn>
+          </div>
+        )}
+        {lens !== 'client' && (
+          <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }}>
+            {headerLabel}
+          </h2>
+        )}
       </div>
 
-      {view === 'clients' && (
-        <div style={{
-          display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8, marginBottom: 8,
-          alignItems: 'center', WebkitOverflowScrolling: 'touch' as any, flexWrap: 'nowrap',
-        }}>
-          <button
-            onClick={() => setSelectedClientIds([])}
-            style={{
-              padding: '4px 12px', borderRadius: 14,
-              border: selectedClientIds.length === 0 ? 'none' : '1px solid #d1d5db',
-              backgroundColor: selectedClientIds.length === 0 ? '#3b82f6' : '#f9fafb',
-              color: selectedClientIds.length === 0 ? 'white' : '#374151',
-              cursor: 'pointer', fontSize: 12, fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap',
-            }}
-          >All clients</button>
-          {clients.map(c => {
-            const selected = selectedClientIds.includes(c.id);
-            const hasWindows = Object.values(c.availabilityWindows).some(w => w && w.length > 0);
-            const s = clientAvailBarStyle(c.name);
-            return (
-              <button
-                key={c.id}
-                onClick={() => setSelectedClientIds(prev =>
-                  prev.includes(c.id) ? prev.filter(id => id !== c.id) : [...prev, c.id]
-                )}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 5,
-                  padding: '4px 10px', borderRadius: 14,
-                  border: selected ? `2px solid ${s.borderColor}` : '1px solid #d1d5db',
-                  backgroundColor: selected ? s.backgroundColor : '#f9fafb',
-                  color: selected ? s.color : hasWindows ? '#374151' : '#9ca3af',
-                  cursor: 'pointer', fontSize: 12, fontWeight: selected ? 700 : 500,
-                  flexShrink: 0, whiteSpace: 'nowrap', opacity: hasWindows ? 1 : 0.6,
-                }}
-              >
-                <span style={{
-                  width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                  backgroundColor: hasWindows ? s.borderColor : '#d1d5db',
-                  display: 'inline-block',
-                }} />
-                {c.name}
-                {selected && <span style={{ fontSize: 9, marginLeft: 2 }}>✕</span>}
-              </button>
-            );
-          })}
-        </div>
+      {lens === 'client' && (
+        <ClientCalendarView
+          clients={clients}
+          appointments={appointments}
+          blackouts={blackouts ?? []}
+        />
       )}
-
-      {view === 'month' && (
-        <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens} settings={settings} timeOff={timeOff} onSelectAppointment={onSelectAppointment} onPickDay={setPickedDay} draftMarks={draftMarks} roomy={roomy} />
+      {lens !== 'client' && view === 'month' && (
+        <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens as 'bcba' | 'bt'} settings={settings} timeOff={timeOff} onSelectAppointment={onSelectAppointment} onPickDay={setPickedDay} draftMarks={draftMarks} roomy={roomy} />
       )}
-      {view === 'month' && !hideTotals && (
+      {lens !== 'client' && view === 'month' && !hideTotals && (
         <div style={{ marginTop: 16 }}>
-          <HoursSummary appointments={appointments} lens={lens} settings={settings} timeOff={timeOff} currentDate={currentDate} />
+          <HoursSummary appointments={appointments} lens={lens as 'bcba' | 'bt'} settings={settings} timeOff={timeOff} currentDate={currentDate} />
         </div>
       )}
-      {view === 'week' && (
+      {lens !== 'client' && view === 'week' && (
         <TimeGrid
           days={weekDays}
           appointments={lensAppts}
@@ -256,7 +223,7 @@ export default function Calendar({
           roomy={roomy}
         />
       )}
-      {view === 'day' && (
+      {lens !== 'client' && view === 'day' && (
         <TimeGrid
           days={[currentDate]}
           appointments={lensAppts}
@@ -269,15 +236,7 @@ export default function Calendar({
           roomy={roomy}
         />
       )}
-      {view === 'clients' && (
-        <ClientAvailMatrix
-          clients={filteredClients}
-          weekDays={weekDays}
-          appointments={appointments}
-          pivot={clientsPivot}
-        />
-      )}
-      {(view === 'week' || view === 'day') && !isLandscape && (
+      {lens !== 'client' && (view === 'week' || view === 'day') && !isLandscape && (
         <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
           Rotate to landscape to drag appointments to a new time.
         </p>
@@ -339,7 +298,7 @@ export default function Calendar({
 function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelectAppointment, onPickDay, draftMarks, roomy }: {
   currentDate: Date;
   appointments: Appointment[];
-  lens: Lens;
+  lens: 'bcba' | 'bt';
   settings?: CompanySettings;
   timeOff?: TimeOff[];
   onSelectAppointment: (a: Appointment) => void;
@@ -457,7 +416,7 @@ function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelec
 // the side pane (wide screens). rollupHours filters by lens internally.
 export function HoursSummary({ appointments, lens, settings, timeOff, currentDate }: {
   appointments: Appointment[];
-  lens: Lens;
+  lens: 'bcba' | 'bt';
   settings?: CompanySettings;
   timeOff?: TimeOff[];
   currentDate: Date;
@@ -535,7 +494,7 @@ function trackColor(hours: HoursByStatus, target: number): string {
 // Compact weekly total printed inside the Sunday cell. Headlines the live total
 // (completed + scheduled) so booked-but-not-yet-done hours are visible, with the
 // ✓completed / ◻scheduled / ✕canceled breakdown and a cap gauge.
-function SundayTotal({ lens, hours, target }: { lens: Lens; hours: HoursByStatus; target: number }) {
+function SundayTotal({ lens, hours, target }: { lens: 'bcba' | 'bt'; hours: HoursByStatus; target: number }) {
   const live = hours.completed + hours.scheduled;
   const color = trackColor(hours, target);
   return (
@@ -584,7 +543,7 @@ type WeekSummary = { weekStart: Date; inMonth: boolean; hours: HoursByStatus };
 
 // Vertical ribbon beside the grid: one row per in-month week + a month total.
 function WeekRibbon({ lens, weeks, weeklyTarget, timeOff, ptoRatio, monthHours, monthlyGoal, monthWeeks }: {
-  lens: Lens;
+  lens: 'bcba' | 'bt';
   weeks: WeekSummary[];
   weeklyTarget: number;
   timeOff?: TimeOff[];
@@ -629,7 +588,7 @@ function WeekRibbon({ lens, weeks, weeklyTarget, timeOff, ptoRatio, monthHours, 
 }
 
 function MonthTotalRow({ lens, hours, goal, weeklyTarget, monthWeeks }: {
-  lens: Lens;
+  lens: 'bcba' | 'bt';
   hours: HoursByStatus;
   goal?: number;
   weeklyTarget: number;
@@ -1216,295 +1175,6 @@ function formatHourLabel(h: number): string {
   if (h === 12) return '12p';
   if (h < 12) return `${h}a`;
   return `${h - 12}p`;
-}
-
-// ---------- Client Availability Matrix ----------
-
-const AVAIL_CELL_START_MINS = VISIBLE_START_HOUR * 60;
-const AVAIL_CELL_TOTAL_MINS = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * 60;
-const AVAIL_LABEL_WIDTH = 60;            // slim label gutter (was 128)
-// Lane thickness along the cross-axis. When time runs horizontally (default)
-// a client lane only needs to be tall enough for a flush colored box; when it
-// runs vertically (pivoted) each day band must hold the whole 6a–10p column.
-const AVAIL_LANE_H = 40;
-const AVAIL_LANE_V = 132;
-
-const HALF_PCT = (30 / AVAIL_CELL_TOTAL_MINS) * 100;     // half-hour band width
-const FULL_PCT = (60 / AVAIL_CELL_TOTAL_MINS) * 100;
-const QUARTER_PCT = (15 / AVAIL_CELL_TOTAL_MINS) * 100;  // quarter-hour ticks
-
-const toMins = (hhmm: string): number => {
-  const [h, m] = hhmm.split(':').map(Number);
-  return h * 60 + (m || 0);
-};
-const fmtHHMM = (hhmm: string): string => {
-  const [h, m] = hhmm.split(':').map(Number);
-  const suffix = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 || 12;
-  return m ? `${h12}:${String(m).padStart(2, '0')} ${suffix}` : `${h12} ${suffix}`;
-};
-
-// Faint alternating half-hour grey bands drawn along the time axis. `horiz`
-// = time runs left→right (vertical bands); otherwise time runs top→bottom and
-// the bands "pivot with the axes" into horizontal stripes.
-function timeBandStyle(horiz: boolean): React.CSSProperties {
-  const dir = horiz ? 'to right' : 'to bottom';
-  const band = 'rgba(100,116,139,0.07)';
-  return {
-    backgroundImage: `repeating-linear-gradient(${dir}, ${band} 0 ${HALF_PCT}%, transparent ${HALF_PCT}% ${FULL_PCT}%)`,
-  };
-}
-
-// Dotted grey quarter-hour gridlines as a single masked overlay (no per-tick
-// DOM). The line gradient lays down a hairline every 15 min; the mask chops
-// each line into dots along the cross-axis. WKWebView (Capacitor) supports
-// -webkit-mask-image.
-function quarterTickStyle(horiz: boolean): React.CSSProperties {
-  const lineDir = horiz ? 'to right' : 'to bottom';
-  const dashDir = horiz ? 'to bottom' : 'to right';
-  const line = 'rgba(100,116,139,0.5)';
-  const lines = `repeating-linear-gradient(${lineDir}, transparent 0, transparent calc(${QUARTER_PCT}% - 1px), ${line} calc(${QUARTER_PCT}% - 1px), ${line} ${QUARTER_PCT}%)`;
-  const dash = `repeating-linear-gradient(${dashDir}, #000 0 2px, transparent 2px 5px)`;
-  return {
-    position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0,
-    backgroundImage: lines,
-    WebkitMaskImage: dash, maskImage: dash,
-  } as React.CSSProperties;
-}
-
-const DAY_COL_MIN = 76;
-const CLIENT_COL_MIN = 54;
-
-function ClientAvailMatrix({ clients, weekDays, appointments, pivot }: {
-  clients: Client[];
-  weekDays: Date[];
-  appointments: Appointment[];
-  pivot: boolean;
-}) {
-  const today = new Date();
-
-  if (clients.length === 0) {
-    return (
-      <div style={{ textAlign: 'center', color: '#6b7280', padding: '48px 20px', fontSize: 14 }}>
-        No clients to display. Add clients via Admin or adjust the filter above.
-      </div>
-    );
-  }
-
-  // Default: clients are rows, days are columns, time runs left→right within a
-  // lane. Pivoted: days are rows (Mon top), clients are columns, time runs
-  // top→bottom. The colored boxes always fill the full cross-thickness of their
-  // lane so same-time neighbours sit flush against the shared edge.
-  const horiz = !pivot;
-  const colCount = pivot ? clients.length : weekDays.length;
-  const colMin = pivot ? CLIENT_COL_MIN : DAY_COL_MIN;
-  const laneThickness = pivot ? AVAIL_LANE_V : AVAIL_LANE_H;
-  const minWidth = AVAIL_LABEL_WIDTH + colCount * colMin;
-
-  // Column headers — clients (pivot) or days (default).
-  const headerCells = pivot
-    ? clients.map(client => {
-        const s = clientAvailBarStyle(client.name);
-        return (
-          <div key={client.id} title={client.name} style={{
-            flex: 1, minWidth: colMin, textAlign: 'center', padding: '5px 3px',
-            fontSize: 11, fontWeight: 700, color: s.color,
-            backgroundColor: s.backgroundColor, borderLeft: `1px solid ${s.borderColor}`,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>{client.name}</div>
-        );
-      })
-    : weekDays.map(day => {
-        const isToday = isSameDay(day, today);
-        return (
-          <div key={day.toISOString()} style={{
-            flex: 1, minWidth: colMin, textAlign: 'center', padding: '6px 4px',
-            fontSize: 11, fontWeight: 600,
-            color: isToday ? '#3b82f6' : '#374151',
-            backgroundColor: isToday ? '#eff6ff' : 'transparent',
-            borderLeft: '1px solid #e5e7eb',
-          }}>
-            <div>{format(day, 'EEE')}</div>
-            <div style={{ fontSize: 15 }}>{format(day, 'd')}</div>
-          </div>
-        );
-      });
-
-  // One body row per row-entity (client in default, day in pivot).
-  const rowEntities = pivot ? weekDays : clients;
-  const colEntities = pivot ? clients : weekDays;
-
-  return (
-    <>
-    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as any, border: '1px solid #e5e7eb', borderRadius: 6 }}>
-      <div style={{ minWidth }}>
-        {/* Header row */}
-        <div style={{ display: 'flex', borderBottom: '2px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-          <div style={{ width: AVAIL_LABEL_WIDTH, flexShrink: 0 }} />
-          {headerCells}
-        </div>
-
-        {/* Body rows */}
-        {rowEntities.map((rowEnt, idx) => {
-          const rowClient = pivot ? null : (rowEnt as Client);
-          const rowDay = pivot ? (rowEnt as Date) : null;
-          const rowIsToday = rowDay ? isSameDay(rowDay, today) : false;
-          const labelStyle = clientAvailBarStyle(rowClient?.name);
-          return (
-            <div key={pivot ? (rowEnt as Date).toISOString() : (rowEnt as Client).id} style={{
-              display: 'flex',
-              borderTop: idx > 0 ? '1px solid #e5e7eb' : undefined,
-            }}>
-              {/* Row label gutter */}
-              <div style={{
-                width: AVAIL_LABEL_WIDTH, flexShrink: 0,
-                display: 'flex', alignItems: 'center', gap: 5,
-                padding: '0 6px', height: laneThickness,
-                backgroundColor: rowIsToday ? '#eff6ff' : '#f9fafb',
-                borderRight: '1px solid #e5e7eb',
-              }}>
-                {rowClient && (
-                  <span style={{
-                    width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
-                    backgroundColor: labelStyle.backgroundColor,
-                    border: `2px solid ${labelStyle.borderColor}`,
-                  }} />
-                )}
-                {rowClient ? (
-                  <span style={{
-                    fontSize: 11, fontWeight: 600, color: '#374151',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>{rowClient.name}</span>
-                ) : (
-                  <span style={{ fontSize: 11, fontWeight: 600, color: rowIsToday ? '#3b82f6' : '#374151' }}>
-                    {format(rowDay!, 'EEE')} <span style={{ color: '#9ca3af' }}>{format(rowDay!, 'd')}</span>
-                  </span>
-                )}
-              </div>
-
-              {/* Lane cells */}
-              {colEntities.map(colEnt => {
-                const client = (pivot ? colEnt : rowEnt) as Client;
-                const day = (pivot ? rowEnt : colEnt) as Date;
-                const dateISO = format(day, 'yyyy-MM-dd');
-                const dayAppts = appointments.filter(a =>
-                  (a.client === client.name || a.client === client.id) &&
-                  a.startTime.startsWith(dateISO) &&
-                  a.status !== 'canceled'
-                );
-                const cellIsToday = isSameDay(day, today);
-                return (
-                  <ClientAvailCell
-                    key={pivot ? client.id : day.toISOString()}
-                    client={client}
-                    date={day}
-                    appointments={dayAppts}
-                    isToday={cellIsToday}
-                    horiz={horiz}
-                    thickness={laneThickness}
-                    colMin={colMin}
-                  />
-                );
-              })}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-    <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 6 }}>
-      Each lane spans {formatHourLabel(VISIBLE_START_HOUR)}–{formatHourLabel(VISIBLE_END_HOUR)} ·
-      shaded half-hour bands, dotted quarter-hour ticks · solid box = availability, darker = booked
-    </p>
-    </>
-  );
-}
-
-function ClientAvailCell({ client, date, appointments, isToday, horiz, thickness, colMin }: {
-  client: Client;
-  date: Date;
-  appointments: Appointment[];
-  isToday: boolean;
-  horiz: boolean;
-  thickness: number;
-  colMin: number;
-}) {
-  const dayOfWeek = format(date, 'EEEE') as DayOfWeek;
-  const windows = client.availabilityWindows[dayOfWeek] ?? [];
-  const s = clientAvailBarStyle(client.name);
-
-  const startPct = (mins: number) =>
-    Math.max(0, (mins - AVAIL_CELL_START_MINS) / AVAIL_CELL_TOTAL_MINS * 100);
-  const spanPct = (startMins: number, endMins: number) => {
-    const s0 = Math.max(startMins, AVAIL_CELL_START_MINS);
-    const e0 = Math.min(endMins, AVAIL_CELL_START_MINS + AVAIL_CELL_TOTAL_MINS);
-    return Math.max(0, (e0 - s0) / AVAIL_CELL_TOTAL_MINS * 100);
-  };
-
-  // Position a box along the time axis (horiz => left/width, vert => top/height)
-  // while filling the full cross-thickness so neighbours sit flush.
-  const place = (startMins: number, endMins: number, inset: number): React.CSSProperties => {
-    const off = `${startPct(startMins)}%`;
-    const len = `${spanPct(startMins, endMins)}%`;
-    return horiz
-      ? { left: off, width: len, top: inset, bottom: inset }
-      : { top: off, height: len, left: inset, right: inset };
-  };
-
-  return (
-    <div style={{
-      flex: 1, minWidth: colMin, height: thickness, position: 'relative',
-      borderLeft: '1px solid #e5e7eb',
-      backgroundColor: isToday ? '#fafbff' : '#fff',
-      overflow: 'hidden',
-      ...timeBandStyle(horiz),
-    }}>
-      {/* Dotted quarter-hour gridlines */}
-      <div style={quarterTickStyle(horiz)} />
-
-      {/* Availability windows — full-thickness colored boxes (flush w/ neighbours) */}
-      {windows.map((w, i) => {
-        if (spanPct(toMins(w.start), toMins(w.end)) <= 0) return null;
-        return (
-          <div
-            key={i}
-            title={`${client.name} · ${fmtHHMM(w.start)} – ${fmtHHMM(w.end)}`}
-            style={{
-              position: 'absolute',
-              ...place(toMins(w.start), toMins(w.end), 0),
-              backgroundColor: s.backgroundColor,
-              border: `1px solid ${s.borderColor}`,
-              boxSizing: 'border-box',
-              zIndex: 1,
-            }}
-          />
-        );
-      })}
-
-      {/* Booked appointments — darker inset overlay on top of availability */}
-      {appointments.map((apt, i) => {
-        const start = new Date(apt.startTime);
-        const end = new Date(apt.endTime);
-        const startMins = start.getHours() * 60 + start.getMinutes();
-        const endMins = end.getHours() * 60 + end.getMinutes();
-        if (spanPct(startMins, endMins) <= 0) return null;
-        return (
-          <div
-            key={apt.id || i}
-            title={`Booked: ${apt.title} · ${format(start, 'h:mm')}–${format(end, 'h:mm a')}`}
-            style={{
-              position: 'absolute',
-              ...place(startMins, endMins, 4),
-              backgroundColor: s.borderColor,
-              opacity: 0.55,
-              borderRadius: 2,
-              zIndex: 2,
-              boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
-            }}
-          />
-        );
-      })}
-    </div>
-  );
 }
 
 // ---------- Toolbar buttons ----------

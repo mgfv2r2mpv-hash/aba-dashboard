@@ -140,7 +140,7 @@ export default function App() {
   const [viewDate, setViewDate] = useState<Date>(new Date());
   // Active calendar lens (bcba/bt), surfaced from <Calendar> so the docked pane
   // can render the matching hours totals.
-  const [calLens, setCalLens] = useState<'bcba' | 'bt'>('bcba');
+  const [calLens, setCalLens] = useState<'bcba' | 'bt' | 'client'>('bcba');
   const [showDayReview, setShowDayReview] = useState(false);
   // Per-entity supervision-compliance cache for the current month. Recomputed
   // incrementally (only the affected clients/techs) on each appointment change
@@ -1296,6 +1296,7 @@ export default function App() {
                     appointments={calendarAppointments}
                     technicians={scheduleData.technicians}
                     clients={scheduleData.clients}
+                    blackouts={scheduleData.blackouts}
                     settings={scheduleData.settings}
                     timeOff={scheduleData.timeOff}
                     onAppointmentChange={handleAppointmentChange}
@@ -1399,7 +1400,7 @@ export default function App() {
                           display: 'flex', flexDirection: 'column',
                           minHeight: 0, overflow: 'hidden',
                         }}>
-                          {!draftActive && (
+                          {!draftActive && calLens !== 'client' && (
                             <div style={{ flexShrink: 0, maxHeight: 'max(160px, 25%)', overflowY: 'auto', padding: '10px 14px', borderBottom: '1px solid #e5e7eb', WebkitOverflowScrolling: 'touch' as any }}>
                               <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} timeOff={scheduleData.timeOff} currentDate={viewDate} />
                             </div>

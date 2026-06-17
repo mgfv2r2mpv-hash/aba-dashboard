@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { ScheduleData, WishRequest, WishKind, WishSolution, WishOp, DayOfWeek, Appointment } from '../types';
 import { AISettings } from './Settings';
 import { ClaudeScheduler } from '../claudeScheduler';
-import { summarizeWish, wishSolutionToDraft } from '../wish';
+import { summarizeWish, wishSolutionToDraft, computeSolutionImpact } from '../wish';
+import ImpactSummary from './ImpactSummary';
 
 // "Wish It": a structured natural-language composer that asks the AI for up to 3
 // ways to reshape the schedule toward a goal, then lets the BCBA Accept (apply),
@@ -199,10 +200,12 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {solutions.map((sol, i) => {
                 const d = wishSolutionToDraft(sol, data);
+                const impact = computeSolutionImpact(data, sol);
                 return (
                   <div key={sol.id} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 12 }}>
                     <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Option {i + 1}: {sol.summary}</div>
                     {sol.reasoning && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{sol.reasoning}</div>}
+                    <ImpactSummary impact={impact} />
                     <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#374151' }}>
                       {sol.ops.map((o, j) => <li key={j}>{opText(o)}</li>)}
                     </ul>

@@ -18,7 +18,7 @@ function indexOf(reg: Map<string, number>, name: string): number {
   if (i === undefined) { i = reg.size; reg.set(name, i); }
   return i;
 }
-function clientHue(name: string): number { return Math.round((indexOf(clientIndex, name) * GOLDEN_ANGLE) % 360); }
+export function clientHue(name: string): number { return Math.round((indexOf(clientIndex, name) * GOLDEN_ANGLE) % 360); }
 function staffHue(name: string): number { return Math.round((indexOf(staffIndex, name) * GOLDEN_ANGLE) % 360); }
 
 export function clientPastel(name?: string): string {

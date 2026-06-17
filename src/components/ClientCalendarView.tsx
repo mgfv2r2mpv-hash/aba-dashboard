@@ -14,7 +14,7 @@ import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, isSameDay, isSameMonth,
 } from 'date-fns';
-import { DAY_S, DAY_E, WEEK_DAYS, SHORT_DAYS, toMin } from './clientCalendarShared';
+import { DAY_S, DAY_E, WEEK_DAYS, SHORT_DAYS, toMin, fmtMin, assignLanes, tierOf, TIER_COLOR } from './clientCalendarShared';
 import { usePinchZoom } from '../hooks/usePinchZoom';
 import ZoomResetPill from './ZoomResetPill';
 import AvailabilityHeatmap from './AvailabilityHeatmap';
@@ -368,13 +368,19 @@ function DayClientGrid({ date, clients, appointments, blackouts }: {
             {clients.map((c, ci) => {
               const s = clientAvailBarStyle(c.name);
               const hasBlackout = blackouts.some(b => b.date === iso && b.entityType === 'client' && b.entityId === c.id);
+              // Availability window times live in the HEADER as text, so a
+              // session card in the grid can never cover them.
+              const wins = c.availabilityWindows[dow] ?? [];
+              const winText = wins.length ? wins.map(w => `${fmtMin(toMin(w.start))}–${fmtMin(toMin(w.end))}`).join(' · ') : '—';
               return (
-                <div key={c.id} style={{ flex: 1, minWidth: DAY_COL_MIN, padding: '7px 6px', textAlign: 'center', borderLeft: ci > 0 ? '1px solid #e5e7eb' : 'none', background: hasBlackout ? '#fef2f2' : 'transparent' }}>
+                <div key={c.id} style={{ flex: 1, minWidth: DAY_COL_MIN, padding: '6px 6px 5px', textAlign: 'center', borderLeft: ci > 0 ? '1px solid #e5e7eb' : 'none', background: hasBlackout ? '#fef2f2' : 'transparent' }}>
                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, maxWidth: '100%' }}>
                     <span style={{ width: 9, height: 9, borderRadius: '50%', background: s.borderColor, flexShrink: 0 }} />
                     <span style={{ fontSize: 12, fontWeight: 700, color: s.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
                   </div>
-                  {hasBlackout && <div style={{ fontSize: 9, color: '#b91c1c', fontWeight: 700, marginTop: 1 }}>🚫 BLACKOUT</div>}
+                  {hasBlackout
+                    ? <div style={{ fontSize: 9, color: '#b91c1c', fontWeight: 700, marginTop: 1 }}>🚫 BLACKOUT</div>
+                    : <div style={{ fontSize: 9, color: '#64748b', marginTop: 1, lineHeight: 1.2 }}>{winText}</div>}
                 </div>
               );
             })}
@@ -409,16 +415,34 @@ function DayClientGrid({ date, clients, appointments, blackouts }: {
                         <div style={{ height: 2, background: '#ef4444' }} />
                       </div>
                     )}
-                    {cAppts.map(appt => {
-                      const top = aptTop(appt), rawH = aptH(appt), h = Math.max(rawH, 16);
+                    {laidOut(cAppts).map(item => {
+                      const appt = item.appt;
+                      const top = aptTop(appt), h = Math.max(aptH(appt), 16);
                       if (top >= totalH || top + h <= 0) return null;
                       const ct = Math.max(0, top);
+                      const laneW = 100 / item.lanes;
                       const isDirect = appt.type === 'client-session';
-                      const blockStyle = isDirect ? tileStyle(client.name, appt.technician) : { backgroundColor: clientDarkBorder(client.name), backgroundImage: undefined as string | undefined };
+                      const tier = tierOf(appt.type);
+                      const borderColor = isDirect ? clientDarkBorder(client.name) : TIER_COLOR[tier];
+                      const blockStyle = isDirect
+                        ? tileStyle(client.name, appt.technician)
+                        : { backgroundColor: TIER_COLOR[tier], backgroundImage: undefined as string | undefined };
+                      const textColor = isDirect ? '#1e3a5f' : '#fff';
+                      const marker = recurrenceMarker(appt, appointments, iso);
                       return (
-                        <div key={appt.id} title={`${appt.title}\n${fmtTime(new Date(appt.startTime))}–${fmtTime(new Date(appt.endTime))}`}
-                          style={{ position: 'absolute', top: ct + 1, left: 5, right: 5, height: Math.max(h - 2, 14), ...blockStyle, border: `1.5px solid ${clientDarkBorder(client.name)}`, borderRadius: 5, overflow: 'hidden', zIndex: 3, boxSizing: 'border-box', padding: '2px 5px', boxShadow: '0 1px 3px rgba(0,0,0,0.14)' }}>
-                          {h > 22 && <div style={{ fontSize: 10, fontWeight: 700, lineHeight: 1.3, color: isDirect ? '#1e3a5f' : '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{appt.title}</div>}
+                        <div key={appt.id} title={`${appt.title}\n${fmtTime(new Date(appt.startTime))}–${fmtTime(new Date(appt.endTime))}\n${marker}`}
+                          style={{
+                            position: 'absolute', top: ct + 1, height: Math.max(h - 2, 14),
+                            left: `calc(${item.lane * laneW}% + 4px)`, width: `calc(${laneW}% - 6px)`,
+                            ...blockStyle, border: `1.5px solid ${borderColor}`, borderRadius: 5,
+                            overflow: 'hidden', zIndex: 3, boxSizing: 'border-box', padding: '2px 4px',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.14)',
+                          }}>
+                          {/* text foremost + clipped to this tile (never spills into another type's square) */}
+                          <div style={{ position: 'relative', zIndex: 5, color: textColor, overflow: 'hidden' }}>
+                            {h > 22 && <div style={{ fontSize: 9.5, fontWeight: 800, lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{appt.title}</div>}
+                            <div style={{ fontSize: 8.5, fontWeight: 600, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{marker}</div>
+                          </div>
                         </div>
                       );
                     })}
@@ -434,6 +458,39 @@ function DayClientGrid({ date, clients, appointments, blackouts }: {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// Lane-lay a day's sessions for one client so overlapping sessions sit
+// side-by-side (ordered by start time, then alphabetically) rather than stacking
+// on top of each other — so every tile keeps its own square and readable text.
+function laidOut(appts: Appointment[]) {
+  return assignLanes(appts.map(a => {
+    const s = new Date(a.startTime), e = new Date(a.endTime);
+    return {
+      appt: a,
+      startMin: s.getHours() * 60 + s.getMinutes(),
+      endMin: e.getHours() * 60 + e.getMinutes(),
+      sortKey: (a.title || a.type || '').toLowerCase(),
+    };
+  }));
+}
+
+const PATTERN_SHORT: Record<string, string> = { weekly: 'wk', biweekly: '2wk', monthly: 'mo' };
+
+// One-time → 1️⃣. Recurring → "N 🔁 wk 8/14" = occurrences left from the viewed
+// date · pattern · series end date. Counts/end come from sibling occurrences
+// (same seriesId) in the full appointment list.
+function recurrenceMarker(appt: Appointment, all: Appointment[], viewedISO: string): string {
+  const recurring = appt.isRecurring || !!appt.seriesId;
+  if (!recurring) return '1️⃣';
+  const series = appt.seriesId ? all.filter(a => a.seriesId === appt.seriesId) : [appt];
+  const future = series.filter(a => a.startTime.slice(0, 10) >= viewedISO && a.status !== 'canceled');
+  const left = future.length || 1;
+  const endISO = series.reduce((mx, a) => (a.startTime.slice(0, 10) > mx ? a.startTime.slice(0, 10) : mx), '');
+  const pat = PATTERN_SHORT[appt.recurringPattern || 'weekly'] || 'wk';
+  const end = endISO ? format(new Date(endISO + 'T00:00:00'), 'M/d') : '';
+  return `${left} 🔁 ${pat}${end ? ` ${end}` : ''}`;
+}
+
 function EmptyState() {
   return (
     <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, textAlign: 'center', padding: '64px 20px', color: '#9ca3af', fontSize: 14 }}>

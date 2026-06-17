@@ -24,7 +24,8 @@ interface BiometricAuthNativePlugin {
     isAvailable: boolean;
     biometryType: number;
     reason?: string;
-    errorCode?: string;
+    code?: string;       // plugin returns `code` (not errorCode) on v9/v10
+    errorCode?: string;  // older field name — kept for safety
   }>;
   internalAuthenticate(options: { reason?: string; cancelTitle?: string }): Promise<void>;
 }
@@ -48,22 +49,39 @@ export async function isBiometricAvailable(): Promise<boolean> {
 
 // Single native call returning both availability and hardware label — use this
 // instead of calling isBiometricAvailable() then getBiometryLabel() separately.
+//
+// On a COLD launch the native bridge / LAContext can briefly report biometry as
+// unavailable before the app is fully active — the call rejects, or returns
+// isAvailable:false with no error code and biometryType "none". That transient
+// false used to hide the Face ID setting and suppress the unlock prompt on every
+// launch after the first. So we retry until we get a *definitive* answer:
+// available, or unavailable WITH a real error code (e.g. not enrolled). A
+// not-ready-looking result (threw, or false + no code + type none) is retried.
+const READY_ATTEMPTS = 6;
+const READY_DELAY_MS = 120;
+const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
 export async function checkBiometryFull(): Promise<{ available: boolean; label: BiometryLabel; reason?: string }> {
   if (!Capacitor.isNativePlatform()) return { available: false, label: 'biometric unlock' };
-  try {
-    const res = await Native.checkBiometry();
-    const available = !!res?.isAvailable;
-    const label: BiometryLabel = res?.biometryType === TOUCH_ID ? 'Touch ID'
-      : res?.biometryType === FACE_ID ? 'Face ID'
-      : 'biometric unlock';
-    if (!available && res?.reason) {
-      console.warn('[biometric] unavailable —', res.reason, res.errorCode ?? '');
+  let last = { available: false, label: 'biometric unlock' as BiometryLabel, reason: undefined as string | undefined };
+  for (let attempt = 0; attempt < READY_ATTEMPTS; attempt++) {
+    try {
+      const res = await Native.checkBiometry();
+      const available = !!res?.isAvailable;
+      const label: BiometryLabel = res?.biometryType === TOUCH_ID ? 'Touch ID'
+        : res?.biometryType === FACE_ID ? 'Face ID'
+        : 'biometric unlock';
+      last = { available, label, reason: res?.reason };
+      const code = res?.code || res?.errorCode || '';
+      // Definitive: it's available, or it's unavailable for a concrete reason
+      // (not enrolled / not available) rather than because we asked too early.
+      if (available || (code && res?.biometryType)) return last;
+    } catch (e) {
+      if (attempt === READY_ATTEMPTS - 1) console.warn('[biometric] checkBiometry threw:', e);
     }
-    return { available, label, reason: res?.reason };
-  } catch (e) {
-    console.warn('[biometric] checkBiometry threw:', e);
-    return { available: false, label: 'biometric unlock' };
+    await delay(READY_DELAY_MS);
   }
+  return last;
 }
 
 // Names the actual hardware so the lock screen and Settings say "Touch ID" /

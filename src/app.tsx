@@ -1035,37 +1035,54 @@ export default function App() {
     const locked = status === 'canceled' || status === 'completed';
     const statusColor = status === 'canceled' ? '#b91c1c' : status === 'completed' ? '#15803d' : '#374151';
     const statusBg = status === 'canceled' ? '#fee2e2' : status === 'completed' ? '#dcfce7' : '#f3f4f6';
+    const typeAccent = a.type === 'client-session' ? '#7c3aed'
+      : a.type === 'supervision' ? '#10b981'
+      : a.type === 'parent-training' ? '#3b82f6'
+      : a.type === 'reassessment' ? '#f59e0b'
+      : a.type === 'case-planning' ? '#0ea5e9'
+      : '#6b7280';
+    const typeLabel = a.type === 'client-session' ? 'Direct service'
+      : a.type === 'parent-training' ? 'Parent training / CoC'
+      : a.type === 'internal-task' ? 'Admin work'
+      : a.type === 'other' ? 'Meeting'
+      : a.type.replace('-', ' ').replace(/^\w/, c => c.toUpperCase());
+    const aStart = new Date(a.startTime), aEnd = new Date(a.endTime);
+    const dateStr = aStart.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    const timeStr = `${aStart.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}–${aEnd.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    const metaChip: React.CSSProperties = {
+      display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600,
+      color: '#374151', background: '#f3f4f6', borderRadius: 8, padding: '3px 9px',
+    };
     return (
-      <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: 8 }}>
-          <h3 style={{ margin: 0 }}>Selected Appointment</h3>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{
-              fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
-              color: statusColor, backgroundColor: statusBg,
-              padding: '2px 8px', borderRadius: 10,
-            }}>{status}</span>
-            <button
-              onClick={() => setSelectedAppointment(null)}
-              aria-label="Close"
-              style={{
-                background: 'none', border: 'none', color: '#6b7280',
-                fontSize: 20, lineHeight: 1, cursor: 'pointer', padding: 4,
-              }}
-            >✕</button>
+      <div className="af-form" style={{ padding: '16px', borderTop: '1px solid #e5e7eb' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
+          <span style={{ width: 4, alignSelf: 'stretch', minHeight: 34, borderRadius: 2, background: typeAccent, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: typeAccent }}>{typeLabel}</div>
+            <h3 style={{ margin: '1px 0 0', fontSize: 16, fontWeight: 800, color: '#111827', lineHeight: 1.2 }}>{a.title}</h3>
           </div>
+          <span style={{
+            fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em',
+            color: statusColor, backgroundColor: statusBg, padding: '3px 9px', borderRadius: 999, flexShrink: 0,
+          }}>{status}</span>
+          <button
+            className="af-btn"
+            onClick={() => setSelectedAppointment(null)}
+            aria-label="Close"
+            style={{ background: '#f3f4f6', border: 'none', width: 28, height: 28, borderRadius: 8, color: '#6b7280', fontSize: 15, lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}
+          >✕</button>
         </div>
-        <p><strong>{a.title}</strong></p>
-        <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
-          {new Date(a.startTime).toLocaleString()} → {new Date(a.endTime).toLocaleString()}
-        </p>
-        {a.technician && (
-          <p style={{ fontSize: '12px', color: '#374151', marginTop: '4px' }}>
-            Tech: {a.technician}
-          </p>
-        )}
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          <span style={{ ...metaChip, background: '#eef2ff', color: '#4338ca' }}>🕐 {dateStr} · {timeStr}</span>
+          {a.client && <span style={metaChip}>👤 {a.client}</span>}
+          {a.technician && <span style={metaChip}>🧑‍⚕️ {a.technician}</span>}
+          {a.isMakeUp && <span style={{ ...metaChip, background: '#fef9c3', color: '#854d0e' }}>↩︎ Make-up</span>}
+          {!a.isBillable && <span style={{ ...metaChip, background: '#f1f5f9', color: '#64748b' }}>Non-billable</span>}
+        </div>
+
         {(status === 'canceled' || status === 'completed') && (
-          <p style={{ color: '#6b7280', marginTop: '4px', fontSize: 12 }}>
+          <p style={{ color: '#6b7280', marginTop: 8, fontSize: 12 }}>
             🔒 Locked — reopen to edit time, status, or assignment
           </p>
         )}

@@ -68,6 +68,14 @@ export interface Technician {
     clientId: string;
     hoursPerWeek: number;
     billable: boolean;
+    // Optional per-case availability: when set, this BT can only serve THIS
+    // client within these windows (e.g. Hannah covers EC only Tue/Thu PM), even
+    // though her overall `availability` below is wider. Absent = the BT's general
+    // availability applies to this case with no extra restriction. The scheduler
+    // intersects client avail ∩ BT general avail ∩ this per-case avail.
+    availability?: {
+      [key in DayOfWeek]?: TimeWindow[];
+    };
   }[];
   availability: {
     [key in DayOfWeek]?: TimeWindow[];

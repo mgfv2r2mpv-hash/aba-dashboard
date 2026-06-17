@@ -6,21 +6,20 @@
 // (the calendars multiply their hour-height by `scale`), so the frozen header
 // and time-axis panes stay aligned because they read the same scaled value.
 //
-// Gestures:
-//   - two-finger pinch  → zoom (clamped to [min, max])
-//   - three-finger tap  → reset to 1 (the "three finger expand to reset")
+// Gesture model (the key fix): a two-finger gesture is ambiguous — it could be a
+// PAN (scroll) or a PINCH (zoom). We watch the distance between the two fingers:
+//   - distance roughly constant → it's a pan; we do nothing and let the browser
+//     scroll natively (momentum preserved).
+//   - distance changes past a threshold → it's a pinch; we take over, zoom, and
+//     preventDefault (when still cancelable) so the pane stops scroll-fighting.
+//   - three fingers → reset to 1× (the "three-finger expand to reset").
 //
-// Touch listeners are attached natively (non-passive) so we can preventDefault
-// during a pinch and stop the pane from scroll-fighting the gesture. Updates are
-// throttled to one per animation frame to keep re-renders smooth.
+// Because we only preventDefault once a pinch is *confirmed*, ordinary two-finger
+// drag-scroll keeps working.
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-interface PinchZoomOptions {
-  min?: number;
-  max?: number;
-}
-
+interface PinchZoomOptions { min?: number; max?: number; }
 interface PinchZoom<T extends HTMLElement> {
   ref: React.RefObject<T | null>;
   scale: number;
@@ -30,24 +29,16 @@ interface PinchZoom<T extends HTMLElement> {
 
 const DEFAULT_MIN = 0.5;
 const DEFAULT_MAX = 2.5;
+const DECIDE_PX = 14; // distance change that commits the gesture to "pinch"
 
-function clamp(v: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, v));
-}
-
-function touchDistance(touches: TouchList): number {
-  const dx = touches[0].clientX - touches[1].clientX;
-  const dy = touches[0].clientY - touches[1].clientY;
-  return Math.hypot(dx, dy);
-}
+function clamp(v: number, min: number, max: number) { return Math.min(max, Math.max(min, v)); }
+function dist(t: TouchList) { return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY); }
 
 export function usePinchZoom<T extends HTMLElement = HTMLDivElement>(
   { min = DEFAULT_MIN, max = DEFAULT_MAX }: PinchZoomOptions = {},
 ): PinchZoom<T> {
   const ref = useRef<T | null>(null);
   const [scale, setScale] = useState(1);
-  // Mirror state in a ref so the (long-lived) touch listeners read the live
-  // value without re-subscribing on every scale change.
   const scaleRef = useRef(1);
 
   const apply = useCallback((next: number) => {
@@ -64,38 +55,34 @@ export function usePinchZoom<T extends HTMLElement = HTMLDivElement>(
 
     let startDist = 0;
     let startScale = 1;
-    let pinching = false;
+    let mode: 'none' | 'undecided' | 'pinch' | 'pan' = 'none';
     let raf = 0;
-    let pending = 0;
-
+    let pending = 1;
     const flush = () => { raf = 0; apply(pending); };
 
     const onStart = (e: TouchEvent) => {
-      // Three (or more) fingers = reset zoom.
-      if (e.touches.length >= 3) {
-        pinching = false;
-        e.preventDefault();
-        apply(1);
-        return;
-      }
+      if (e.touches.length >= 3) { mode = 'none'; apply(1); return; }
       if (e.touches.length === 2) {
-        pinching = true;
-        startDist = touchDistance(e.touches);
+        startDist = dist(e.touches) || 1;
         startScale = scaleRef.current;
+        mode = 'undecided';
       }
     };
 
     const onMove = (e: TouchEvent) => {
-      if (!pinching || e.touches.length !== 2) return;
-      e.preventDefault(); // stop the pane from scrolling mid-pinch
-      const ratio = touchDistance(e.touches) / (startDist || 1);
-      pending = clamp(startScale * ratio, min, max);
+      if (mode === 'none' || mode === 'pan' || e.touches.length !== 2) return;
+      const d = dist(e.touches);
+      if (mode === 'undecided') {
+        if (Math.abs(d - startDist) > DECIDE_PX) mode = 'pinch';
+        else return; // still ambiguous → leave it to native scroll
+      }
+      // confirmed pinch
+      if (e.cancelable) e.preventDefault();
+      pending = clamp(startScale * (d / startDist), min, max);
       if (!raf) raf = requestAnimationFrame(flush);
     };
 
-    const onEnd = (e: TouchEvent) => {
-      if (e.touches.length < 2) pinching = false;
-    };
+    const onEnd = (e: TouchEvent) => { if (e.touches.length < 2) mode = 'none'; };
 
     el.addEventListener('touchstart', onStart, { passive: false });
     el.addEventListener('touchmove', onMove, { passive: false });

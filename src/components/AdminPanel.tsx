@@ -2115,7 +2115,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   );
 
   const schedulePwSection = (
-    <SettingsSection title="😇 Schedule Password (HIPAA)">
+    <SettingsSection title="Schedule Password (HIPAA 😇)">
       <div style={{ padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px', fontSize: '13px' }}>
         <p style={{ marginBottom: '12px', color: '#6b7280', fontSize: '12px' }}>
           Encrypts your downloaded schedule file. Leave blank for a normal readable file.
@@ -2172,7 +2172,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   );
 
   const appLockSection = faceIdAvailable !== undefined ? (
-    <SettingsSection title="😇 App Lock (HIPAA)">
+    <SettingsSection title="App Lock (HIPAA 😇)">
       <div style={{ padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px', fontSize: '13px' }}>
         <p style={{ marginBottom: '12px', color: '#6b7280', fontSize: '12px' }}>
           A PIN locks the app on launch. There is no recovery if you forget it.
@@ -2363,9 +2363,6 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
 
       {/* AI Integration — bottom when key is set */}
       {keySavedState && aiSettings && onSaveAISettings && aiSection}
-
-      {/* App Lock — bottom management when on native */}
-      {faceIdAvailable !== undefined && appLockSection}
 
       {/* Schedule Password — bottom management when set */}
       {hasExistingPw && schedulePwSection}

@@ -33,6 +33,7 @@ interface CalendarProps {
   // When a draft is open, marks staged appointments (add/move/shorten/remove)
   // so they render as "proposed"/tombstoned rather than committed sessions.
   draftMarks?: Map<string, DraftMark>;
+  onAddAppointment?: () => void;
 }
 
 type View = 'month' | 'week' | 'day';
@@ -64,6 +65,7 @@ export default function Calendar({
   onLensChange,
   hideTotals,
   draftMarks,
+  onAddAppointment,
 }: CalendarProps) {
   const [view, setView] = useState<View>('month');
   const [lens, setLens] = useState<Lens>('bcba');

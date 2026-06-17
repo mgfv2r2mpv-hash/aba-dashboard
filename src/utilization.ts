@@ -7,6 +7,8 @@ export const DEFAULT_UTILIZATION: Required<UtilizationSettings> = {
   bcbaMonthlyBillableHours: 100,
   bcbaMonthlyBillableHours5Week: 125,
   bcbaWeeklyBillableMin: 25,
+  clientUtilizationPercent: 80,
+  minClientSessionHoursPerWeek: 10,
 };
 
 export function resolveUtilization(u?: UtilizationSettings): Required<UtilizationSettings> {
@@ -16,8 +18,9 @@ export function resolveUtilization(u?: UtilizationSettings): Required<Utilizatio
     btWeeklyDirectHours: u?.btWeeklyDirectHours ?? DEFAULT_UTILIZATION.btWeeklyDirectHours,
     bcbaMonthlyBillableHours: u?.bcbaMonthlyBillableHours ?? DEFAULT_UTILIZATION.bcbaMonthlyBillableHours,
     bcbaMonthlyBillableHours5Week: u?.bcbaMonthlyBillableHours5Week ?? DEFAULT_UTILIZATION.bcbaMonthlyBillableHours5Week,
-    // Floor defaults to the weekly target when unset.
     bcbaWeeklyBillableMin: u?.bcbaWeeklyBillableMin ?? weekly,
+    clientUtilizationPercent: u?.clientUtilizationPercent ?? DEFAULT_UTILIZATION.clientUtilizationPercent,
+    minClientSessionHoursPerWeek: u?.minClientSessionHoursPerWeek ?? DEFAULT_UTILIZATION.minClientSessionHoursPerWeek,
   };
 }
 

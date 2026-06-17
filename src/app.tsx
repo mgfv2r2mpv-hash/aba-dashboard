@@ -9,24 +9,21 @@ import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolu
 import Calendar, { HoursSummary } from './components/Calendar';
 import ConflictPanel, { conflictKey } from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
-import WishComposer from './components/WishComposer';
-import AdminPanel, { AdminPersist } from './components/AdminPanel';
-import ComplianceDashboard from './components/ComplianceDashboard';
-import CaseloadView from './components/CaseloadView';
+import type { AdminPersist } from './components/AdminPanel';
 import FileUpload from './components/FileUpload';
 import { AISettings, ClaudeModel } from './components/Settings';
 import AppointmentForm from './components/AppointmentForm';
+import CancellationDialog from './components/CancellationDialog';
+import DayReview from './components/DayReview';
+import CompleteTimePrompt from './components/CompleteTimePrompt';
+import AgendaRail from './components/AgendaRail';
+import ImportPreview from './components/ImportPreview';
 
 const WishComposer = React.lazy(() => import('./components/WishComposer'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
 const ComplianceDashboard = React.lazy(() => import('./components/ComplianceDashboard'));
 const CaseloadView = React.lazy(() => import('./components/CaseloadView'));
 const SetupWizard = React.lazy(() => import('./components/SetupWizard'));
-import CancellationDialog from './components/CancellationDialog';
-import DayReview from './components/DayReview';
-import CompleteTimePrompt from './components/CompleteTimePrompt';
-import AgendaRail from './components/AgendaRail';
-import ImportPreview from './components/ImportPreview';
 import { useMinWidth, useIsTablet, useIsLandscape } from './useMediaQuery';
 import LockScreen from './components/LockScreen';
 import PasswordPrompt from './components/PasswordPrompt';
@@ -121,6 +118,7 @@ export default function App() {
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [view, setView] = useState<'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish'>('schedule');
   const [showWizard, setShowWizard] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
   // Wish view is now a full page (view === 'wish') rather than a modal.
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
@@ -1461,16 +1459,26 @@ export default function App() {
               </>
             )}
             {view === 'admin' && (
-              <AdminPanel
-                data={scheduleData}
-                onDataChange={commitFull}
-                persist={serverPersist}
-                onImportFile={triggerImportPicker}
-                onRerunWizard={() => setShowWizard(true)}
-                onDownload={handleDownload}
-                onClearData={handleClearData}
-                onOpenAISettings={() => setShowSettings(true)}
-              />
+              <React.Suspense fallback={null}>
+                <AdminPanel
+                  data={scheduleData}
+                  onDataChange={commitFull}
+                  persist={serverPersist}
+                  onImportFile={triggerImportPicker}
+                  onRerunWizard={() => setShowWizard(true)}
+                  onDownload={handleDownload}
+                  onClearData={handleClearData}
+                  aiSettings={aiSettings}
+                  onSaveAISettings={handleAISettingsSave}
+                  onClearKey={handleClearKey}
+                  onRequestUnlock={authenticateForKey}
+                  faceIdAvailable={isNative ? faceIdAvailable : undefined}
+                  faceIdEnabled={faceIdEnabled}
+                  biometryLabel={biometryLabel}
+                  onToggleFaceId={handleToggleFaceId}
+                  onChangePin={() => setChangingPin(true)}
+                />
+              </React.Suspense>
             )}
             {view === 'compliance' && (
               <React.Suspense fallback={null}>

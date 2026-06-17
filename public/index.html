@@ -98,6 +98,31 @@
         background-color: #f97316;
         opacity: 0.8;
       }
+
+      /* Appointment form + detail (af-) — modern focus/hover states without
+         per-element handlers. Scoped to the .af-form / .af-detail wrappers. */
+      .af-form :is(input, select, textarea) {
+        transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .af-form :is(input, select, textarea):focus {
+        outline: none;
+        border-color: #6366f1;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+      }
+      .af-form select {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%236b7280' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 12px center;
+        padding-right: 30px;
+      }
+      .af-btn {
+        transition: filter 0.15s ease, transform 0.05s ease, background-color 0.15s ease;
+      }
+      .af-btn:hover { filter: brightness(0.96); }
+      .af-btn:active { transform: translateY(1px); }
+      .af-chip { transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease; }
     </style>
   </head>
   <body>

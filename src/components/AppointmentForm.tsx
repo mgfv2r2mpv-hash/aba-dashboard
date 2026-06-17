@@ -395,26 +395,61 @@ export default function AppointmentForm({
 
   const inputStyle: React.CSSProperties = {
     width: '100%',
-    padding: '8px 12px',
+    padding: '10px 12px',
     border: '1px solid #d1d5db',
-    borderRadius: '6px',
-    fontSize: '14px',
+    borderRadius: '8px',
+    fontSize: '15px',
+    color: '#111827',
+    background: '#fff',
+    boxSizing: 'border-box',
   };
 
   const labelStyle: React.CSSProperties = {
     display: 'block',
-    fontWeight: '600',
-    marginBottom: '6px',
-    fontSize: '13px',
+    fontWeight: 700,
+    marginBottom: '5px',
+    fontSize: '11px',
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
+    color: '#6b7280',
   };
+
+  // Subtle group heading that segments the form into sections.
+  const groupHeader = (label: string, first = false): React.CSSProperties => ({
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: '0.07em',
+    textTransform: 'uppercase',
+    color: '#9ca3af',
+    marginTop: first ? 0 : 8,
+    paddingTop: first ? 0 : 12,
+    borderTop: first ? 'none' : '1px solid #f1f5f9',
+  });
+
+  // Accent color keyed to the session type, echoed in the header bar.
+  const typeAccent = type === 'client-session' ? '#7c3aed'
+    : type === 'supervision' ? '#10b981'
+    : type === 'parent-training' ? '#3b82f6'
+    : type === 'reassessment' ? '#f59e0b'
+    : type === 'case-planning' ? '#0ea5e9'
+    : '#6b7280';
 
   const content = (
     <>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <h2 style={{ fontSize: '20px', fontWeight: 'bold' }}>
-            {appointment ? 'Edit Appointment' : 'Add Appointment'}
-          </h2>
-          <button onClick={onCancel} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <span style={{ width: 4, alignSelf: 'stretch', minHeight: 28, borderRadius: 2, background: typeAccent }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: typeAccent }}>
+              {appointment ? 'Edit session' : 'New session'}
+            </div>
+            <h2 style={{ fontSize: 19, fontWeight: 800, color: '#111827', margin: 0, lineHeight: 1.2 }}>
+              {title || (appointment ? 'Appointment' : 'Add appointment')}
+            </h2>
+          </div>
+          <button className="af-btn" onClick={onCancel} aria-label="Close" style={{
+            background: '#f3f4f6', border: 'none', width: 30, height: 30, borderRadius: 8,
+            fontSize: 16, cursor: 'pointer', color: '#6b7280', flexShrink: 0,
+          }}>✕</button>
         </div>
 
         {appointment && hasSeries && (
@@ -432,6 +467,7 @@ export default function AppointmentForm({
         )}
 
         <div style={{ display: 'grid', gap: '12px' }}>
+          <div style={groupHeader('Details', true)}>Details</div>
           <div>
             <label style={labelStyle}>Title *</label>
             <input value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
@@ -468,6 +504,7 @@ export default function AppointmentForm({
             </div>
           </div>
 
+          <div style={groupHeader('Assignment')}>Assignment</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
             {type !== 'supervision' && (
               <div>
@@ -496,6 +533,7 @@ export default function AppointmentForm({
             </div>
           </div>
 
+          <div style={groupHeader('Schedule')}>Schedule</div>
           <div>
             <label style={labelStyle}>Date *</label>
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
@@ -578,6 +616,7 @@ export default function AppointmentForm({
             </div>
           )}
 
+          <div style={groupHeader('Options')}>Options</div>
           <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginTop: '4px', flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
               <input type="checkbox" checked={isBillable} onChange={(e) => setIsBillable(e.target.checked)} />
@@ -624,29 +663,35 @@ export default function AppointmentForm({
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '20px', flexWrap: 'wrap' }}>
+        <div style={{
+          display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap',
+          position: 'sticky', bottom: 0, marginTop: 18, paddingTop: 14,
+          borderTop: '1px solid #e5e7eb',
+          background: 'linear-gradient(to top, #fff 70%, rgba(255,255,255,0))',
+        }}>
           {appointment && onDelete && (
-            <button onClick={handleDelete} style={{
-              padding: '8px 14px', border: '1px solid #fca5a5', borderRadius: '6px',
-              background: '#fee2e2', color: '#b91c1c', cursor: 'pointer', fontWeight: 600,
+            <button className="af-btn" onClick={handleDelete} style={{
+              padding: '10px 16px', border: '1px solid #fca5a5', borderRadius: '8px',
+              background: '#fee2e2', color: '#b91c1c', cursor: 'pointer', fontWeight: 700, fontSize: 14,
             }}>Delete</button>
           )}
           <div style={{ flex: 1 }} />
-          <button onClick={onCancel} style={{
-            padding: '8px 16px', border: '1px solid #d1d5db', borderRadius: '6px',
-            background: 'white', cursor: 'pointer',
+          <button className="af-btn" onClick={onCancel} style={{
+            padding: '10px 18px', border: '1px solid #d1d5db', borderRadius: '8px',
+            background: 'white', cursor: 'pointer', fontWeight: 600, fontSize: 14, color: '#374151',
           }}>Cancel</button>
-          <button onClick={handleSubmit} style={{
-            padding: '8px 16px', backgroundColor: '#3b82f6', color: 'white',
-            border: 'none', borderRadius: '6px', cursor: 'pointer',
-          }}>Save</button>
+          <button className="af-btn" onClick={handleSubmit} style={{
+            padding: '10px 22px', backgroundColor: typeAccent, color: 'white',
+            border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: 14,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+          }}>{appointment ? 'Save changes' : 'Add session'}</button>
         </div>
     </>
   );
 
   if (variant === 'inline') {
     return (
-      <div style={{
+      <div className="af-form" style={{
         height: '100%', overflowY: 'auto', padding: 16, boxSizing: 'border-box',
         background: '#fff', WebkitOverflowScrolling: 'touch' as any,
       }}>
@@ -658,15 +703,15 @@ export default function AppointmentForm({
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.5)',
+      backgroundColor: 'rgba(17,24,39,0.55)', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
       padding: 'max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left))',
       boxSizing: 'border-box',
     }}>
-      <div style={{
-        backgroundColor: 'white', borderRadius: '8px', padding: '20px',
+      <div className="af-form" style={{
+        backgroundColor: 'white', borderRadius: '14px', padding: '20px',
         width: '100%', maxWidth: 600, maxHeight: '100%', overflowY: 'auto',
-        boxSizing: 'border-box',
+        boxSizing: 'border-box', boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
       }}>
         {content}
       </div>

@@ -152,8 +152,10 @@ export default function App() {
   const detailPanelRef = React.useRef<HTMLDivElement | null>(null);
   const importInputRef = React.useRef<HTMLInputElement | null>(null);
   const headerRef = React.useRef<HTMLElement | null>(null);
+  const mainScrollRef = React.useRef<HTMLDivElement | null>(null);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const mainScrollLastRef = React.useRef(0);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(56);
   const isLandscape = useIsLandscape();
 
@@ -269,7 +271,11 @@ export default function App() {
   });
 
   const handleMainScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    mainScrollLastRef.current = e.currentTarget.scrollTop;
+    const curr = e.currentTarget.scrollTop;
+    const prev = mainScrollLastRef.current;
+    // Show scroll-to-top when scrolling upward past the threshold (not in split view)
+    if (!splitView) setShowScrollTop(curr > 180 && curr < prev);
+    mainScrollLastRef.current = curr;
   };
 
   // On narrow screens the right-side detail panel wraps below the calendar.
@@ -1295,6 +1301,7 @@ export default function App() {
       </header>
 
       <div
+        ref={mainScrollRef as React.RefObject<HTMLDivElement>}
         onScroll={handleMainScroll}
         style={{
           display: 'flex', flex: 1, minHeight: 0,
@@ -1685,6 +1692,39 @@ export default function App() {
       {/* Re-key flow launched from Settings → App Lock. */}
       {changingPin && (
         <LockScreen mode="create" onCreate={handleChangePin} />
+      )}
+
+      {/* Scroll-to-top button: appears when user scrolls up inside a content panel */}
+      {showScrollTop && (
+        <button
+          onClick={() => mainScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+          aria-label="Scroll to top"
+          style={{
+            position: 'fixed',
+            bottom: `calc(env(safe-area-inset-bottom) + 20px)`,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 50,
+            background: 'rgba(255,255,255,0.82)',
+            border: '1px solid rgba(0,0,0,0.10)',
+            borderRadius: 22,
+            padding: '9px 18px',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.14)',
+            cursor: 'pointer',
+            fontSize: 15,
+            fontWeight: 600,
+            color: '#374151',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
+            opacity: 0.88,
+            pointerEvents: 'auto',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+          }}
+        >
+          <span style={{ fontSize: 13 }}>↑</span> Top
+        </button>
       )}
     </div>
   );

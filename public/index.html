@@ -17,8 +17,11 @@
       html, body {
         width: 100%;
         max-width: 100%;
-        overflow-x: hidden;
-        overscroll-behavior-x: none;
+        /* Lock body/html so the OS never scrolls the whole page. All scrolling
+           must happen inside designated scroll containers in the app shell. */
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
         /* The app shell must never pinch-zoom as a whole. Calendars implement
            their own scoped zoom (see usePinchZoom) inside their scroll panes. */
         touch-action: pan-x pan-y;
@@ -34,10 +37,10 @@
       }
 
       #root {
-        min-height: 100vh;
+        height: 100%;
         width: 100%;
         max-width: 100vw;
-        overflow-x: hidden;
+        overflow: hidden;
       }
 
       /* Calendar styles */

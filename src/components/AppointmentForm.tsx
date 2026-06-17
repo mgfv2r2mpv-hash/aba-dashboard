@@ -667,7 +667,7 @@ export default function AppointmentForm({
           display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap',
           position: 'sticky', bottom: 0, marginTop: 18, paddingTop: 14,
           borderTop: '1px solid #e5e7eb',
-          background: 'linear-gradient(to top, #fff 70%, rgba(255,255,255,0))',
+          background: '#fff',
         }}>
           {appointment && onDelete && (
             <button className="af-btn" onClick={handleDelete} style={{
@@ -692,8 +692,9 @@ export default function AppointmentForm({
   if (variant === 'inline') {
     return (
       <div className="af-form" style={{
-        height: '100%', overflowY: 'auto', padding: 16, boxSizing: 'border-box',
-        background: '#fff', WebkitOverflowScrolling: 'touch' as any,
+        height: '100%', overflowY: 'auto', padding: 16, paddingBottom: 20,
+        boxSizing: 'border-box', background: '#fff',
+        WebkitOverflowScrolling: 'touch' as any,
       }}>
         {content}
       </div>
@@ -709,7 +710,7 @@ export default function AppointmentForm({
       boxSizing: 'border-box',
     }}>
       <div className="af-form" style={{
-        backgroundColor: 'white', borderRadius: '14px', padding: '20px',
+        backgroundColor: 'white', borderRadius: '14px', padding: '20px', paddingBottom: 20,
         width: '100%', maxWidth: 600, maxHeight: '100%', overflowY: 'auto',
         boxSizing: 'border-box', boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
       }}>

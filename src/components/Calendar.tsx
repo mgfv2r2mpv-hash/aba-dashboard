@@ -5,6 +5,8 @@ import { DraftMark } from '../draft';
 import { rollupHours, resolveUtilization, HoursByStatus, ptoHoursInRange, reduceRequirementForPto } from '../utilization';
 import { tileStyle, clientPastel, clientDarkBorder, legendStripeStyle } from '../calendarColors';
 import { useMinWidth, useIsLandscape } from '../useMediaQuery';
+import { usePinchZoom } from '../hooks/usePinchZoom';
+import ZoomResetPill from './ZoomResetPill';
 import {
   startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek,
   format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay,
@@ -647,7 +649,7 @@ function Legend() {
 // Tiles are color-coded (client pastel background + staff diagonal stripes),
 // the time axis is frozen on side-scroll, and tapping a tile pops a small
 // dialog to view the session in the detail panel.
-function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks, hourHeight = HOUR_HEIGHT, axisWidth = TIME_AXIS_WIDTH, roomy = false }: {
+function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks, hourHeight: hourHeightBase = HOUR_HEIGHT, axisWidth = TIME_AXIS_WIDTH, roomy = false }: {
   days: Date[];
   appointments: Appointment[];
   onSelectAppointment: (a: Appointment) => void;
@@ -658,6 +660,11 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
   axisWidth?: number;
   roomy?: boolean;
 }) {
+  // Pinch-zoom scoped to this grid: scales the hour height so the frozen time
+  // axis and day header stay aligned (they read the same value). Two-finger
+  // pinch to zoom, three-finger tap (or the Reset pill) to return to 1×.
+  const { ref: zoomRef, scale: zoom, zoomed, reset: resetZoom } = usePinchZoom();
+  const hourHeight = hourHeightBase * zoom;
   const hours = Array.from({ length: VISIBLE_END_HOUR - VISIBLE_START_HOUR }, (_, i) => VISIBLE_START_HOUR + i);
   const totalHeight = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * hourHeight;
   const today = new Date();
@@ -738,7 +745,8 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
   };
 
   return (
-    <div style={{ overflowX: 'auto' }}>
+    <div ref={zoomRef} style={{ overflowX: 'auto', touchAction: 'pan-x pan-y' }}>
+      {zoomed && <ZoomResetPill scale={zoom} onReset={resetZoom} />}
       {/* Day header */}
       <div style={{ display: 'flex', minWidth, borderBottom: '1px solid #e5e7eb' }}>
         <div style={{ ...stickyAxis, borderRight: '1px solid #e5e7eb' }} />

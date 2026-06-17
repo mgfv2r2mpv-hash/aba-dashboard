@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>SAssi - ABA Calendar</title>
     <link rel="icon" type="image/png" href="/logo.png" />
     <link rel="apple-touch-icon" href="/logo.png" />
@@ -19,6 +19,9 @@
         max-width: 100%;
         overflow-x: hidden;
         overscroll-behavior-x: none;
+        /* The app shell must never pinch-zoom as a whole. Calendars implement
+           their own scoped zoom (see usePinchZoom) inside their scroll panes. */
+        touch-action: pan-x pan-y;
       }
 
       body {

@@ -63,8 +63,14 @@ export default function LockScreen({ mode, onCreate, onVerify, onBiometric, biom
       return;
     }
     setBusy(true);
+    setError(null);
     try {
       await onCreate?.(pin);
+    } catch (e) {
+      // Don't fail silently — a native write/crypto failure here used to look
+      // like the button "did nothing". Surface it so it's diagnosable.
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(`Couldn't set PIN: ${msg}`);
     } finally {
       setBusy(false);
     }

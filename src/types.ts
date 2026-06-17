@@ -605,6 +605,7 @@ export type WishKind =
   | 'clearWindow'   // free up a recurring weekday/time window, going forward
   | 'addRecurring'  // add a recurring session into a tight schedule
   | 'shaveDown'     // trim over-served supervision to free capacity
+  | 'fillSchedule'  // maximize direct-service case utilization toward 100%
   | 'freeform';     // anything else, described in the note
 
 export interface WishRequest {

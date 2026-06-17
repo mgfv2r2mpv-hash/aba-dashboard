@@ -37,6 +37,9 @@ export function summarizeWish(w: WishRequest): string {
     case 'shaveDown':
       base = `Trim over-served supervision sessions toward the compliance minimum${horizon} to free up capacity, without dropping below required floors.`;
       break;
+    case 'fillSchedule':
+      base = `Fill my schedule out: maximize each case's DIRECT-service utilization toward 100% this week using the open windows, suggest supervision where it helps, and parent training only within scheduled sessions. Do not change my (BCBA) own schedule.`;
+      break;
     case 'freeform':
     default:
       base = w.note?.trim() || 'Rework the schedule as described.';

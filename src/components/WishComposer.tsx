@@ -22,6 +22,7 @@ const KINDS: { value: WishKind; label: string; blurb: string }[] = [
   { value: 'clearWindow', label: 'Clear a recurring window', blurb: 'Free up a weekday/time going forward (e.g. Friday evenings).' },
   { value: 'addRecurring', label: 'Add a recurring session', blurb: 'Fit a new repeating session into a tight schedule.' },
   { value: 'shaveDown', label: 'Trim over-served sessions', blurb: 'Shave supervision hours toward the minimum to free up capacity.' },
+  { value: 'fillSchedule', label: 'Fill my schedule out', blurb: 'Maximize each case toward 100% direct utilization; suggest supervision + parent training within sessions. Leaves my BCBA schedule alone.' },
   { value: 'freeform', label: 'Something else', blurb: 'Describe it in your own words.' },
 ];
 

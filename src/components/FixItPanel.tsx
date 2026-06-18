@@ -5,6 +5,7 @@ import { ClaudeScheduler } from '../claudeScheduler';
 import { summarizeFixIt } from '../fixit';
 import { wishSolutionToDraft, computeSolutionImpact } from '../wish';
 import ImpactSummary from './ImpactSummary';
+import TrimPanel from './TrimPanel';
 
 // "Fix It" 🔧 — the compliance-remediation panel that sits at the top of the
 // Compliance tab. The BCBA picks which clinical tools the AI may use and which
@@ -54,6 +55,7 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
   const [showPromptPreview, setShowPromptPreview] = useState(false);
   const [previewPrompt, setPreviewPrompt] = useState('');
   const [copyFlash, setCopyFlash] = useState(false);
+  const [trimSolution, setTrimSolution] = useState<WishSolution | null>(null);
   const previewTextRef = useRef<HTMLTextAreaElement>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -221,34 +223,57 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
           {/* Solutions */}
           {solutions && (
             <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: '#9a3412', marginBottom: 8 }}>
-                {solutions.length > 0 ? `${solutions.length} proposed option${solutions.length === 1 ? '' : 's'}` : 'No compliant options within the selected strategies'}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {solutions.map((sol, i) => {
-                  const d = wishSolutionToDraft(sol, data);
-                  const impact = computeSolutionImpact(data, sol);
-                  return (
-                    <div key={sol.id} style={{ border: '1px solid #fed7aa', background: 'white', borderRadius: 8, padding: 12 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Option {i + 1}: {sol.summary}</div>
-                      {sol.reasoning && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{sol.reasoning}</div>}
-                      <ImpactSummary impact={impact} />
-                      {sol.ops.length > 0 && (
-                        <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#374151' }}>
-                          {sol.ops.map((o, j) => <li key={j}>{opText(o)}</li>)}
-                        </ul>
-                      )}
-                      {d.unresolved > 0 && <div style={{ fontSize: 11, color: '#b45309', marginTop: 4 }}>{d.unresolved} change(s) referenced something not found and will be skipped.</div>}
-                      {sol.ops.length > 0 && (
-                        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                          <button onClick={() => onAccept(sol)} style={{ padding: '6px 14px', background: '#ea580c', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Accept</button>
-                          <button onClick={() => onCustomize(sol)} style={{ padding: '6px 14px', background: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>Customize &amp; accept</button>
-                        </div>
-                      )}
+              {/* If every solution is empty (no-solution diagnostic), show a clear explanation */}
+              {solutions.every(s => s.ops.length === 0) ? (
+                <div style={{ border: '1px solid #fca5a5', background: '#fef2f2', borderRadius: 8, padding: 12, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: '#991b1b', marginBottom: 4 }}>
+                    No sessions could be placed within your selected strategies
+                  </div>
+                  {solutions[0]?.reasoning && (
+                    <div style={{ fontSize: 12, color: '#7f1d1d', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                      {solutions[0].reasoning}
                     </div>
-                  );
-                })}
-              </div>
+                  )}
+                  <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 8 }}>
+                    Try enabling more strategies, extending the horizon, or reviewing BCBA availability in Settings.
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: '#9a3412', marginBottom: 8 }}>
+                    {solutions.filter(s => s.ops.length > 0).length} proposed option{solutions.filter(s => s.ops.length > 0).length === 1 ? '' : 's'}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {solutions.filter(s => s.ops.length > 0).map((sol, i) => {
+                      const d = wishSolutionToDraft(sol, data);
+                      const impact = computeSolutionImpact(data, sol);
+                      const addCount = sol.ops.filter(o => o.op === 'add').length;
+                      return (
+                        <div key={sol.id} style={{ border: '1px solid #fed7aa', background: 'white', borderRadius: 8, padding: 12 }}>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Option {i + 1}: {sol.summary}</div>
+                          {sol.reasoning && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{sol.reasoning}</div>}
+                          <ImpactSummary impact={impact} />
+                          <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#374151' }}>
+                            {sol.ops.map((o, j) => <li key={j}>{opText(o)}</li>)}
+                          </ul>
+                          {d.unresolved > 0 && <div style={{ fontSize: 11, color: '#b45309', marginTop: 4 }}>{d.unresolved} change(s) referenced something not found and will be skipped.</div>}
+                          <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                            <button onClick={() => onAccept(sol)} style={{ padding: '6px 14px', background: '#ea580c', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Accept</button>
+                            <button onClick={() => onCustomize(sol)} style={{ padding: '6px 14px', background: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>Customize &amp; accept</button>
+                            {addCount > 0 && (
+                              <button
+                                onClick={() => setTrimSolution(sol)}
+                                style={{ padding: '6px 10px', background: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}
+                                title="Remove individual sessions by clinical priority"
+                              >✂️ Trim</button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
 
               {/* Set-level actions: object (regenerate with feedback) or reject. */}
               <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
@@ -281,6 +306,15 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
             </div>
           )}
         </div>
+      )}
+
+      {trimSolution && (
+        <TrimPanel
+          solution={trimSolution}
+          data={data}
+          onApply={sol => { setTrimSolution(null); onAccept(sol); }}
+          onClose={() => setTrimSolution(null)}
+        />
       )}
     </div>
   );

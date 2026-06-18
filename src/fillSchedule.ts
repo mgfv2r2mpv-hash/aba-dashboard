@@ -18,6 +18,7 @@
 
 import { ScheduleData, Appointment, DayOfWeek, TimeWindow, Technician } from './types';
 import { findAuthFor } from './authorization';
+import { computeClientCompliance, CompliancePeriod } from './compliance';
 
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const toMin = (t: string): number => { const [h, m] = t.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
@@ -194,6 +195,133 @@ export function buildFillContext(data: ScheduleData, weekStart: Date) {
   };
 }
 
+// ── Supervisable windows for Fix It ──────────────────────────────────────────
+// Future direct sessions in [now, horizonEnd) where the BCBA is both available
+// (per clinicianAvailability) and not already double-booked by an existing
+// supervision/PT/case-planning/reassessment session. These are the concrete
+// candidate slots the Fix It prompt gives to Claude so it can pick specific
+// times rather than reasoning from raw JSON availability blocks.
+
+export interface SupervisableWindow {
+  clientId: string;
+  clientName: string;
+  appointmentId: string;  // the direct session's ID
+  date: string;           // YYYY-MM-DD
+  sessionStart: string;   // ISO local datetime (no Z)
+  sessionEnd: string;
+  techId: string | undefined;
+  techName: string | undefined;
+}
+
+const BCBA_TYPES = new Set<string>(['supervision', 'parent-training', 'case-planning', 'reassessment']);
+
+function isBcbaBusyFn(data: ScheduleData) {
+  const busy = data.appointments
+    .filter(a => isActive(a) && BCBA_TYPES.has(a.type))
+    .map(a => ({ s: new Date(a.startTime).getTime(), e: new Date(a.endTime).getTime() }));
+  return (startMs: number, endMs: number) => busy.some(b => b.s < endMs && b.e > startMs);
+}
+
+function isBcbaAvailableAtFn(data: ScheduleData) {
+  const avail = data.settings.clinicianAvailability as Record<string, TimeWindow[]> | undefined;
+  const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return (startIso: string, endIso: string): boolean => {
+    if (!avail) return true;
+    const d = new Date(startIso);
+    const ws = avail[DAY_NAMES[d.getDay()]];
+    if (!ws || ws.length === 0) return false;
+    const sMin = d.getHours() * 60 + d.getMinutes();
+    const eMin = (new Date(endIso).getHours()) * 60 + (new Date(endIso).getMinutes());
+    return ws.some(w => toMin(w.start) <= sMin && toMin(w.end) >= eMin);
+  };
+}
+
+export function buildSupervisableWindows(
+  data: ScheduleData,
+  now: Date,
+  horizonEnd: Date,
+): SupervisableWindow[] {
+  const nowMs = now.getTime();
+  const horizonMs = horizonEnd.getTime();
+  const isBusy = isBcbaBusyFn(data);
+  const isAvail = isBcbaAvailableAtFn(data);
+
+  return data.appointments
+    .filter(a => {
+      const s = new Date(a.startTime).getTime();
+      return a.type === 'client-session' && isActive(a) && s > nowMs && s <= horizonMs;
+    })
+    .filter(a => isAvail(a.startTime, a.endTime))
+    .filter(a => !isBusy(new Date(a.startTime).getTime(), new Date(a.endTime).getTime()))
+    .map(a => {
+      const client = data.clients.find(c => c.id === a.client || c.name === a.client);
+      const tech = a.technician
+        ? data.technicians.find(t => t.name === a.technician || t.id === a.technician)
+        : undefined;
+      return {
+        clientId: client?.id || a.client || '',
+        clientName: client?.name || a.client || '',
+        appointmentId: a.id,
+        date: a.startTime.slice(0, 10),
+        sessionStart: a.startTime,
+        sessionEnd: a.endTime,
+        techId: tech?.id,
+        techName: tech?.name || a.technician,
+      };
+    })
+    .sort((a, b) => a.sessionStart.localeCompare(b.sessionStart));
+}
+
+// Per-client feasibility check: why can't the BCBA supervise a given client?
+// Used to build the "why impossible" diagnostic for the no-solution case.
+export interface FeasibilityDiagnostic {
+  clientId: string;
+  clientName: string;
+  futureDirects: number;
+  bcbaAvailableSlots: number;
+  bcbaFreeSlots: number;
+  blocker: string | null;  // null = slots are available
+}
+
+export function buildFeasibilityDiagnostics(
+  data: ScheduleData,
+  now: Date,
+  horizonEnd: Date,
+): FeasibilityDiagnostic[] {
+  const nowMs = now.getTime();
+  const horizonMs = horizonEnd.getTime();
+  const isBusy = isBcbaBusyFn(data);
+  const isAvail = isBcbaAvailableAtFn(data);
+
+  return data.clients.map(client => {
+    const futureDirects = data.appointments.filter(a =>
+      a.type === 'client-session' && isActive(a) &&
+      (a.client === client.id || a.client === client.name) &&
+      new Date(a.startTime).getTime() > nowMs &&
+      new Date(a.startTime).getTime() <= horizonMs
+    );
+    const bcbaAvailable = futureDirects.filter(a => isAvail(a.startTime, a.endTime));
+    const bcbaFree = bcbaAvailable.filter(
+      a => !isBusy(new Date(a.startTime).getTime(), new Date(a.endTime).getTime())
+    );
+    let blocker: string | null = null;
+    if (futureDirects.length === 0) blocker = 'no future direct sessions in scope';
+    else if (bcbaAvailable.length === 0) blocker = `${futureDirects.length} direct session(s), none fall within BCBA availability`;
+    else if (bcbaFree.length === 0) blocker = `${bcbaAvailable.length} slot(s) within BCBA availability, all blocked by existing BCBA appointments`;
+    return {
+      clientId: client.id,
+      clientName: client.name,
+      futureDirects: futureDirects.length,
+      bcbaAvailableSlots: bcbaAvailable.length,
+      bcbaFreeSlots: bcbaFree.length,
+      blocker,
+    };
+  });
+}
+
+// Re-export helpers so localSolver.ts can use the same logic.
+export { isBcbaBusyFn as _isBcbaBusyFn, isBcbaAvailableAtFn as _isBcbaAvailableAtFn };
+
 // ── date helpers ──────────────────────────────────────────────────────────────
 function isoOf(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -204,4 +332,102 @@ function inWeek(iso: string, weekStart: Date): boolean {
   const start = isoOf(weekStart), end = isoOf(addDays(weekStart, 6));
   const day = iso.slice(0, 10);
   return day >= start && day <= end;
+}
+
+// ── Compliance-fill context ("Fill my schedule out") ─────────────────────────
+// For the BCBA-fills-their-own-calendar wish: computes which cases are below
+// ideal supervision range, and lists future direct sessions as the valid windows
+// into which the BCBA can drop supervision or PT to earn compliance credit.
+//
+// Supervision earns credit when it overlaps a direct (BT present).
+// PT earns credit only when it falls within a direct session's time window.
+
+export interface ComplianceFillCase {
+  clientId: string;
+  clientName: string;
+  supPct: number;        // current projected supervision %
+  supHrs: number;        // current projected supervision hours
+  directHrs: number;     // projected direct hours
+  gapToIdealHrs: number; // additional sup hours needed to reach idealMinPct
+  idealMaxHrs: number;   // sup hours at idealMaxPct cap
+}
+
+export interface ComplianceFillDirectWindow {
+  clientId: string;
+  clientName: string;
+  appointmentId: string;
+  start: string;         // ISO datetime
+  end: string;
+  techId: string | undefined;
+  techName: string | undefined;
+}
+
+export interface ComplianceFillContext {
+  periodLabel: string;
+  floorPct: number;
+  idealMinPct: number;
+  idealMaxPct: number;
+  cases: ComplianceFillCase[];               // below ideal, sorted by gap desc
+  directWindows: ComplianceFillDirectWindow[]; // future directs for those cases
+}
+
+export function buildComplianceFillContext(
+  data: ScheduleData,
+  period: CompliancePeriod,
+  now: Date,
+): ComplianceFillContext {
+  const compliances = computeClientCompliance(data, period, now);
+  const s = data.settings;
+  const floorPct   = s.supervisionFloorPercent        ?? 10;
+  const idealMinPct = s.supervisionPreferredMinPercent ?? 15;
+  const idealMaxPct = s.supervisionPreferredMaxPercent ?? 20;
+
+  const cases: ComplianceFillCase[] = [];
+  for (const cc of compliances) {
+    if (cc.projected.directHours < 0.1) continue;
+    const clientMin = (cc.client as any).supervisionIdealPct ?? idealMinPct;
+    const supPct    = cc.projected.supervisionHours / cc.projected.directHours * 100;
+    const gap       = Math.max(0, (clientMin / 100) * cc.projected.directHours - cc.projected.supervisionHours);
+    if (gap < 0.05) continue; // already at or above ideal
+    cases.push({
+      clientId:      cc.client.id,
+      clientName:    cc.client.name,
+      supPct:        +supPct.toFixed(1),
+      supHrs:        +cc.projected.supervisionHours.toFixed(2),
+      directHrs:     +cc.projected.directHours.toFixed(2),
+      gapToIdealHrs: +gap.toFixed(2),
+      idealMaxHrs:   +(idealMaxPct / 100 * cc.projected.directHours).toFixed(2),
+    });
+  }
+  cases.sort((a, b) => b.gapToIdealHrs - a.gapToIdealHrs);
+
+  const caseIds   = new Set(cases.map(c => c.clientId));
+  const caseNames = new Set(cases.map(c => c.clientName));
+
+  const directWindows: ComplianceFillDirectWindow[] = data.appointments
+    .filter(a =>
+      a.type === 'client-session' &&
+      isActive(a) &&
+      new Date(a.startTime) >= now &&
+      new Date(a.startTime) < period.end &&
+      (caseIds.has(a.client || '') || caseNames.has(a.client || ''))
+    )
+    .map(a => {
+      const client = data.clients.find(c => c.id === a.client || c.name === a.client);
+      const tech   = a.technician
+        ? data.technicians.find(t => t.name === a.technician || t.id === a.technician)
+        : undefined;
+      return {
+        clientId:      client?.id    || a.client || '',
+        clientName:    client?.name  || a.client || '',
+        appointmentId: a.id,
+        start: a.startTime,
+        end:   a.endTime,
+        techId:   tech?.id,
+        techName: tech?.name || a.technician,
+      };
+    })
+    .sort((a, b) => a.start.localeCompare(b.start));
+
+  return { periodLabel: period.label, floorPct, idealMinPct, idealMaxPct, cases, directWindows };
 }

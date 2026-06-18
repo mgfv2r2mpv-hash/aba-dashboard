@@ -14,7 +14,7 @@ import { parseWishSolutions } from './wish';
 import { allowedStrategies } from './fixit';
 import { computeClientCompliance, computeTechCompliance, monthPeriod } from './compliance';
 import { resolveUtilization } from './utilization';
-import { buildFillContext } from './fillSchedule';
+import { buildFillContext, buildComplianceFillContext, buildSupervisableWindows, buildFeasibilityDiagnostics } from './fillSchedule';
 import { startOfWeek } from 'date-fns';
 
 export type ClaudeModel = 'claude-opus-4-8' | 'claude-sonnet-4-6' | 'claude-haiku-4-5-20251001';
@@ -122,9 +122,13 @@ export class ClaudeScheduler {
     const clientGaps = computeClientCompliance(this.data, period)
       .filter(r => !excluded.has(r.client.id))
       .filter(r => r.projected.hoursToGo > 0 || r.actual.hoursToGo > 0)
+      .sort((a, b) => b.projected.hoursToGo - a.projected.hoursToGo) // most behind first
       .map(r => {
         const token = this.anonMap.clients.get(r.client.id) || this.anonMap.clients.get(r.client.name) || 'CLIENT_?';
-        return `${token}: direct ${r.actual.directHours.toFixed(1)}h, supervision ${r.actual.supervisionHours.toFixed(1)}h, needs ~${r.projected.hoursToGo.toFixed(1)}h more`;
+        const pct = r.projected.directHours > 0
+          ? (r.projected.supervisionHours / r.projected.directHours * 100).toFixed(0)
+          : '0';
+        return `${token}: direct ${r.actual.directHours.toFixed(1)}h, supervision ${r.actual.supervisionHours.toFixed(1)}h (${pct}%), needs ~${r.projected.hoursToGo.toFixed(1)}h more to reach target`;
       });
 
     const techGaps = computeTechCompliance(this.data, period)
@@ -148,12 +152,31 @@ export class ClaudeScheduler {
         recur: a.isRecurring ? (a.recurringPattern || true) : undefined,
       }));
 
+    // Precomputed supervisable windows: direct sessions where the BCBA is
+    // available and not already double-booked. Giving the model these concrete
+    // slots is much more reliable than asking it to derive them from raw JSON.
+    const supWindows = buildSupervisableWindows(this.data, now, horizonEnd);
+    const tok = (m: Map<string, string>, id: string, name: string) => m.get(id) || m.get(name) || name;
+    const aptTok = (id: string) => this.anonMap.appointments.get(id) || id;
+    const supWindowLines = supWindows.map(w => {
+      const ct = tok(this.anonMap.clients, w.clientId, w.clientName);
+      const tt = w.techName ? ` [BT:${tok(this.anonMap.technicians, w.techId || '', w.techName)}]` : '';
+      return `${ct} ${aptTok(w.appointmentId)} ${w.date} ${w.sessionStart.slice(11, 16)}–${w.sessionEnd.slice(11, 16)}${tt}`;
+    });
+
+    // Feasibility diagnostics: per-client explanation of why BCBA can't supervise
+    // (only include clients with gaps that have no free windows)
+    const diagnostics = buildFeasibilityDiagnostics(this.data, now, horizonEnd);
+    const blockedDiagLines = diagnostics
+      .filter(d => d.blocker !== null && d.futureDirects > 0)
+      .map(d => {
+        const ct = tok(this.anonMap.clients, d.clientId, d.clientName);
+        return `${ct}: ${d.blocker}`;
+      });
+
     const strategies = allowedStrategies(options);
     const scrubbedConflicts = conflicts.map(c => scrubText(c, this.data, this.anonMap));
     const billableMin = u.bcbaWeeklyBillableMin ?? u.bcbaWeeklyBillableHours;
-    const billableRule = options.softenBillableMinimum
-      ? `BCBA weekly billable (${billableMin ?? 'n/a'}h) MAY be relaxed as a last resort — flag it in reasoning.`
-      : `Keep BCBA weekly billable ≥ ${billableMin ?? 'required'}h.`;
 
     const priorityLines = [
       options.prioritizeBtSupervision ? 'PRIORITY: Prefer adding BT supervision (named-BT direct + supervision overlap).' : '',
@@ -165,48 +188,59 @@ export class ClaudeScheduler {
 NOW: ${now.toISOString()}
 HORIZON: ${horizonEnd.toISOString().slice(0, 10)}
 
-GAPS TO CLOSE:
+FITNESS FUNCTION: Maximize (1) cases reaching the target supervision %, (2) techs hitting BACB 5% + company target, (3) BCBA billable ≈ ${billableMin ?? 'goal'}h/week. A 15-20% overage is acceptable as a cancellation buffer — DO NOT refuse to add sessions solely because they push billable slightly over the weekly goal.
+
+GAPS TO CLOSE (sorted most behind first):
 Case supervision (target ${s.supervisionDirectHoursPercent}% of direct hours):
-${clientGaps.length ? clientGaps.map(g => `  ${g}`).join('\n') : '  (none)'}
+${clientGaps.length ? clientGaps.map(g => `  ${g}`).join('\n') : '  (none — all cases at target)'}
 Tech supervision (company ${s.supervisionRBTHoursPercent}%; RBTs also need BACB ≥5%):
 ${techGaps.length ? techGaps.map(g => `  ${g}`).join('\n') : '  (none)'}
 ${scrubbedConflicts.length ? `\nEXISTING WARNINGS:\n${scrubbedConflicts.map(c => `  ${c}`).join('\n')}` : ''}
 
-ALLOWED STRATEGIES: ${strategies.length ? strategies.join(', ') : '(none — return one solution with empty ops explaining why)'}
+SUPERVISABLE WINDOWS — direct sessions where BCBA is available and not yet booked (add supervision here):
+${supWindowLines.length ? supWindowLines.join('\n') : '  (none in horizon — see BLOCKERS below)'}
+${blockedDiagLines.length ? `\nBLOCKERS (why BCBA cannot supervise these clients):\n${blockedDiagLines.map(l => `  ${l}`).join('\n')}` : ''}
+
+ALLOWED STRATEGIES: ${strategies.length ? strategies.join(', ') : '(none selected — return one solution with empty ops explaining why)'}
 ${priorityLines.length ? '\n' + priorityLines.join('\n') : ''}
 
-HARD RULES — check every op against ALL of these before outputting:
+HARD RULES — verify every op against ALL before outputting:
 1. Never touch any appointment whose start < NOW.
-2. Never double-book a person; respect all availability windows. The BCBA is not listed in CLIENTS/TECHNICIANS but is the implicit actor on EVERY supervision/parent-training/case-planning/reassessment item — new or already in SCHEDULE IN HORIZON. Two such items (any client/tech combination) must never overlap in time, since the same BCBA can't run both. Diff every new add/move against (a) the other ops in the same solution and (b) every existing supervision/parent-training/case-planning/reassessment row in the schedule.
-3. ${billableRule}
-4. Fewest/smallest additions that close the gap; do not over-serve above target.
+2. Never double-book a person. The BCBA is the implicit actor on EVERY supervision/parent-training/case-planning/reassessment item — new or already in SCHEDULE. No two such items may overlap in time. Diff new ops against (a) other ops in this solution and (b) every existing supervision/PT/case-planning/reassessment row.
+3. BCBA BILLABLE (soft target): Aim for ~${billableMin ?? 'goal'}h/week. Solutions MAY exceed this when needed to meet compliance — flag the overage in reasoning so the BCBA can decide what to trim. Do not voluntarily go below target without a clinical reason.
+4. MAXIMIZE compliance gaps aggressively. Add as many compliant sessions as needed across the horizon — the BCBA will manually trim overages. Prefer the SUPERVISABLE WINDOWS above; only look outside them if needed.
 5. "add" ops must NOT include an "id" field — the app assigns IDs.
 6. "add" recurring: output only the first occurrence; the app expands the series.
-7. Each of the 3 solutions must be genuinely distinct (different gaps targeted, different slots, or different op types).
+7. Each of the 3 solutions must be genuinely distinct (different clients prioritized, different weeks, different session types, or different slot distributions).
 
 SCHEDULE IN HORIZON (compact JSON):
 ${JSON.stringify(inScope)}
 
 CLIENTS: ${JSON.stringify(anon.clients)}
 TECHNICIANS: ${JSON.stringify(anon.technicians)}
-${anon.blackouts.length ? `BLACKOUT DAYS (each entry blocks only the named entity — other people on that date are unaffected): ${JSON.stringify(anon.blackouts)}` : ''}
-${anon.timeOff.length ? `BCBA TIME OFF (BCBA unavailable these days/hours): ${JSON.stringify(anon.timeOff)}` : ''}
+${anon.blackouts.length ? `BLACKOUT DAYS (each entry blocks only the named entity): ${JSON.stringify(anon.blackouts)}` : ''}
+${anon.timeOff.length ? `BCBA TIME OFF: ${JSON.stringify(anon.timeOff)}` : ''}
 
-VALIDATION (do mentally before answering): For every op verify — (a) start ≥ NOW; (b) no double-book of any tech or client; (b2) no two supervision/parent-training/case-planning/reassessment items (new ops AND existing schedule rows) overlap in time — the BCBA runs all of them and can only be in one at a time; (c) client/tech tokens exist in CLIENTS/TECHNICIANS; (d) apt tokens for move/remove exist in SCHEDULE; (e) proposed date+entity combination is not in BLACKOUT DAYS (each blackout only blocks its named entity, not the whole day); (f) BCBA not scheduled on TIME OFF dates; (g) skip any malformed token that looks like "CLIENT_nIENT_m" — those are corrupted and should be ignored.
+VALIDATION (do mentally before answering): For every op verify — (a) start ≥ NOW; (b) no double-book; (b2) no two BCBA items overlap; (c) tokens exist in CLIENTS/TECHNICIANS; (d) apt tokens exist in SCHEDULE; (e) entity not in BLACKOUT; (f) BCBA not in TIME OFF; (g) ignore malformed tokens like "CLIENT_nIENT_m".
 
-OUTPUT: Strict JSON only — no prose, no markdown. Exact schema (include only listed keys per op type):
+OUTPUT: Strict JSON only — no prose, no markdown. Schema:
 {"solutions":[{"summary":"short title","reasoning":"1-2 sentences","ops":[
   {"op":"add","title":"...","type":"supervision|parent-training|case-planning|client-session","client":"CLIENT_n or null","tech":"TECH_n or null","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss","recurring":false,"pattern":null},
   {"op":"move","apt":"APT_n","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss"},
   {"op":"remove","apt":"APT_n"}
 ]}]}
-ISO times are local (no timezone suffix). If no compliant option exists, return one solution with empty ops and reasoning explaining why.`;
+ISO times are local (no timezone suffix).
+
+NO-SOLUTION RULE: If no compliant option exists within ALLOWED STRATEGIES, return EXACTLY ONE solution with empty ops [] and a detailed "reasoning" that for EACH case in GAPS TO CLOSE specifies: (1) does it have supervisable windows? (2) is the BCBA available during those windows? (3) would a new supervision session create a double-book? (4) is the case already at or above target? Format as "CLIENT_n: [specific reason]" per case so the BCBA knows exactly what to fix.`;
   }
 
   buildWishPrompt(wish: WishRequest): string {
     const now = new Date();
-    const horizonWeeks = wish.horizonWeeks && wish.horizonWeeks > 0 ? wish.horizonWeeks : 8;
-    const horizonEnd = new Date(now.getTime() + horizonWeeks * 7 * 86400000);
+    // fillSchedule scopes to the compliance month; all other wishes use horizonWeeks.
+    const period = monthPeriod(now);
+    const horizonEnd = wish.kind === 'fillSchedule'
+      ? period.end
+      : new Date(now.getTime() + (wish.horizonWeeks && wish.horizonWeeks > 0 ? wish.horizonWeeks : 8) * 7 * 86400000);
     const anon = anonymizeSchedule(this.data, this.anonMap);
     const s = this.data.settings;
 
@@ -227,11 +261,12 @@ ISO times are local (no timezone suffix). If no compliant option exists, return 
       ? Object.entries(s.clinicianAvailability).map(([d, ws]) => `${d}: ${(ws as any[]).map(w => `${w.start}-${w.end}`).join(', ')}`).join('; ')
       : 'not specified';
 
-    // "Fill my Schedule" injects the local solver's facts (per-case utilization
-    // gaps + open direct windows), anonymized to tokens, so the model assembles +
-    // ranks 3 variants from real feasibility rather than guessing.
+    // Inject local solver context depending on the wish kind.
     let fillBlock = '';
-    if (wish.kind === 'fillSchedule') {
+
+    if (wish.kind === 'maximizeDirectHours') {
+      // Maximize BT direct-service utilization: compute per-case gaps + feasible
+      // windows for this week, then let the model assemble 3 variants.
       const weekStart = startOfWeek(now, { weekStartsOn: 1 });
       const ctx = buildFillContext(this.data, weekStart);
       const tok = (m: Map<string, string>, id: string, name: string) => m.get(id) || m.get(name) || name;
@@ -241,12 +276,57 @@ ISO times are local (no timezone suffix). If no compliant option exists, return 
         `${tok(this.anonMap.clients, w.clientId, w.clientName)} ${w.date}(${w.day.slice(0, 3)}) ${w.start}-${w.end} [${w.techs.map(t => tok(this.anonMap.technicians, t.id, t.name)).join(',')}]`);
       fillBlock = `
 
-FILL MY SCHEDULE — maximize DIRECT-service case utilization for the week of ${ctx.weekStart}. Bring each underserved case toward 100% of its weekly direct target by ADDING client-session (direct) ops inside the OPEN WINDOWS below, assigning one of the eligible techs listed for that window.
+MAXIMIZE DIRECT HOURS — fill each underserved case toward 100% of its weekly direct target for the week of ${ctx.weekStart} by ADDING client-session (direct) ops inside the OPEN WINDOWS below, assigning one of the eligible techs listed for that window.
 - Do NOT move or remove anything on the BCBA's own schedule (supervision / parent-training / case-planning / reassessment). You MAY ADD supervision when it helps a case meet its supervision %. You MAY ADD parent-training ONLY within the time span of an already-scheduled or newly-added session — never as a standalone window.
 - Stay strictly inside each open window; only assign a tech listed as eligible for that window; never double-book a tech or client.
 UNDERSERVED CASES (token: target, scheduled, gap): ${cases.join(' | ') || 'none'}
 OPEN DIRECT WINDOWS (token date(day) start-end [eligible techs]): ${windows.join(' | ') || 'none'}
 The 3 solutions should differ in how they trade techs/slots while maximizing total filled direct hours.`;
+
+    } else if (wish.kind === 'fillSchedule') {
+      // BCBA fills own calendar with supervision + PT within existing direct
+      // sessions to bring cases toward ideal compliance range for the month.
+      const ctx = buildComplianceFillContext(this.data, period, now);
+      const tok = (m: Map<string, string>, id: string, name: string) => m.get(id) || m.get(name) || name;
+      const aptTok = (id: string) => this.anonMap.appointments.get(id) || id;
+
+      if (ctx.cases.length === 0) {
+        fillBlock = `\nFILL MY SCHEDULE OUT — all cases are already at or above the ideal supervision range (${ctx.idealMinPct}%–${ctx.idealMaxPct}%) for ${ctx.periodLabel}. No supervision gaps to fill this month.`;
+      } else {
+        const caseLines = ctx.cases.map(c => {
+          const clientTok = tok(this.anonMap.clients, c.clientId, c.clientName);
+          return `${clientTok}: ${c.supPct}% supervision (${c.supHrs}h / ${c.directHrs}h direct), need +${c.gapToIdealHrs}h → ${ctx.idealMinPct}% ideal (cap ${c.idealMaxHrs}h = ${ctx.idealMaxPct}%)`;
+        });
+        const windowLines = ctx.directWindows.map(w => {
+          const clientTok = tok(this.anonMap.clients, w.clientId, w.clientName);
+          const techPart  = w.techName ? ` [${tok(this.anonMap.technicians, w.techId || '', w.techName)}]` : '';
+          return `${clientTok} ${aptTok(w.appointmentId)} ${w.start.slice(0, 16).replace('T', ' ')}–${w.end.slice(11, 16)}${techPart}`;
+        });
+
+        fillBlock = `
+
+FILL MY SCHEDULE OUT — add supervision and parent-training to bring each case toward the ideal supervision range (${ctx.idealMinPct}%–${ctx.idealMaxPct}% of direct hours) for ${ctx.periodLabel}.
+
+FITNESS FUNCTION: Maximize cases reaching the ideal range. A 15-20% buffer above the ideal max (e.g. up to ~${(ctx.idealMaxPct * 1.18).toFixed(0)}%) is acceptable as a cancellation buffer — solutions that slightly exceed the ideal cap are preferred over leaving gaps. The BCBA will manually trim overages if needed.
+
+RULES FOR THIS WISH:
+- Only ADD new sessions. Do NOT move or remove any existing session.
+- Supervision: place within an existing direct session's time window for the same client, naming that BT in the tech field — overlap is required for compliance credit.
+- Parent Training: must fall within the time span of an existing direct session for the same client. Never add PT as a standalone window outside a direct session — it earns no credit and violates clinical rules.
+- Aim for the ideal cap per case but do NOT refuse to add sessions just because the cap would be slightly exceeded. Soft cap — flag overages in reasoning.
+- Never double-book the BCBA against existing supervision/PT/case-planning/reassessment in the schedule.
+- Stay within BCBA availability.
+
+UNDERSERVED CASES (token: sup%, gap to ideal, soft cap):
+${caseLines.join('\n')}
+
+FUTURE DIRECT SESSIONS — valid windows for supervision or PT (token: apt date start–end [BT]):
+${windowLines.length ? windowLines.join('\n') : '(none remaining this month — gaps can only be addressed in future months)'}
+
+The 3 solutions should differ in which sessions they prioritize and how they balance supervision vs parent-training.
+
+NO-SOLUTION RULE: If no sessions can be placed (e.g. all windows are BCBA-blocked), return one solution with empty ops [] and detailed reasoning per case: which clients have windows, which are blocked, and WHY (BCBA conflict, outside availability, no future sessions).`;
+      }
     }
 
     return `You are an ABA scheduler helping a BCBA reshape their schedule toward a goal. All people are opaque tokens — use exact tokens, never invent names.

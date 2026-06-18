@@ -171,15 +171,19 @@ export default function Settings({ settings, onSave, onClose, onClearKey, onRequ
             >
               Change PIN
             </button>
-            {lock.faceIdAvailable && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={lock.faceIdEnabled}
-                  onChange={(e) => lock.onToggleFaceId(e.target.checked)}
-                />
-                <span style={{ fontSize: '13px' }}>Unlock with {lock.biometryLabel || 'Face ID'}</span>
-              </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', cursor: lock.faceIdAvailable ? 'pointer' : 'default', opacity: lock.faceIdAvailable ? 1 : 0.5 }}>
+              <input
+                type="checkbox"
+                checked={lock.faceIdEnabled}
+                disabled={!lock.faceIdAvailable}
+                onChange={(e) => lock.onToggleFaceId(e.target.checked)}
+              />
+              <span style={{ fontSize: '13px' }}>Unlock with {lock.biometryLabel || 'Face ID'}</span>
+            </label>
+            {!lock.faceIdAvailable && (
+              <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px', lineHeight: 1.4 }}>
+                Not available. Go to iOS Settings → Privacy &amp; Security → Face ID &amp; Passcode and enable this app, then return here.
+              </p>
             )}
           </div>
         )}

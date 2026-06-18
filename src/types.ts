@@ -452,9 +452,7 @@ export type PtoBucket = 'sick' | 'vacation' | 'combined' | 'unpaid';
 // time and reports a remaining balance. Anyone whose real accrual rule isn't yet
 // supported can stay on 'unlimited' and still use time off.
 
-// How a rule grants hours. Phase 1 computes the two date-based kinds; the
-// hours-based kinds are defined for forward-compat and reported as deferred until
-// Phase 2 (so a saved rule round-trips and is visible, but doesn't yet accrue).
+// How a rule grants hours. All four kinds are computed by the engine.
 export type AccrualKind =
   | 'semimonthly'        // fixed hours on the 1st and the 15th of every month
   | 'everyNWeeks'        // fixed hours every N weeks, on a given weekday, from an anchor date
@@ -486,6 +484,7 @@ export interface AccrualRule {
   bonusPerExtraHours?: number;        // Y' — converted hours/interval to be at criterion ('hours')
   bonusPercentAboveGoal?: number;     // e.g. 5 → converted >= goal*1.05 ('percentAboveGoal')
   enabled?: boolean;       // default true; lets a rule be parked without deleting
+  waitingPeriodDays?: number; // grace period: no accrual for first N days after opening-balance date
 }
 
 // A starting balance for a bucket as of a date — accrual is summed forward from
@@ -504,6 +503,7 @@ export interface PtoConfig {
   unpaidEnabled?: boolean;         // expose a distinct 'unpaid' pool. Default false.
   accruals?: AccrualRule[];        // used only in 'accrual' mode
   openingBalances?: PtoOpeningBalance[];
+  maxBalances?: Partial<Record<PtoBucket, number>>; // per-bucket cap: opening + accrued never exceeds this
 }
 
 export const DEFAULT_PTO_CONFIG: PtoConfig = { mode: 'unlimited', buckets: 'combined' };
@@ -601,12 +601,13 @@ export interface ScheduleSolution {
 // that's STRUCTURED — the kind + fields below capture the details the model needs
 // so the prompt stays compact (fewer tokens) and the parse is reliable.
 export type WishKind =
-  | 'vacation'      // block off a date range (reschedule my sessions out of it)
-  | 'clearWindow'   // free up a recurring weekday/time window, going forward
-  | 'addRecurring'  // add a recurring session into a tight schedule
-  | 'shaveDown'     // trim over-served supervision to free capacity
-  | 'fillSchedule'  // maximize direct-service case utilization toward 100%
-  | 'freeform';     // anything else, described in the note
+  | 'vacation'            // block off a date range (reschedule my sessions out of it)
+  | 'clearWindow'         // free up a recurring weekday/time window, going forward
+  | 'addRecurring'        // add a recurring session into a tight schedule
+  | 'shaveDown'           // trim over-served supervision to free capacity
+  | 'fillSchedule'        // BCBA fills own calendar with sup+PT within direct windows → ideal compliance
+  | 'maximizeDirectHours' // fill BT direct-service hours toward authorization targets (week-based)
+  | 'freeform';           // anything else, described in the note
 
 export interface WishRequest {
   kind: WishKind;
@@ -690,4 +691,6 @@ export interface WishSolution {
   summary: string;
   reasoning: string;
   ops: WishOp[];
+  // Model returned empty ops with reasoning — no action possible, but reason explains why.
+  diagnostic?: boolean;
 }

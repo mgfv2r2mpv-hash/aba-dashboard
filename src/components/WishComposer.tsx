@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ScheduleData, WishRequest, WishKind, WishSolution, WishOp, DayOfWeek, Appointment } from '../types';
 import { AISettings } from './Settings';
-import { ClaudeScheduler } from '../claudeScheduler';
+import { ClaudeScheduler, ClaudeApiError } from '../claudeScheduler';
 import { summarizeWish, wishSolutionToDraft, computeSolutionImpact } from '../wish';
 import ImpactSummary from './ImpactSummary';
 import TrimPanel from './TrimPanel';
@@ -83,7 +83,11 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
       const sols = await scheduler.generateWishSolutions(wish);
       setSolutions(sols);
     } catch (e: any) {
-      setError(e?.message || String(e));
+      if (e instanceof ClaudeApiError) {
+        setError(e.message);
+      } else {
+        setError('Unexpected error: ' + (e?.message || String(e)));
+      }
     } finally {
       setLoading(false);
     }
@@ -211,10 +215,19 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
         {/* Options */}
         {solutions && (
           <div style={{ marginTop: 16 }}>
-            {solutions.every(s => s.ops.length === 0) ? (
+            {solutions.length === 0 ? (
+              <div style={{ border: '1px solid #fca5a5', background: '#fef2f2', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#b91c1c', marginBottom: 4 }}>
+                  Claude responded but returned no options
+                </div>
+                <div style={{ fontSize: 12, color: '#7f1d1d' }}>
+                  The model reply could not be parsed into schedule changes. Try regenerating or copy the prompt to inspect it.
+                </div>
+              </div>
+            ) : solutions.every(s => s.diagnostic) ? (
               <div style={{ border: '1px solid #c4b5fd', background: '#f5f3ff', borderRadius: 8, padding: 12 }}>
                 <div style={{ fontWeight: 700, fontSize: 13, color: '#5b21b6', marginBottom: 4 }}>
-                  No sessions could be placed
+                  Claude's analysis — no changes possible
                 </div>
                 {solutions[0]?.reasoning && (
                   <div style={{ fontSize: 12, color: '#4c1d95', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
@@ -222,7 +235,7 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
                   </div>
                 )}
                 <div style={{ fontSize: 11, color: '#7c3aed', marginTop: 8 }}>
-                  Try a different wish type or check BCBA availability in Settings.
+                  This is the AI's explanation — not an app error. Try a different wish type or adjust BCBA availability in Settings.
                 </div>
               </div>
             ) : (

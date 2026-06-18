@@ -21,6 +21,21 @@ export type ClaudeModel = 'claude-opus-4-8' | 'claude-sonnet-4-6' | 'claude-haik
 
 export const DEFAULT_MODEL: ClaudeModel = 'claude-sonnet-4-6';
 
+export type ClaudeErrorKind =
+  | 'auth'         // 401 — bad API key
+  | 'rate_limit'   // 429 — too many requests
+  | 'api_error'    // 5xx — Claude server error
+  | 'network'      // no connectivity / fetch failed
+  | 'no_solutions' // API responded but model returned no ops and no reasoning
+  | 'anonymization'; // PII safety check failed before sending
+
+export class ClaudeApiError extends Error {
+  constructor(public readonly kind: ClaudeErrorKind, message: string) {
+    super(message);
+    this.name = 'ClaudeApiError';
+  }
+}
+
 export class ClaudeScheduler {
   private client: Anthropic;
   private data: ScheduleData;
@@ -48,27 +63,11 @@ export class ClaudeScheduler {
     // SAFETY ASSERTION: prompt should not contain any client/tech original names.
     // If it does, the anonymizer has a bug — don't send the request.
     if (this.containsRawNames(prompt)) {
-      throw new Error('Anonymization check failed: prompt would leak PII. Aborting Claude call.');
+      throw new ClaudeApiError('anonymization', 'Anonymization check failed: prompt would leak PII. Aborting Claude call.');
     }
 
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: 2000,
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-    });
-
-    const content = response.content[0];
-    if (!content || content.type !== 'text') {
-      return [];
-    }
-
-    // De-anonymize tokens in the reply before parsing structured fields.
-    const deanon = deAnonymizeText(content.text, this.anonMap);
+    const text = await this.callApi(prompt, 2000);
+    const deanon = deAnonymizeText(text, this.anonMap);
     return this.parseSolutions(deanon, changedAppointment);
   }
 
@@ -77,18 +76,10 @@ export class ClaudeScheduler {
   async generateWishSolutions(wish: WishRequest): Promise<WishSolution[]> {
     const prompt = this.buildWishPrompt(wish);
     if (this.containsRawNames(prompt)) {
-      throw new Error('Anonymization check failed: prompt would leak PII. Aborting Claude call.');
+      throw new ClaudeApiError('anonymization', 'Anonymization check failed: prompt would leak PII. Aborting Claude call.');
     }
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: 3000,
-      messages: [{ role: 'user', content: prompt }],
-    });
-    const content = response.content[0];
-    if (!content || content.type !== 'text') return [];
-    // Parse tokens out of the JSON via the reverse map (don't string-replace the
-    // whole reply — that would corrupt ISO timestamps that contain digits).
-    return parseWishSolutions(content.text, token => this.anonMap.reverse.get(token));
+    const text = await this.callApi(prompt, 3000);
+    return parseWishSolutions(text, token => this.anonMap.reverse.get(token));
   }
 
   // "Fix It": compliance remediation. Hands the model the under-target cases and
@@ -97,16 +88,10 @@ export class ClaudeScheduler {
   async generateFixSolutions(options: FixItOptions, conflicts: string[]): Promise<WishSolution[]> {
     const prompt = this.buildFixItPrompt(options, conflicts);
     if (this.containsRawNames(prompt)) {
-      throw new Error('Anonymization check failed: prompt would leak PII. Aborting Claude call.');
+      throw new ClaudeApiError('anonymization', 'Anonymization check failed: prompt would leak PII. Aborting Claude call.');
     }
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: 3000,
-      messages: [{ role: 'user', content: prompt }],
-    });
-    const content = response.content[0];
-    if (!content || content.type !== 'text') return [];
-    return parseWishSolutions(content.text, token => this.anonMap.reverse.get(token));
+    const text = await this.callApi(prompt, 3000);
+    return parseWishSolutions(text, token => this.anonMap.reverse.get(token));
   }
 
   buildFixItPrompt(options: FixItOptions, conflicts: string[]): string {
@@ -310,11 +295,12 @@ FILL MY SCHEDULE OUT — add supervision and parent-training to bring each case 
 FITNESS FUNCTION: Maximize cases reaching the ideal range. A 15-20% buffer above the ideal max (e.g. up to ~${(ctx.idealMaxPct * 1.18).toFixed(0)}%) is acceptable as a cancellation buffer — solutions that slightly exceed the ideal cap are preferred over leaving gaps. The BCBA will manually trim overages if needed.
 
 RULES FOR THIS WISH:
-- Only ADD new sessions. Do NOT move or remove any existing session.
-- Supervision: place within an existing direct session's time window for the same client, naming that BT in the tech field — overlap is required for compliance credit.
-- Parent Training: must fall within the time span of an existing direct session for the same client. Never add PT as a standalone window outside a direct session — it earns no credit and violates clinical rules.
+- Prefer ADDing new sessions. You may also MOVE existing supervision or parent-training sessions to better-fitting direct-session windows (see below). Do NOT move or remove direct sessions, case-planning, or reassessment appointments.
+- Supervision: must overlap a direct session for the same client. Naming the BT in the tech field is required for compliance credit. You may move an existing supervision session to a different direct-session window for the same client if that improves coverage.
+- Parent Training: must fall within the time span of a direct session for the same client. Never place PT outside a direct session window — it earns no credit and violates clinical rules. You may move an existing PT session to a different direct-session window for the same client if that improves coverage.
+- AVAILABLE BLOCK = any time slot in FUTURE DIRECT SESSIONS below. A scheduled direct session at that time means the BCBA may join for supervision or PT.
 - Aim for the ideal cap per case but do NOT refuse to add sessions just because the cap would be slightly exceeded. Soft cap — flag overages in reasoning.
-- Never double-book the BCBA against existing supervision/PT/case-planning/reassessment in the schedule.
+- Never double-book the BCBA against existing supervision/PT/case-planning/reassessment in the schedule. When moving a supervision or PT, the vacated slot no longer counts as a BCBA conflict.
 - Stay within BCBA availability.
 
 UNDERSERVED CASES (token: sup%, gap to ideal, soft cap):
@@ -426,6 +412,33 @@ Single-week: <yes|no>
     `;
   }
 
+  // Central API call wrapper — classifies Anthropic SDK errors into user-facing kinds.
+  private async callApi(prompt: string, maxTokens: number): Promise<string> {
+    try {
+      const response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: maxTokens,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const content = response.content[0];
+      if (!content || content.type !== 'text') {
+        throw new ClaudeApiError('no_solutions', 'Claude returned an unexpected response format. The model may have hit a content filter.');
+      }
+      return content.text;
+    } catch (err: any) {
+      if (err instanceof ClaudeApiError) throw err;
+      const status: number | undefined = err?.status ?? err?.error?.status;
+      if (status === 401) throw new ClaudeApiError('auth', 'Invalid API key. Check your Claude API key in Admin → Settings.');
+      if (status === 429) throw new ClaudeApiError('rate_limit', 'Rate limit reached. Wait a moment and try again, or switch to a smaller model in Settings.');
+      if (status && status >= 500) throw new ClaudeApiError('api_error', `Claude API server error (${status}). Try again in a few seconds.`);
+      const msg: string = err?.message ?? String(err);
+      if (msg.includes('fetch') || msg.includes('network') || err?.name === 'APIConnectionError') {
+        throw new ClaudeApiError('network', 'Could not reach the Claude API. Check your internet connection and try again.');
+      }
+      throw err;
+    }
+  }
+
   private containsRawNames(prompt: string): boolean {
     // Whole-word match only — a plain substring check false-positives whenever
     // a client/tech name (ABA practices commonly use 2-letter initials, e.g.
@@ -497,6 +510,220 @@ Single-week: <yes|no>
     });
 
     return solutions.slice(0, 3);
+  }
+
+  // "Move This" — minimal same-week placement for a canceled/incomplete appointment.
+  async generateMoveThisSolutions(apt: Appointment, now: Date = new Date()): Promise<WishSolution[]> {
+    const prompt = this.buildMoveThisPrompt(apt, now);
+    if (this.containsRawNames(prompt)) {
+      throw new ClaudeApiError('anonymization', 'Anonymization check failed: prompt would leak PII. Aborting Claude call.');
+    }
+    const text = await this.callApi(prompt, 2000);
+    const deanon = deAnonymizeText(text, this.anonMap);
+    return parseWishSolutions(deanon, t => this.anonMap.reverse.get(t));
+  }
+
+  // "Replace This" — fill the empty slot + work original in elsewhere.
+  async generateReplaceThisSolutions(apt: Appointment, now: Date = new Date()): Promise<WishSolution[]> {
+    const prompt = this.buildReplaceThisPrompt(apt, now);
+    if (this.containsRawNames(prompt)) {
+      throw new ClaudeApiError('anonymization', 'Anonymization check failed: prompt would leak PII. Aborting Claude call.');
+    }
+    const text = await this.callApi(prompt, 2000);
+    const deanon = deAnonymizeText(text, this.anonMap);
+    return parseWishSolutions(deanon, t => this.anonMap.reverse.get(t));
+  }
+
+  // "Cancel Recovery" — find a replacement after a cancellation, swap-first.
+  async generateCancelRecoverySolutions(apt: Appointment, now: Date = new Date()): Promise<WishSolution[]> {
+    const prompt = this.buildCancelRecoveryPrompt(apt, now);
+    if (this.containsRawNames(prompt)) {
+      throw new ClaudeApiError('anonymization', 'Anonymization check failed: prompt would leak PII. Aborting Claude call.');
+    }
+    const text = await this.callApi(prompt, 2000);
+    const deanon = deAnonymizeText(text, this.anonMap);
+    return parseWishSolutions(deanon, t => this.anonMap.reverse.get(t));
+  }
+
+  private buildMoveThisPrompt(apt: Appointment, now: Date): string {
+    const anonApt = anonymizeAppointment(apt, this.anonMap);
+    const anon = anonymizeSchedule(this.data, this.anonMap);
+    const s = this.data.settings;
+
+    const aptDate = new Date(apt.startTime);
+    const weekStart = startOfWeek(aptDate, { weekStartsOn: 0 });
+    const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
+    const weekEndStr = weekEnd.toISOString().slice(0, 10);
+
+    const weekAppts = anon.appointments
+      .filter((a: any) => {
+        const t = new Date(a.startTime).getTime();
+        return t >= weekStart.getTime() && t < weekEnd.getTime() && a.id !== anonApt.id;
+      })
+      .map((a: any) => ({
+        id: a.id, tech: a.technician || undefined, client: a.client || undefined,
+        start: a.startTime, end: a.endTime, type: a.type, fixed: a.isFixed || undefined,
+      }));
+
+    const clinicianAvail = s.clinicianAvailability
+      ? Object.entries(s.clinicianAvailability).map(([d, ws]) => `${d}: ${(ws as any[]).map(w => `${w.start}-${w.end}`).join(', ')}`).join('; ')
+      : 'not specified';
+
+    return `You are an ABA scheduler. A ${apt.status === 'canceled' ? 'canceled' : 'incomplete'} appointment needs to be worked back into the same week with minimal disruption.
+
+NOW: ${now.toISOString()}
+WEEK: ${weekStart.toISOString().slice(0, 10)} → ${weekEndStr}
+
+TARGET APPOINTMENT (place this back in the week):
+${JSON.stringify({ id: anonApt.id, tech: anonApt.technician || null, client: anonApt.client || null, start: anonApt.startTime, end: anonApt.endTime, type: anonApt.type })}
+
+HARD RULES:
+1. Never place any appointment before NOW (${now.toISOString()}).
+2. All proposed times must fall within the WEEK range above.
+3. Never double-book any technician or client.
+4. Never move a fixed appointment.
+5. Compliance must maintain or improve — do not displace a supervision session that is currently earning compliance credit unless an equivalent window remains.
+6. Minimize total changes — prefer a direct re-slot of the target over cascading moves.
+7. "add" ops must NOT include an "id" field.
+8. Propose up to 3 genuinely distinct options (different days, times, or approaches).
+
+SUPERVISION: ${s.supervisionDirectHoursPercent}% of direct hours; ${s.supervisionRBTHoursPercent}% of RBT hours.
+BCBA availability: ${clinicianAvail}
+
+WEEK SCHEDULE (all appointments this week except target, compact JSON):
+${JSON.stringify(weekAppts)}
+
+CLIENTS: ${JSON.stringify(anon.clients)}
+TECHNICIANS: ${JSON.stringify(anon.technicians)}
+${anon.blackouts.length ? `BLACKOUT DAYS: ${JSON.stringify(anon.blackouts)}` : ''}
+
+VALIDATION: verify each op — (a) start ≥ NOW; (b) no double-book; (c) within week; (d) tokens exist; (e) no fixed violations.
+
+OUTPUT: Strict JSON only — no prose, no markdown. Schema:
+{"solutions":[{"summary":"short title","reasoning":"1-2 sentences","ops":[
+  {"op":"move","apt":"APT_n","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss"},
+  {"op":"add","title":"...","type":"supervision|parent-training|case-planning|client-session","client":"CLIENT_n or null","tech":"TECH_n or null","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss","recurring":false,"pattern":null}
+]}]}
+ISO times are local (no timezone suffix). If no in-week option exists, return one solution with empty ops and reasoning.`;
+  }
+
+  private buildReplaceThisPrompt(apt: Appointment, now: Date): string {
+    const anonApt = anonymizeAppointment(apt, this.anonMap);
+    const anon = anonymizeSchedule(this.data, this.anonMap);
+    const s = this.data.settings;
+
+    const aptDate = new Date(apt.startTime);
+    const weekStart = startOfWeek(aptDate, { weekStartsOn: 0 });
+    const nextWeekEnd = new Date(weekStart.getTime() + 14 * 86400000);
+
+    const inScope = anon.appointments
+      .filter((a: any) => {
+        const t = new Date(a.startTime).getTime();
+        return t >= now.getTime() && t < nextWeekEnd.getTime() && a.id !== anonApt.id;
+      })
+      .map((a: any) => ({
+        id: a.id, tech: a.technician || undefined, client: a.client || undefined,
+        start: a.startTime, end: a.endTime, type: a.type, fixed: a.isFixed || undefined,
+      }));
+
+    return `You are an ABA scheduler. An appointment left an empty slot. Find what fills the slot AND where the original appointment goes.
+
+NOW: ${now.toISOString()}
+EMPTY SLOT: ${anonApt.startTime} → ${anonApt.endTime}
+ORIGINAL APPOINTMENT (needs placement elsewhere this week or next):
+${JSON.stringify({ id: anonApt.id, tech: anonApt.technician || null, client: anonApt.client || null, type: anonApt.type })}
+
+GOAL (two parts per solution):
+1. Fill the slot (${anonApt.startTime}–${anonApt.endTime}) — move an existing appointment into it OR add a new session if it helps compliance.
+2. Work the original appointment in — later this week (preferred) or next week.
+
+HARD RULES:
+1. Never place any appointment before NOW.
+2. Never double-book any technician or client.
+3. Never move a fixed appointment.
+4. Compliance must not worsen — do not displace a compliant supervision session unless it can be moved to an equivalent direct-service window.
+5. The slot replacement should be the same session type family (direct → direct; supervision → supervision) unless clinical reasoning clearly justifies crossing types.
+6. Propose up to 3 genuinely distinct options.
+
+SUPERVISION: ${s.supervisionDirectHoursPercent}% of direct hours; ${s.supervisionRBTHoursPercent}% of RBT hours.
+
+SCHEDULE (this week + next week, compact JSON):
+${JSON.stringify(inScope)}
+
+CLIENTS: ${JSON.stringify(anon.clients)}
+TECHNICIANS: ${JSON.stringify(anon.technicians)}
+${anon.blackouts.length ? `BLACKOUT DAYS: ${JSON.stringify(anon.blackouts)}` : ''}
+
+OUTPUT: Strict JSON only. Schema:
+{"solutions":[{"summary":"short title","reasoning":"1-2 sentences","ops":[
+  {"op":"move","apt":"APT_n","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss"},
+  {"op":"add","title":"...","type":"supervision|parent-training|case-planning|client-session","client":"CLIENT_n or null","tech":"TECH_n or null","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss","recurring":false,"pattern":null},
+  {"op":"remove","apt":"APT_n"}
+]}]}
+ISO times are local. If no solution exists, return one empty-ops solution with reasoning.`;
+  }
+
+  private buildCancelRecoveryPrompt(apt: Appointment, now: Date): string {
+    const anonApt = anonymizeAppointment(apt, this.anonMap);
+    const anon = anonymizeSchedule(this.data, this.anonMap);
+    const s = this.data.settings;
+
+    const aptDate = new Date(apt.startTime);
+    const endOfMonth = new Date(aptDate.getFullYear(), aptDate.getMonth() + 1, 0, 23, 59, 59);
+    const horizon = endOfMonth.getTime() > now.getTime() + 14 * 86400000
+      ? endOfMonth
+      : new Date(now.getTime() + 14 * 86400000);
+
+    const inScope = anon.appointments
+      .filter((a: any) => {
+        const t = new Date(a.startTime).getTime();
+        return t >= now.getTime() && t <= horizon.getTime() && a.id !== anonApt.id;
+      })
+      .map((a: any) => ({
+        id: a.id, tech: a.technician || undefined, client: a.client || undefined,
+        start: a.startTime, end: a.endTime, type: a.type, fixed: a.isFixed || undefined,
+      }));
+
+    return `You are an ABA scheduler. An appointment was just canceled. Find the best recovery to maintain service and compliance.
+
+NOW: ${now.toISOString()}
+CANCELED APPOINTMENT:
+${JSON.stringify({ id: anonApt.id, tech: anonApt.technician || null, client: anonApt.client || null, start: anonApt.startTime, end: anonApt.endTime, type: anonApt.type })}
+
+RECOVERY STRATEGY (prefer in order):
+1. SWAP: move a future-week session into this week's gap; reschedule the displaced session later — keeps both weeks balanced.
+2. MODIFIED SWAP: as above but shorten or split one session if needed to fit.
+3. BRING IN: add a new session within this week to replace the lost hours.
+
+COMPLIANCE GUARD — CRITICAL:
+- NEVER push a case/tech that is "on track" into "behind".
+- NEVER push an already-"behind" case/tech further behind.
+- MAY move toward "at risk" if unavoidable — flag clearly in reasoning with before/after.
+
+HARD RULES:
+1. Never place any appointment before NOW.
+2. Never double-book any technician or client.
+3. Never move a fixed appointment.
+4. Propose up to 3 genuinely distinct recovery options.
+
+SUPERVISION: ${s.supervisionDirectHoursPercent}% of direct hours; ${s.supervisionRBTHoursPercent}% of RBT hours.
+HORIZON: Through ${horizon.toISOString().slice(0, 10)}
+
+SCHEDULE (compact JSON):
+${JSON.stringify(inScope)}
+
+CLIENTS: ${JSON.stringify(anon.clients)}
+TECHNICIANS: ${JSON.stringify(anon.technicians)}
+${anon.blackouts.length ? `BLACKOUT DAYS: ${JSON.stringify(anon.blackouts)}` : ''}
+${anon.timeOff.length ? `BCBA TIME OFF: ${JSON.stringify(anon.timeOff)}` : ''}
+
+OUTPUT: Strict JSON only. Schema:
+{"solutions":[{"summary":"short title","reasoning":"1-2 sentences (include compliance impact if any)","ops":[
+  {"op":"move","apt":"APT_n","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss"},
+  {"op":"add","title":"...","type":"supervision|parent-training|case-planning|client-session","client":"CLIENT_n or null","tech":"TECH_n or null","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss","recurring":false,"pattern":null},
+  {"op":"remove","apt":"APT_n"}
+]}]}
+ISO times are local. If no recovery exists, return one empty-ops solution with detailed reasoning.`;
   }
 
   private getEndOfMonth(isoDate: string): string {

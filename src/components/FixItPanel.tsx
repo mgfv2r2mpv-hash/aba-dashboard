@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { ScheduleData, ScheduleConflict, WishSolution, WishOp, FixItOptions, DEFAULT_FIXIT_OPTIONS } from '../types';
 import { AISettings } from './Settings';
-import { ClaudeScheduler } from '../claudeScheduler';
+import { ClaudeScheduler, ClaudeApiError } from '../claudeScheduler';
 import { summarizeFixIt } from '../fixit';
 import { wishSolutionToDraft, computeSolutionImpact } from '../wish';
 import ImpactSummary from './ImpactSummary';
@@ -85,7 +85,11 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
       setSolutions(sols);
       setObjecting(false); setObjection('');
     } catch (e: any) {
-      setError(e?.message || String(e));
+      if (e instanceof ClaudeApiError) {
+        setError(e.message);
+      } else {
+        setError('Unexpected error: ' + (e?.message || String(e)));
+      }
     } finally {
       setLoading(false);
     }
@@ -223,11 +227,19 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
           {/* Solutions */}
           {solutions && (
             <div style={{ marginTop: 8 }}>
-              {/* If every solution is empty (no-solution diagnostic), show a clear explanation */}
-              {solutions.every(s => s.ops.length === 0) ? (
+              {solutions.length === 0 ? (
                 <div style={{ border: '1px solid #fca5a5', background: '#fef2f2', borderRadius: 8, padding: 12, marginBottom: 8 }}>
                   <div style={{ fontWeight: 700, fontSize: 13, color: '#991b1b', marginBottom: 4 }}>
-                    No sessions could be placed within your selected strategies
+                    Claude responded but returned no options
+                  </div>
+                  <div style={{ fontSize: 12, color: '#7f1d1d' }}>
+                    The model reply could not be parsed. Try regenerating or copy the prompt to inspect it.
+                  </div>
+                </div>
+              ) : solutions.every(s => s.diagnostic) ? (
+                <div style={{ border: '1px solid #fca5a5', background: '#fef2f2', borderRadius: 8, padding: 12, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: '#991b1b', marginBottom: 4 }}>
+                    Claude's analysis — no sessions could be placed
                   </div>
                   {solutions[0]?.reasoning && (
                     <div style={{ fontSize: 12, color: '#7f1d1d', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
@@ -235,7 +247,7 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
                     </div>
                   )}
                   <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 8 }}>
-                    Try enabling more strategies, extending the horizon, or reviewing BCBA availability in Settings.
+                    This is the AI's explanation — not an app error. Try enabling more strategies, extending the horizon, or reviewing BCBA availability in Settings.
                   </div>
                 </div>
               ) : (

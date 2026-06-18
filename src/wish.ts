@@ -38,7 +38,10 @@ export function summarizeWish(w: WishRequest): string {
       base = `Trim over-served supervision sessions toward the compliance minimum${horizon} to free up capacity, without dropping below required floors.`;
       break;
     case 'fillSchedule':
-      base = `Fill my schedule out: maximize each case's DIRECT-service utilization toward 100% this week using the open windows, suggest supervision where it helps, and parent training only within scheduled sessions. Do not change my (BCBA) own schedule.`;
+      base = `Fill my schedule out: add supervision and parent-training sessions within each case's existing direct-service windows to bring cases toward the ideal compliance range this month. Parent training only inside an already-scheduled direct session — no standalone PT. Do not move or remove existing sessions.`;
+      break;
+    case 'maximizeDirectHours':
+      base = `Maximize direct hours across cases: fill each case's authorized direct-service hours toward 100% this week using open windows, respecting each tech's and client's availability. Do not change my (BCBA) own schedule.`;
       break;
     case 'freeform':
     default:
@@ -107,13 +110,16 @@ export function parseWishSolutions(text: string, reverse: (token: string) => str
         }
       }
     }
-    if (ops.length === 0) continue;
-    out.push({
+    const reasoning = rs?.reasoning ? String(rs.reasoning) : '';
+    if (ops.length === 0 && !reasoning) continue;
+    const sol: WishSolution = {
       id: uuidv4(),
-      summary: rs?.summary ? String(rs.summary) : 'Proposed change',
-      reasoning: rs?.reasoning ? String(rs.reasoning) : '',
+      summary: rs?.summary ? String(rs.summary) : ops.length === 0 ? 'No changes possible' : 'Proposed change',
+      reasoning,
       ops,
-    });
+    };
+    if (ops.length === 0) sol.diagnostic = true;
+    out.push(sol);
   }
   return out.slice(0, 3);
 }

@@ -158,12 +158,12 @@ export default function Calendar({
   );
 
   return (
-    <div style={{ padding: 'clamp(8px, 3vw, 24px)', maxWidth: '100%', boxSizing: 'border-box' }}>
+    <div style={{ padding: 'clamp(8px, 3vw, 24px)', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         marginBottom: 16, gap: 8, flexWrap: 'wrap',
       }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'nowrap' }}>
           {onAddAppointment && (
             <button
               onClick={onAddAppointment}
@@ -341,7 +341,7 @@ function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelec
   useEffect(() => { setExpandedRows(new Set()); }, [monthKey]);
 
   return (
-      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as any, border: '1px solid #e5e7eb', borderRadius: 6 }}>
+      <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' as any, border: '1px solid #e5e7eb', borderRadius: 6 }}>
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 1,
           backgroundColor: '#e5e7eb', marginBottom: 1, minWidth: colMin * 7,
@@ -777,7 +777,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
   };
 
   return (
-    <div ref={zoomRef} style={{ overflowX: 'auto', touchAction: 'pan-x pan-y' }}>
+    <div ref={zoomRef} style={{ width: '100%', overflowX: 'auto', touchAction: 'pan-x pan-y' }}>
       {zoomed && <ZoomResetPill scale={zoom} onReset={resetZoom} />}
       {/* Day header */}
       <div style={{ display: 'flex', minWidth, borderBottom: '1px solid #e5e7eb' }}>
@@ -1224,10 +1224,11 @@ function formatHourLabel(h: number): string {
 function ViewBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button onClick={onClick} style={{
-      padding: '6px 14px', border: 'none',
+      padding: '5px 10px', border: 'none',
       backgroundColor: active ? '#3b82f6' : 'white',
       color: active ? 'white' : '#374151',
       cursor: 'pointer', fontSize: 13, fontWeight: 600,
+      whiteSpace: 'nowrap',
     }}>{children}</button>
   );
 }

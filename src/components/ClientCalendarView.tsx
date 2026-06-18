@@ -65,7 +65,7 @@ export default function ClientCalendarView({ clients, appointments, blackouts, v
   const weekDays = useMemo(() => getWeekDays(date), [date]);
 
   return (
-    <div style={{ padding: 'clamp(8px,3vw,24px)', boxSizing: 'border-box', paddingTop: 0 }}>
+    <div style={{ width: '100%', padding: 'clamp(8px,3vw,24px)', boxSizing: 'border-box', paddingTop: 0 }}>
 
       {/* Client filter pills (view switch, nav + heading live in the parent toolbar) */}
       <div style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 6, marginBottom: 10, flexWrap: 'nowrap', WebkitOverflowScrolling: 'touch' as any }}>
@@ -210,9 +210,9 @@ function WeekTimeGrid({ days, clients, appointments, blackouts, highlightId }: {
   const aptH = (a: Appointment) => Math.max(16, (new Date(a.endTime).getTime() - new Date(a.startTime).getTime()) / 3_600_000 * hourPx);
 
   return (
-    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 12, background: 'white' }}>
+    <div style={{ width: '100%', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 12, background: 'white' }}>
       {zoomed && <ZoomResetPill scale={zoom} onReset={reset} />}
-      <div ref={zoomRef} style={{ overflowX: 'auto', touchAction: 'pan-x pan-y', WebkitOverflowScrolling: 'touch' as any }}>
+      <div ref={zoomRef} style={{ width: '100%', overflowX: 'auto', touchAction: 'pan-x pan-y', WebkitOverflowScrolling: 'touch' as any }}>
         <div style={{ minWidth: GUTTER + days.length * COL_MIN, display: 'flex', flexDirection: 'column' }}>
 
           {/* Sticky day headers */}
@@ -330,7 +330,7 @@ function DayClientGrid({ date, clients, appointments, blackouts }: {
   return (
     <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', background: 'white' }}>
       {zoomed && <ZoomResetPill scale={zoom} onReset={reset} />}
-      <div ref={zoomRef} style={{ overflowX: 'auto', touchAction: 'pan-x pan-y', WebkitOverflowScrolling: 'touch' as any }}>
+      <div ref={zoomRef} style={{ width: '100%', overflowX: 'auto', touchAction: 'pan-x pan-y', WebkitOverflowScrolling: 'touch' as any }}>
         <div style={{ minWidth: GUTTER + clients.length * DAY_COL_MIN, display: 'flex', flexDirection: 'column' }}>
 
           {/* Sticky client headers */}

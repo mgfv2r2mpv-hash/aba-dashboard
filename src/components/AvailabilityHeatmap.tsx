@@ -158,7 +158,7 @@ export default function AvailabilityHeatmap({ days, clients, appointments, highl
         </div>
       </div>
 
-      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
+      <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
         <div style={{ minWidth: totalW }}>
 
           {/* Day header */}

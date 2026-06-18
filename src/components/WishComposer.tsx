@@ -4,6 +4,7 @@ import { AISettings } from './Settings';
 import { ClaudeScheduler } from '../claudeScheduler';
 import { summarizeWish, wishSolutionToDraft, computeSolutionImpact } from '../wish';
 import ImpactSummary from './ImpactSummary';
+import TrimPanel from './TrimPanel';
 
 // "Wish It": a structured natural-language composer that asks the AI for up to 3
 // ways to reshape the schedule toward a goal, then lets the BCBA Accept (apply),
@@ -22,7 +23,8 @@ const KINDS: { value: WishKind; label: string; blurb: string }[] = [
   { value: 'clearWindow', label: 'Clear a recurring window', blurb: 'Free up a weekday/time going forward (e.g. Friday evenings).' },
   { value: 'addRecurring', label: 'Add a recurring session', blurb: 'Fit a new repeating session into a tight schedule.' },
   { value: 'shaveDown', label: 'Trim over-served sessions', blurb: 'Shave supervision hours toward the minimum to free up capacity.' },
-  { value: 'fillSchedule', label: 'Fill my schedule out', blurb: 'Maximize each case toward 100% direct utilization; suggest supervision + parent training within sessions. Leaves my BCBA schedule alone.' },
+  { value: 'fillSchedule', label: 'Fill my schedule out', blurb: 'Add supervision and parent-training within existing direct sessions to bring cases toward the ideal compliance range this month. PT only inside a running direct session. Does not move existing sessions.' },
+  { value: 'maximizeDirectHours', label: 'Maximize direct hours across cases', blurb: 'Fill each case\'s authorized weekly direct-service hours toward 100% using open availability windows. Leaves my BCBA schedule alone.' },
   { value: 'freeform', label: 'Something else', blurb: 'Describe it in your own words.' },
 ];
 
@@ -57,6 +59,7 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
   const [error, setError] = useState<string | null>(null);
   const [solutions, setSolutions] = useState<WishSolution[] | null>(null);
   const [copied, setCopied] = useState(false);
+  const [trimSolution, setTrimSolution] = useState<WishSolution | null>(null);
 
   const upd = (patch: Partial<WishRequest>) => setWish(w => ({ ...w, ...patch }));
 
@@ -208,30 +211,56 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
         {/* Options */}
         {solutions && (
           <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: 8 }}>
-              {solutions.length > 0 ? `${solutions.length} option${solutions.length === 1 ? '' : 's'}` : 'No compliant options found'}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {solutions.map((sol, i) => {
-                const d = wishSolutionToDraft(sol, data);
-                const impact = computeSolutionImpact(data, sol);
-                return (
-                  <div key={sol.id} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 12 }}>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Option {i + 1}: {sol.summary}</div>
-                    {sol.reasoning && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{sol.reasoning}</div>}
-                    <ImpactSummary impact={impact} />
-                    <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#374151' }}>
-                      {sol.ops.map((o, j) => <li key={j}>{opText(o)}</li>)}
-                    </ul>
-                    {d.unresolved > 0 && <div style={{ fontSize: 11, color: '#b45309', marginTop: 4 }}>{d.unresolved} change(s) referenced something not found and will be skipped.</div>}
-                    <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                      <button onClick={() => onAccept(sol)} style={{ padding: '6px 14px', background: '#7c3aed', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Accept</button>
-                      <button onClick={() => onCustomize(sol)} style={{ padding: '6px 14px', background: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>Customize</button>
-                    </div>
+            {solutions.every(s => s.ops.length === 0) ? (
+              <div style={{ border: '1px solid #c4b5fd', background: '#f5f3ff', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#5b21b6', marginBottom: 4 }}>
+                  No sessions could be placed
+                </div>
+                {solutions[0]?.reasoning && (
+                  <div style={{ fontSize: 12, color: '#4c1d95', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                    {solutions[0].reasoning}
                   </div>
-                );
-              })}
-            </div>
+                )}
+                <div style={{ fontSize: 11, color: '#7c3aed', marginTop: 8 }}>
+                  Try a different wish type or check BCBA availability in Settings.
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: 8 }}>
+                  {solutions.filter(s => s.ops.length > 0).length} option{solutions.filter(s => s.ops.length > 0).length === 1 ? '' : 's'}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {solutions.filter(s => s.ops.length > 0).map((sol, i) => {
+                    const d = wishSolutionToDraft(sol, data);
+                    const impact = computeSolutionImpact(data, sol);
+                    const addCount = sol.ops.filter(o => o.op === 'add').length;
+                    return (
+                      <div key={sol.id} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 12 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Option {i + 1}: {sol.summary}</div>
+                        {sol.reasoning && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{sol.reasoning}</div>}
+                        <ImpactSummary impact={impact} />
+                        <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, color: '#374151' }}>
+                          {sol.ops.map((o, j) => <li key={j}>{opText(o)}</li>)}
+                        </ul>
+                        {d.unresolved > 0 && <div style={{ fontSize: 11, color: '#b45309', marginTop: 4 }}>{d.unresolved} change(s) referenced something not found and will be skipped.</div>}
+                        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                          <button onClick={() => onAccept(sol)} style={{ padding: '6px 14px', background: '#7c3aed', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Accept</button>
+                          <button onClick={() => onCustomize(sol)} style={{ padding: '6px 14px', background: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>Customize</button>
+                          {addCount > 0 && (
+                            <button
+                              onClick={() => setTrimSolution(sol)}
+                              style={{ padding: '6px 10px', background: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}
+                              title="Remove sessions by clinical priority"
+                            >✂️ Trim</button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -249,6 +278,15 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
             </button>
           </div>
         </div>
+
+      {trimSolution && (
+        <TrimPanel
+          solution={trimSolution}
+          data={data}
+          onApply={sol => { setTrimSolution(null); onAccept(sol); }}
+          onClose={() => setTrimSolution(null)}
+        />
+      )}
     </div>
   );
 }

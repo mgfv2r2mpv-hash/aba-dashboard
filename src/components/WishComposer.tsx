@@ -286,14 +286,12 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
           <button onClick={onClose} style={{ padding: '8px 16px', background: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {wish.kind === 'fillSchedule' && (
-              <button
-                onClick={quickFill}
-                disabled={loading}
-                title="Run the local solver offline — no API key needed"
-                style={{ padding: '8px 14px', background: 'white', color: '#059669', border: '1px solid #6ee7b7', borderRadius: 6, cursor: loading ? 'default' : 'pointer', fontSize: 13, fontWeight: 600 }}
-              >⚡ Quick Fill</button>
-            )}
+            <button
+              onClick={quickFill}
+              disabled={loading}
+              title="Instantly fill supervision gaps using local rules — no API key needed"
+              style={{ padding: '8px 14px', background: 'white', color: '#059669', border: '1px solid #6ee7b7', borderRadius: 6, cursor: loading ? 'default' : 'pointer', fontSize: 13, fontWeight: 600 }}
+            >⚡ Quick Fill</button>
             <button
               onClick={copyPrompt}
               title="Copy the prompt that will be sent to Claude"

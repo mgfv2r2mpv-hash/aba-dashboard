@@ -1780,13 +1780,15 @@ function NavButtons({ view, onChange, compSummary, conflictCount, conflictHasErr
   return (
     <>
       {btn('📅 Cal', 'schedule')}
-      {btn('🔧Comp.', 'compliance', (
-        <span style={{
-          minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9,
-          backgroundColor: badgeColor, color: 'white',
-          fontSize: 11, fontWeight: 700,
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}>{badgeCount}</span>
+      {btn('Comp', 'compliance', (
+        <span
+          title={`${conflictCount ?? 0} scheduling conflict${(conflictCount ?? 0) !== 1 ? 's' : ''} · ${compRed} behind · ${compYellow} at risk`}
+          style={{
+            minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9,
+            backgroundColor: badgeColor, color: 'white',
+            fontSize: 11, fontWeight: 700,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}>{badgeCount}</span>
       ))}
       {btn('✨Wish', 'wish')}
       {btn('CPR', 'cpr')}

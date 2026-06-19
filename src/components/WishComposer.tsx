@@ -5,6 +5,8 @@ import { ClaudeScheduler } from '../claudeScheduler';
 import { summarizeWish, wishSolutionToDraft, computeSolutionImpact } from '../wish';
 import ImpactSummary from './ImpactSummary';
 import TrimPanel from './TrimPanel';
+import { solveComplianceFill } from '../localSolver';
+import { monthPeriod } from '../compliance';
 
 // "Wish It": a structured natural-language composer that asks the AI for up to 3
 // ways to reshape the schedule toward a goal, then lets the BCBA Accept (apply),
@@ -86,6 +88,22 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
       setError(e?.message || String(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const quickFill = () => {
+    setError(null); setSolutions(null);
+    try {
+      const result = solveComplianceFill(data, monthPeriod(new Date()), new Date());
+      const detail = result.casesHelped > 0
+        ? `${result.casesHelped}/${result.totalCases} cases helped · +${result.supHoursAdded.toFixed(1)}h supervision`
+        : '';
+      setSolutions([{
+        ...result.solution,
+        summary: result.solution.summary + (detail ? ` (${detail})` : ''),
+      }]);
+    } catch (e: any) {
+      setError(e?.message || String(e));
     }
   };
 
@@ -265,9 +283,17 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
         )}
 
         {/* Footer */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
           <button onClick={onClose} style={{ padding: '8px 16px', background: 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {wish.kind === 'fillSchedule' && (
+              <button
+                onClick={quickFill}
+                disabled={loading}
+                title="Run the local solver offline — no API key needed"
+                style={{ padding: '8px 14px', background: 'white', color: '#059669', border: '1px solid #6ee7b7', borderRadius: 6, cursor: loading ? 'default' : 'pointer', fontSize: 13, fontWeight: 600 }}
+              >⚡ Quick Fill</button>
+            )}
             <button
               onClick={copyPrompt}
               title="Copy the prompt that will be sent to Claude"

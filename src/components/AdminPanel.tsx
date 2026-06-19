@@ -345,7 +345,7 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
             </div>
             {reordering === 'technicians' ? (
               <ReorderList
-                items={data.technicians.map(t => ({ id: t.id, name: t.name, meta: t.isRBT ? 'RBT' : undefined }))}
+                items={data.technicians.map(t => ({ id: t.id, name: t.name, meta: t.isRBT ? (t.isFieldworkSupervisee ? 'RBT · FW' : 'RBT') : t.isFieldworkSupervisee ? 'FW' : undefined }))}
                 onCommit={(ids) => { reorderEntity('technicians', ids); setReordering(null); }}
                 onCancel={() => setReordering(null)}
               />
@@ -520,7 +520,7 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
         collapsed={collapsed}
         onToggle={() => setCollapsed(c => !c)}
         name={tech.name}
-        badges={[...(tech.isRBT ? ['RBT'] : []), ...(noClients ? ['(!) No Clients'] : [])]}
+        badges={[...(tech.isRBT ? ['RBT'] : []), ...(tech.isFieldworkSupervisee ? ['Fieldwork'] : []), ...(noClients ? ['(!) No Clients'] : [])]}
         summary={`${availDays} day${availDays === 1 ? '' : 's'} avail · ${assignments.length} assignment${assignments.length === 1 ? '' : 's'}`}
       />
 
@@ -535,15 +535,26 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
           />
           <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>ID: {tech.id}</p>
         </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-          <input
-            type="checkbox"
-            checked={tech.isRBT}
-            onChange={(e) => onChange({ isRBT: e.target.checked })}
-            style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-          />
-          <span>RBT</span>
-        </label>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <input
+              type="checkbox"
+              checked={tech.isRBT}
+              onChange={(e) => onChange({ isRBT: e.target.checked })}
+              style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+            />
+            <span>RBT</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <input
+              type="checkbox"
+              checked={tech.isFieldworkSupervisee === true}
+              onChange={(e) => onChange({ isFieldworkSupervisee: e.target.checked ? true : undefined })}
+              style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+            />
+            <span>Accruing fieldwork hrs</span>
+          </label>
+        </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
           {!editing && (
             <button onClick={() => setEditing(true)} style={chipBtn}>Edit availability</button>
@@ -678,12 +689,13 @@ function CardHeader({ collapsed, onToggle, name, badges, summary }: {
       </span>
       {badges.map(b => {
         const isAlert = b.startsWith('(!)');
+        const isFieldwork = b === 'Fieldwork';
         return (
           <span key={b} style={{
             fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', padding: '1px 6px',
             borderRadius: '8px', flexShrink: 0,
-            backgroundColor: isAlert ? '#fee2e2' : '#dbeafe',
-            color: isAlert ? '#dc2626' : '#1e40af',
+            backgroundColor: isAlert ? '#fee2e2' : isFieldwork ? '#ede9fe' : '#dbeafe',
+            color: isAlert ? '#dc2626' : isFieldwork ? '#6d28d9' : '#1e40af',
           }}>{b}</span>
         );
       })}

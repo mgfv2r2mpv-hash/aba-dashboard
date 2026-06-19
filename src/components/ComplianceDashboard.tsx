@@ -607,13 +607,20 @@ function TechCard({ report, maxPct, contacts, rbtMinContacts, btMinContacts }: {
       borderRadius: 8, padding: 12,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
-        <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
           {tech.name}
           <span style={{
-            marginLeft: 6, fontSize: 10, fontWeight: 700,
+            fontSize: 10, fontWeight: 700,
             color: '#6b7280', backgroundColor: '#e5e7eb',
             padding: '2px 6px', borderRadius: 8,
           }}>{tech.isRBT ? 'RBT' : 'BT'}</span>
+          {tech.isFieldworkSupervisee && (
+            <span style={{
+              fontSize: 10, fontWeight: 700,
+              color: '#6d28d9', backgroundColor: '#ede9fe',
+              padding: '2px 6px', borderRadius: 8,
+            }}>Fieldwork</span>
+          )}
         </h3>
         <span style={{
           fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
@@ -633,8 +640,20 @@ function TechCard({ report, maxPct, contacts, rbtMinContacts, btMinContacts }: {
             <TechMetric title="Projected" m={projected} accent={accent} isRBT={tech.isRBT} maxPct={maxPct} />
           </div>
           {contacts !== undefined && contactsRequired > 0 && (
-            <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>
-              Supervision contacts: <strong style={{ color: actualContactsBehind ? '#6b7280' : '#15803d' }}>
+            <div style={{
+              marginTop: 8, fontSize: 12, color: '#6b7280',
+              ...(tech.isFieldworkSupervisee ? {
+                padding: '6px 10px', borderRadius: 6,
+                backgroundColor: '#faf5ff', border: '1px solid #ede9fe',
+              } : {}),
+            }}>
+              {tech.isFieldworkSupervisee && (
+                <div style={{ fontWeight: 700, fontSize: 11, color: '#6d28d9', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Fieldwork Contact Days
+                </div>
+              )}
+              {!tech.isFieldworkSupervisee && 'Supervision contacts: '}
+              <strong style={{ color: actualContactsBehind ? '#6b7280' : '#15803d' }}>
                 {contacts.actual} actual
               </strong>
               {' / '}

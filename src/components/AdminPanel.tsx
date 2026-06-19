@@ -549,7 +549,7 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
             <input
               type="checkbox"
               checked={tech.isFieldworkSupervisee === true}
-              onChange={(e) => onChange({ isFieldworkSupervisee: e.target.checked ? true : undefined })}
+              onChange={(e) => onChange({ isFieldworkSupervisee: e.target.checked })}
               style={{ cursor: 'pointer', width: '18px', height: '18px' }}
             />
             <span>Accruing fieldwork hrs</span>

@@ -149,6 +149,7 @@ function parseTechnicians(workbook: XLSX.WorkBook): Technician[] {
       id: text(row.id) || uuidv4(),
       name: text(row.name) || '',
       isRBT: truthy(row.isRBT),
+      isFieldworkSupervisee: truthy(row.isFieldworkSupervisee) || undefined,
       assignments: [],
       availability: {},
     };
@@ -513,8 +514,8 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
     ]));
 
   // Technicians (scalars only).
-  add('Technicians', ['id', 'name', 'isRBT', 'notes'],
-    data.technicians.map(t => [t.id, t.name, WB(t.isRBT), W(t.notes)]));
+  add('Technicians', ['id', 'name', 'isRBT', 'isFieldworkSupervisee', 'notes'],
+    data.technicians.map(t => [t.id, t.name, WB(t.isRBT), WT(t.isFieldworkSupervisee), W(t.notes)]));
 
   // Availability (normalized: clients + technicians + clinician).
   const availRows: any[][] = [];

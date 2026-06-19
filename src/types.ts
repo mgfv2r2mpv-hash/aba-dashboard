@@ -64,6 +64,7 @@ export interface Technician {
   id: string;
   name: string;
   isRBT: boolean;
+  isFieldworkSupervisee?: boolean;
   assignments: {
     clientId: string;
     hoursPerWeek: number;

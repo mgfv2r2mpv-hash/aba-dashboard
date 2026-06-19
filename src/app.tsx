@@ -135,6 +135,8 @@ export default function App() {
   const [draftOps, setDraftOps] = useState<DraftOp[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
+  const [recoveryTarget, setRecoveryTarget] = useState<Appointment | null>(null);
+  const [recoverySolutions, setRecoverySolutions] = useState<{ title: string; solutions: WishSolution[] } | null>(null);
   // The month/week the calendar is showing. Conflicts are scoped to this so the
   // Issues panel reflects what you're looking at, not just today.
   const [viewDate, setViewDate] = useState<Date>(new Date());
@@ -521,6 +523,8 @@ export default function App() {
       if (!(await biometricAuthenticate('Enable Face ID for ABA Schedule'))) return;
       await enableFaceId(pin);
       setFaceIdEnabled(true);
+      // Biometric just succeeded — mark available so the help message clears.
+      setFaceIdAvailable(true);
     } else {
       await disableFaceId();
       setFaceIdEnabled(false);
@@ -800,6 +804,44 @@ export default function App() {
     setView('schedule');
   };
 
+  // ---- Move This / Replace This / Cancel Recovery ----
+  const runRecoveryAI = async (
+    kind: 'move' | 'replace' | 'cancel',
+    apt: Appointment,
+    title: string,
+  ) => {
+    if (!scheduleData || !aiSettings.apiKey) return;
+    setAiLoading(true);
+    try {
+      const { ClaudeScheduler } = await import('./claudeScheduler');
+      const scheduler = new ClaudeScheduler(aiSettings.apiKey, scheduleData, aiSettings.model);
+      let sols: WishSolution[];
+      if (kind === 'move') sols = await scheduler.generateMoveThisSolutions(apt);
+      else if (kind === 'replace') sols = await scheduler.generateReplaceThisSolutions(apt);
+      else sols = await scheduler.generateCancelRecoverySolutions(apt);
+      if (sols.length === 0) {
+        setDebugMsg('AI found no options for this appointment.');
+      } else {
+        setRecoverySolutions({ title, solutions: sols });
+      }
+    } catch (error: any) {
+      alert('AI error: ' + (error.message || error));
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleMoveThis = (apt: Appointment) =>
+    runRecoveryAI('move', apt, `Move options — ${apt.title || apt.type}`);
+
+  const handleReplaceThis = (apt: Appointment) =>
+    runRecoveryAI('replace', apt, `Replacement options — ${apt.title || apt.type}`);
+
+  const handleFindReplacement = (apt: Appointment) => {
+    setRecoveryTarget(null);
+    runRecoveryAI('cancel', apt, `Recovery options — ${apt.title || apt.type}`);
+  };
+
   // "Clear loaded data" (Admin → Settings). Drops the working schedule from the
   // UI and returns to the upload/wizard empty state. The user is nudged to
   // download first since this is destructive for unsaved changes.
@@ -871,10 +913,15 @@ export default function App() {
   const handleReopen = (a: Appointment) =>
     persistAppointment({ ...a, status: 'scheduled', cancellation: undefined });
 
-  const handleConfirmCancel = (cancellation: Cancellation) => {
+  const handleConfirmCancel = async (cancellation: Cancellation) => {
     if (!cancelTarget) return;
-    persistAppointment({ ...cancelTarget, status: 'canceled', cancellation });
+    const target = cancelTarget;
+    await persistAppointment({ ...target, status: 'canceled', cancellation });
     setCancelTarget(null);
+    // Offer AI recovery only if the appointment was in the future and an API key is set.
+    if (aiSettings.apiKey && new Date(target.startTime) > new Date()) {
+      setRecoveryTarget(target);
+    }
   };
 
   // Add (new id) or edit (existing id) → stage as draft ops. Nothing commits
@@ -1088,7 +1135,10 @@ export default function App() {
           {a.client && <span style={metaChip}>👤 {a.client}</span>}
           {a.technician && <span style={metaChip}>🧑‍⚕️ {a.technician}</span>}
           {a.isMakeUp && <span style={{ ...metaChip, background: '#fef9c3', color: '#854d0e' }}>↩︎ Make-up</span>}
-          {!a.isBillable && <span style={{ ...metaChip, background: '#f1f5f9', color: '#64748b' }}>Non-billable</span>}
+          {a.isBillable
+            ? <span style={{ ...metaChip, background: '#dcfce7', color: '#15803d' }}>Billable</span>
+            : <span style={{ ...metaChip, background: '#f1f5f9', color: '#64748b' }}>Non-billable</span>
+          }
         </div>
 
         {(status === 'canceled' || status === 'completed') && (
@@ -1246,12 +1296,12 @@ export default function App() {
       paddingRight: 'env(safe-area-inset-right)',
     }}>
       <header ref={headerRef as React.RefObject<HTMLElement>} style={{
-        backgroundColor: '#1f2937',
+        backgroundColor: 'var(--surface-header)',
         color: 'white',
         // Top padding includes the iOS status bar / notch inset so the
         // title doesn't sit under the time/carrier indicators.
         padding: 'calc(env(safe-area-inset-top) + 6px) 12px 6px',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+        boxShadow: 'var(--shadow-sm)',
         // Both orientations: sticky/fixed at top, never scrolls off-screen.
         position: isLandscape ? 'sticky' : 'fixed',
         top: 0,
@@ -1264,7 +1314,7 @@ export default function App() {
       }}>
         {/* Row 1: app name + AI status dot */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-          <h1 style={{ fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>SAssi - ABA Calendar</h1>
+          <h1 style={{ fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>SAssi · ABA Calendar</h1>
           <span
             title={aiSettings.apiKey ? `AI: ${aiSettings.model}` : 'No AI key set — add in Settings'}
             style={{
@@ -1278,9 +1328,9 @@ export default function App() {
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
           {!scheduleData ? (
             <>
-              {compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), '#8b5cf6')}
+              {compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), 'var(--brand-ai)')}
               <FileUpload onUpload={handleFileUpload} loading={loading} />
-              {compactBtn('CPR', 'CPR & Analysis', () => setView('cpr'), view === 'cpr' ? '#6366f1' : '#374151')}
+              {compactBtn('CPR', 'CPR & Analysis', () => setView('cpr'), view === 'cpr' ? 'var(--brand-accent)' : '#374151')}
             </>
           ) : (
             <>
@@ -1289,7 +1339,7 @@ export default function App() {
                 aria-label="Add appointment"
                 title="Add appointment"
                 style={{
-                  padding: '5px 10px', backgroundColor: '#3b82f6', color: 'white',
+                  padding: '5px 10px', backgroundColor: 'var(--brand-primary)', color: 'white',
                   border: 'none', borderRadius: 5, cursor: 'pointer',
                   fontSize: 16, fontWeight: 700, lineHeight: 1,
                 }}
@@ -1363,6 +1413,8 @@ export default function App() {
                     onLensChange={setCalLens}
                     hideTotals={dockPane}
                     draftMarks={calendarMarks}
+                    onMoveThis={aiSettings.apiKey ? handleMoveThis : undefined}
+                    onReplaceThis={aiSettings.apiKey ? handleReplaceThis : undefined}
                   />
                 </div>
                 {(() => {
@@ -1648,6 +1700,83 @@ export default function App() {
         />
       )}
 
+      {/* Cancel recovery offer — shown after confirming a cancellation when AI is available */}
+      {recoveryTarget && (
+        <div
+          onClick={() => setRecoveryTarget(null)}
+          style={{
+            position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400, padding: 16,
+          }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'white', borderRadius: 10, padding: 20, maxWidth: 340, width: '100%',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Appointment canceled</div>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
+              Want to find a replacement session to keep this week's schedule on track?
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setRecoveryTarget(null)}
+                style={{ padding: '7px 14px', border: '1px solid #d1d5db', borderRadius: 6, background: 'white', cursor: 'pointer', fontSize: 13 }}
+              >Just Cancel</button>
+              <button
+                onClick={() => handleFindReplacement(recoveryTarget)}
+                disabled={aiLoading}
+                style={{ padding: '7px 14px', border: 'none', borderRadius: 6, background: '#6366f1', color: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 600, opacity: aiLoading ? 0.6 : 1 }}
+              >{aiLoading ? 'Searching…' : 'Find Replacement'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI recovery / move / replace solutions picker */}
+      {recoverySolutions && (
+        <div
+          onClick={() => setRecoverySolutions(null)}
+          style={{
+            position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400, padding: 16,
+          }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'white', borderRadius: 10, padding: 20, maxWidth: 420, width: '100%',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.25)', maxHeight: '80vh', overflowY: 'auto',
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{recoverySolutions.title}</div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 14 }}>
+              Select an option — Accept commits immediately; Customize stages it for review.
+            </div>
+            {recoverySolutions.solutions.map((sol, i) => (
+              <div key={i} style={{
+                border: '1px solid #e5e7eb', borderRadius: 8, padding: 12, marginBottom: 10,
+              }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{sol.summary}</div>
+                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>{sol.reasoning}</div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => { setRecoverySolutions(null); customizeWish(sol); }}
+                    style={{ padding: '5px 12px', border: '1px solid #d1d5db', borderRadius: 6, background: 'white', cursor: 'pointer', fontSize: 12 }}
+                  >Customize</button>
+                  <button
+                    onClick={() => { setRecoverySolutions(null); acceptWish(sol); }}
+                    style={{ padding: '5px 12px', border: 'none', borderRadius: 6, background: '#3b82f6', color: 'white', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+                  >Accept</button>
+                </div>
+              </div>
+            ))}
+            <div style={{ textAlign: 'right', marginTop: 4 }}>
+              <button
+                onClick={() => setRecoverySolutions(null)}
+                style={{ padding: '6px 14px', border: '1px solid #d1d5db', borderRadius: 6, background: 'white', cursor: 'pointer', fontSize: 13 }}
+              >Dismiss</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAddAppointment && scheduleData && (
         <AppointmentForm
           allAppointments={scheduleData.appointments}
@@ -1765,7 +1894,7 @@ function NavButtons({ view, onChange, compSummary, conflictCount, conflictHasErr
         title={label}
         style={{
           padding: '5px 10px', border: 'none', borderRadius: 5,
-          backgroundColor: active ? '#6366f1' : '#374151',
+          backgroundColor: active ? 'var(--brand-accent)' : '#374151',
           color: 'white', cursor: 'pointer',
           fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
           display: 'inline-flex', alignItems: 'center', gap: 4,

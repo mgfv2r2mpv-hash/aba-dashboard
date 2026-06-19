@@ -1,21 +1,59 @@
-# Project notes for Claude
+# Project Runtime Configuration & AI Rules
 
-## Coding methodology
+## 1. System CLI & Verification Protocol (IMPERATIVE RUNTIME)
+Execute these exact verification scripts in order before outputting any code solutions.
 
-Think like the laziest senior dev in the room. **The best code is the code you never wrote.**
+### iOS Code Changes:
+1. `swiftlint` (Enforce zero memory leaks and catch `[weak self]` omissions).
+2. `xcodebuild -scheme [YourAppScheme] -destination 'platform=iOS Simulator,name=iPhone 15' build`
+3. **Audit Rule:** Verify no plain-text `.xlsx`, cryptographic parsing, or unencrypted local logging routines leak into SwiftUI View templates.
 
-- **Reuse before reinvent:** Use existing libraries, frameworks, and patterns. Copy-paste with confidence.
-- **Simplest solution wins:** Pick the minimal approach that solves the problem. Avoid over-engineering and premature optimization.
-- **Ship fast:** Get to done. Iterate later. Refactor only when something breaks.
-- **Minimal diffs:** Every line should earn its place. No "while we're here" cleanups.
-- **Trust tech users:** Assume app users are semi-confident with tech. Don't explain clinical rationale; focus on UI clarity for scheduling/compliance decisions.
+### Cloudflare Worker Changes:
+1. `npx tsc --noEmit` (Validate TypeScript structural integrity).
+2. `npx wrangler dev` (Simulate local runtime authentication and data parsing loops).
+3. **Audit Rule:** Review terminal stdout to ensure zero raw parameters or dynamic variables containing client data are printed.
 
-**Non-negotiable guards (never sacrifice for efficiency):**
+## 2. Zero-Knowledge Cryptographic & Security Architecture
+- **No Cleartext Transmission:** The backend API, hosting layers, and network logs must **never** receive, store, or transmit the cleartext user decryption key or unencrypted client data. 
+- **Client-Side Encryption:** All data payloads must be completely encrypted using client-side AES-256 via Apple's `CryptoKit` on iOS *before* hitting any network interface or storage container (Cloudflare R2/KV).
+- **Transient Memory Isolation:** When an Excel file is decrypted in-memory on the local device, all local variables and memory buffers must be forcefully wiped, cleared, or de-allocated immediately after the write/read block executes. Never cache unencrypted payloads to `tmp/` directories.
+- **Active PHI Scrubbing:** Update this section as its logic is strengthened or breaches are encountered. Force structural regex or string-replacement sanitization wrappers on all error boundaries, catch statements, and logs. Instantly strip any strings matching patient identities and replace them with anonymized but internally-distinguishable `[SCRUBBED_TOKEN]`.
+
+## 3. Code Design Patterns, Standards & Heuristics
+- **Simplicity over cleverness:** Write readable, modular, scalable code. Avoid premature optimization. Optimally consolidate reused calls. plugin everything claude code "ecc" is available.
+- **Reuse before reinvent:** Use existing libraries, frameworks, and patterns. Reuse with some confidence.
+- **Non-negotiable guards (trump efficiency):**
 - Data security: encryption, at-rest keys, access gates never bypass.
 - AI tool safety: anonymization, validation, and prompt hardening stay strict.
 - Compliance logic: BCBA-confirmed rules in `src/compliance.ts` and constraint validators are law.
+- **workflow:** feature branches promote throuch dev and main branch. Unless specified differently for a repo: Code changes go to dev, then claude&user test, user confirms releaseclaude executes PR to main. Maintain dev environments. 
+- **Ship fast:** Get to done. Iterate later unless requested. Refactor only when something breaks or explicitly requested.
+- **Minimal diffs:** Every change earns its place. Limit to critical "while we're here" cleanups.
+- **Strict Typing:** Avoid deviation from TypeScript frontend logic and Node.js backends. 
+- **Error Handling:** Never swallow errors. Provide meaningful log traces (in dev, or in main/production when admin mode is enabled) and graceful fallbacks always.
+- **Trust tech users:** Assume app users are semi-confident with tech. Don't explain clinical rationale; focus on UI clarity for scheduling/compliance decisions.
+- **No TODOs:** Do not use `// TODO:` placeholders. Either implement the solution or leave an upgrade/note/comment on what's missing or out of scope.
+- **The Repository Pattern:** The iOS SwiftUI layouts and the network routing endpoints must remain entirely decoupled from the file-system layout and cryptography mechanics.
+- **Implementation Mapping:** Route all state operations through an abstract `SecureBehavioralRepository` protocol interface. The application core logic must only interact with high-level domain models (e.g., `BehaviorSession`, `TrialData`, `ABCData`). The repository implementation handles data storage in encrypted excel file, & allows easy swap to an enterprise data system later.
+- **State Management:** Use modern Swift `@Observable` models or standard environment objects. Do not use global state variables or hardcoded user credentials.
 
-## Git workflow — read this first
+### Swift / iOS Standards
+- **Concurrency:** Use native `async/await` and Actors. Avoid legacy `DispatchQueue` unless strictly necessary.
+- **Architecture:** Follow strict MVVM (Model-View-ViewModel) or Clean Architecture. No business logic in SwiftUI Views.
+- **Memory Management:** Watch out for retain cycles. Always use `[weak self]` in escaping closures.
+
+### Cloudflare Workers Standards
+- **Runtime Limits:** Code must be optimized for execution within the 50ms CPU time limit (Bundled plan) or 10ms limit (Free plan).
+- **Environment Variables:** Always use standard `env` bindings via `wrangler.toml`. Never hardcode secrets.
+- **V8 Isolates:** Write stateless code. Do not rely on global variable persistence across Worker invocations.
+
+## 4. Clinical & Regulatory Boundary Constraints (Compliance Guardrails)
+- **Objective Metrics Only:** Automated clinical summaries, UI data trends, or textual reporting tools must exclusively output objective, observable, and measurable behavior data metrics (e.g., frequency, duration, rate, latency, antecedents, consequences).
+- **Scope Restriction:** Never write code or logic text that attempts to diagnose, provide psychiatric evaluations, offer mental health counseling, or suggest pharmacological interventions. All workflows must sit strictly inside the  scope of clinical treatment under guidance of a BCBA/LABA.
+- **Ethics Code Adherence:** All code paths must conform to the current BACB Ethics Code, prioritizing client privacy, confidentiality, and data minimization via the "Minimum Necessary" healthcare standard. Use pseudonyms "Supervising Behavior Analyst" for "BCBA" and "Credentialed BT" for "RBT" (registered trademarks)
+
+
+## Git workflow 
 
 The harness proxy on this repo **denies direct pushes to `main`** with HTTP 403
 (the 403 carries Cloudflare / api.anthropic.com response headers, confirming it's

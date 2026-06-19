@@ -652,6 +652,13 @@ function TechCard({ report, maxPct, contacts, rbtMinContacts, btMinContacts }: {
   );
 }
 
+function techSectionStatus(m: TechComplianceMetrics, isRBT: boolean): { text: string; color: string } {
+  const bacbOk = !isRBT || (m.bacbHoursToGo ?? 0) === 0;
+  const companyOk = m.companyHoursToGo === 0;
+  if (bacbOk && companyOk) return { text: 'On Track', color: '#15803d' };
+  return { text: 'Behind', color: '#b91c1c' };
+}
+
 function TechMetric({ title, m, accent, isRBT, maxPct }: {
   title: string;
   m: TechComplianceMetrics;
@@ -667,6 +674,7 @@ function TechMetric({ title, m, accent, isRBT, maxPct }: {
   const fillPct = bindingPct > 0 ? Math.min(100, (m.pct / bindingPct) * 100) : 0;
   const overCap = maxPct !== undefined && m.pct > maxPct;
   const pctColor = overCap ? CAP_OVER : accent;
+  const sectionStatus = techSectionStatus(m, isRBT);
 
   return (
     <div>
@@ -676,8 +684,15 @@ function TechMetric({ title, m, accent, isRBT, maxPct }: {
       <div style={{ fontSize: 18, fontWeight: 700, color: pctColor }}>
         {m.pct.toFixed(1)}%{overCap && <span style={{ fontSize: 14 }}> ⚠️</span>}
       </div>
+      <div style={{ height: 22, display: 'flex', alignItems: 'center', marginTop: 3 }}>
+        <span style={{
+          fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+          color: 'white', backgroundColor: sectionStatus.color,
+          padding: '2px 7px', borderRadius: 8,
+        }}>{sectionStatus.text}</span>
+      </div>
       <div style={{
-        marginTop: 6, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden',
+        marginTop: 4, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden',
       }}>
         <div style={{
           height: '100%', width: `${fillPct}%`,

@@ -53,6 +53,11 @@ Execute these exact verification scripts in order before outputting any code sol
 - **Ethics Code Adherence:** All code paths must conform to the current BACB Ethics Code, prioritizing client privacy, confidentiality, and data minimization via the "Minimum Necessary" healthcare standard. Use pseudonyms "Supervising Behavior Analyst" for "BCBA" and "Credentialed BT" for "RBT" (registered trademarks)
 
 
+## Collaboration Protocol
+
+- **After completing any set of changes:** ask "Anything else, or should I open a PR / merge to dev?"
+- **Before implementing a feature:** ask clarifying questions until 95% confident of intent and constraints. Do not write code until that bar is met.
+
 ## Git workflow
 
 **Standard flow:**

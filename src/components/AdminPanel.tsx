@@ -976,6 +976,7 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
   const [maxStr, setMaxStr] = useState(client.parentTrainingMaxHours !== undefined ? String(client.parentTrainingMaxHours) : '');
   const [utilStr, setUtilStr] = useState(client.directUtilizationTarget !== undefined ? String(client.directUtilizationTarget) : '');
   const [supIdealStr, setSupIdealStr] = useState(client.supervisionIdealPct !== undefined ? String(client.supervisionIdealPct) : '');
+  const [dischargeStr, setDischargeStr] = useState(client.anticipatedDischarge || '');
   const [editing, setEditing] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
 
@@ -1038,7 +1039,7 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
       <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '8px', fontSize: '12px' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Completely exempts this client from parent-training minimum requirements.">
           <input type="checkbox" checked={client.disablePTRequirements === true}
-            onChange={e => onChange({ disablePTRequirements: e.target.checked || undefined })} />
+            onChange={e => onChange({ disablePTRequirements: e.target.checked ? true : false })} />
           <span>Disable PT Requirements</span>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1088,7 +1089,7 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="When ON, parent training can be scheduled outside the client's set availability and need not coincide with a direct session (tentative, pending BCBA confirmation).">
           <input type="checkbox" checked={client.parentAvailableOutsideSessions === true}
-            onChange={e => onChange({ parentAvailableOutsideSessions: e.target.checked || undefined })} />
+            onChange={e => onChange({ parentAvailableOutsideSessions: e.target.checked ? true : false })} />
           <span>Parent available outside scheduled availability</span>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="When OFF, the engine won't propose partial-staff coverage.">
@@ -1098,7 +1099,7 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <input type="checkbox" checked={client.isEI === true}
-            onChange={e => onChange({ isEI: e.target.checked || undefined })} />
+            onChange={e => onChange({ isEI: e.target.checked ? true : false })} />
           <span>EI case</span>
         </label>
         {client.isEI && (
@@ -1110,9 +1111,9 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 180px' }}>
           <span style={{ whiteSpace: 'nowrap' }}>Anticipated discharge:</span>
-          <input value={client.anticipatedDischarge || ''}
-            onBlur={e => { if ((e.target.value || undefined) !== client.anticipatedDischarge) onChange({ anticipatedDischarge: e.target.value || undefined }); }}
-            defaultValue={client.anticipatedDischarge || ''}
+          <input value={dischargeStr}
+            onChange={e => setDischargeStr(e.target.value)}
+            onBlur={() => { const v = dischargeStr.trim() || undefined; if (v !== client.anticipatedDischarge) onChange({ anticipatedDischarge: v }); }}
             placeholder="date / note" style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
         </label>
       </div>

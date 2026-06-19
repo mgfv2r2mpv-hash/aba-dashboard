@@ -36,6 +36,8 @@ interface CalendarProps {
   // so they render as "proposed"/tombstoned rather than committed sessions.
   draftMarks?: Map<string, DraftMark>;
   onAddAppointment?: () => void;
+  onMoveThis?: (a: Appointment) => void;
+  onReplaceThis?: (a: Appointment) => void;
 }
 
 type View = 'month' | 'week' | 'day';
@@ -72,6 +74,8 @@ export default function Calendar({
   hideTotals,
   draftMarks,
   onAddAppointment,
+  onMoveThis,
+  onReplaceThis,
 }: CalendarProps) {
   const [view, setView] = useState<View>('month');
   const [lens, setLens] = useState<Lens>('bcba');
@@ -178,8 +182,7 @@ export default function Calendar({
           )}
           <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
             <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
-            {/* The Case Week view carries the availability/schedule heatmap. */}
-            <ViewBtn active={view === 'week'} onClick={() => setView('week')}>{lens === 'client' ? 'Week 🌡️' : 'Week'}</ViewBtn>
+            <ViewBtn active={view === 'week'} onClick={() => setView('week')}>Week</ViewBtn>
             <ViewBtn active={view === 'day'} onClick={() => setView('day')}>Day</ViewBtn>
           </div>
           <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
@@ -203,6 +206,9 @@ export default function Calendar({
           clients={clients}
           appointments={appointments}
           blackouts={blackouts ?? []}
+          view={view}
+          date={currentDate}
+          onPickDay={(d) => { setCurrentDate(d); setView('day'); }}
         />
       )}
       {lens !== 'client' && view === 'month' && (
@@ -224,6 +230,8 @@ export default function Calendar({
           hourHeight={hourHeight}
           axisWidth={axisWidth}
           roomy={roomy}
+          onMoveThis={onMoveThis}
+          onReplaceThis={onReplaceThis}
         />
       )}
       {lens !== 'client' && view === 'day' && (
@@ -237,6 +245,8 @@ export default function Calendar({
           hourHeight={hourHeight}
           axisWidth={axisWidth}
           roomy={roomy}
+          onMoveThis={onMoveThis}
+          onReplaceThis={onReplaceThis}
         />
       )}
       {lens !== 'client' && (view === 'week' || view === 'day') && !isLandscape && (
@@ -531,8 +541,8 @@ function CapBar({ hours, target }: { hours: HoursByStatus; target: number }) {
       <div style={{ height: 8, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden', display: 'flex' }}>
         <div style={{ width: `${pct(hours.completed)}%`, background: '#16a34a' }} />
         <div style={{ width: `${pct(hours.scheduled)}%`, background: '#9ca3af' }} />
-        <div style={{ width: `${pct(hours.canceledFamily)}%`, background: '#f97316' }} />
-        <div style={{ width: `${pct(hours.canceledStaff)}%`, background: '#dc2626' }} />
+        <div style={{ width: `${pct(hours.canceledFamily)}%`, background: 'var(--cancel-family)' }} />
+        <div style={{ width: `${pct(hours.canceledStaff)}%`, background: 'var(--cancel-bt)' }} />
       </div>
       <div
         style={{ position: 'absolute', top: -1, bottom: -1, left: `${capPct}%`, width: 2, background: '#111827', transform: 'translateX(-1px)' }}
@@ -621,10 +631,15 @@ function MonthTotalRow({ lens, hours, goal, weeklyTarget, monthWeeks }: {
 
 function Legend() {
   const items: { c: string; label: string }[] = [
-    { c: '#9ca3af', label: 'Pending' },
-    { c: '#16a34a', label: 'Completed' },
-    { c: '#f97316', label: 'Family cancel' },
-    { c: '#dc2626', label: 'Staff cancel' },
+    { c: '#94a3b8', label: 'Pending (billable)' },
+    { c: '#9ca3af', label: 'Pending (non-bill.)' },
+    { c: '#3b82f6', label: 'Done (billable)' },
+    { c: '#6366f1', label: 'Done (non-bill.)' },
+    { c: 'var(--cancel-family)', label: 'Cancel: family' },
+    { c: 'var(--cancel-bt)', label: 'Cancel: BT' },
+    { c: 'var(--cancel-bcba)', label: 'Cancel: BCBA' },
+    { c: 'var(--cancel-admin)', label: 'Cancel: admin' },
+    { c: 'var(--cancel-pto)', label: 'Cancel: PTO' },
   ];
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', fontSize: 10, color: '#6b7280', marginTop: 2 }}>
@@ -648,7 +663,7 @@ function Legend() {
 // Tiles are color-coded (client pastel background + staff diagonal stripes),
 // the time axis is frozen on side-scroll, and tapping a tile pops a small
 // dialog to view the session in the detail panel.
-function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks, hourHeight: hourHeightBase = HOUR_HEIGHT, axisWidth = TIME_AXIS_WIDTH, roomy = false }: {
+function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks, hourHeight: hourHeightBase = HOUR_HEIGHT, axisWidth = TIME_AXIS_WIDTH, roomy = false, onMoveThis, onReplaceThis }: {
   days: Date[];
   appointments: Appointment[];
   onSelectAppointment: (a: Appointment) => void;
@@ -658,6 +673,8 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
   hourHeight?: number;
   axisWidth?: number;
   roomy?: boolean;
+  onMoveThis?: (a: Appointment) => void;
+  onReplaceThis?: (a: Appointment) => void;
 }) {
   // Pinch-zoom scoped to this grid: scales the hour height so the frozen time
   // axis and day header stay aligned (they read the same value). Two-finger
@@ -888,11 +905,23 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
               {tapped.client && <> · {tapped.client}</>}
               {tapped.technician && <> · {tapped.technician}</>}
             </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               <button onClick={() => setTapped(null)} style={{
                 padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: 6,
                 background: 'white', cursor: 'pointer', fontSize: 13,
               }}>Close</button>
+              {tapped.status !== 'completed' && onMoveThis && (
+                <button onClick={() => { const a = tapped; setTapped(null); onMoveThis(a); }} style={{
+                  padding: '6px 12px', border: '1px solid #f59e0b', borderRadius: 6,
+                  background: '#fffbeb', color: '#b45309', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                }} title="Find minimal same-week moves to place this appointment back">Move This</button>
+              )}
+              {tapped.status !== 'completed' && onReplaceThis && (
+                <button onClick={() => { const a = tapped; setTapped(null); onReplaceThis(a); }} style={{
+                  padding: '6px 12px', border: '1px solid #a855f7', borderRadius: 6,
+                  background: '#faf5ff', color: '#7e22ce', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                }} title="Fill this slot with another session and reschedule the original">Replace This</button>
+              )}
               <button onClick={() => { const a = tapped; setTapped(null); onSelectAppointment(a); }} style={{
                 padding: '6px 12px', border: 'none', borderRadius: 6,
                 background: '#3b82f6', color: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -993,66 +1022,108 @@ function appointmentsOn(appointments: Appointment[], date: Date): Appointment[] 
     .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 }
 
-// Status-based coloring so cancellation trends are visible at a glance across a
-// week: gray = pending, green = completed, and canceled splits by who canceled —
-// orange-red for family, bright red for staff (BT/BCBA/admin). Appointment type
-// is conveyed by the title text rather than color in this view.
+// Status-based coloring for the monthly chip view. Two-axis scheme: status ×
+// billability. Completed = blue family (billable=blue-500, non-billable=indigo-500).
+// Pending = gray family (billable=slate-400, non-billable=gray-400). Canceled
+// keeps orange/red split by who canceled.
+// Map appointment type to its brand accent color (load-bearing color language).
+function typeAccent(type: Appointment['type']): string {
+  switch (type) {
+    case 'client-session':  return 'var(--type-direct)';
+    case 'supervision':     return 'var(--type-supervision)';
+    case 'parent-training': return 'var(--type-parent-training)';
+    case 'reassessment':    return 'var(--type-reassessment)';
+    case 'case-planning':   return 'var(--type-case-planning)';
+    default:                return 'var(--type-admin)';
+  }
+}
+
+// Map cancellation source to its coded bar color.
+function cancelBar(source?: string): string {
+  switch (source) {
+    case 'family': return 'var(--cancel-family)';
+    case 'bcba':   return 'var(--cancel-bcba)';
+    case 'admin':  return 'var(--cancel-admin)';
+    default:       return 'var(--cancel-bt)';
+  }
+}
+
 function appointmentLook(apt: Appointment, mark?: DraftMark) {
   const canceled = apt.status === 'canceled';
   const completed = apt.status === 'completed';
-  let background = '#9ca3af'; // pending
-  if (completed) background = '#16a34a';
-  else if (canceled) background = apt.cancellation?.source === 'family' ? '#f97316' : '#dc2626';
 
-  let color = 'white';
-  let border = '1px solid rgba(0,0,0,0.05)';
-  let opacity = canceled ? 0.85 : 1;
-  let strike = canceled;
+  let bar = typeAccent(apt.type);
+  let bg = 'var(--white)';
+  let fg = 'var(--text-body)';
+  let border = '1px solid transparent';
+  let opacity = 1;
+  let strike = false;
   let prefix = '';
 
-  // Ghost = wished-for, never placed: a faint dashed reminder.
+  if (completed) {
+    bar = 'var(--appt-completed)';
+    bg = 'var(--green-50)';
+    fg = 'var(--green-800)';
+    prefix = '✓ ';
+  } else if (canceled) {
+    const src = apt.cancellation?.source;
+    bar = cancelBar(src);
+    bg = src === 'family' ? 'var(--orange-100)' : src === 'admin' ? 'var(--slate-100)' : 'var(--red-50)';
+    fg = src === 'family' ? 'var(--orange-700)' : src === 'admin' ? 'var(--slate-600)' : src === 'bcba' ? 'var(--red-800)' : 'var(--red-700)';
+    strike = true;
+    opacity = 0.9;
+  }
+
+  // Ghost = wished-for, never placed: faint dashed reminder, excluded from all calculations.
   if (apt.isGhost) {
-    background = '#f3f4f6'; color = '#6b7280'; border = '1px dashed #9ca3af';
-    opacity = 0.9; prefix = '👻 ';
+    bar = 'var(--slate-400)';
+    bg = 'var(--slate-100)';
+    fg = 'var(--text-muted)';
+    border = '1px dashed var(--slate-400)';
+    opacity = 0.9;
+    prefix = '👻 ';
+    strike = false;
   } else if (mark) {
-    // Draft (uncommitted) styling. Removes are tombstoned; the rest are
-    // "proposed" with a dashed blue outline so they read as not-yet-saved.
+    // Draft (uncommitted): removes tombstoned, others proposed with violet dashes.
     if (mark === 'remove') {
-      background = '#fee2e2'; color = '#b91c1c'; border = '1px dashed #fca5a5';
+      bar = 'var(--red-300)'; bg = 'var(--red-100)'; fg = 'var(--red-700)';
+      border = '1px dashed var(--red-300)';
       opacity = 0.7; strike = true; prefix = '🗑 ';
     } else {
-      background = '#dbeafe'; color = '#1e3a8a'; border = '1px dashed #2563eb';
-      opacity = 0.95; prefix = mark === 'add' ? '＋ ' : mark === 'shorten' ? '✂ ' : '✎ ';
+      bar = 'var(--violet-400)'; bg = 'var(--violet-100)'; fg = 'var(--violet-700)';
+      border = '1px dashed var(--violet-400)';
+      opacity = 0.95;
+      prefix = mark === 'add' ? '＋ ' : mark === 'shorten' ? '✂ ' : '✎ ';
     }
   }
 
-  return {
-    canceled, completed,
-    background, color, border, opacity, strike, prefix,
-    statusIcon: canceled ? '✕' : completed ? '✓' : null,
-    statusColor: apt.isGhost || mark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.95)',
-  };
+  return { canceled, completed, bar, bg, fg, border, opacity, strike, prefix };
 }
 
 function AppointmentChip({ apt, mark, onClick }: { apt: Appointment; mark?: DraftMark; onClick: () => void }) {
   const look = appointmentLook(apt, mark);
   return (
-    <div
+    <button
       onClick={e => { e.stopPropagation(); onClick(); }}
+      title={apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : '')}
       style={{
-        background: look.background, color: look.color,
-        padding: '3px 4px', borderRadius: 3, fontSize: 10,
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        cursor: 'pointer',
+        display: 'flex', alignItems: 'stretch', gap: 4,
+        width: '100%', padding: '2px 4px 2px 3px', marginBottom: 2,
+        background: look.bg, color: look.fg,
+        border: look.border,
+        borderRadius: 'var(--radius-xs)',
+        cursor: 'pointer', overflow: 'hidden',
         textDecoration: look.strike ? 'line-through' : 'none',
         opacity: look.opacity,
-        border: look.border,
+        textAlign: 'left',
         boxSizing: 'border-box',
       }}
-      title={apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : '')}
     >
-      {look.prefix}{apt.title}
-    </div>
+      <span style={{ width: 3, borderRadius: 2, background: look.bar, flexShrink: 0 }} />
+      <span style={{ fontSize: 10.5, fontWeight: 700, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {look.prefix}{apt.title}
+      </span>
+    </button>
   );
 }
 
@@ -1073,7 +1144,7 @@ function blockLook(apt: Appointment, mark?: DraftMark) {
 
   if (completed) { border = `2px solid ${clientDarkBorder(apt.client)}`; }
   else if (canceled) {
-    border = `2px solid ${apt.cancellation?.source === 'family' ? '#f97316' : '#dc2626'}`;
+    border = `2px solid ${cancelBar(apt.cancellation?.source)}`;
     opacity = 0.55; strike = true;
   }
 
@@ -1090,6 +1161,7 @@ function blockLook(apt: Appointment, mark?: DraftMark) {
     backgroundImage: tile.backgroundImage,
     border, opacity, strike, prefix,
     color: '#1f2937',
+    typeBar: typeAccent(apt.type),
   };
 }
 
@@ -1124,26 +1196,31 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
         backgroundColor: look.backgroundColor,
         backgroundImage: look.backgroundImage,
         color: look.color,
-        padding: roomy ? '5px 8px' : '4px 6px', borderRadius: 4, fontSize: roomy ? 13 : 11,
+        borderRadius: 4, fontSize: roomy ? 13 : 11,
         overflow: 'hidden', cursor: dragHandle ? 'grab' : 'pointer', boxSizing: 'border-box',
         border: look.border,
         opacity: look.opacity,
         textDecoration: look.strike ? 'line-through' : 'none',
         touchAction: dragHandle ? 'none' : 'manipulation',
+        display: 'flex',
       }}
       title={apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : '')}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }}>
-        <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{look.prefix}{apt.title}</span>
-      </div>
-      <div style={{ fontSize: roomy ? 12 : 10, opacity: 0.85, marginTop: 2 }}>
-        {format(new Date(apt.startTime), 'h:mm')}–{format(new Date(apt.endTime), 'h:mm a')}
-      </div>
-      {roomy && (apt.client || apt.technician) && (
-        <div style={{ fontSize: 11, opacity: 0.8, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {[apt.client, apt.technician].filter(Boolean).join(' · ')}
+      {/* 4px type-accent left edge — encodes session type without overriding client/staff palette */}
+      <span style={{ width: 4, background: look.typeBar, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0, padding: roomy ? '5px 8px' : '4px 6px', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }}>
+          <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{look.prefix}{apt.title}</span>
         </div>
-      )}
+        <div style={{ fontSize: roomy ? 12 : 10, opacity: 0.85, marginTop: 2 }}>
+          {format(new Date(apt.startTime), 'h:mm')}–{format(new Date(apt.endTime), 'h:mm a')}
+        </div>
+        {roomy && (apt.client || apt.technician) && (
+          <div style={{ fontSize: 11, opacity: 0.8, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {[apt.client, apt.technician].filter(Boolean).join(' · ')}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

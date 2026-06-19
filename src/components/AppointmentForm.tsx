@@ -274,9 +274,15 @@ export default function AppointmentForm({
     const start = new Date(startTime);
     if (isNaN(start.getTime())) return [base];
     const duration = new Date(endTime).getTime() - start.getTime();
-    // Fallback window if the user didn't pick an end — 90 days of weekly is
-    // a reasonable seed without runaway records.
-    const defaultEnd = new Date(start.getTime() + 90 * 24 * 60 * 60 * 1000);
+    const authEnd = (() => {
+      if (!clientId || !date) return undefined;
+      const auth = findAuthFor(
+        { appointments: allAppointments || [], authorizations: authorizations || [], clients } as unknown as ScheduleData,
+        clientId, date,
+      );
+      return auth?.endDate ? new Date(`${auth.endDate}T23:59:59`) : undefined;
+    })();
+    const defaultEnd = authEnd ?? new Date(start.getTime() + 90 * 24 * 60 * 60 * 1000);
     const end = recurrenceEnd ? new Date(`${recurrenceEnd}T23:59:59`) : defaultEnd;
     // One seriesId for all instances of this new series, so future edits can
     // target "this and following" or "all in series".
@@ -396,11 +402,11 @@ export default function AppointmentForm({
   const inputStyle: React.CSSProperties = {
     width: '100%',
     padding: '10px 12px',
-    border: '1px solid #d1d5db',
-    borderRadius: '8px',
+    border: 'var(--border-control)',
+    borderRadius: 'var(--radius-lg)',
     fontSize: '15px',
-    color: '#111827',
-    background: '#fff',
+    color: 'var(--text-primary)',
+    background: 'var(--surface-card)',
     boxSizing: 'border-box',
   };
 
@@ -427,12 +433,12 @@ export default function AppointmentForm({
   });
 
   // Accent color keyed to the session type, echoed in the header bar.
-  const typeAccent = type === 'client-session' ? '#7c3aed'
-    : type === 'supervision' ? '#10b981'
-    : type === 'parent-training' ? '#3b82f6'
-    : type === 'reassessment' ? '#f59e0b'
-    : type === 'case-planning' ? '#0ea5e9'
-    : '#6b7280';
+  const typeAccent = type === 'client-session' ? 'var(--type-direct)'
+    : type === 'supervision' ? 'var(--type-supervision)'
+    : type === 'parent-training' ? 'var(--type-parent-training)'
+    : type === 'reassessment' ? 'var(--type-reassessment)'
+    : type === 'case-planning' ? 'var(--type-case-planning)'
+    : 'var(--type-admin)';
 
   const content = (
     <>
@@ -454,7 +460,7 @@ export default function AppointmentForm({
 
         {appointment && hasSeries && (
           <div style={{ marginBottom: 16 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-body)', display: 'block', marginBottom: 6 }}>
               Apply changes to
             </label>
             <ScopePicker value={editScope} onChange={setEditScope} />
@@ -533,6 +539,52 @@ export default function AppointmentForm({
             </div>
           </div>
 
+          <div style={groupHeader('Options')}>Options</div>
+          <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginTop: '4px', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
+              <input type="checkbox" checked={isBillable} onChange={(e) => setIsBillable(e.target.checked)} />
+              <span>Billable</span>
+            </label>
+            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
+              <input type="checkbox" checked={isMakeUp} onChange={(e) => { setIsMakeUp(e.target.checked); if (!e.target.checked) setMakeupForId(''); }} />
+              <span>Make-up session</span>
+            </label>
+          </div>
+
+          {isMakeUp && (
+            <div style={{ padding: '10px 12px', background: 'var(--surface-sunken)', border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)' }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-body)', marginBottom: 6 }}>
+                Making up which canceled session?
+              </p>
+              {!clientId || !date ? (
+                <p style={{ fontSize: 12, color: '#9ca3af' }}>Pick a client and date first.</p>
+              ) : makeupOptions.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#9ca3af' }}>
+                  No canceled, not-yet-made-up sessions for this client in this auth period. Saving as a general make-up.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, cursor: 'pointer' }}>
+                    <input type="radio" name="makeupFor" checked={makeupForId === ''} onChange={() => setMakeupForId('')} />
+                    <span style={{ color: '#6b7280' }}>General make-up (not tied to one cancellation)</span>
+                  </label>
+                  {makeupOptions.map(opt => (
+                    <label key={opt.appointment.id} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, cursor: 'pointer' }}>
+                      <input type="radio" name="makeupFor" checked={makeupForId === opt.appointment.id} onChange={() => setMakeupForId(opt.appointment.id)} />
+                      <span>
+                        {opt.appointment.title} — {new Date(opt.appointment.startTime).toLocaleDateString()}{' '}
+                        <span style={{ color: 'var(--status-behind)', fontWeight: 600 }}>
+                          {Math.round(opt.remainingHours * 10) / 10}h not made up
+                        </span>
+                        {opt.madeUpHours > 0 && <span style={{ color: '#6b7280' }}> (of {Math.round(opt.hours * 10) / 10}h)</span>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={groupHeader('Schedule')}>Schedule</div>
           <div>
             <label style={labelStyle}>Date *</label>
@@ -566,10 +618,10 @@ export default function AppointmentForm({
                     onClick={() => toggleDay(day)}
                     style={{
                       padding: '6px 10px',
-                      border: '1px solid #d1d5db',
-                      borderRadius: '4px',
-                      backgroundColor: selectedDays.has(day) ? '#3b82f6' : 'white',
-                      color: selectedDays.has(day) ? 'white' : '#374151',
+                      border: 'var(--border-control)',
+                      borderRadius: 'var(--radius-sm)',
+                      backgroundColor: selectedDays.has(day) ? 'var(--brand-primary)' : 'var(--surface-card)',
+                      color: selectedDays.has(day) ? 'var(--brand-primary-text)' : 'var(--text-body)',
                       cursor: 'pointer',
                       fontSize: '12px',
                     }}
@@ -593,7 +645,7 @@ export default function AppointmentForm({
               />
               <p style={{ fontSize: '11px', color: '#6b7280', marginTop: 4 }}>
                 The series starts on the Date at the Start time above and repeats until
-                this date (or 90 days out if left blank). When editing an existing
+                this date (or the client's auth end date if left blank; falls back to 90 days if no auth). When editing an existing
                 appointment, changes apply only to that single occurrence — the
                 rest of the series is independent.
               </p>
@@ -616,74 +668,29 @@ export default function AppointmentForm({
             </div>
           )}
 
-          <div style={groupHeader('Options')}>Options</div>
-          <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginTop: '4px', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
-              <input type="checkbox" checked={isBillable} onChange={(e) => setIsBillable(e.target.checked)} />
-              <span>Billable</span>
-            </label>
-            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
-              <input type="checkbox" checked={isMakeUp} onChange={(e) => { setIsMakeUp(e.target.checked); if (!e.target.checked) setMakeupForId(''); }} />
-              <span>Make-up session</span>
-            </label>
-          </div>
-
-          {isMakeUp && (
-            <div style={{ padding: '10px 12px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6 }}>
-              <p style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-                Making up which canceled session?
-              </p>
-              {!clientId || !date ? (
-                <p style={{ fontSize: 12, color: '#9ca3af' }}>Pick a client and date first.</p>
-              ) : makeupOptions.length === 0 ? (
-                <p style={{ fontSize: 12, color: '#9ca3af' }}>
-                  No canceled, not-yet-made-up sessions for this client in this auth period. Saving as a general make-up.
-                </p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, cursor: 'pointer' }}>
-                    <input type="radio" name="makeupFor" checked={makeupForId === ''} onChange={() => setMakeupForId('')} />
-                    <span style={{ color: '#6b7280' }}>General make-up (not tied to one cancellation)</span>
-                  </label>
-                  {makeupOptions.map(opt => (
-                    <label key={opt.appointment.id} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, cursor: 'pointer' }}>
-                      <input type="radio" name="makeupFor" checked={makeupForId === opt.appointment.id} onChange={() => setMakeupForId(opt.appointment.id)} />
-                      <span>
-                        {opt.appointment.title} — {new Date(opt.appointment.startTime).toLocaleDateString()}{' '}
-                        <span style={{ color: '#b91c1c', fontWeight: 600 }}>
-                          {Math.round(opt.remainingHours * 10) / 10}h not made up
-                        </span>
-                        {opt.madeUpHours > 0 && <span style={{ color: '#6b7280' }}> (of {Math.round(opt.hours * 10) / 10}h)</span>}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         <div style={{
           display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap',
           position: 'sticky', bottom: 0, marginTop: 18, paddingTop: 14,
-          borderTop: '1px solid #e5e7eb',
-          background: '#fff',
+          borderTop: 'var(--border-hairline)',
+          background: 'var(--surface-card)',
         }}>
           {appointment && onDelete && (
             <button className="af-btn" onClick={handleDelete} style={{
-              padding: '10px 16px', border: '1px solid #fca5a5', borderRadius: '8px',
-              background: '#fee2e2', color: '#b91c1c', cursor: 'pointer', fontWeight: 700, fontSize: 14,
+              padding: '10px 16px', border: '1px solid var(--red-300)', borderRadius: 'var(--radius-lg)',
+              background: 'var(--status-behind-bg)', color: 'var(--status-behind)', cursor: 'pointer', fontWeight: 700, fontSize: 14,
             }}>Delete</button>
           )}
           <div style={{ flex: 1 }} />
           <button className="af-btn" onClick={onCancel} style={{
-            padding: '10px 18px', border: '1px solid #d1d5db', borderRadius: '8px',
-            background: 'white', cursor: 'pointer', fontWeight: 600, fontSize: 14, color: '#374151',
+            padding: '10px 18px', border: 'var(--border-control)', borderRadius: 'var(--radius-lg)',
+            background: 'var(--surface-card)', cursor: 'pointer', fontWeight: 600, fontSize: 14, color: 'var(--text-body)',
           }}>Cancel</button>
           <button className="af-btn" onClick={handleSubmit} style={{
             padding: '10px 22px', backgroundColor: typeAccent, color: 'white',
-            border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: 14,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+            border: 'none', borderRadius: 'var(--radius-lg)', cursor: 'pointer', fontWeight: 700, fontSize: 14,
+            boxShadow: 'var(--shadow-sm)',
           }}>{appointment ? 'Save changes' : 'Add session'}</button>
         </div>
     </>
@@ -710,9 +717,9 @@ export default function AppointmentForm({
       boxSizing: 'border-box',
     }}>
       <div className="af-form" style={{
-        backgroundColor: 'white', borderRadius: '14px', padding: '20px', paddingBottom: 20,
+        backgroundColor: 'var(--surface-card)', borderRadius: 'var(--radius-xl)', padding: '20px', paddingBottom: 20,
         width: '100%', maxWidth: 600, maxHeight: '100%', overflowY: 'auto',
-        boxSizing: 'border-box', boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+        boxSizing: 'border-box', boxShadow: 'var(--shadow-pop)',
       }}>
         {content}
       </div>
@@ -728,8 +735,8 @@ function ScopePicker({ value, onChange }: { value: EditScope; onChange: (v: Edit
   ];
   return (
     <div style={{
-      display: 'flex', borderRadius: 6, overflow: 'hidden',
-      border: '1px solid #d1d5db', maxWidth: '100%',
+      display: 'flex', borderRadius: 'var(--radius-md)', overflow: 'hidden',
+      border: 'var(--border-control)', maxWidth: '100%',
     }}>
       {opts.map(o => (
         <button
@@ -739,8 +746,8 @@ function ScopePicker({ value, onChange }: { value: EditScope; onChange: (v: Edit
           style={{
             flex: 1, padding: '6px 8px', fontSize: 12, fontWeight: 600,
             border: 'none', cursor: 'pointer',
-            backgroundColor: o.value === value ? '#3b82f6' : 'white',
-            color: o.value === value ? 'white' : '#374151',
+            backgroundColor: o.value === value ? 'var(--brand-primary)' : 'var(--surface-card)',
+            color: o.value === value ? 'var(--brand-primary-text)' : 'var(--text-body)',
             whiteSpace: 'nowrap',
           }}
         >{o.label}</button>

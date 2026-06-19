@@ -1,0 +1,6 @@
+{
+  "appId": "com.abascheduler",
+  "appName": "ABA Schedule Assistant",
+  "webDir": "dist-client",
+  "plugins": {}
+}

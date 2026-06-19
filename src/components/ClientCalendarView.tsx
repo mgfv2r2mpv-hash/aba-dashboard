@@ -1,12 +1,13 @@
 // ClientCalendarView — top-level client-centric schedule view.
 //
 // Month sub-view: blackout dates only per client (no appointments).
-// Day sub-view:   vertical time axis × horizontal client columns.
+// Day/Week sub-view: vertical time axis × horizontal client columns.
 //   - Availability windows: translucent pastel vertical fills.
 //   - Direct-service sessions (client-session): candy-stripe tileStyle.
 //   - Other sessions (supervision, PT, case-planning…): solid fill.
-//   - Heatmap toggle: 30-min slot row backgrounds show aggregate session density.
+//   - Heatmap always on in day/week views (red overlay shows busy slots).
 // Client filter: All / None / individual pills — defaults all selected.
+// Navigation is controlled entirely by the outer Calendar toolbar.
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -16,7 +17,7 @@ import {
   clientPastel, clientDarkBorder, clientAvailBarStyle, tileStyle,
 } from '../calendarColors';
 import {
-  format, addDays, subDays, addMonths, subMonths,
+  format, addDays,
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, isSameDay, isSameMonth,
 } from 'date-fns';
@@ -27,18 +28,20 @@ const HOUR_PX   = 80;   // taller than BCBA calendar → more scroll, larger ban
 const GUTTER    = 56;   // time axis width
 const COL_MIN   = 140;  // min client column width
 
-type Sub = 'month' | 'day';
-
 interface Props {
   clients: Client[];
   appointments: Appointment[];
   blackouts: Blackout[];
+  view: 'month' | 'week' | 'day';
+  date: Date;
+  onPickDay: (d: Date) => void;
 }
 
-export default function ClientCalendarView({ clients, appointments, blackouts }: Props) {
-  const [sub, setSub]       = useState<Sub>('day');
-  const [date, setDate]     = useState(new Date());
-  const [heatmap, setHeatmap] = useState(false);
+export default function ClientCalendarView({ clients, appointments, blackouts, view, date, onPickDay }: Props) {
+  // Heatmap is always on in day/week views — no toggle needed.
+  const heatmap = view !== 'month';
+  const sub: 'month' | 'day' = view === 'month' ? 'month' : 'day';
+
   const [selIds, setSelIds] = useState<Set<string>>(
     () => new Set(clients.map(c => c.id)),
   );
@@ -56,66 +59,8 @@ export default function ClientCalendarView({ clients, appointments, blackouts }:
   const allSel    = clients.length > 0 && clients.every(c => selIds.has(c.id));
   const noneSel   = selIds.size === 0;
 
-  const goPrev = () => setDate(d => sub === 'month' ? subMonths(d, 1) : subDays(d, 1));
-  const goNext = () => setDate(d => sub === 'month' ? addMonths(d, 1) : addDays(d, 1));
-
   return (
     <div style={{ padding: 'clamp(8px,3vw,24px)', boxSizing: 'border-box' }}>
-
-      {/* ── Toolbar ───────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
-
-        {/* Month / Day toggle */}
-        <div style={{ display: 'flex', border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
-          {(['month', 'day'] as Sub[]).map(v => (
-            <button
-              key={v}
-              onClick={() => { setSub(v); if (v === 'month') setHeatmap(false); }}
-              style={{
-                padding: '6px 14px', border: 'none', cursor: 'pointer',
-                fontSize: 13, fontWeight: 600,
-                background: sub === v ? '#3b82f6' : 'white',
-                color:      sub === v ? 'white'   : '#374151',
-              }}
-            >{v[0].toUpperCase() + v.slice(1)}</button>
-          ))}
-        </div>
-
-        {/* Heatmap toggle (day only) */}
-        {sub === 'day' && (
-          <button
-            onClick={() => setHeatmap(h => !h)}
-            style={{
-              padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
-              border:      `1px solid ${heatmap ? '#b91c1c' : '#d1d5db'}`,
-              background:  heatmap ? '#fff5f5' : 'white',
-              color:       heatmap ? '#b91c1c' : '#374151',
-              fontWeight:  heatmap ? 700 : 500,
-            }}
-          >🌡 Heatmap</button>
-        )}
-
-        {/* Date nav */}
-        <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
-          {[
-            { label: '←', fn: goPrev },
-            { label: 'Today', fn: () => setDate(new Date()) },
-            { label: '→', fn: goNext },
-          ].map(({ label, fn }) => (
-            <button key={label} onClick={fn} style={{
-              padding: '6px 12px', background: '#e5e7eb', border: 'none',
-              borderRadius: 4, cursor: 'pointer', fontSize: 13,
-            }}>{label}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Date heading ──────────────────────────────────── */}
-      <h2 style={{ fontSize: 17, fontWeight: 700, margin: '0 0 10px', textAlign: 'center', color: '#111827' }}>
-        {sub === 'month'
-          ? format(date, 'MMMM yyyy')
-          : format(date, 'EEEE, MMMM d, yyyy')}
-      </h2>
 
       {/* ── Client filter pills ────────────────────────────── */}
       <div style={{
@@ -167,7 +112,7 @@ export default function ClientCalendarView({ clients, appointments, blackouts }:
           date={date}
           blackouts={blackouts}
           clients={visible}
-          onPickDay={d => { setDate(d); setSub('day'); }}
+          onPickDay={onPickDay}
         />
       )}
       {sub === 'day' && (

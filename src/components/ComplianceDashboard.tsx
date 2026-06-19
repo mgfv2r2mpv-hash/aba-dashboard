@@ -259,7 +259,7 @@ function PastIncomplete({ items, onMarkComplete, onRequestCancel, onSelect }: {
   const [collapsed, setCollapsed] = useState(false);
   return (
     <div style={{
-      backgroundColor: '#fef3c7', border: '1px solid #f59e0b',
+      backgroundColor: 'var(--status-pace-bg)', border: '1px solid var(--status-pace)',
       borderRadius: 8, padding: 12, marginBottom: 16,
     }}>
       <button
@@ -377,21 +377,21 @@ function actualSectionStatus(level: ActualLevel): { text: string; color: string 
   switch (level) {
     case 'na':     return { text: 'N/A',    color: '#6b7280' };
     case 'over':   return { text: 'Over',   color: CAP_OVER };
-    case 'high':   return { text: 'High',   color: '#b45309' };
-    case 'ideal':  return { text: 'Ideal',  color: '#166534' };
-    case 'good':   return { text: 'Good',   color: '#15803d' };
-    case 'behind': return { text: 'Behind', color: '#b91c1c' };
+    case 'high':   return { text: 'High',   color: 'var(--status-pace)' };
+    case 'ideal':  return { text: 'Ideal',  color: 'var(--status-met)' };
+    case 'good':   return { text: 'Good',   color: 'var(--status-met)' };
+    case 'behind': return { text: 'Behind', color: 'var(--status-behind)' };
   }
 }
 
 function projectedSectionStatus(level: ProjectedLevel): { text: string; color: string } {
   switch (level) {
     case 'over':   return { text: 'Over',   color: CAP_OVER };
-    case 'high':   return { text: 'High',   color: '#b45309' };
-    case 'ideal':  return { text: 'Ideal',  color: '#166534' };
-    case 'ok':     return { text: 'OK',     color: '#15803d' };
-    case 'risky':  return { text: 'Risky',  color: '#b91c1c' };
-    case 'behind': return { text: 'Behind', color: '#b91c1c' };
+    case 'high':   return { text: 'High',   color: 'var(--status-pace)' };
+    case 'ideal':  return { text: 'Ideal',  color: 'var(--status-met)' };
+    case 'ok':     return { text: 'OK',     color: 'var(--status-met)' };
+    case 'risky':  return { text: 'Risky',  color: 'var(--status-behind)' };
+    case 'behind': return { text: 'Behind', color: 'var(--status-behind)' };
   }
 }
 
@@ -400,14 +400,14 @@ const mkBadge = (text: string, bgColor: string, cardBg?: string, isCritical = fa
   ({ text, bgColor, cardBg, isCritical, isAmazing });
 
 // Colours used in overallBadge.
-const BADGE_RED        = '#b91c1c'; // Critical / High Risk
-const BADGE_RED_CARD   = '#fff5f5';
-const BADGE_AMBER_WARM = '#b45309'; // At Risk (yellow-orange)
-const BADGE_AMBER      = '#a16207'; // At Risk (yellow)
-const BADGE_YG         = '#65a30d'; // Projected Good / Projected High (yellow-green)
-const BADGE_GREEN      = '#15803d'; // Projected Good (green) / Projected Ideal
-const BADGE_GREEN_CARD = '#f0fdf4';
-const BADGE_ORANGE_RED = '#c2410c'; // Over/Over → High
+const BADGE_RED        = 'var(--status-behind)'; // Critical / High Risk
+const BADGE_RED_CARD   = 'var(--status-behind-bg)';
+const BADGE_AMBER_WARM = 'var(--status-pace)'; // At Risk (yellow-orange)
+const BADGE_AMBER      = '#a16207'; // At Risk (yellow) — no direct token
+const BADGE_YG         = '#65a30d'; // Projected Good / Projected High (yellow-green) — no direct token
+const BADGE_GREEN      = 'var(--status-met)'; // Projected Good (green) / Projected Ideal
+const BADGE_GREEN_CARD = 'var(--status-met-bg)';
+const BADGE_ORANGE_RED = 'var(--status-over)'; // Over/Over → High
 
 // Helper: how far below the company min is the projected pct?
 // Used for Behind-projection calculations.
@@ -607,20 +607,13 @@ function TechCard({ report, maxPct, contacts, rbtMinContacts, btMinContacts }: {
       borderRadius: 8, padding: 12,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
-        <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+        <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>
           {tech.name}
           <span style={{
-            fontSize: 10, fontWeight: 700,
+            marginLeft: 6, fontSize: 10, fontWeight: 700,
             color: '#6b7280', backgroundColor: '#e5e7eb',
             padding: '2px 6px', borderRadius: 8,
           }}>{tech.isRBT ? 'RBT' : 'BT'}</span>
-          {tech.isFieldworkSupervisee && (
-            <span style={{
-              fontSize: 10, fontWeight: 700,
-              color: '#6d28d9', backgroundColor: '#ede9fe',
-              padding: '2px 6px', borderRadius: 8,
-            }}>Fieldwork</span>
-          )}
         </h3>
         <span style={{
           fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
@@ -636,33 +629,21 @@ function TechCard({ report, maxPct, contacts, rbtMinContacts, btMinContacts }: {
       ) : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-            <TechMetric title="Actual" m={actual} accent={accent} isRBT={tech.isRBT} maxPct={maxPct} />
-            <TechMetric title="Projected" m={projected} accent={accent} isRBT={tech.isRBT} maxPct={maxPct} />
+            <TechMetric title="Actual" m={actual} accent={accent} isRBT={tech.isRBT} maxPct={maxPct} sectionStatus={techHalfStatus(actual, tech.isRBT)} />
+            <TechMetric title="Projected" m={projected} accent={accent} isRBT={tech.isRBT} maxPct={maxPct} sectionStatus={techHalfStatus(projected, tech.isRBT)} />
           </div>
           {contacts !== undefined && contactsRequired > 0 && (
-            <div style={{
-              marginTop: 8, fontSize: 12, color: '#6b7280',
-              ...(tech.isFieldworkSupervisee ? {
-                padding: '6px 10px', borderRadius: 6,
-                backgroundColor: '#faf5ff', border: '1px solid #ede9fe',
-              } : {}),
-            }}>
-              {tech.isFieldworkSupervisee && (
-                <div style={{ fontWeight: 700, fontSize: 11, color: '#6d28d9', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Fieldwork Contact Days
-                </div>
-              )}
-              {!tech.isFieldworkSupervisee && 'Supervision contacts: '}
-              <strong style={{ color: actualContactsBehind ? '#6b7280' : '#15803d' }}>
+            <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>
+              Supervision contacts: <strong style={{ color: actualContactsBehind ? 'var(--text-muted)' : 'var(--status-met)' }}>
                 {contacts.actual} actual
               </strong>
               {' / '}
-              <strong style={{ color: projectedContactsBehind ? '#b91c1c' : '#15803d' }}>
+              <strong style={{ color: projectedContactsBehind ? 'var(--status-behind)' : 'var(--status-met)' }}>
                 {contacts.projected} projected
               </strong>
               {' '}(need {contactsRequired}/month)
-              {projectedContactsBehind && <span style={{ color: '#b91c1c', fontWeight: 600 }}> — behind</span>}
-              {!projectedContactsBehind && <span style={{ color: '#15803d' }}> ✓</span>}
+              {projectedContactsBehind && <span style={{ color: 'var(--status-behind)', fontWeight: 600 }}> — behind</span>}
+              {!projectedContactsBehind && <span style={{ color: 'var(--status-met)' }}> ✓</span>}
             </div>
           )}
         </>
@@ -671,19 +652,21 @@ function TechCard({ report, maxPct, contacts, rbtMinContacts, btMinContacts }: {
   );
 }
 
-function techSectionStatus(m: TechComplianceMetrics, isRBT: boolean): { text: string; color: string } {
-  const bacbOk = !isRBT || (m.bacbHoursToGo ?? 0) === 0;
-  const companyOk = m.companyHoursToGo === 0;
-  if (bacbOk && companyOk) return { text: 'On Track', color: '#15803d' };
-  return { text: 'Behind', color: '#b91c1c' };
+function techHalfStatus(m: TechComplianceMetrics, isRBT: boolean): { text: string; color: string } {
+  const bacbOk = !isRBT || (m.bacbHoursToGo ?? 0) <= 0;
+  const companyOk = m.companyHoursToGo <= 0;
+  if (bacbOk && companyOk) return { text: 'On Track', color: 'var(--status-met)' };
+  if (isRBT && (bacbOk || companyOk)) return { text: 'Partial', color: 'var(--status-pace)' };
+  return { text: 'Behind', color: 'var(--status-behind)' };
 }
 
-function TechMetric({ title, m, accent, isRBT, maxPct }: {
+function TechMetric({ title, m, accent, isRBT, maxPct, sectionStatus }: {
   title: string;
   m: TechComplianceMetrics;
   accent: string;
   isRBT: boolean;
   maxPct?: number;
+  sectionStatus?: { text: string; color: string };
 }) {
   // Bar fills against whichever requirement is HIGHER (the binding one) so the
   // user sees how far they are from passing both checks.
@@ -693,7 +676,6 @@ function TechMetric({ title, m, accent, isRBT, maxPct }: {
   const fillPct = bindingPct > 0 ? Math.min(100, (m.pct / bindingPct) * 100) : 0;
   const overCap = maxPct !== undefined && m.pct > maxPct;
   const pctColor = overCap ? CAP_OVER : accent;
-  const sectionStatus = techSectionStatus(m, isRBT);
 
   return (
     <div>
@@ -703,15 +685,17 @@ function TechMetric({ title, m, accent, isRBT, maxPct }: {
       <div style={{ fontSize: 18, fontWeight: 700, color: pctColor }}>
         {m.pct.toFixed(1)}%{overCap && <span style={{ fontSize: 14 }}> ⚠️</span>}
       </div>
-      <div style={{ height: 22, display: 'flex', alignItems: 'center', marginTop: 3 }}>
-        <span style={{
-          fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-          color: 'white', backgroundColor: sectionStatus.color,
-          padding: '2px 7px', borderRadius: 8,
-        }}>{sectionStatus.text}</span>
-      </div>
+      {sectionStatus && (
+        <div style={{ height: 22, display: 'flex', alignItems: 'center', marginTop: 3 }}>
+          <span style={{
+            fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+            color: 'white', backgroundColor: sectionStatus.color,
+            padding: '2px 7px', borderRadius: 8,
+          }}>{sectionStatus.text}</span>
+        </div>
+      )}
       <div style={{
-        marginTop: 4, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden',
+        marginTop: 6, height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden',
       }}>
         <div style={{
           height: '100%', width: `${fillPct}%`,
@@ -761,17 +745,17 @@ function techStatus(
 }
 
 function statusColor(s: 'green' | 'atRisk' | 'yellow' | 'red' | 'gray'): string {
-  return s === 'green' ? '#15803d'
-    : s === 'atRisk' ? '#c2410c'
-    : s === 'yellow' ? '#a16207'
-    : s === 'red' ? '#b91c1c'
-    : '#6b7280';
+  return s === 'green' ? 'var(--status-met)'
+    : s === 'atRisk' ? 'var(--status-over)'
+    : s === 'yellow' ? 'var(--status-pace)'
+    : s === 'red' ? 'var(--status-behind)'
+    : 'var(--text-muted)';
 }
 
 
 // Distinct from the green/yellow/red status colors so the over-cap warning
 // doesn't get confused with the under-min status pill.
-const CAP_OVER = '#ea580c';
+const CAP_OVER = 'var(--status-over)';
 
 function Metric({ title, m, targetPct, preferredPct, preferredMaxPct, sectionStatus, maxPct }: {
   title: string;
@@ -855,7 +839,7 @@ function NavBtn({ onClick, children }: { onClick: () => void; children: React.Re
 
 const cancelBtn: React.CSSProperties = {
   flex: '1 1 auto', padding: '5px 9px',
-  backgroundColor: '#fee2e2', color: '#b91c1c',
-  border: '1px solid #fca5a5', borderRadius: 4,
+  backgroundColor: 'var(--status-behind-bg)', color: 'var(--status-behind)',
+  border: '1px solid var(--red-300)', borderRadius: 4,
   cursor: 'pointer', fontSize: 12, fontWeight: 600,
 };

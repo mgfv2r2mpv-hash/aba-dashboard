@@ -114,7 +114,7 @@ export default function LockScreen({ mode, onCreate, onVerify, onBiometric, biom
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 2000,
-      backgroundColor: '#1f2937', color: 'white',
+      backgroundColor: 'var(--surface-header)', color: 'var(--text-on-dark)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 'max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom))',
       boxSizing: 'border-box',
@@ -151,8 +151,8 @@ export default function LockScreen({ mode, onCreate, onVerify, onBiometric, biom
           disabled={busy}
           style={{
             width: '100%', marginTop: 18, padding: '13px',
-            backgroundColor: busy ? '#374151' : '#3b82f6', color: 'white',
-            border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 600,
+            backgroundColor: busy ? 'var(--slate-700)' : 'var(--brand-primary)', color: 'var(--brand-primary-text)',
+            border: 'none', borderRadius: 'var(--radius-lg)', fontSize: 16, fontWeight: 600,
             cursor: busy ? 'default' : 'pointer',
           }}
         >
@@ -166,8 +166,8 @@ export default function LockScreen({ mode, onCreate, onVerify, onBiometric, biom
             disabled={busy}
             style={{
               width: '100%', marginTop: 10, padding: '11px',
-              background: 'transparent', color: '#93c5fd',
-              border: '1px solid #374151', borderRadius: 10,
+              background: 'transparent', color: 'var(--sage-200)',
+              border: '1px solid var(--slate-600)', borderRadius: 'var(--radius-lg)',
               fontSize: 14, fontWeight: 600, cursor: 'pointer',
             }}
           >

@@ -9,7 +9,7 @@
 // Client filter: All / None / individual pills — defaults all selected.
 // Navigation is controlled entirely by the outer Calendar toolbar.
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Client, Blackout, Appointment, DayOfWeek,
 } from '../types';
@@ -21,6 +21,12 @@ import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, isSameDay, isSameMonth,
 } from 'date-fns';
+import {
+  DAY_S, DAY_E, WEEK_DAYS, SHORT_DAYS, toMin, tierOf, TIER_COLOR,
+} from './clientCalendarShared';
+import { usePinchZoom } from '../hooks/usePinchZoom';
+import ZoomResetPill from './ZoomResetPill';
+import AvailabilityHeatmap from './AvailabilityHeatmap';
 
 const DAY_START = 6;
 const DAY_END   = 22;
@@ -40,11 +46,41 @@ interface Props {
 export default function ClientCalendarView({ clients, appointments, blackouts, view, date, onPickDay }: Props) {
   // Heatmap is always on in day/week views — no toggle needed.
   const heatmap = view !== 'month';
-  const sub: 'month' | 'day' = view === 'month' ? 'month' : 'day';
 
   const [selIds, setSelIds] = useState<Set<string>>(
     () => new Set(clients.map(c => c.id)),
   );
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [fadedTier, setFadedTier] = useState<SessionTier | null>(null);
+  const [fadedClients, setFadedClients] = useState<Set<string>>(new Set());
+
+  const onFadeClient = (clientId: string) => {
+    setFadedClients(prev => {
+      const next = new Set(prev);
+      if (next.size === 0) {
+        // First selection: fade all except this client
+        visible.forEach(c => {
+          if (c.id !== clientId) next.add(c.id);
+        });
+      } else if (next.has(clientId)) {
+        // Already faded: unfade it
+        next.delete(clientId);
+      } else {
+        // Not faded: fade it
+        next.add(clientId);
+      }
+      return next;
+    });
+  };
+
+  const onClearFadedClients = () => {
+    setFadedClients(new Set());
+  };
+
+  const weekDays = useMemo(() => {
+    const mon = startOfWeek(date, { weekStartsOn: 1 });
+    return Array.from({ length: 7 }, (_, i) => addDays(mon, i));
+  }, [date]);
 
   // Keep any newly-added clients selected by default
   useEffect(() => {
@@ -107,7 +143,7 @@ export default function ClientCalendarView({ clients, appointments, blackouts, v
       </div>
 
       {/* ── Content ──────────────────────────────────────── */}
-      {sub === 'month' && (
+      {view === 'month' && (
         <ClientMonthView
           date={date}
           blackouts={blackouts}
@@ -115,7 +151,32 @@ export default function ClientCalendarView({ clients, appointments, blackouts, v
           onPickDay={onPickDay}
         />
       )}
-      {sub === 'day' && (
+      {view === 'week' && (
+        <>
+          <WeekTimeGrid
+            days={weekDays}
+            clients={visible}
+            appointments={appointments}
+            blackouts={blackouts}
+            highlightId={highlightId}
+            fadedTier={fadedTier}
+            onFadeTier={setFadedTier}
+          />
+          <AvailabilityHeatmap
+            days={weekDays}
+            clients={visible}
+            appointments={appointments}
+            highlightId={highlightId}
+            onHighlight={setHighlightId}
+            fadedTier={fadedTier}
+            onFadeTier={setFadedTier}
+            fadedClients={fadedClients}
+            onFadeClient={onFadeClient}
+            onClearFadedClients={onClearFadedClients}
+          />
+        </>
+      )}
+      {view === 'day' && (
         <ClientDayGrid
           date={date}
           clients={visible}
@@ -248,6 +309,210 @@ function ClientMonthView({ date, blackouts, clients, onPickDay }: {
   );
 }
 
+// ── Week time grid (days as columns, dual heatmap: blue avail + red density) ──
+
+const WEEK_HOUR_PX = 48;
+const WEEK_GUTTER  = 44;
+const WEEK_COL_MIN = 88;
+
+function WeekTimeGrid({ days, clients, appointments, blackouts, highlightId, fadedTier, onFadeTier }: {
+  days: Date[];
+  clients: Client[];
+  appointments: Appointment[];
+  blackouts: Blackout[];
+  highlightId: string | null;
+}) {
+  const { ref: zoomRef, scale: zoom, zoomed, reset } = usePinchZoom<HTMLDivElement>();
+  const hourPx = WEEK_HOUR_PX * zoom;
+  const totalH = (DAY_E - DAY_S) * hourPx;
+  const hours  = Array.from({ length: DAY_E - DAY_S }, (_, i) => DAY_S + i);
+  const today  = new Date();
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to current time on mount
+  useEffect(() => {
+    if (!bodyRef.current) return;
+    const now = new Date();
+    bodyRef.current.scrollTop = Math.max(0, (now.getHours() - 1 - DAY_S) * hourPx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const weekAppts = useMemo(() => {
+    const s = format(days[0], 'yyyy-MM-dd');
+    const e = format(days[6], 'yyyy-MM-dd');
+    return appointments.filter(a => {
+      const d = a.startTime.slice(0, 10);
+      return d >= s && d <= e && a.status !== 'canceled' && !a.isGhost;
+    });
+  }, [appointments, days]);
+
+  if (clients.length === 0) {
+    return (
+      <div style={{
+        border: '1px solid #e5e7eb', borderRadius: 8,
+        textAlign: 'center', padding: '64px 20px', color: '#9ca3af', fontSize: 14,
+      }}>
+        No clients selected. Choose clients using the filter above.
+      </div>
+    );
+  }
+
+  const topPx = (h: number, m: number) => (h + m / 60 - DAY_S) * hourPx;
+  const aptTop = (a: Appointment) => { const d = new Date(a.startTime); return topPx(d.getHours(), d.getMinutes()); };
+  const aptH   = (a: Appointment) => Math.max(16, (new Date(a.endTime).getTime() - new Date(a.startTime).getTime()) / 3_600_000 * hourPx);
+
+  return (
+    <div style={{ width: '100%', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden', marginBottom: 12, background: 'white' }}>
+      {zoomed && <ZoomResetPill scale={zoom} onReset={reset} />}
+      <div ref={zoomRef} style={{ width: '100%', overflowX: 'auto', touchAction: 'pan-x pan-y', WebkitOverflowScrolling: 'touch' as any }}>
+        <div style={{ minWidth: WEEK_GUTTER + days.length * WEEK_COL_MIN, display: 'flex', flexDirection: 'column' }}>
+
+          {/* Sticky day headers */}
+          <div style={{ display: 'flex', position: 'sticky', top: 0, zIndex: 10, borderBottom: '2px solid #d1d5db', background: '#f9fafb' }}>
+            <div style={{ width: WEEK_GUTTER, flexShrink: 0, borderRight: '2px solid #d1d5db', position: 'sticky', left: 0, zIndex: 2, background: '#f3f4f6' }} />
+            {days.map((day, di) => {
+              const isToday = isSameDay(day, today);
+              const iso = format(day, 'yyyy-MM-dd');
+              const hasBlackout = clients.some(c => blackouts.some(b => b.date === iso && b.entityType === 'client' && b.entityId === c.id));
+              return (
+                <div key={iso} style={{
+                  flex: 1, minWidth: WEEK_COL_MIN, padding: '6px 4px', textAlign: 'center',
+                  background: isToday ? '#eff6ff' : hasBlackout ? '#fef2f2' : 'white',
+                  borderLeft: di > 0 ? '1px solid #e5e7eb' : 'none',
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: isToday ? '#3b82f6' : '#6b7280' }}>{SHORT_DAYS[di]}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: isToday ? '#3b82f6' : '#1f2937' }}>{format(day, 'd')}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Scrollable body */}
+          <div ref={bodyRef} style={{ overflowY: 'auto', maxHeight: '52vh' }}>
+            <div style={{ display: 'flex', position: 'relative' }}>
+
+              {/* Time gutter */}
+              <div style={{ width: WEEK_GUTTER, flexShrink: 0, position: 'sticky', left: 0, zIndex: 3, background: '#f9fafb', borderRight: '2px solid #d1d5db', height: totalH }}>
+                {hours.map(h => (
+                  <div key={h} style={{ position: 'absolute', top: (h - DAY_S) * hourPx - (h === DAY_S ? 0 : 6), width: '100%', textAlign: 'right', paddingRight: 6, fontSize: 10, fontWeight: 600, color: '#9ca3af' }}>
+                    {h === 12 ? '12p' : h > 12 ? `${h - 12}p` : `${h}a`}
+                  </div>
+                ))}
+              </div>
+
+              {/* Hour lines (full-width) */}
+              <div style={{ position: 'absolute', left: WEEK_GUTTER, right: 0, top: 0, bottom: 0, zIndex: 0, pointerEvents: 'none' }}>
+                {hours.map(h => h > DAY_S && (
+                  <div key={h} style={{ position: 'absolute', left: 0, right: 0, top: (h - DAY_S) * hourPx, borderTop: `1px solid ${h % 3 === 0 ? '#d1d5db' : '#eee'}` }} />
+                ))}
+              </div>
+
+              {/* Day columns */}
+              {days.map((day, di) => {
+                const iso = format(day, 'yyyy-MM-dd');
+                const dow = WEEK_DAYS[di];
+                const isToday = isSameDay(day, today);
+                const dayAppts = weekAppts.filter(a => a.startTime.startsWith(iso));
+
+                // Blue availability heatmap: fraction of clients available per hour slot
+                const availFrac = hours.map(h => {
+                  const slotMin = h * 60;
+                  return clients.filter(c =>
+                    (c.availabilityWindows[dow] ?? []).some(
+                      w => toMin(w.start) <= slotMin + 60 && toMin(w.end) > slotMin,
+                    ),
+                  ).length / Math.max(1, clients.length);
+                });
+
+                // Red session density heatmap: count bookings per 30-min slot
+                const slotCount = (DAY_E - DAY_S) * 2;
+                const heatCounts = new Array(slotCount).fill(0);
+                for (const a of dayAppts) {
+                  const s = new Date(a.startTime);
+                  const e = new Date(a.endTime);
+                  const s0 = Math.max(0, Math.floor((s.getHours() * 60 + s.getMinutes() - DAY_S * 60) / 30));
+                  const e0 = Math.min(slotCount, Math.ceil((e.getHours() * 60 + e.getMinutes() - DAY_S * 60) / 30));
+                  for (let i = s0; i < e0; i++) heatCounts[i]++;
+                }
+                const maxHeat = Math.max(1, ...heatCounts);
+
+                const nowTop = isToday ? topPx(today.getHours(), today.getMinutes()) : -1;
+
+                return (
+                  <div key={iso} style={{ flex: 1, minWidth: WEEK_COL_MIN, height: totalH, position: 'relative', zIndex: 1, borderLeft: di > 0 ? '1px solid #e5e7eb' : 'none' }}>
+
+                    {/* Blue: availability heatmap */}
+                    {hours.map((h, hi) => availFrac[hi] > 0 && (
+                      <div key={`avail-${h}`} style={{
+                        position: 'absolute', left: 0, right: 0,
+                        top: (h - DAY_S) * hourPx, height: hourPx,
+                        background: `rgba(59,130,246,${(0.04 + availFrac[hi] * 0.09).toFixed(2)})`,
+                        pointerEvents: 'none',
+                      }} />
+                    ))}
+
+                    {/* Red: session density heatmap */}
+                    {heatCounts.map((count, i) => count > 0 && (
+                      <div key={`heat-${i}`} style={{
+                        position: 'absolute', left: 0, right: 0,
+                        top: i * hourPx / 2, height: hourPx / 2,
+                        background: `rgba(220,38,38,${(0.05 + (count / maxHeat) * 0.40).toFixed(2)})`,
+                        pointerEvents: 'none',
+                      }} />
+                    ))}
+
+                    {/* Now indicator */}
+                    {nowTop >= 0 && nowTop <= totalH && (
+                      <div style={{ position: 'absolute', left: 0, right: 0, top: nowTop, zIndex: 4, pointerEvents: 'none' }}>
+                        <div style={{ position: 'absolute', left: -3, top: -4, width: 8, height: 8, borderRadius: '50%', background: '#ef4444' }} />
+                        <div style={{ height: 2, background: '#ef4444' }} />
+                      </div>
+                    )}
+
+                    {/* Appointment tiles */}
+                    {dayAppts.map(appt => {
+                      const client = clients.find(c => c.id === appt.client || c.name === appt.client);
+                      if (!client) return null;
+                      const top = aptTop(appt);
+                      const h   = aptH(appt);
+                      if (top >= totalH || top + h <= 0) return null;
+                      const isLit = highlightId === null || highlightId === client.id;
+                      const tier = tierOf(appt.type);
+                      return (
+                        <div
+                          key={appt.id}
+                          title={`${client.name}: ${appt.title}\n${new Date(appt.startTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}–${new Date(appt.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
+                          style={{
+                            position: 'absolute', top: Math.max(0, top) + 1, left: 3, right: 3, height: h - 2,
+                            ...(appt.type === 'client-session'
+                              ? tileStyle(client.name, appt.technician)
+                              : { backgroundColor: TIER_COLOR[tier] }),
+                            border: `1.5px solid ${clientDarkBorder(client.name)}`,
+                            borderRadius: 4, overflow: 'hidden', zIndex: 2,
+                            padding: '2px 4px', boxSizing: 'border-box',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+                            opacity: (isLit ? 1 : 0.18) * (fadedTier === tier ? 0.25 : 1), transition: 'opacity 0.15s', cursor: 'pointer',
+                          }}
+                        >
+                          {h > 22 && (
+                            <div style={{ fontSize: 10, fontWeight: 700, lineHeight: 1.2, color: appt.type === 'client-session' ? '#1e3a5f' : '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {client.name}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Day sub-view: vertical time × horizontal client columns ────────────────────
 
 function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
@@ -257,9 +522,11 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
   blackouts: Blackout[];
   heatmap: boolean;
 }) {
+  const { ref: zoomRef, scale: zoom, zoomed, reset } = usePinchZoom<HTMLDivElement>();
+  const scaledHourPx = HOUR_PX * zoom;
   const iso      = format(date, 'yyyy-MM-dd');
   const dow      = format(date, 'EEEE') as DayOfWeek;
-  const totalH   = (DAY_END - DAY_START) * HOUR_PX;
+  const totalH   = (DAY_END - DAY_START) * scaledHourPx;
   const hours    = Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i);
 
   const dayAppts = useMemo(() =>
@@ -297,8 +564,8 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
     );
   }
 
-  // Helpers for converting time → pixel position
-  const toTopPx = (h: number, m: number) => (h + m / 60 - DAY_START) * HOUR_PX;
+  // Helpers for converting time → pixel position (use scaledHourPx for zoom support)
+  const toTopPx = (h: number, m: number) => (h + m / 60 - DAY_START) * scaledHourPx;
   const apptTopPx = (a: Appointment) => {
     const d = new Date(a.startTime);
     return toTopPx(d.getHours(), d.getMinutes());
@@ -306,7 +573,7 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
   const apptHPx = (a: Appointment) => {
     const s = new Date(a.startTime);
     const e = new Date(a.endTime);
-    return ((e.getTime() - s.getTime()) / 3_600_000) * HOUR_PX;
+    return ((e.getTime() - s.getTime()) / 3_600_000) * scaledHourPx;
   };
   const winTopPx = (t: string) => {
     const [h, m] = t.split(':').map(Number);
@@ -315,16 +582,17 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
   const winHPx = (start: string, end: string) => {
     const [sh, sm] = start.split(':').map(Number);
     const [eh, em] = end.split(':').map(Number);
-    return ((eh + em / 60) - (sh + sm / 60)) * HOUR_PX;
+    return ((eh + em / 60) - (sh + sm / 60)) * scaledHourPx;
   };
   const fmtTime = (d: Date) =>
     d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
   return (
     <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-      <div style={{
+      {zoomed && <ZoomResetPill scale={zoom} onReset={reset} />}
+      <div ref={zoomRef} style={{
         overflowY: 'auto', overflowX: 'auto', maxHeight: '75vh',
-        WebkitOverflowScrolling: 'touch' as any,
+        touchAction: 'pan-x pan-y', WebkitOverflowScrolling: 'touch' as any,
       }}>
         {/* Inner wrapper enforces minimum total width */}
         <div style={{ minWidth: GUTTER + clients.length * COL_MIN, display: 'flex', flexDirection: 'column' }}>
@@ -392,7 +660,7 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
               {hours.map(h => (
                 <div key={h} style={{
                   position: 'absolute',
-                  top: (h - DAY_START) * HOUR_PX - (h === DAY_START ? 0 : 6),
+                  top: (h - DAY_START) * scaledHourPx - (h === DAY_START ? 0 : 6),
                   width: '100%', textAlign: 'right',
                   paddingRight: 7, fontSize: 11, fontWeight: 600, color: '#6b7280',
                 }}>
@@ -412,7 +680,7 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
                   return (
                     <div key={i} style={{
                       position: 'absolute', left: 0, right: 0,
-                      top: i * HOUR_PX / 2, height: HOUR_PX / 2,
+                      top: i * scaledHourPx / 2, height: scaledHourPx / 2,
                       background: intensity > 0
                         ? `rgba(220,38,38,${(0.05 + intensity * 0.40).toFixed(2)})`
                         : 'transparent',
@@ -430,7 +698,7 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
               {hours.map(h => h > DAY_START && (
                 <div key={h} style={{
                   position: 'absolute', left: 0, right: 0,
-                  top: (h - DAY_START) * HOUR_PX,
+                  top: (h - DAY_START) * scaledHourPx,
                   borderTop: `1px solid ${h % 3 === 0 ? '#d1d5db' : '#ececec'}`,
                 }} />
               ))}
@@ -438,7 +706,7 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
                 i % 2 === 1 ? (
                   <div key={i} style={{
                     position: 'absolute', left: 0, right: 0,
-                    top: i * HOUR_PX / 2,
+                    top: i * scaledHourPx / 2,
                     borderTop: '1px dashed #f0f0f0',
                   }} />
                 ) : null,

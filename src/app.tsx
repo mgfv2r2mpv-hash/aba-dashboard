@@ -158,6 +158,7 @@ export default function App() {
   const mainScrollRef = React.useRef<HTMLDivElement | null>(null);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const mainScrollLastRef = React.useRef(0);
+  const savedScrollRef = React.useRef<number>(0);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(56);
   const isLandscape = useIsLandscape();
@@ -281,17 +282,28 @@ export default function App() {
     mainScrollLastRef.current = curr;
   };
 
-  // On narrow screens the right-side detail panel wraps below the calendar.
-  // When the user taps an appointment, scroll the detail into view so they
-  // notice it actually opened.
+  // On wide screens: scroll the docked pane into view when an appointment opens.
+  // On narrow screens: the bottom sheet is position:fixed so no scroll is needed —
+  // instead save the current scroll position so we can restore it when the sheet
+  // closes, preventing the jarring "drag back up" experience on portrait iPhones.
   useEffect(() => {
     if (selectedAppointment) {
-      setPanelCollapsed(false); // auto-expand right panel when an appointment is opened
-      if (detailPanelRef.current) {
-        detailPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      setPanelCollapsed(false);
+      if (dockPane) {
+        if (detailPanelRef.current) {
+          detailPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      } else {
+        savedScrollRef.current = mainScrollRef.current?.scrollTop ?? 0;
       }
+    } else if (!dockPane) {
+      const saved = savedScrollRef.current;
+      const scrollEl = mainScrollRef.current;
+      // Delay matches the sheet close animation (300ms) so the scroll happens
+      // after the sheet is off-screen, not while it's still visible.
+      setTimeout(() => { if (scrollEl) scrollEl.scrollTop = saved; }, 320);
     }
-  }, [selectedAppointment]);
+  }, [selectedAppointment, dockPane]);
 
   // A new selection (or clearing it) always starts on the read-only detail, not
   // mid-edit, so the panel collapses back from any prior expanded edit form.
@@ -1169,13 +1181,13 @@ export default function App() {
               {dismissed.length > 0 && (
                 <details style={{ marginTop: 10, fontSize: 12 }}>
                   <summary style={{ cursor: 'pointer', color: '#6b7280', fontWeight: 600 }}>
-                    Dismissed Issues ({dismissed.length})
+                    Dismissed Issues — permanent ({dismissed.length})
                   </summary>
                   <div style={{ paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {dismissed.map((c, i) => (
                       <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, background: '#f9fafb', borderRadius: 4, padding: '4px 8px' }}>
                         <span style={{ color: '#374151' }}>{conflictTitle(c)}</span>
-                        <button onClick={() => unconfirmConflict(conflictKey(c))} style={{ border: '1px solid #d1d5db', borderRadius: 4, background: 'white', cursor: 'pointer', fontSize: 11, padding: '2px 6px' }}>Un-dismiss</button>
+                        <button onClick={() => unconfirmConflict(conflictKey(c))} style={{ border: '1px solid #d1d5db', borderRadius: 4, background: 'white', cursor: 'pointer', fontSize: 11, padding: '2px 6px' }}>Restore</button>
                       </div>
                     ))}
                   </div>
@@ -1184,13 +1196,13 @@ export default function App() {
               {muted.length > 0 && (
                 <details style={{ marginTop: 6, fontSize: 12 }}>
                   <summary style={{ cursor: 'pointer', color: '#6b7280', fontWeight: 600 }}>
-                    Muted Issues ({muted.length})
+                    Snoozed Issues — clears on reload ({muted.length})
                   </summary>
                   <div style={{ paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {muted.map((c, i) => (
                       <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, background: '#f9fafb', borderRadius: 4, padding: '4px 8px' }}>
                         <span style={{ color: '#374151' }}>{conflictTitle(c)}</span>
-                        <button onClick={() => unmuteConflict(conflictKey(c))} style={{ border: '1px solid #d1d5db', borderRadius: 4, background: 'white', cursor: 'pointer', fontSize: 11, padding: '2px 6px' }}>Un-mute</button>
+                        <button onClick={() => unmuteConflict(conflictKey(c))} style={{ border: '1px solid #d1d5db', borderRadius: 4, background: 'white', cursor: 'pointer', fontSize: 11, padding: '2px 6px' }}>Unsnooze</button>
                       </div>
                     ))}
                   </div>
@@ -1450,6 +1462,7 @@ export default function App() {
                         onMute={muteConflict}
                         onUnmute={unmuteConflict}
                         onConfirmDismiss={confirmDismissConflict}
+                        defaultCollapsed={!dockPane}
                       />
                     )}
                     {solutions.length > 0 && (
@@ -1556,11 +1569,14 @@ export default function App() {
                   <div style={{
                     position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1050,
                     background: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16,
-                    boxShadow: selectedAppointment ? '0 -6px 24px rgba(0,0,0,0.18)' : 'none',
+                    boxShadow: '0 -6px 24px rgba(0,0,0,0.18)',
                     display: 'flex', flexDirection: 'column', overflow: 'hidden',
-                    maxHeight: selectedAppointment ? (inlineEdit ? '92vh' : '60vh') : 0,
+                    // Use a fixed height so translateY slides the whole panel in/out
+                    // without animating height — prevents content from "jumping up"
+                    // as maxHeight grows from 0 during open.
+                    height: inlineEdit ? '92vh' : '60vh',
                     transform: selectedAppointment ? 'translateY(0)' : 'translateY(100%)',
-                    transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), height 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                     paddingBottom: 'env(safe-area-inset-bottom)',
                   }}>
                     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
@@ -1837,17 +1853,16 @@ export default function App() {
           style={{
             position: 'fixed',
             bottom: `calc(env(safe-area-inset-bottom) + 20px)`,
-            left: '50%',
-            transform: 'translateX(-50%)',
+            right: 20,
             zIndex: 50,
             background: 'rgba(255,255,255,0.82)',
             border: '1px solid rgba(0,0,0,0.10)',
-            borderRadius: 22,
-            padding: '9px 18px',
+            borderRadius: 20,
+            padding: '8px 14px',
             boxShadow: '0 2px 10px rgba(0,0,0,0.14)',
             cursor: 'pointer',
-            fontSize: 15,
-            fontWeight: 600,
+            fontSize: 13,
+            fontWeight: 500,
             color: '#374151',
             backdropFilter: 'blur(6px)',
             WebkitBackdropFilter: 'blur(6px)',
@@ -1855,10 +1870,10 @@ export default function App() {
             pointerEvents: 'auto',
             display: 'flex',
             alignItems: 'center',
-            gap: 5,
+            gap: 3,
           }}
         >
-          <span style={{ fontSize: 13 }}>↑</span> Top
+          <span style={{ fontSize: 11 }}>↑</span>
         </button>
       )}
     </div>

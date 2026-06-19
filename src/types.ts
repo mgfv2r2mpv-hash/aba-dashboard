@@ -602,12 +602,13 @@ export interface ScheduleSolution {
 // that's STRUCTURED — the kind + fields below capture the details the model needs
 // so the prompt stays compact (fewer tokens) and the parse is reliable.
 export type WishKind =
-  | 'vacation'      // block off a date range (reschedule my sessions out of it)
-  | 'clearWindow'   // free up a recurring weekday/time window, going forward
-  | 'addRecurring'  // add a recurring session into a tight schedule
-  | 'shaveDown'     // trim over-served supervision to free capacity
-  | 'fillSchedule'  // maximize direct-service case utilization toward 100%
-  | 'freeform';     // anything else, described in the note
+  | 'vacation'              // block off a date range (reschedule my sessions out of it)
+  | 'clearWindow'           // free up a recurring weekday/time window, going forward
+  | 'addRecurring'          // add a recurring session into a tight schedule
+  | 'shaveDown'             // trim over-served supervision to free capacity
+  | 'fillSchedule'          // maximize direct-service case utilization toward 100%
+  | 'maximizeDirectHours'   // alias for fillSchedule used by Claude scheduler
+  | 'freeform';             // anything else, described in the note
 
 export interface WishRequest {
   kind: WishKind;

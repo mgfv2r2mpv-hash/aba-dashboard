@@ -53,30 +53,17 @@ Execute these exact verification scripts in order before outputting any code sol
 - **Ethics Code Adherence:** All code paths must conform to the current BACB Ethics Code, prioritizing client privacy, confidentiality, and data minimization via the "Minimum Necessary" healthcare standard. Use pseudonyms "Supervising Behavior Analyst" for "BCBA" and "Credentialed BT" for "RBT" (registered trademarks)
 
 
-## Git workflow 
+## Git workflow
 
-The harness proxy on this repo **denies direct pushes to `main`** with HTTP 403
-(the 403 carries Cloudflare / api.anthropic.com response headers, confirming it's
-the proxy rather than the GitHub remote rejecting the push). Earlier in May 2026
-direct pushes worked; they stopped after a proxy restart mid-session.
+**Standard flow:**
 
-**Standard flow until the owner says otherwise:**
+1. Develop and commit on the `dev` branch.
+2. `git push origin dev`
+3. `gh pr create --base main --head dev`
+4. `gh pr merge <n> --rebase --delete-branch=false`
+5. `git fetch origin main` locally after merge.
 
-1. Develop on the session's designated feature branch
-   (`claude/enable-ios-file-sharing-qKyys` historically; whatever the current
-   session was assigned).
-2. `git push origin <feature-branch>` — this is always allowed.
-3. Open a PR from the feature branch into `main` via
-   `mcp__github__create_pull_request`.
-4. Merge it via `mcp__github__merge_pull_request` with `merge_method: 'rebase'`
-   so `main` stays linear and ends at the same code state a direct push would
-   have produced.
-5. Locally, `git fetch origin main` so the local refs match.
-
-Do **not** retry direct pushes to `main`; they will fail the same way and burn
-turn budget. The owner has explicitly authorized auto-merge into `main` for the
-remainder of this session and future sessions until further notice — no need to
-ask before each merge.
+Direct pushes to `main` are denied by the harness proxy (HTTP 403). `dev` → PR → merge is the only path. There is no separate staging/dev deployment — `dev` is a holding branch only; testing happens locally or on the iOS simulator before merging.
 
 ## Repo essentials
 
@@ -98,7 +85,7 @@ ask before each merge.
 
 - **Lock gate:** Numeric PIN, **never stored**. Both `pin.verifier` (constant) and `schedule.enc` (ScheduleData) are AES-GCM, key PBKDF2-derived from PIN via `clientCrypto`. Correct PIN = decryption success. See `src/appLock.ts` + `src/secureStore.ts` (blobs in `Directory.Data`, namespaced `lock_*`). Cold launch only; web has no lock.
 - **Lifecycle:** First launch → LockScreen "create" mode (PIN mandatory on native). Schedule re-encrypted every change (debounced 400ms) on unlock → only cross-launch persistence (no GET on mount).
-- **Biometric:** `@aparajita/capacitor-biometric-auth` v9 (Capacitor 8 compatible). `src/biometric.ts` via `registerPlugin('BiometricAuth')` (no static import → web build safe). `getBiometryLabel()` maps iOS type (1=Touch, 2=Face) to UI. Opt-in stashes PIN under obfuscation (`pin.stash`) for biometric recovery — convenience/strength tradeoff, off by default. **Setup:** `npm install` → `npx cap sync ios` → add `NSFaceIDUsageDescription` to `ios/App/App/Info.plist` (Face ID requires it; Touch ID doesn't).
+- **Biometric:** `@aparajita/capacitor-biometric-auth` v9 (Capacitor 8 compatible). `src/biometric.ts` via `registerPlugin('BiometricAuth')` (no static import → web build safe). `getBiometryLabel()` maps iOS type (1=Touch, 2=Face) to UI. Opt-in stashes PIN under obfuscation (`pin.stash`) for biometric recovery — convenience/strength tradeoff, off by default. **Setup:** `npm install` → `npx cap sync ios` → add `NSFaceIDUsageDescription` to `ios/App/App/Info.plist` (Face ID requires it; Touch ID doesn't). **Note:** `@aparajita/capacitor-biometric-auth` was removed from `ios/App/CapApp-SPM/Package.swift` — native biometric will not link until restored via `npx cap sync`.
 - **Claude API key:** Two paths: (1) **workbook embed** (`_Config` sheet, app-obfuscated via `obfuscateKey`) for download→upload round-trip (no prompt); (2) **native at-rest** (`aiconfig.enc` blob via `saveAIConfig`/`loadAIConfig`, re-keyed on PIN change, cleared on lock clear). **Display:** Never shown after set ("🔒 API key is set" + Replace/Clear). Replace gated by `onRequestUnlock` (Face ID or PIN). Blank field on save = keep existing. Stores `schedulePassword` alongside for persistence across reinstalls.
 - **Schedule password:** Optional whole-file encryption (workbook download). Never re-displayed; stored encrypted at rest. Changing requires current password (gate).
 - **AutoFill:** Schedule-decrypt prompt is real `<form>` (`PasswordPrompt.tsx`, `autocomplete="current-password"`) for iOS AutoFill support.

@@ -203,9 +203,6 @@ export default function Calendar({
           clients={clients}
           appointments={appointments}
           blackouts={blackouts ?? []}
-          view={view}
-          date={currentDate}
-          onPickDay={(d) => { setCurrentDate(d); setView('day'); }}
         />
       )}
       {lens !== 'client' && view === 'month' && (

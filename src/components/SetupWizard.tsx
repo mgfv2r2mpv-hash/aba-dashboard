@@ -34,9 +34,9 @@ const labelStyle: React.CSSProperties = {
 
 const cardStyle: React.CSSProperties = {
   padding: '12px',
-  border: '1px solid #e5e7eb',
-  borderRadius: '6px',
-  backgroundColor: '#f9fafb',
+  border: 'var(--border-hairline)',
+  borderRadius: 'var(--radius-md)',
+  backgroundColor: 'var(--surface-sunken)',
   minWidth: 0,
   overflow: 'hidden',
 };
@@ -184,8 +184,8 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
       paddingRight: 'env(safe-area-inset-right)',
     }}>
       <div style={{
-        backgroundColor: 'white',
-        borderRadius: '8px',
+        backgroundColor: 'var(--surface-card)',
+        borderRadius: 'var(--radius-lg)',
         width: '100%',
         maxWidth: '720px',
         height: '100%',
@@ -207,7 +207,7 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
             {Array.from({ length: totalSteps }).map((_, i) => (
               <div key={i} style={{
                 flex: 1, height: '4px',
-                backgroundColor: i <= stepIndex ? '#3b82f6' : '#e5e7eb',
+                backgroundColor: i <= stepIndex ? 'var(--brand-primary)' : 'var(--border-default)',
                 borderRadius: '2px',
               }} />
             ))}
@@ -223,7 +223,7 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
               <p style={{ color: '#6b7280', marginBottom: '12px' }}>
                 We'll walk through 4 quick steps to configure your company:
               </p>
-              <ol style={{ paddingLeft: '20px', color: '#374151', lineHeight: '1.8' }}>
+              <ol style={{ paddingLeft: '20px', color: 'var(--text-body)', lineHeight: '1.8' }}>
                 <li>Company supervision and training requirements</li>
                 <li>Client list with availability windows</li>
                 <li>Technicians with RBT status, availability, and assignments</li>
@@ -242,7 +242,7 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
               <p style={{ color: '#6b7280', marginBottom: '16px', fontSize: '13px' }}>
                 These are the constraints we'll check against. Defaults match BACB minimums and a common parent-training target.
               </p>
-              <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', minWidth: 0 }}>
+              <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: 'var(--surface-sunken)', border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)', overflow: 'hidden', minWidth: 0 }}>
                 <label style={labelStyle}>Clinician (supervisor) availability</label>
                 <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
                   Sessions can't ethically be scheduled when you're not available to supervise.
@@ -398,8 +398,8 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '8px' }}>
                 <h3 style={{ fontSize: '18px', margin: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Clients ({clients.length})</h3>
                 <button onClick={addClient} style={{
-                  padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
-                  border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                  padding: '6px 12px', backgroundColor: 'var(--brand-primary)', color: 'var(--brand-primary-text)',
+                  border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '13px',
                   flexShrink: 0, whiteSpace: 'nowrap',
                 }}>+ Add</button>
               </div>
@@ -417,8 +417,8 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
                         style={{ ...inputStyle, flex: 1, width: 'auto' }}
                       />
                       <button onClick={() => removeClient(c.id)} style={{
-                        width: '32px', height: '32px', padding: 0, backgroundColor: '#fee2e2', color: '#dc2626',
-                        border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
+                        width: '32px', height: '32px', padding: 0, backgroundColor: 'var(--status-behind-bg)', color: 'var(--status-behind)',
+                        border: '1px solid var(--red-300)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', flexShrink: 0,
                         fontSize: '18px', lineHeight: 1,
                       }} aria-label="Remove client">×</button>
                     </div>
@@ -463,8 +463,8 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '8px' }}>
                 <h3 style={{ fontSize: '18px', margin: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Technicians ({technicians.length})</h3>
                 <button onClick={addTechnician} style={{
-                  padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
-                  border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                  padding: '6px 12px', backgroundColor: 'var(--brand-primary)', color: 'var(--brand-primary-text)',
+                  border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '13px',
                   flexShrink: 0, whiteSpace: 'nowrap',
                 }}>+ Add</button>
               </div>
@@ -490,8 +490,8 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
                         <span>RBT</span>
                       </label>
                       <button onClick={() => removeTechnician(t.id)} style={{
-                        width: '32px', height: '32px', padding: 0, backgroundColor: '#fee2e2', color: '#dc2626',
-                        border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
+                        width: '32px', height: '32px', padding: 0, backgroundColor: 'var(--status-behind-bg)', color: 'var(--status-behind)',
+                        border: '1px solid var(--red-300)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', flexShrink: 0,
                         fontSize: '18px', lineHeight: 1,
                       }} aria-label="Remove technician">×</button>
                     </div>
@@ -539,8 +539,8 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
                               setAssignmentHoursStr(newHoursStr);
                               updateTechnician(t.id, { assignments: newAssignments });
                             }} style={{
-                              width: '36px', padding: '4px', backgroundColor: '#fee2e2', color: '#dc2626',
-                              border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
+                              width: '36px', padding: '4px', backgroundColor: 'var(--status-behind-bg)', color: 'var(--status-behind)',
+                              border: '1px solid var(--red-300)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', flexShrink: 0,
                             }}>×</button>
                           </div>
                         );
@@ -548,8 +548,8 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
                       <button onClick={() => updateTechnician(t.id, {
                         assignments: [...t.assignments, { clientId: '', hoursPerWeek: 0, billable: true }],
                       })} style={{
-                        padding: '4px 10px', backgroundColor: 'white', color: '#3b82f6',
-                        border: '1px solid #3b82f6', borderRadius: '4px', cursor: 'pointer', fontSize: '12px',
+                        padding: '4px 10px', backgroundColor: 'var(--surface-card)', color: 'var(--brand-primary)',
+                        border: '1px solid var(--brand-primary)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '12px',
                       }}>+ Assignment</button>
                     </div>
                   </div>
@@ -607,20 +607,20 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
           flexShrink: 0,
         }}>
           <button onClick={goBack} style={{
-            padding: '8px 16px', border: '1px solid #d1d5db', borderRadius: '6px',
-            background: 'white', cursor: 'pointer', fontSize: '14px',
+            padding: '8px 16px', border: 'var(--border-control)', borderRadius: 'var(--radius-md)',
+            background: 'var(--surface-card)', cursor: 'pointer', fontSize: '14px',
           }}>
             {step === 'welcome' ? 'Cancel' : 'Back'}
           </button>
           {step === 'review' ? (
             <button onClick={finish} style={{
-              padding: '8px 16px', backgroundColor: '#10b981', color: 'white',
-              border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '14px',
+              padding: '8px 16px', backgroundColor: 'var(--brand-primary)', color: 'var(--brand-primary-text)',
+              border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontWeight: '600', fontSize: '14px',
             }}>Create Dashboard</button>
           ) : (
             <button onClick={goNext} style={{
-              padding: '8px 16px', backgroundColor: '#3b82f6', color: 'white',
-              border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '14px',
+              padding: '8px 16px', backgroundColor: 'var(--brand-primary)', color: 'var(--brand-primary-text)',
+              border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: '14px',
             }}>Next</button>
           )}
         </div>
@@ -704,7 +704,7 @@ function WeeklyAvailability({
           </label>
         ))}
         <button onClick={copyMondayToWeekdays} style={presetBtn}>Copy Mon → Tue–Fri</button>
-        <button onClick={clearAll} style={{ ...presetBtn, color: '#dc2626', borderColor: '#fca5a5' }}>Clear all</button>
+        <button onClick={clearAll} style={{ ...presetBtn, color: 'var(--status-behind)', borderColor: 'var(--red-300)' }}>Clear all</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {DAYS.map((day, dayIdx) => {
@@ -719,14 +719,14 @@ function WeeklyAvailability({
                 flexWrap: 'wrap',
                 padding: '6px 8px',
                 borderRadius: '4px',
-                background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
+                background: dayIdx % 2 === 0 ? 'var(--surface-sunken)' : 'var(--surface-card)',
                 border: '1px solid #e5e7eb',
                 boxSizing: 'border-box',
                 width: '100%',
                 minWidth: 0,
               }}
             >
-              <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151', width: '36px', flexShrink: 0 }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-body)', width: '36px', flexShrink: 0 }}>
                 {day.slice(0, 3)}
               </span>
               {windows.length === 0 && (
@@ -737,8 +737,8 @@ function WeeklyAvailability({
                   key={idx}
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: '3px',
-                    backgroundColor: '#eff6ff', border: '1px solid #bfdbfe',
-                    borderRadius: '4px', padding: '2px 6px',
+                    backgroundColor: 'var(--sage-50)', border: '1px solid var(--sage-200)',
+                    borderRadius: 'var(--radius-sm)', padding: '2px 6px',
                   }}
                 >
                   <input
@@ -785,7 +785,7 @@ const presetBtn: React.CSSProperties = {
   borderRadius: '4px',
   background: 'white',
   cursor: 'pointer',
-  color: '#374151',
+  color: 'var(--text-body)',
   flexShrink: 0,
 };
 

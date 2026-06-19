@@ -84,9 +84,9 @@ export default function CancellationDialog({ appointment, settings, onConfirm, o
               onClick={() => setSource(s.value)}
               style={{
                 ...chip,
-                backgroundColor: source === s.value ? '#3b82f6' : 'white',
-                color: source === s.value ? 'white' : '#374151',
-                borderColor: source === s.value ? '#3b82f6' : '#d1d5db',
+                backgroundColor: source === s.value ? 'var(--brand-primary)' : 'var(--surface-card)',
+                color: source === s.value ? 'var(--brand-primary-text)' : 'var(--text-body)',
+                borderColor: source === s.value ? 'var(--brand-primary)' : 'var(--border-strong)',
               }}
             >{s.label}</button>
           ))}
@@ -134,7 +134,7 @@ const overlay: React.CSSProperties = {
 };
 
 const modal: React.CSSProperties = {
-  backgroundColor: 'white', borderRadius: 8, padding: 20,
+  backgroundColor: 'var(--surface-card)', borderRadius: 'var(--radius-lg)', padding: 20,
   width: '100%', maxWidth: 420, maxHeight: '90vh', overflowY: 'auto',
 };
 
@@ -143,12 +143,12 @@ const label: React.CSSProperties = {
 };
 
 const input: React.CSSProperties = {
-  width: '100%', padding: '8px 10px', border: '1px solid #d1d5db',
-  borderRadius: 6, fontSize: 14, boxSizing: 'border-box',
+  width: '100%', padding: '8px 10px', border: 'var(--border-control)',
+  borderRadius: 'var(--radius-md)', fontSize: 14, boxSizing: 'border-box',
 };
 
 const chip: React.CSSProperties = {
-  padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 4,
+  padding: '6px 10px', border: 'var(--border-control)', borderRadius: 'var(--radius-sm)',
   fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
 };
 
@@ -158,13 +158,13 @@ const checkbox: React.CSSProperties = {
 };
 
 const secondaryBtn: React.CSSProperties = {
-  padding: '8px 14px', border: '1px solid #d1d5db', borderRadius: 6,
-  background: 'white', cursor: 'pointer', fontSize: 14,
+  padding: '8px 14px', border: 'var(--border-control)', borderRadius: 'var(--radius-md)',
+  background: 'var(--surface-card)', cursor: 'pointer', fontSize: 14,
 };
 
 const dangerBtn: React.CSSProperties = {
-  padding: '8px 14px', border: 'none', borderRadius: 6,
-  background: '#dc2626', color: 'white', cursor: 'pointer', fontSize: 14, fontWeight: 600,
+  padding: '8px 14px', border: 'none', borderRadius: 'var(--radius-md)',
+  background: 'var(--red-700)', color: 'var(--white)', cursor: 'pointer', fontSize: 14, fontWeight: 600,
 };
 
 const closeBtn: React.CSSProperties = {

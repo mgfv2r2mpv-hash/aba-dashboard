@@ -302,8 +302,8 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
 
   const tabStyle = (isActive: boolean) => ({
     padding: '12px 16px',
-    backgroundColor: isActive ? '#ffffff' : '#f3f4f6',
-    border: isActive ? '2px solid #3b82f6' : '1px solid #e5e7eb',
+    backgroundColor: isActive ? 'var(--surface-card)' : 'var(--surface-sunken)',
+    border: isActive ? `2px solid var(--brand-primary)` : 'var(--border-hairline)',
     borderBottom: 'none',
     cursor: 'pointer',
     fontWeight: isActive ? '600' : 'normal',
@@ -312,7 +312,7 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9f9f9' }}>
+      <div style={{ display: 'flex', borderBottom: 'var(--border-hairline)', backgroundColor: 'var(--surface-sunken)' }}>
         <button onClick={() => setActiveTab('settings')} style={tabStyle(activeTab === 'settings')}>Settings</button>
         <button onClick={() => setActiveTab('technicians')} style={tabStyle(activeTab === 'technicians')}>Technicians</button>
         <button onClick={() => setActiveTab('clients')} style={tabStyle(activeTab === 'clients')}>Clients</button>
@@ -321,7 +321,7 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
       </div>
 
       {error && (
-        <div style={{ padding: '8px 16px', backgroundColor: '#fee2e2', color: '#991b1b', fontSize: '13px' }}>
+        <div style={{ padding: '8px 16px', backgroundColor: 'var(--status-behind-bg)', color: 'var(--red-800)', fontSize: '13px' }}>
           {error}
         </div>
       )}
@@ -345,7 +345,7 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
             </div>
             {reordering === 'technicians' ? (
               <ReorderList
-                items={data.technicians.map(t => ({ id: t.id, name: t.name, meta: t.isRBT ? (t.isFieldworkSupervisee ? 'RBT · FW' : 'RBT') : t.isFieldworkSupervisee ? 'FW' : undefined }))}
+                items={data.technicians.map(t => ({ id: t.id, name: t.name, meta: t.isRBT ? 'RBT' : undefined }))}
                 onCommit={(ids) => { reorderEntity('technicians', ids); setReordering(null); }}
                 onCancel={() => setReordering(null)}
               />
@@ -362,7 +362,7 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
                   />
                 ))}
                 {data.technicians.length === 0 && (
-                  <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>No technicians yet.</p>
+                  <p style={{ color: 'var(--text-faint)', textAlign: 'center', padding: '20px' }}>No technicians yet.</p>
                 )}
               </div>
             )}
@@ -403,7 +403,7 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
                   />
                 ))}
                 {data.clients.length === 0 && (
-                  <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>No clients yet.</p>
+                  <p style={{ color: 'var(--text-faint)', textAlign: 'center', padding: '20px' }}>No clients yet.</p>
                 )}
               </div>
             )}
@@ -431,7 +431,7 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
               onAdd={addBlackout}
               onRemove={removeBlackout}
             />
-            <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid #e5e7eb' }}>
+            <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid var(--border-default)' }}>
               <TimeOffTab
                 timeOff={data.timeOff || []}
                 settings={data.settings}
@@ -520,7 +520,7 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
         collapsed={collapsed}
         onToggle={() => setCollapsed(c => !c)}
         name={tech.name}
-        badges={[...(tech.isRBT ? ['RBT'] : []), ...(tech.isFieldworkSupervisee ? ['Fieldwork'] : []), ...(noClients ? ['(!) No Clients'] : [])]}
+        badges={[...(tech.isRBT ? ['RBT'] : []), ...(noClients ? ['(!) No Clients'] : [])]}
         summary={`${availDays} day${availDays === 1 ? '' : 's'} avail · ${assignments.length} assignment${assignments.length === 1 ? '' : 's'}`}
       />
 
@@ -535,26 +535,15 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
           />
           <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>ID: {tech.id}</p>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-            <input
-              type="checkbox"
-              checked={tech.isRBT}
-              onChange={(e) => onChange({ isRBT: e.target.checked })}
-              style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-            />
-            <span>RBT</span>
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-            <input
-              type="checkbox"
-              checked={tech.isFieldworkSupervisee === true}
-              onChange={(e) => onChange({ isFieldworkSupervisee: e.target.checked })}
-              style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-            />
-            <span>Accruing fieldwork hrs</span>
-          </label>
-        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <input
+            type="checkbox"
+            checked={tech.isRBT}
+            onChange={(e) => onChange({ isRBT: e.target.checked })}
+            style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+          />
+          <span>RBT</span>
+        </label>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
           {!editing && (
             <button onClick={() => setEditing(true)} style={chipBtn}>Edit availability</button>
@@ -562,7 +551,7 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
           <button onClick={onRemove} style={dangerBtn}>Remove</button>
         </div>
       </div>
-      {saving && <p style={{ fontSize: '11px', color: '#3b82f6' }}>Saving…</p>}
+      {saving && <p style={{ fontSize: '11px', color: 'var(--brand-primary)' }}>Saving…</p>}
 
       {!editing ? (
         <AvailabilitySummary windows={tech.availability} />
@@ -587,7 +576,7 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
           const caseDays = Object.values(a.availability || {}).filter(w => w && (w as TimeWindow[]).length > 0).length;
           const isEditingAvail = availIdx === idx;
           return (
-            <div key={idx} style={{ border: '1px solid #eef0f2', borderRadius: 8, padding: '8px', marginBottom: '8px', background: '#fcfcfd' }}>
+            <div key={idx} style={{ border: 'var(--border-hairline)', borderRadius: 'var(--radius-lg)', padding: '8px', marginBottom: '8px', background: 'var(--surface-card)' }}>
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                 <select
                   value={a.clientId}
@@ -609,8 +598,8 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
                 <button
                   onClick={() => removeAssignment(idx)}
                   style={{
-                    width: '32px', height: '32px', padding: 0, backgroundColor: '#fee2e2', color: '#dc2626',
-                    border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', flexShrink: 0,
+                    width: '32px', height: '32px', padding: 0, backgroundColor: 'var(--status-behind-bg)', color: 'var(--status-behind)',
+                    border: '1px solid var(--red-300)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', flexShrink: 0,
                     fontSize: '18px', lineHeight: 1,
                   }}
                   aria-label="Remove assignment"
@@ -620,7 +609,7 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
               {/* Per-case availability — when this BT can only serve THIS client at
                   specific times (beyond their general availability). */}
               <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11, color: caseDays > 0 ? '#3b82f6' : '#9ca3af', fontWeight: 600 }}>
+                <span style={{ fontSize: 11, color: caseDays > 0 ? 'var(--brand-primary)' : 'var(--text-faint)', fontWeight: 600 }}>
                   {caseDays > 0
                     ? `Case-specific availability · ${caseDays} day${caseDays === 1 ? '' : 's'}`
                     : 'Uses general availability for this case'}
@@ -633,7 +622,7 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
                 {caseDays > 0 && !isEditingAvail && (
                   <button
                     onClick={() => updateAssignment(idx, { availability: undefined })}
-                    style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-faint)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
                   >Clear</button>
                 )}
               </div>
@@ -661,8 +650,8 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
         <button
           onClick={addAssignment}
           style={{
-            padding: '6px 12px', fontSize: '13px', backgroundColor: 'white', color: '#3b82f6',
-            border: '1px solid #3b82f6', borderRadius: '4px', cursor: 'pointer',
+            padding: '6px 12px', fontSize: '13px', backgroundColor: 'white', color: 'var(--brand-primary)',
+            border: '1px solid var(--brand-primary)', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
           }}
         >+ Assignment</button>
       </div>
@@ -689,13 +678,12 @@ function CardHeader({ collapsed, onToggle, name, badges, summary }: {
       </span>
       {badges.map(b => {
         const isAlert = b.startsWith('(!)');
-        const isFieldwork = b === 'Fieldwork';
         return (
           <span key={b} style={{
             fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', padding: '1px 6px',
             borderRadius: '8px', flexShrink: 0,
-            backgroundColor: isAlert ? '#fee2e2' : isFieldwork ? '#ede9fe' : '#dbeafe',
-            color: isAlert ? '#dc2626' : isFieldwork ? '#6d28d9' : '#1e40af',
+            backgroundColor: isAlert ? 'var(--status-behind-bg)' : 'var(--blue-100)',
+            color: isAlert ? 'var(--status-behind)' : 'var(--blue-900)',
           }}>{b}</span>
         );
       })}
@@ -728,7 +716,7 @@ function SortMenu({ onSortAsc, onSortDesc, onReorder }: {
           <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 19 }} />
           <div style={{
             position: 'absolute', right: 0, top: '110%', zIndex: 20, background: 'white',
-            border: '1px solid #e5e7eb', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+            border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)', boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
             minWidth: 170, overflow: 'hidden',
           }}>
             <MenuItem onClick={() => { setOpen(false); onSortAsc(); }}>Sort name A → Z</MenuItem>
@@ -747,8 +735,8 @@ function MenuItem({ onClick, children }: { onClick: () => void; children: React.
       onClick={onClick}
       style={{
         display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px',
-        border: 'none', borderBottom: '1px solid #f3f4f6', background: 'white',
-        cursor: 'pointer', fontSize: '13px', color: '#374151',
+        border: 'none', borderBottom: '1px solid var(--surface-sunken)', background: 'var(--surface-card)',
+        cursor: 'pointer', fontSize: '13px', color: 'var(--text-body)',
       }}
     >{children}</button>
   );
@@ -805,7 +793,7 @@ function ReorderList({ items, onCommit, onCancel }: {
             data-rid={it.id}
             style={{
               display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-              border: '1px solid #e5e7eb', borderRadius: 6,
+              border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)',
               background: dragId === it.id ? '#eff6ff' : 'white',
               boxShadow: dragId === it.id ? '0 2px 8px rgba(0,0,0,0.12)' : 'none',
               // Row stays scrollable on touch; only the ≡ handle suppresses
@@ -815,7 +803,7 @@ function ReorderList({ items, onCommit, onCancel }: {
             <span
               onPointerDown={(e) => { e.preventDefault(); setDragId(it.id); }}
               aria-label="Drag to reorder"
-              style={{ cursor: 'grab', fontSize: 20, color: '#9ca3af', touchAction: 'none', userSelect: 'none', lineHeight: 1 }}
+              style={{ cursor: 'grab', fontSize: 20, color: 'var(--text-faint)', touchAction: 'none', userSelect: 'none', lineHeight: 1 }}
             >≡</span>
             <span style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {it.name || 'Unnamed'}
@@ -823,7 +811,7 @@ function ReorderList({ items, onCommit, onCancel }: {
             {it.meta && (
               <span style={{
                 fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '1px 6px',
-                borderRadius: 8, backgroundColor: '#dbeafe', color: '#1e40af',
+                borderRadius: 'var(--radius-lg)', backgroundColor: 'var(--blue-100)', color: 'var(--blue-900)',
               }}>{it.meta}</span>
             )}
           </div>
@@ -909,7 +897,7 @@ function AvailabilityEditor({ initial, onSave, onCancel }: {
           </label>
         ))}
         <button onClick={copyMondayToWeekdays} style={chipBtn}>Copy Mon → Tue–Fri</button>
-        <button onClick={clearAll} style={{ ...chipBtn, color: '#dc2626', borderColor: '#fca5a5' }}>Clear all</button>
+        <button onClick={clearAll} style={{ ...chipBtn, color: 'var(--status-behind)', borderColor: 'var(--red-300)' }}>Clear all</button>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {DAYS.map((day, dayIdx) => {
@@ -920,14 +908,14 @@ function AvailabilityEditor({ initial, onSave, onCancel }: {
               style={{
                 display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap',
                 padding: '6px 8px', borderRadius: '4px',
-                background: dayIdx % 2 === 0 ? '#f9fafb' : 'white',
-                border: '1px solid #e5e7eb',
+                background: dayIdx % 2 === 0 ? 'var(--surface-sunken)' : 'var(--surface-card)',
+                border: 'var(--border-hairline)',
                 boxSizing: 'border-box', width: '100%', minWidth: 0,
               }}
             >
               <span style={{ width: '36px', flexShrink: 0, fontSize: '13px', fontWeight: 600 }}>{day.slice(0, 3)}</span>
               {windows.length === 0 ? (
-                <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>Off</span>
+                <span style={{ fontSize: '12px', color: 'var(--text-faint)', fontStyle: 'italic' }}>Off</span>
               ) : (
                 windows.map((w, idx) => (
                   <span key={idx} style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
@@ -988,7 +976,6 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
   const [maxStr, setMaxStr] = useState(client.parentTrainingMaxHours !== undefined ? String(client.parentTrainingMaxHours) : '');
   const [utilStr, setUtilStr] = useState(client.directUtilizationTarget !== undefined ? String(client.directUtilizationTarget) : '');
   const [supIdealStr, setSupIdealStr] = useState(client.supervisionIdealPct !== undefined ? String(client.supervisionIdealPct) : '');
-  const [dischargeStr, setDischargeStr] = useState(client.anticipatedDischarge || '');
   const [editing, setEditing] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
 
@@ -1033,9 +1020,9 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
           <button onClick={onRemove} style={dangerBtn}>Remove</button>
         </div>
       </div>
-      {saving && <p style={{ fontSize: '11px', color: '#3b82f6' }}>Saving…</p>}
+      {saving && <p style={{ fontSize: '11px', color: 'var(--brand-primary)' }}>Saving…</p>}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-        <label style={{ fontSize: '12px', color: '#374151', whiteSpace: 'nowrap' }}>
+        <label style={{ fontSize: '12px', color: 'var(--text-body)', whiteSpace: 'nowrap' }}>
           Parent-training max:
         </label>
         <input
@@ -1051,11 +1038,11 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
       <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '8px', fontSize: '12px' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Completely exempts this client from parent-training minimum requirements.">
           <input type="checkbox" checked={client.disablePTRequirements === true}
-            onChange={e => onChange({ disablePTRequirements: e.target.checked ? true : false })} />
+            onChange={e => onChange({ disablePTRequirements: e.target.checked || undefined })} />
           <span>Disable PT Requirements</span>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ color: '#374151', whiteSpace: 'nowrap' }}>Direct utilization target:</span>
+          <span style={{ color: 'var(--text-body)', whiteSpace: 'nowrap' }}>Direct utilization target:</span>
           <input
             type="number" step="1" min="1" max="100"
             value={utilStr}
@@ -1070,7 +1057,7 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
           <span style={{ color: '#6b7280' }}>%</span>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Ideal supervision % for this case. Overrides the company default on the Compliance dashboard.">
-          <span style={{ color: '#374151', whiteSpace: 'nowrap' }}>Ideal supervision:</span>
+          <span style={{ color: 'var(--text-body)', whiteSpace: 'nowrap' }}>Ideal supervision:</span>
           <input
             type="number" step="0.5" min="0" max="100"
             value={supIdealStr}
@@ -1087,7 +1074,7 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
       </div>
 
       {/* Per-case clinical / scheduling metadata (feeds the correction engine) */}
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10, fontSize: 12, color: '#374151' }}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10, fontSize: 12, color: 'var(--text-body)' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span>Supervision cadence:</span>
           <select
@@ -1101,7 +1088,7 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="When ON, parent training can be scheduled outside the client's set availability and need not coincide with a direct session (tentative, pending BCBA confirmation).">
           <input type="checkbox" checked={client.parentAvailableOutsideSessions === true}
-            onChange={e => onChange({ parentAvailableOutsideSessions: e.target.checked ? true : false })} />
+            onChange={e => onChange({ parentAvailableOutsideSessions: e.target.checked || undefined })} />
           <span>Parent available outside scheduled availability</span>
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="When OFF, the engine won't propose partial-staff coverage.">
@@ -1111,7 +1098,7 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <input type="checkbox" checked={client.isEI === true}
-            onChange={e => onChange({ isEI: e.target.checked ? true : false })} />
+            onChange={e => onChange({ isEI: e.target.checked || undefined })} />
           <span>EI case</span>
         </label>
         {client.isEI && (
@@ -1123,9 +1110,9 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 180px' }}>
           <span style={{ whiteSpace: 'nowrap' }}>Anticipated discharge:</span>
-          <input value={dischargeStr}
-            onChange={e => setDischargeStr(e.target.value)}
-            onBlur={() => { const v = dischargeStr.trim() || undefined; if (v !== client.anticipatedDischarge) onChange({ anticipatedDischarge: v }); }}
+          <input value={client.anticipatedDischarge || ''}
+            onBlur={e => { if ((e.target.value || undefined) !== client.anticipatedDischarge) onChange({ anticipatedDischarge: e.target.value || undefined }); }}
+            defaultValue={client.anticipatedDischarge || ''}
             placeholder="date / note" style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
         </label>
       </div>
@@ -1179,7 +1166,7 @@ function AuthsTab({ data, savingId, onUpsertAuth, onRemoveAuth, onUpsertUsage, o
                 <button onClick={() => addAuthFor(client.id)} style={chipBtn}>+ Add authorization</button>
               </div>
               {clientAuths.length === 0 ? (
-                <p style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic', marginTop: 8 }}>No authorization on file.</p>
+                <p style={{ fontSize: '12px', color: 'var(--text-faint)', fontStyle: 'italic', marginTop: 8 }}>No authorization on file.</p>
               ) : [...clientAuths]
                   .sort((a, b) => b.startDate.localeCompare(a.startDate))
                   .map(auth => (
@@ -1198,7 +1185,7 @@ function AuthsTab({ data, savingId, onUpsertAuth, onRemoveAuth, onUpsertUsage, o
           );
         })}
         {data.clients.length === 0 && (
-          <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>No clients yet.</p>
+          <p style={{ color: 'var(--text-faint)', textAlign: 'center', padding: '20px' }}>No clients yet.</p>
         )}
       </div>
     </div>
@@ -1221,10 +1208,10 @@ function AuthRow(props: AuthCardProps) {
   const { data, auth } = props;
   const [collapsed, setCollapsed] = useState(true);
   const usage = computeAuthUsage(data, auth, new Date());
-  const cliffColor = usage.daysLeft < 0 ? '#9ca3af' : usage.daysLeft <= 21 ? '#b91c1c' : usage.daysLeft <= 45 ? '#b45309' : '#15803d';
+  const cliffColor = usage.daysLeft < 0 ? 'var(--text-faint)' : usage.daysLeft <= 21 ? 'var(--status-behind)' : usage.daysLeft <= 45 ? 'var(--status-pace)' : 'var(--status-met)';
   const title = auth.label || `${auth.startDate} to ${auth.endDate}`;
   return (
-    <div style={{ marginTop: 10, border: '1px solid #e5e7eb', borderRadius: 6, background: 'white' }}>
+    <div style={{ marginTop: 10, border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)', background: 'white' }}>
       <div
         onClick={() => setCollapsed(c => !c)}
         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', cursor: 'pointer', flexWrap: 'wrap' }}
@@ -1254,7 +1241,7 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
 
   const usage = computeAuthUsage(data, auth, new Date());
   const fmt = (n: number) => (Math.round(n * 10) / 10).toString();
-  const cliffColor = usage.daysLeft < 0 ? '#9ca3af' : usage.daysLeft <= 21 ? '#b91c1c' : usage.daysLeft <= 45 ? '#b45309' : '#15803d';
+  const cliffColor = usage.daysLeft < 0 ? 'var(--text-faint)' : usage.daysLeft <= 21 ? 'var(--status-behind)' : usage.daysLeft <= 45 ? 'var(--status-pace)' : 'var(--status-met)';
 
   const commitBucket = (key: AuthBucketKey, raw: string) => {
     const v = parseFloat(raw);
@@ -1282,20 +1269,20 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
   const reportDates = computeReportDates(auth, data.settings);
 
   return (
-    <div style={{ padding: '0 12px 12px', borderTop: '1px solid #f3f4f6' }}>
+    <div style={{ padding: '0 12px 12px', borderTop: 'var(--border-hairline)' }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 140px', minWidth: 0 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>Auth label / number</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-body)' }}>Auth label / number</span>
           <input value={label} onChange={e => setLabel(e.target.value)}
             onBlur={() => { if (label !== (auth.label || '')) onChange({ label: label || undefined }); }}
             placeholder="optional" style={inputStyle} />
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 1 150px', minWidth: 120 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>Start</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-body)' }}>Start</span>
           <input type="date" value={auth.startDate} onChange={e => onChange({ startDate: e.target.value })} style={inputStyle} />
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '0 1 150px', minWidth: 120 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>End (cliff)</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-body)' }}>End (cliff)</span>
           <input type="date" value={auth.endDate} onChange={e => onChange({ endDate: e.target.value })} style={inputStyle} />
         </label>
       </div>
@@ -1305,12 +1292,12 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
         </p>
         <button onClick={onRemove} style={{ ...dangerBtn, marginLeft: 'auto' }}>Remove</button>
       </div>
-      {saving && <p style={{ fontSize: 11, color: '#3b82f6' }}>Saving…</p>}
+      {saving && <p style={{ fontSize: 11, color: 'var(--brand-primary)' }}>Saving…</p>}
 
       {/* Per-week authorized rates — what the correction engine reasons over. */}
-      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #e5e7eb' }}>
-        <p style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>
-          Authorized weekly rates <span style={{ fontWeight: 400, color: '#9ca3af' }}>(supervision cap ≈ 20% of direct)</span>
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border-default)' }}>
+        <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-body)', marginBottom: 6 }}>
+          Authorized weekly rates <span style={{ fontWeight: 400, color: 'var(--text-faint)' }}>(supervision cap ≈ 20% of direct)</span>
         </p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {([['direct', 'Direct'], ['supervision', 'Supervision'], ['parentTraining', 'Parent trng'], ['casePlanning', 'Case plan']] as const).map(([key, lbl]) => (
@@ -1333,11 +1320,11 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ fontSize: 10, color: '#6b7280' }}>Initial draft due (internal)</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{reportDates.initialDraftDue}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-body)' }}>{reportDates.initialDraftDue}</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ fontSize: 10, color: '#6b7280' }}>Final draft due (internal)</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{reportDates.finalDraftDue}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-body)' }}>{reportDates.finalDraftDue}</span>
           </div>
         </div>
       </div>
@@ -1347,10 +1334,10 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
         {AUTH_BUCKETS.map(({ key, label: bLabel }) => {
           const b = usage.buckets.find(x => x.key === key)!.usage;
           const over = b.authorized > 0 && b.remaining < -0.01;
-          const rowColor = over ? '#b91c1c' : '#374151';
+          const rowColor = over ? 'var(--status-behind)' : 'var(--text-body)';
           return (
             <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 12 }}>
-              <span style={{ flex: '1 1 150px', minWidth: 0, color: '#374151' }}>{bLabel}</span>
+              <span style={{ flex: '1 1 150px', minWidth: 0, color: 'var(--text-body)' }}>{bLabel}</span>
               <input
                 type="number" step="0.5" min="0" inputMode="decimal"
                 value={bucketDrafts[key] ?? (auth.buckets[key] !== undefined ? String(auth.buckets[key]) : '')}
@@ -1361,7 +1348,7 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
               <span style={{ color: rowColor, whiteSpace: 'nowrap' }}>
                 {b.authorized > 0
                   ? <>used {fmt(b.used)} · sched {fmt(b.scheduled)} · <strong>{over ? `${fmt(-b.remaining)}h OVER` : `${fmt(b.remaining)}h left`}</strong></>
-                  : <span style={{ color: '#9ca3af' }}>not authorized</span>}
+                  : <span style={{ color: 'var(--text-faint)' }}>not authorized</span>}
               </span>
             </div>
           );
@@ -1369,14 +1356,14 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
       </div>
 
       {/* Manual (outside-system) hours */}
-      <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #e5e7eb' }}>
-        <p style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Prior hours used in auth (prior / outside SAssi, and not imported)</p>
+      <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed var(--border-default)' }}>
+        <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-body)', marginBottom: 6 }}>Prior hours used in auth (prior / outside SAssi, and not imported)</p>
         {manualInSpan.map(u => (
           <div key={u.id} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, marginBottom: 4, flexWrap: 'wrap' }}>
             <span style={{ color: '#6b7280', whiteSpace: 'nowrap' }}>{u.date}</span>
             <span style={{ flex: '1 1 120px', minWidth: 0 }}>
               {AUTH_BUCKETS.find(b => b.key === u.bucket)?.label || u.bucket}: <strong>{u.hours}h</strong>
-              {u.note ? <span style={{ color: '#9ca3af' }}> · {u.note}</span> : null}
+              {u.note ? <span style={{ color: 'var(--text-faint)' }}> · {u.note}</span> : null}
             </span>
             <button onClick={() => onRemoveUsage(u.id)} style={{ ...dangerBtn, padding: '2px 8px', fontSize: 11 }}>×</button>
           </div>
@@ -1385,8 +1372,8 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
           <select value={mBucket} onChange={e => setMBucket(e.target.value as AuthBucketKey)} style={{ ...inputStyle, width: 'auto', flex: '1 1 130px', minWidth: 0 }}>
             {AUTH_BUCKETS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
           </select>
-          <input type="number" step="0.25" min="0" placeholder="hrs" value={mHours} onChange={e => setMHours(e.target.value)} style={{ ...inputStyle, width: 60 }} />
-          <input type="date" value={mDate} onChange={e => setMDate(e.target.value)} style={{ ...inputStyle, width: 130 }} />
+          <input type="number" step="0.25" min="0" placeholder="hrs" value={mHours} onChange={e => setMHours(e.target.value)} style={{ ...inputStyle, width: 60, minWidth: 0 }} />
+          <input type="date" value={mDate} onChange={e => setMDate(e.target.value)} style={{ ...inputStyle, width: 130, minWidth: 0 }} />
           <input placeholder="note (optional)" value={mNote} onChange={e => setMNote(e.target.value)} style={{ ...inputStyle, flex: '1 1 120px', minWidth: 0 }} />
           <button onClick={addManual} style={chipBtn} disabled={!mHours || !mDate}>+ Add</button>
         </div>
@@ -1456,19 +1443,19 @@ function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemo
   const renderRow = (b: Blackout, dim: boolean) => (
     <div key={b.id} style={{
       display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
-      border: '1px solid #e5e7eb', borderRadius: '6px', backgroundColor: dim ? '#f9fafb' : 'white',
+      border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)', backgroundColor: dim ? 'var(--surface-sunken)' : 'var(--surface-card)',
       opacity: dim ? 0.75 : 1, flexWrap: 'wrap',
     }}>
       <div style={{ flex: '1 1 200px', minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: '14px', color: '#111827' }}>
           {formatBlackoutDate(b.date)}
         </div>
-        <div style={{ fontSize: '13px', color: '#374151', marginTop: '2px' }}>
+        <div style={{ fontSize: '13px', color: 'var(--text-body)', marginTop: '2px' }}>
           <span style={{
             fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', padding: '1px 6px',
             borderRadius: '8px', marginRight: '6px',
-            backgroundColor: b.entityType === 'technician' ? '#dbeafe' : '#fef3c7',
-            color: b.entityType === 'technician' ? '#1e40af' : '#92400e',
+            backgroundColor: b.entityType === 'technician' ? 'var(--blue-100)' : 'var(--amber-100)',
+            color: b.entityType === 'technician' ? 'var(--blue-900)' : 'var(--amber-700)',
           }}>{b.entityType === 'technician' ? 'Staff' : 'Client'}</span>
           {nameFor(b)}
         </div>
@@ -1497,7 +1484,7 @@ function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemo
           generous row/column gap keeps them from crowding when wrapped. */}
       <div style={{ ...cardStyle, marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '14px 16px', alignItems: 'flex-end' }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 200px', minWidth: 0 }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Who</span>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Who</span>
           <select value={entityKey} onChange={e => setEntityKey(e.target.value)} style={inputStyle}>
             <option value="">— Pick staff or client —</option>
             {technicians.length > 0 && (
@@ -1513,11 +1500,11 @@ function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemo
           </select>
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 150px', minWidth: 0 }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Date</span>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Date</span>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '2 1 200px', minWidth: 0 }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Reason (optional)</span>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Reason (optional)</span>
           <input
             type="text" value={reason} onChange={e => setReason(e.target.value)}
             placeholder="e.g. dentist appointment" style={inputStyle}
@@ -1528,7 +1515,7 @@ function BlackoutsTab({ blackouts, technicians, clients, savingId, onAdd, onRemo
       </div>
 
       {blackouts.length === 0 ? (
-        <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>No blackout days recorded.</p>
+        <p style={{ color: 'var(--text-faint)', textAlign: 'center', padding: '20px' }}>No blackout days recorded.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {upcoming.length > 0 && (
@@ -1606,18 +1593,18 @@ function TimeOffTab({ timeOff, settings, appointments, savingId, onAdd, onRemove
   const renderRow = (t: TimeOff, dim: boolean) => (
     <div key={t.id} style={{
       display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
-      border: '1px solid #e5e7eb', borderRadius: '6px', backgroundColor: dim ? '#f9fafb' : 'white',
+      border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)', backgroundColor: dim ? 'var(--surface-sunken)' : 'var(--surface-card)',
       opacity: dim ? 0.75 : 1, flexWrap: 'wrap',
     }}>
       <div style={{ flex: '1 1 200px', minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: '14px', color: '#111827' }}>
           {formatBlackoutDate(t.date)} · {fmtHours(t.hours)}h
-          <span style={{ color: '#7c3aed', fontWeight: 600 }}> (−{fmtHours(t.hours * ratio)}h req.)</span>
+          <span style={{ color: 'var(--violet-600)', fontWeight: 600 }}> (−{fmtHours(t.hours * ratio)}h req.)</span>
         </div>
-        <div style={{ fontSize: '13px', color: '#374151', marginTop: '2px' }}>
+        <div style={{ fontSize: '13px', color: 'var(--text-body)', marginTop: '2px' }}>
           <span style={{
             fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', padding: '1px 6px',
-            borderRadius: '8px', marginRight: '6px', backgroundColor: '#ede9fe', color: '#5b21b6',
+            borderRadius: 'var(--radius-lg)', marginRight: '6px', backgroundColor: 'var(--violet-100)', color: 'var(--violet-700)',
           }}>{ptoBucketLabel(t.bucket || 'combined')}</span>
           {t.note && <span style={{ color: '#6b7280', fontStyle: 'italic' }}>{t.note}</span>}
         </div>
@@ -1639,8 +1626,8 @@ function TimeOffTab({ timeOff, settings, appointments, savingId, onAdd, onRemove
 
       {/* Where the setup lives — this tab shows balances + logs leave; the rules,
           buckets, mode, and ratio are configured under Settings. */}
-      <div style={{ ...cardStyle, marginBottom: '16px', padding: '10px 12px', background: '#f5f3ff', borderColor: '#ddd6fe' }}>
-        <div style={{ fontSize: '12px', color: '#5b21b6' }}>
+      <div style={{ ...cardStyle, marginBottom: '16px', padding: '10px 12px', background: 'var(--violet-50)', borderColor: 'var(--violet-200)' }}>
+        <div style={{ fontSize: '12px', color: 'var(--violet-700)' }}>
           <strong>Accrual setup is in Admin → Settings → "Time off."</strong> There you choose the
           mode ({cfg.mode === 'accrual' ? 'currently Accrual' : 'currently Unlimited'}), buckets, the
           deduction ratio, and—in accrual mode—your accrual rules and opening balances. This tab is
@@ -1653,7 +1640,7 @@ function TimeOffTab({ timeOff, settings, appointments, savingId, onAdd, onRemove
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '20px' }}>
         {balances.map(b => (
           <div key={b.bucket} style={{ ...cardStyle, flex: '1 1 150px', minWidth: 140, padding: '10px 12px' }}>
-            <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#5b21b6' }}>{ptoBucketLabel(b.bucket)}</div>
+            <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--violet-700)' }}>{ptoBucketLabel(b.bucket)}</div>
             {cfg.mode === 'accrual' ? (
               <>
                 <div style={{ fontSize: '20px', fontWeight: 700, color: (b.remaining ?? 0) < 0 ? '#dc2626' : '#111827' }}>
@@ -1671,7 +1658,7 @@ function TimeOffTab({ timeOff, settings, appointments, savingId, onAdd, onRemove
           </div>
         ))}
         {cfg.mode !== 'accrual' && (
-          <div style={{ flex: '1 1 100%', fontSize: '12px', color: '#9ca3af' }}>
+          <div style={{ flex: '1 1 100%', fontSize: '12px', color: 'var(--text-faint)' }}>
             Unlimited mode — tracking leave taken only. Turn on accrual in <strong>Settings → Time off</strong> to see remaining balances.
           </div>
         )}
@@ -1681,29 +1668,29 @@ function TimeOffTab({ timeOff, settings, appointments, savingId, onAdd, onRemove
           instead of crowding its neighbor; generous row/column gap when wrapped. */}
       <div style={{ ...cardStyle, marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '14px 16px', alignItems: 'flex-end' }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 150px', minWidth: 0 }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>From</span>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>From</span>
           <input type="date" value={start} onChange={e => { setStart(e.target.value); if (end < e.target.value) setEnd(e.target.value); }} style={inputStyle} />
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 150px', minWidth: 0 }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>To</span>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>To</span>
           <input type="date" value={end} min={start} onChange={e => setEnd(e.target.value)} style={inputStyle} />
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 120px', minWidth: 0 }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Hours / day</span>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Hours / day</span>
           <input type="number" min="0" step="0.25" value={hours} onChange={e => setHours(e.target.value)} style={inputStyle} />
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 1 150px', minWidth: 0 }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Bucket</span>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Bucket</span>
           <select value={bucket} onChange={e => setBucket(e.target.value as PtoBucket)} style={inputStyle}>
             {buckets.map(b => <option key={b} value={b}>{ptoBucketLabel(b)}</option>)}
           </select>
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '2 1 180px', minWidth: 0 }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Note (optional)</span>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Note (optional)</span>
           <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. beach trip" style={inputStyle}
             onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
         </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '0 1 auto', fontSize: '13px', color: '#374151' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: '0 1 auto', fontSize: '13px', color: 'var(--text-body)' }}>
           <input type="checkbox" checked={skipWeekends} onChange={e => setSkipWeekends(e.target.checked)} />
           Skip weekends
         </label>
@@ -1711,7 +1698,7 @@ function TimeOffTab({ timeOff, settings, appointments, savingId, onAdd, onRemove
       </div>
 
       {timeOff.length === 0 ? (
-        <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>No time off recorded.</p>
+        <p style={{ color: 'var(--text-faint)', textAlign: 'center', padding: '20px' }}>No time off recorded.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {upcoming.length > 0 && (
@@ -1796,14 +1783,14 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
 
   const radioRow = (label: string, options: { v: string; l: string }[], current: string, onPick: (v: string) => void) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-      <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>{label}</span>
+      <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>{label}</span>
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
         {options.map(o => (
           <button key={o.v} onClick={() => onPick(o.v)} style={{
             padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px',
-            border: `1px solid ${current === o.v ? '#7c3aed' : '#d1d5db'}`,
-            background: current === o.v ? '#ede9fe' : 'white',
-            color: current === o.v ? '#5b21b6' : '#374151', fontWeight: current === o.v ? 700 : 400,
+            border: `1px solid ${current === o.v ? 'var(--violet-600)' : 'var(--border-strong)'}`,
+            background: current === o.v ? 'var(--violet-100)' : 'var(--surface-card)',
+            color: current === o.v ? 'var(--violet-700)' : 'var(--text-body)', fontWeight: current === o.v ? 700 : 400,
           }}>{o.l}</button>
         ))}
       </div>
@@ -1811,7 +1798,7 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px dashed #e5e7eb', paddingTop: '12px', marginTop: '4px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px dashed var(--border-default)', paddingTop: '12px', marginTop: '4px' }}>
       {radioRow('Tracking mode', [
         { v: 'unlimited', l: 'Unlimited (used only)' },
         { v: 'accrual', l: 'Accrual + balances' },
@@ -1822,7 +1809,7 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
         { v: 'separate', l: 'Separate sick / vacation' },
       ], cfg.buckets, v => set({ buckets: v as PtoConfig['buckets'] }))}
 
-      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#374151' }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-body)' }}>
         <input type="checkbox" checked={!!cfg.unpaidEnabled} onChange={e => set({ unpaidEnabled: e.target.checked })} />
         Track a separate Unpaid bucket
       </label>
@@ -1834,91 +1821,125 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {(cfg.accruals || []).map(r => {
                 return (
-                  <div key={r.id} style={{ ...cardStyle, padding: '10px 12px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end' }}>
-                    <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '1 1 180px' }}>
-                      <span style={{ fontSize: '11px', color: '#6b7280' }}>Rule</span>
-                      <select value={r.kind} onChange={e => updateRule(r.id, { kind: e.target.value as AccrualKind })} style={inputStyle}>
-                        {(Object.keys(ACCRUAL_KIND_LABEL) as AccrualKind[]).map(k => <option key={k} value={k}>{ACCRUAL_KIND_LABEL[k]}</option>)}
-                      </select>
-                    </label>
-                    <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 120px' }}>
-                      <span style={{ fontSize: '11px', color: '#6b7280' }}>Bucket</span>
-                      <select value={r.bucket} onChange={e => updateRule(r.id, { bucket: e.target.value as PtoBucket })} style={inputStyle}>
-                        {buckets.map(b => <option key={b} value={b}>{ptoBucketLabel(b)}</option>)}
-                      </select>
-                    </label>
-                    <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
-                      <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours</span>
-                      <input type="text" inputMode="decimal" value={String(r.hours)} onChange={e => updateRule(r.id, { hours: parseFloat(e.target.value) || 0 })} placeholder="0" style={inputStyle} />
-                    </label>
-                    {r.kind === 'everyNWeeks' && (
-                      <>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
-                          <span style={{ fontSize: '11px', color: '#6b7280' }}>Every (wks)</span>
-                          <input type="text" inputMode="numeric" value={String(r.everyWeeks ?? 1)} onChange={e => updateRule(r.id, { everyWeeks: Math.max(1, parseInt(e.target.value) || 1) })} placeholder="1" style={inputStyle} />
-                        </label>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 110px' }}>
-                          <span style={{ fontSize: '11px', color: '#6b7280' }}>On</span>
-                          <select value={r.weekday ?? 'Friday'} onChange={e => updateRule(r.id, { weekday: e.target.value as DayOfWeek })} style={inputStyle}>
-                            {WEEKDAYS.map(d => <option key={d} value={d}>{d}</option>)}
-                          </select>
-                        </label>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 150px' }}>
-                          <span style={{ fontSize: '11px', color: '#6b7280' }}>From (anchor)</span>
-                          <input type="date" value={r.anchor ?? ''} onChange={e => updateRule(r.id, { anchor: e.target.value })} style={inputStyle} />
-                        </label>
-                      </>
-                    )}
-                    {(r.kind === 'perConvertedHours' || r.kind === 'perConvertedBonus') && (
-                      <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 130px' }}>
-                        <span style={{ fontSize: '11px', color: '#6b7280' }}>Per converted hrs</span>
-                        <input type="number" min="0" step="0.5" value={String(r.perHours ?? 0)} onChange={e => updateRule(r.id, { perHours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                  <div key={r.id} style={{ ...cardStyle, padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Accrual rule</span>
+                      <button onClick={() => removeRule(r.id)} style={dangerBtn}>Remove</button>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end' }}>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '1 1 180px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', color: '#6b7280' }}>Rule</span>
+                        <select value={r.kind} onChange={e => updateRule(r.id, { kind: e.target.value as AccrualKind })} style={inputStyle}>
+                          {(Object.keys(ACCRUAL_KIND_LABEL) as AccrualKind[]).map(k => <option key={k} value={k}>{ACCRUAL_KIND_LABEL[k]}</option>)}
+                        </select>
                       </label>
-                    )}
-                    {r.kind === 'perConvertedBonus' && (
-                      <>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
-                          <span style={{ fontSize: '11px', color: '#6b7280' }}>Bonus hrs (Z)</span>
-                          <input type="number" min="0" step="0.25" value={String(r.bonusHours ?? 0)} onChange={e => updateRule(r.id, { bonusHours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
-                        </label>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 100px' }}>
-                          <span style={{ fontSize: '11px', color: '#6b7280' }}>Per</span>
-                          <select value={r.bonusInterval ?? 'week'} onChange={e => updateRule(r.id, { bonusInterval: e.target.value as 'week' | 'month' })} style={inputStyle}>
-                            <option value="week">week</option>
-                            <option value="month">month</option>
-                          </select>
-                        </label>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 120px' }}>
-                          <span style={{ fontSize: '11px', color: '#6b7280' }}>Consecutive (M)</span>
-                          <input type="number" min="1" step="1" value={String(r.bonusConsecutiveIntervals ?? 1)} onChange={e => updateRule(r.id, { bonusConsecutiveIntervals: Math.max(1, parseInt(e.target.value) || 1) })} style={inputStyle} />
-                        </label>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 140px' }}>
-                          <span style={{ fontSize: '11px', color: '#6b7280' }}>At criterion when</span>
-                          <select value={r.bonusCriterion ?? 'hours'} onChange={e => updateRule(r.id, { bonusCriterion: e.target.value as 'hours' | 'percentAboveGoal' })} style={inputStyle}>
-                            <option value="hours">converted ≥ hours</option>
-                            <option value="percentAboveGoal">% above goal</option>
-                          </select>
-                        </label>
-                        {(r.bonusCriterion ?? 'hours') === 'hours' ? (
-                          <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 110px' }}>
-                            <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours (Y′)</span>
-                            <input type="number" min="0" step="1" value={String(r.bonusPerExtraHours ?? 0)} onChange={e => updateRule(r.id, { bonusPerExtraHours: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 120px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', color: '#6b7280' }}>Bucket</span>
+                        <select value={r.bucket} onChange={e => updateRule(r.id, { bucket: e.target.value as PtoBucket })} style={inputStyle}>
+                          {buckets.map(b => <option key={b} value={b}>{ptoBucketLabel(b)}</option>)}
+                        </select>
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours</span>
+                        <input type="text" inputMode="decimal" key={r.id + '-h'} defaultValue={r.hours || ''} onBlur={e => updateRule(r.id, { hours: parseFloat(e.target.value) || 0 })} placeholder="0" style={inputStyle} />
+                      </label>
+                      {r.kind === 'everyNWeeks' && (
+                        <>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px', minWidth: 0 }}>
+                            <span style={{ fontSize: '11px', color: '#6b7280' }}>Every (wks)</span>
+                            <input type="text" inputMode="numeric" key={r.id + '-ew'} defaultValue={String(r.everyWeeks ?? 1)} onBlur={e => { const v = Math.max(1, parseInt(e.target.value) || 1); updateRule(r.id, { everyWeeks: v }); if (!e.target.value || parseInt(e.target.value) < 1) e.target.value = String(v); }} placeholder="1" style={inputStyle} />
                           </label>
-                        ) : (
-                          <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 110px' }}>
-                            <span style={{ fontSize: '11px', color: '#6b7280' }}>% above goal</span>
-                            <input type="number" min="0" step="1" value={String(r.bonusPercentAboveGoal ?? 0)} onChange={e => updateRule(r.id, { bonusPercentAboveGoal: parseFloat(e.target.value) || 0 })} style={inputStyle} />
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 110px', minWidth: 0 }}>
+                            <span style={{ fontSize: '11px', color: '#6b7280' }}>On</span>
+                            <select value={r.weekday ?? 'Friday'} onChange={e => updateRule(r.id, { weekday: e.target.value as DayOfWeek })} style={inputStyle}>
+                              {WEEKDAYS.map(d => <option key={d} value={d}>{d}</option>)}
+                            </select>
                           </label>
-                        )}
-                      </>
-                    )}
-                    {(r.kind === 'perConvertedHours' || r.kind === 'perConvertedBonus') && (
-                      <span style={{ fontSize: '11px', color: '#6b7280', flex: '1 1 100%' }}>
-                        "Converted" = your completed billable hours since the opening-balance date; balances move as sessions are completed or reopened.
-                        {r.kind === 'perConvertedBonus' && ' Bonus pays out each time you string together M at-criterion intervals (then the streak resets).'}
-                      </span>
-                    )}
-                    <button onClick={() => removeRule(r.id)} style={dangerBtn}>Remove</button>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 150px', minWidth: 0 }}>
+                            <span style={{ fontSize: '11px', color: '#6b7280' }}>From (anchor)</span>
+                            <input type="date" value={r.anchor ?? ''} onChange={e => updateRule(r.id, { anchor: e.target.value })} style={inputStyle} />
+                          </label>
+                          {/* Force Waiting period + Active onto their own row — date picker is wide enough to warrant this break */}
+                          <div aria-hidden="true" style={{ flex: '1 1 100%', height: 0 }} />
+                          {!r.anchor && (
+                            <span style={{ fontSize: '11px', color: 'var(--status-behind)', flex: '1 1 100%' }}>
+                              ⚠ Anchor date required — without it no hours will accrue.
+                            </span>
+                          )}
+                        </>
+                      )}
+                      {(r.kind === 'perConvertedHours' || r.kind === 'perConvertedBonus') && (
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 130px', minWidth: 0 }}>
+                          <span style={{ fontSize: '11px', color: '#6b7280' }}>Per converted hrs</span>
+                          <input type="text" inputMode="decimal" key={r.id + '-ph'} defaultValue={r.perHours || ''} onBlur={e => updateRule(r.id, { perHours: parseFloat(e.target.value) || 0 })} placeholder="0" style={inputStyle} />
+                        </label>
+                      )}
+                      {r.kind === 'perConvertedBonus' && (
+                        <>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px', minWidth: 0 }}>
+                            <span style={{ fontSize: '11px', color: '#6b7280' }}>Bonus hrs (Z)</span>
+                            <input type="text" inputMode="decimal" key={r.id + '-bh'} defaultValue={r.bonusHours || ''} onBlur={e => updateRule(r.id, { bonusHours: parseFloat(e.target.value) || 0 })} placeholder="0" style={inputStyle} />
+                          </label>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 100px', minWidth: 0 }}>
+                            <span style={{ fontSize: '11px', color: '#6b7280' }}>Per</span>
+                            <select value={r.bonusInterval ?? 'week'} onChange={e => updateRule(r.id, { bonusInterval: e.target.value as 'week' | 'month' })} style={inputStyle}>
+                              <option value="week">week</option>
+                              <option value="month">month</option>
+                            </select>
+                          </label>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 120px', minWidth: 0 }}>
+                            <span style={{ fontSize: '11px', color: '#6b7280' }}>Consecutive (M)</span>
+                            <input type="text" inputMode="numeric" key={r.id + '-bci'} defaultValue={String(r.bonusConsecutiveIntervals ?? 1)} onBlur={e => { const v = Math.max(1, parseInt(e.target.value) || 1); updateRule(r.id, { bonusConsecutiveIntervals: v }); if (!e.target.value || parseInt(e.target.value) < 1) e.target.value = String(v); }} placeholder="1" style={inputStyle} />
+                          </label>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 140px', minWidth: 0 }}>
+                            <span style={{ fontSize: '11px', color: '#6b7280' }}>At criterion when</span>
+                            <select value={r.bonusCriterion ?? 'hours'} onChange={e => updateRule(r.id, { bonusCriterion: e.target.value as 'hours' | 'percentAboveGoal' })} style={inputStyle}>
+                              <option value="hours">converted ≥ hours</option>
+                              <option value="percentAboveGoal">% above goal</option>
+                            </select>
+                          </label>
+                          {(r.bonusCriterion ?? 'hours') === 'hours' ? (
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 110px', minWidth: 0 }}>
+                              <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours (Y′)</span>
+                              <input type="text" inputMode="decimal" key={r.id + '-bpe'} defaultValue={r.bonusPerExtraHours || ''} onBlur={e => updateRule(r.id, { bonusPerExtraHours: parseFloat(e.target.value) || 0 })} placeholder="0" style={inputStyle} />
+                            </label>
+                          ) : (
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 110px', minWidth: 0 }}>
+                              <span style={{ fontSize: '11px', color: '#6b7280' }}>% above goal</span>
+                              <input type="text" inputMode="decimal" key={r.id + '-bpg'} defaultValue={r.bonusPercentAboveGoal || ''} onBlur={e => updateRule(r.id, { bonusPercentAboveGoal: parseFloat(e.target.value) || 0 })} placeholder="0" style={inputStyle} />
+                            </label>
+                          )}
+                        </>
+                      )}
+                      {(r.kind === 'perConvertedHours' || r.kind === 'perConvertedBonus') && (
+                        <span style={{ fontSize: '11px', color: '#6b7280', flex: '1 1 100%' }}>
+                          "Converted" = your completed billable hours since the opening-balance date; balances move as sessions are completed or reopened.
+                          {r.kind === 'perConvertedBonus' && ' Bonus pays out each time you string together M at-criterion intervals (then the streak resets).'}
+                        </span>
+                      )}
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 130px', minWidth: 0 }}>
+                        <span style={{ fontSize: '11px', color: '#6b7280' }}>Waiting period (days)</span>
+                        <input
+                          type="text" inputMode="numeric"
+                          key={r.id + '-wpd'}
+                          placeholder="0 (none)"
+                          defaultValue={r.waitingPeriodDays !== undefined ? String(r.waitingPeriodDays) : ''}
+                          onBlur={e => {
+                            const v = e.target.value === '' ? undefined : (parseInt(e.target.value) || 0);
+                            updateRule(r.id, { waitingPeriodDays: v });
+                          }}
+                          style={inputStyle}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-body)', flex: '0 0 auto', alignSelf: 'flex-end', paddingBottom: '4px' }}>
+                        <input
+                          type="checkbox"
+                          checked={r.enabled !== false}
+                          onChange={e => updateRule(r.id, { enabled: e.target.checked })}
+                        />
+                        Active
+                      </label>
+                    </div>
                   </div>
                 );
               })}
@@ -1928,26 +1949,58 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
 
           <div>
             <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '6px' }}>
+              Balance caps <span style={{ fontWeight: 400, textTransform: 'none' }}>(optional — stop accruing once a bucket reaches this ceiling)</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {buckets.map(b => (
+                <label key={b} style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 140px' }}>
+                  <span style={{ fontSize: '11px', color: '#6b7280' }}>{ptoBucketLabel(b)} max (hrs)</span>
+                  <input
+                    type="number" min="0" step="0.0001"
+                    placeholder="No cap"
+                    key={`mb-${b}`}
+                    defaultValue={cfg.maxBalances?.[b] ?? ''}
+                    onBlur={e => {
+                      const v = e.target.value === '' ? undefined : (parseFloat(e.target.value) || 0);
+                      const existing = cfg.maxBalances || {};
+                      const next: Partial<Record<PtoBucket, number>> = { ...existing };
+                      if (v === undefined) { delete next[b]; } else { next[b] = v; }
+                      set({ maxBalances: Object.keys(next).length ? next : undefined });
+                    }}
+                    style={inputStyle}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '6px' }}>
               Opening balances <span style={{ fontWeight: 400, textTransform: 'none' }}>(starting point; accrual sums forward from each date)</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {(cfg.openingBalances || []).map((b, i) => (
-                <div key={i} style={{ ...cardStyle, padding: '10px 12px', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end' }}>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 120px' }}>
-                    <span style={{ fontSize: '11px', color: '#6b7280' }}>Bucket</span>
-                    <select value={b.bucket} onChange={e => updateBalance(i, { bucket: e.target.value as PtoBucket })} style={inputStyle}>
-                      {buckets.map(x => <option key={x} value={x}>{ptoBucketLabel(x)}</option>)}
-                    </select>
-                  </label>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px' }}>
-                    <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours</span>
-                    <input type="text" inputMode="decimal" value={String(b.hours)} onChange={e => updateBalance(i, { hours: parseFloat(e.target.value) || 0 })} placeholder="0" style={inputStyle} />
-                  </label>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 150px' }}>
-                    <span style={{ fontSize: '11px', color: '#6b7280' }}>As of</span>
-                    <input type="date" value={b.asOf} onChange={e => updateBalance(i, { asOf: e.target.value })} style={inputStyle} />
-                  </label>
-                  <button onClick={() => removeBalance(i)} style={dangerBtn}>Remove</button>
+                <div key={i} style={{ ...cardStyle, padding: '10px 12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Opening balance</span>
+                    <button onClick={() => removeBalance(i)} style={dangerBtn}>Remove</button>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end' }}>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 120px', minWidth: 0 }}>
+                      <span style={{ fontSize: '11px', color: '#6b7280' }}>Bucket</span>
+                      <select value={b.bucket} onChange={e => updateBalance(i, { bucket: e.target.value as PtoBucket })} style={inputStyle}>
+                        {buckets.map(x => <option key={x} value={x}>{ptoBucketLabel(x)}</option>)}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 90px', minWidth: 0 }}>
+                      <span style={{ fontSize: '11px', color: '#6b7280' }}>Hours</span>
+                      <input type="text" inputMode="decimal" key={`ob-${i}-h`} defaultValue={b.hours || ''} onBlur={e => updateBalance(i, { hours: parseFloat(e.target.value) || 0 })} placeholder="0" style={inputStyle} />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: '0 1 150px', minWidth: 0 }}>
+                      <span style={{ fontSize: '11px', color: '#6b7280' }}>As of</span>
+                      <input type="date" value={b.asOf} onChange={e => updateBalance(i, { asOf: e.target.value })} style={inputStyle} />
+                    </label>
+                  </div>
                 </div>
               ))}
             </div>
@@ -2144,8 +2197,8 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   const saveBar = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
       <button onClick={save} style={primaryBtn} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
-      {justSaved && <span style={{ color: '#15803d', fontWeight: 600, fontSize: 13 }}>✓ Saved</span>}
-      <span style={{ fontSize: 12, color: '#9ca3af' }}>Saves everything on this tab, including cancellation codes &amp; time-off rules.</span>
+      {justSaved && <span style={{ color: 'var(--status-met)', fontWeight: 600, fontSize: 13 }}>✓ Saved</span>}
+      <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>Saves everything on this tab, including cancellation codes &amp; time-off rules.</span>
     </div>
   );
 
@@ -2176,17 +2229,17 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
 
   const schedulePwSection = (
     <SettingsSection title="Schedule Password (HIPAA 😇)">
-      <div style={{ padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px', fontSize: '13px' }}>
+      <div style={{ padding: '12px', backgroundColor: 'var(--surface-sunken)', borderRadius: 'var(--radius-md)', fontSize: '13px' }}>
         <p style={{ marginBottom: '12px', color: '#6b7280', fontSize: '12px' }}>
           Encrypts your downloaded schedule file. Leave blank for a normal readable file.
         </p>
         {hasExistingPw && !changingPw ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '13px', color: '#374151' }}>🔒 Password is set.</span>
+            <span style={{ fontSize: '13px', color: 'var(--text-body)' }}>🔒 Password is set.</span>
             <button
               onClick={() => { setChangingPw(true); setPwError(null); }}
               style={{
-                padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                padding: '6px 12px', border: 'var(--border-control)', borderRadius: 'var(--radius-md)',
                 background: 'white', cursor: 'pointer', fontSize: '13px',
               }}
             >
@@ -2202,7 +2255,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
                 value={currentPw}
                 onChange={(e) => { setCurrentPw(e.target.value); setPwError(null); }}
                 autoComplete="off"
-                style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}
+                style={{ padding: '8px 12px', border: 'var(--border-control)', borderRadius: 'var(--radius-md)', fontSize: '13px' }}
               />
             )}
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -2212,19 +2265,19 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
                 value={newPw}
                 onChange={(e) => { setNewPw(e.target.value); setPwError(null); }}
                 autoComplete="off"
-                style={{ flex: 1, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px' }}
+                style={{ flex: 1, padding: '8px 12px', border: 'var(--border-control)', borderRadius: 'var(--radius-md)', fontSize: '13px' }}
               />
               <button
                 onClick={() => setShowPw(!showPw)}
                 style={{
-                  padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                  padding: '8px 12px', border: 'var(--border-control)', borderRadius: 'var(--radius-md)',
                   background: 'white', cursor: 'pointer', fontSize: '13px',
                 }}
               >
                 {showPw ? 'Hide' : 'Show'}
               </button>
             </div>
-            {pwError && <p style={{ fontSize: '12px', color: '#dc2626', margin: 0 }}>{pwError}</p>}
+            {pwError && <p style={{ fontSize: '12px', color: 'var(--status-behind)', margin: 0 }}>{pwError}</p>}
           </div>
         )}
       </div>
@@ -2233,28 +2286,31 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
 
   const appLockSection = faceIdAvailable !== undefined ? (
     <SettingsSection title="App Lock (HIPAA 😇)">
-      <div style={{ padding: '12px', backgroundColor: '#f9fafb', borderRadius: '6px', fontSize: '13px' }}>
+      <div style={{ padding: '12px', backgroundColor: 'var(--surface-sunken)', borderRadius: 'var(--radius-md)', fontSize: '13px' }}>
         <p style={{ marginBottom: '12px', color: '#6b7280', fontSize: '12px' }}>
           A PIN locks the app on launch. There is no recovery if you forget it.
         </p>
         <button
           onClick={onChangePin}
           style={{
-            padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+            padding: '8px 12px', border: 'var(--border-control)', borderRadius: 'var(--radius-md)',
             background: 'white', cursor: 'pointer', fontSize: '13px',
           }}
         >
           Change PIN
         </button>
-        {faceIdAvailable && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={faceIdEnabled || false}
-              onChange={(e) => onToggleFaceId?.(e.target.checked)}
-            />
-            <span style={{ fontSize: '13px' }}>Unlock with {biometryLabel || 'Face ID / Touch ID'}</span>
-          </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={faceIdEnabled || false}
+            onChange={(e) => onToggleFaceId?.(e.target.checked)}
+          />
+          <span style={{ fontSize: '13px' }}>Unlock with {biometryLabel || 'Face ID / Touch ID'}</span>
+        </label>
+        {!faceIdAvailable && (
+          <p style={{ fontSize: '11px', color: 'var(--text-faint)', marginTop: '4px', lineHeight: 1.4 }}>
+            Tap above to request Face ID access. If previously denied, go to Settings → Face ID &amp; Passcode → Other Apps to enable this app.
+          </p>
         )}
       </div>
     </SettingsSection>
@@ -2280,8 +2336,8 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
               <button
                 onClick={onRerunWizard}
                 style={{
-                  padding: '8px 14px', backgroundColor: '#8b5cf6', color: 'white',
-                  border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                  padding: '8px 14px', backgroundColor: 'var(--brand-ai)', color: 'var(--brand-primary-text)',
+                  border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
                 }}
               >Re-run wizard</button>
             )}
@@ -2289,8 +2345,8 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
               <button
                 onClick={onImportFile}
                 style={{
-                  padding: '8px 14px', backgroundColor: '#3b82f6', color: 'white',
-                  border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                  padding: '8px 14px', backgroundColor: 'var(--brand-primary)', color: 'var(--brand-primary-text)',
+                  border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
                 }}
               >Upload schedule…</button>
             )}
@@ -2298,14 +2354,14 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
               <button
                 onClick={onDownload}
                 style={{
-                  padding: '8px 14px', backgroundColor: '#10b981', color: 'white',
-                  border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                  padding: '8px 14px', backgroundColor: 'var(--brand-primary)', color: 'var(--brand-primary-text)',
+                  border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
                 }}
               >↓ Download schedule</button>
             )}
           </div>
           {onClearData && (
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #e5e7eb' }}>
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: 'var(--border-hairline)' }}>
               <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 6px' }}>
                 Clearing wipes the schedule loaded in the app. If you haven't saved
                 your work, <strong>download it first</strong> — this can't be undone.
@@ -2316,7 +2372,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
                     onClick={onDownload}
                     style={{
                       background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-                      fontSize: 12, color: '#b91c1c', textDecoration: 'underline', fontWeight: 600,
+                      fontSize: 12, color: 'var(--status-behind)', textDecoration: 'underline', fontWeight: 600,
                     }}
                   >↓ Download schedule first</button>
                 </div>
@@ -2324,8 +2380,8 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
               <button
                 onClick={onClearData}
                 style={{
-                  padding: '8px 14px', backgroundColor: '#fee2e2', color: '#b91c1c',
-                  border: '1px solid #fca5a5', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                  padding: '8px 14px', backgroundColor: 'var(--status-behind-bg)', color: 'var(--status-behind)',
+                  border: '1px solid var(--red-300)', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
                 }}
               >Clear loaded data</button>
             </div>
@@ -2364,16 +2420,16 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
               }}
               style={{ width: 15, height: 15 }}
             />
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Contacts Must Occur on Separate Days?</span>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Contacts Must Occur on Separate Days?</span>
           </label>
           {pendingUncheck && (
-            <div style={{ marginLeft: 23, padding: '8px 10px', backgroundColor: '#fef9c3', border: '1px solid #fde047', borderRadius: 6, fontSize: 12, color: '#713f12' }}>
+            <div style={{ marginLeft: 23, padding: '8px 10px', backgroundColor: 'var(--amber-100)', border: '1px solid var(--amber-300)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--amber-700)' }}>
               <p style={{ margin: '0 0 6px' }}>
                 Unchecking means multiple supervision sessions on the same calendar day, for the same technician, will each count as a separate contact toward the monthly minimum.
               </p>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => { setContactsSeparateDays(false); setPendingUncheck(false); }} style={{ padding: '4px 10px', fontSize: 12, fontWeight: 600, backgroundColor: '#b45309', color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer' }}>Confirm</button>
-                <button onClick={() => setPendingUncheck(false)} style={{ padding: '4px 10px', fontSize: 12, fontWeight: 600, backgroundColor: '#e5e7eb', color: '#374151', border: 'none', borderRadius: 4, cursor: 'pointer' }}>Cancel</button>
+                <button onClick={() => { setContactsSeparateDays(false); setPendingUncheck(false); }} style={{ padding: '4px 10px', fontSize: 12, fontWeight: 600, backgroundColor: 'var(--status-pace)', color: 'var(--white)', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>Confirm</button>
+                <button onClick={() => setPendingUncheck(false)} style={{ padding: '4px 10px', fontSize: 12, fontWeight: 600, backgroundColor: 'var(--border-default)', color: 'var(--text-body)', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>Cancel</button>
               </div>
             </div>
           )}
@@ -2385,7 +2441,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
 
       <SettingsSection title="Parent Training Targets">
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Period</span>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Period</span>
           <select value={periodUnit} onChange={e => setPeriodUnit(e.target.value as TrainingPeriodUnit)} style={inputStyle}>
             <option value="week">Per week</option>
             <option value="month">Per month</option>
@@ -2458,7 +2514,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
         Clinician availability is still configured in the Setup Wizard.
       </p>
 
-      <div style={{ marginTop: '8px', paddingTop: '12px', borderTop: '1px solid #e5e7eb' }}>
+      <div style={{ marginTop: '8px', paddingTop: '12px', borderTop: 'var(--border-hairline)' }}>
         {saveBar}
       </div>
     </div>
@@ -2517,7 +2573,7 @@ function AISettingsSection({ model, onModelChange, hasExistingKey, replacingKey,
                 display: 'flex',
                 gap: '10px',
                 padding: '10px',
-                border: model === opt.value ? '2px solid #3b82f6' : '1px solid #e5e7eb',
+                border: model === opt.value ? '2px solid var(--brand-primary)' : 'var(--border-hairline)',
                 borderRadius: '6px',
                 cursor: 'pointer',
                 backgroundColor: model === opt.value ? '#eff6ff' : 'white',
@@ -2544,11 +2600,11 @@ function AISettingsSection({ model, onModelChange, hasExistingKey, replacingKey,
         <label style={{ display: 'block', fontWeight: '600', marginBottom: '8px', fontSize: '13px' }}>Claude API Key</label>
         {hasExistingKey && !replacingKey ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '13px', color: '#374151' }}>🔒 API key is set.</span>
+            <span style={{ fontSize: '13px', color: 'var(--text-body)' }}>🔒 API key is set.</span>
             <button
               onClick={onReplaceKey}
               style={{
-                padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: '6px',
+                padding: '6px 12px', border: 'var(--border-control)', borderRadius: 'var(--radius-md)',
                 background: 'white', cursor: 'pointer', fontSize: '13px',
               }}
             >
@@ -2559,9 +2615,9 @@ function AISettingsSection({ model, onModelChange, hasExistingKey, replacingKey,
                 onClick={() => { onClearKey(); onApiKeyChange(''); }}
                 style={{
                   padding: '6px 12px',
-                  background: '#fee2e2',
-                  color: '#dc2626',
-                  border: '1px solid #fca5a5',
+                  background: 'var(--status-behind-bg)',
+                  color: 'var(--status-behind)',
+                  border: '1px solid var(--red-300)',
                   borderRadius: '6px',
                   cursor: 'pointer',
                   fontSize: '13px',
@@ -2604,7 +2660,7 @@ function AISettingsSection({ model, onModelChange, hasExistingKey, replacingKey,
           </div>
         )}
         {unlockError && (
-          <p style={{ fontSize: '12px', color: '#dc2626', marginTop: '6px' }}>{unlockError}</p>
+          <p style={{ fontSize: '12px', color: 'var(--status-behind)', marginTop: '6px' }}>{unlockError}</p>
         )}
         <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '6px' }}>
           Your key is sent per-request via header and never stored on the server.
@@ -2669,7 +2725,7 @@ function CancellationCodesEditor({ codes, onChange }: {
             style={{
               width: '76px', flexShrink: 0, padding: '6px 8px', fontSize: '12px', cursor: 'pointer',
               borderRadius: 4, border: '1px solid #d1d5db',
-              background: c.retired ? '#ecfdf5' : 'white', color: c.retired ? '#15803d' : '#b45309',
+              background: c.retired ? 'var(--green-50)' : 'var(--surface-card)', color: c.retired ? 'var(--status-met)' : 'var(--status-pace)',
             }}
           >{c.retired ? 'Restore' : 'Retire'}</button>
         </div>
@@ -2688,11 +2744,11 @@ function CancellationCodesEditor({ codes, onChange }: {
           style={{
             flexShrink: 0, padding: '8px 12px', fontSize: '13px', fontWeight: 600,
             borderRadius: 6, border: 'none', cursor: newLabel.trim() ? 'pointer' : 'not-allowed',
-            background: newLabel.trim() ? '#3b82f6' : '#e5e7eb', color: newLabel.trim() ? 'white' : '#9ca3af',
+            background: newLabel.trim() ? 'var(--brand-primary)' : 'var(--border-default)', color: newLabel.trim() ? 'var(--brand-primary-text)' : 'var(--text-faint)',
           }}
         >+ Add</button>
       </div>
-      <p style={{ fontSize: '11px', color: '#9ca3af', margin: '2px 0 0' }}>
+      <p style={{ fontSize: '11px', color: 'var(--text-faint)', margin: '2px 0 0' }}>
         Retiring keeps a code on past cancellations but removes it from the cancel
         picker. Renaming changes only the label. Changes save with “Save settings”.
       </p>
@@ -2714,7 +2770,7 @@ function NumField({ label, value, onChange, suffix, hint, placeholder, defaultVa
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-      <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>{label}</span>
+      <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>{label}</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <input
           type="number" step="0.5" min="0" inputMode="decimal"
@@ -2724,7 +2780,7 @@ function NumField({ label, value, onChange, suffix, hint, placeholder, defaultVa
         />
         {suffix && <span style={{ fontSize: '12px', color: '#6b7280' }}>{suffix}</span>}
       </div>
-      {hint && <span style={{ fontSize: '11px', color: '#9ca3af' }}>{hint}</span>}
+      {hint && <span style={{ fontSize: '11px', color: 'var(--text-faint)' }}>{hint}</span>}
     </div>
   );
 }
@@ -2739,7 +2795,7 @@ function LeadField({ label, value, unit, onChangeValue, onChangeUnit }: {
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-      <span style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>{label}</span>
+      <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>{label}</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <input
           type="number" step="1" min="0" inputMode="decimal"
@@ -2757,9 +2813,9 @@ function LeadField({ label, value, unit, onChangeValue, onChangeUnit }: {
 }
 
 const cardStyle: React.CSSProperties = {
-  backgroundColor: '#f9f9f9',
-  border: '1px solid #e5e7eb',
-  borderRadius: '8px',
+  backgroundColor: 'var(--surface-sunken)',
+  border: 'var(--border-hairline)',
+  borderRadius: 'var(--radius-lg)',
   padding: '16px',
 };
 
@@ -2774,20 +2830,20 @@ const inputStyle: React.CSSProperties = {
 
 const primaryBtn: React.CSSProperties = {
   padding: '6px 12px',
-  backgroundColor: '#3b82f6',
-  color: 'white',
+  backgroundColor: 'var(--brand-primary)',
+  color: 'var(--brand-primary-text)',
   border: 'none',
-  borderRadius: '4px',
+  borderRadius: 'var(--radius-sm)',
   cursor: 'pointer',
   fontSize: '13px',
 };
 
 const dangerBtn: React.CSSProperties = {
   padding: '6px 10px',
-  backgroundColor: '#fee2e2',
-  color: '#dc2626',
-  border: '1px solid #fca5a5',
-  borderRadius: '4px',
+  backgroundColor: 'var(--status-behind-bg)',
+  color: 'var(--status-behind)',
+  border: '1px solid var(--red-300)',
+  borderRadius: 'var(--radius-sm)',
   cursor: 'pointer',
   fontSize: '13px',
 };
@@ -2799,7 +2855,7 @@ const chipBtn: React.CSSProperties = {
   borderRadius: '4px',
   background: 'white',
   cursor: 'pointer',
-  color: '#374151',
+  color: 'var(--text-body)',
 };
 
 const editTimeInput: React.CSSProperties = {

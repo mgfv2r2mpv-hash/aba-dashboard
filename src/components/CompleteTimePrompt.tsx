@@ -50,17 +50,17 @@ export default function CompleteTimePrompt({ a, onComplete, label = '✓ Complet
 
 const completeBtn: React.CSSProperties = {
   flex: '1 1 auto', padding: '6px 12px',
-  backgroundColor: '#dcfce7', color: '#15803d',
-  border: '1px solid #86efac', borderRadius: 4,
+  backgroundColor: 'var(--status-met-bg)', color: 'var(--status-met)',
+  border: '1px solid var(--green-200)', borderRadius: 'var(--radius-sm)',
   cursor: 'pointer', fontSize: 13, fontWeight: 600,
 };
 const ghostBtn: React.CSSProperties = {
-  padding: '6px 12px', backgroundColor: 'white', color: '#6b7280',
-  border: '1px solid #d1d5db', borderRadius: 4, cursor: 'pointer', fontSize: 13,
+  padding: '6px 12px', backgroundColor: 'var(--surface-card)', color: 'var(--text-muted)',
+  border: 'var(--border-control)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: 13,
 };
 const timeInput: React.CSSProperties = {
-  fontSize: 13, padding: '3px 6px', border: '1px solid #d1d5db', borderRadius: 4,
+  fontSize: 13, padding: '3px 6px', border: 'var(--border-control)', borderRadius: 'var(--radius-sm)',
 };
 const lbl: React.CSSProperties = {
-  fontSize: 11, color: '#374151', display: 'flex', alignItems: 'center', gap: 4,
+  fontSize: 11, color: 'var(--text-body)', display: 'flex', alignItems: 'center', gap: 4,
 };

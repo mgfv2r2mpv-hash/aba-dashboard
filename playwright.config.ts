@@ -13,14 +13,21 @@ export default defineConfig({
     ['junit', { outputFile: 'test-results/e2e-junit.xml' }],
   ],
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
+  // Serve the production build via `vite preview`, not the dev server. The Vite
+  // root is `public/`, whose index.html loads the entry as `../src/index.tsx`
+  // (outside the dev-server root → 404, React never mounts). The build bundles
+  // that entry correctly, so previewing dist-client serves the real, working app
+  // and starts deterministically (no dep pre-bundle). This also fixes the prior
+  // failure where Playwright waited on 5173 while Vite serves 3000.
   webServer: {
-    command: 'npm run dev:client',
-    url: 'http://localhost:5173',
+    command: 'npm run build:client && npx vite preview --port 3000 --strictPort',
+    url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
+    timeout: 180_000,
   },
   projects: [
     {

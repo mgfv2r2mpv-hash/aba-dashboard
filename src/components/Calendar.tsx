@@ -221,6 +221,7 @@ export default function Calendar({
           view={view}
           date={currentDate}
           onPickDay={(d) => { setCurrentDate(d); setView('day'); }}
+          companyHolidays={companyHolidays}
         />
       )}
       {lens !== 'client' && view === 'month' && (

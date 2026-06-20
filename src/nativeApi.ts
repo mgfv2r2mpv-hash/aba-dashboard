@@ -274,6 +274,26 @@ async function route(method: string, path: string, body: any): Promise<any> {
     return { success: true, removed: before - data.timeOff.length };
   }
 
+  if (m === 'POST' && path === '/api/admin/company-holiday') {
+    const data = requireData();
+    if (!body?.id || !body?.date || !body?.name) {
+      throw new HttpError('Company holiday must have id, date and name');
+    }
+    if (!data.companyHolidays) data.companyHolidays = [];
+    const existing = data.companyHolidays.find(h => h.id === body.id);
+    if (existing) Object.assign(existing, body);
+    else data.companyHolidays.push(body);
+    return { success: true, holiday: existing || body };
+  }
+
+  const holidayIdMatch = path.match(/^\/api\/admin\/company-holiday\/([^/]+)$/);
+  if (m === 'DELETE' && holidayIdMatch) {
+    const data = requireData();
+    const before = (data.companyHolidays || []).length;
+    data.companyHolidays = (data.companyHolidays || []).filter(h => h.id !== holidayIdMatch[1]);
+    return { success: true, removed: before - (data.companyHolidays || []).length };
+  }
+
   throw new HttpError(`Native API: no handler for ${m} ${path}`, 404);
 }
 

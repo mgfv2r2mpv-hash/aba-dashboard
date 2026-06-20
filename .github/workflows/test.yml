@@ -49,12 +49,17 @@ jobs:
               }
             }
             const pct = ((covered / lines) * 100).toFixed(2);
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## @claude-unit-test-coverage\n**Lines:** ${pct}%\n**Goal:** 80%\n${ pct >= 80 ? '✅' : '⚠️' }`
-            });
+
+            try {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## @claude-unit-test-coverage\n**Lines:** ${pct}%\n**Goal:** 80%\n${ pct >= 80 ? '✅' : '⚠️' }`
+              });
+            } catch (e) {
+              core.warning(`Could not post coverage comment: ${e.message}`);
+            }
 
   e2e-tests:
     runs-on: ubuntu-latest

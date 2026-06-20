@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import {
   ScheduleData, Appointment, Technician, Client, CompanySettings, DayOfWeek,
-  Blackout, Authorization, ManualUsage, Cancellation, CancellationCode, AUTH_BUCKETS, TimeOff,
+  Blackout, Authorization, ManualUsage, Cancellation, CancellationCode, AUTH_BUCKETS, TimeOff, CompanyHoliday,
   PtoConfig, AccrualRule, AccrualKind, PtoBucket, PtoOpeningBalance,
   BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS,
 } from './types';
@@ -111,6 +111,7 @@ export function parseWorkbook(workbook: XLSX.WorkBook): ParsedSchedule {
       appointments,
       blackouts: parseBlackouts(workbook),
       timeOff: parseTimeOff(workbook),
+      companyHolidays: parseHolidays(workbook),
       authorizations: parseAuthorizations(workbook),
       manualUsage: parseManualUsage(workbook),
       lastModified: text(meta.lastModified) || new Date().toISOString(),
@@ -385,6 +386,20 @@ function parseTimeOff(workbook: XLSX.WorkBook): TimeOff[] {
     });
 }
 
+function parseHolidays(workbook: XLSX.WorkBook): CompanyHoliday[] {
+  return rowsOf(workbook, 'Holidays')
+    .filter(row => row && !isBlank(row.date) && !isBlank(row.name))
+    .map((row: any) => {
+      const h: CompanyHoliday = {
+        id: text(row.id) || uuidv4(),
+        date: normalizeDateString(row.date),
+        name: String(row.name),
+      };
+      if (!isBlank(row.createdAt)) h.createdAt = String(row.createdAt);
+      return h;
+    });
+}
+
 const PTO_BUCKET_VALUES: PtoBucket[] = ['sick', 'vacation', 'combined', 'unpaid'];
 const ACCRUAL_KINDS: AccrualKind[] = ['semimonthly', 'everyNWeeks', 'perConvertedHours', 'perConvertedBonus'];
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -595,6 +610,10 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
   // Blackouts.
   add('Blackouts', ['id', 'entityType', 'entityId', 'entityName', 'date', 'reason', 'createdAt'],
     (data.blackouts || []).map(b => [b.id, b.entityType, b.entityId, W(b.entityName), b.date, W(b.reason), W(b.createdAt)]));
+
+  // Company holidays (company-wide non-working days; drive green-star session markers).
+  add('Holidays', ['id', 'date', 'name', 'createdAt'],
+    (data.companyHolidays || []).map(h => [h.id, h.date, h.name, W(h.createdAt)]));
 
   // BCBA time off (one row per leave day). Drives the billable-requirement
   // deduction (Settings.ptoBillableDeductionRatio); bucket is recorded for the

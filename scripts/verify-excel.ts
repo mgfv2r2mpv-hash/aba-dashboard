@@ -48,6 +48,7 @@ const data: ScheduleData = {
   ],
   blackouts: [{ id: 'B1', entityType: 'client', entityId: 'C1', entityName: 'Client One', date: '2026-07-04', reason: 'holiday' }],
   timeOff: [{ id: 'PTO1', date: '2026-06-15', hours: 8, bucket: 'vacation', note: 'beach', createdAt: '2026-06-01T12:00:00.000Z' }],
+  companyHolidays: [{ id: 'H1', date: '2026-07-04', name: 'Independence Day', createdAt: '2026-01-01T00:00:00.000Z' }],
   authorizations: [{
     id: 'AU1', clientId: 'C1', label: 'Payer-123', startDate: '2026-01-01', endDate: '2026-08-31',
     buckets: { reassessment: 8, direct: 400 }, weekly: { direct: 20, supervision: 4, parentTraining: 1, casePlanning: 1 },
@@ -87,6 +88,7 @@ check('appointment recurring metadata', rt.appointments[0].seriesId === 'S1' && 
 
 check('schemaVersion = 2', rt.version === SCHEMA_VERSION);
 check('blackout + manualUsage', rt.blackouts![0].reason === 'holiday' && rt.manualUsage![0].hours === 5);
+check('companyHolidays round-trip', rt.companyHolidays?.[0].name === 'Independence Day' && rt.companyHolidays?.[0].date === '2026-07-04');
 check('timeOff + pto deduction ratio',
   rt.timeOff![0].hours === 8 && rt.timeOff![0].bucket === 'vacation' && rt.timeOff![0].note === 'beach'
   && st.ptoBillableDeductionRatio === 0.625);

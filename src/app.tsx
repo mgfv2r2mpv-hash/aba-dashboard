@@ -406,6 +406,8 @@ export default function App() {
     deleteBlackout: async (id) => { await axios.delete(`/api/admin/blackout/${id}`); },
     timeOff: async (t) => (await axios.post('/api/admin/time-off', t)).data.timeOff ?? t,
     deleteTimeOff: async (id) => { await axios.delete(`/api/admin/time-off/${id}`); },
+    companyHoliday: async (h) => (await axios.post('/api/admin/company-holiday', h)).data.holiday ?? h,
+    deleteCompanyHoliday: async (id) => { await axios.delete(`/api/admin/company-holiday/${id}`); },
     settings: async (s) => (await axios.post('/api/admin/settings', s)).data.settings,
     auth: async (a) => (await axios.post('/api/admin/authorization', a)).data.authorization ?? a,
     deleteAuth: async (id) => { await axios.delete(`/api/admin/authorization/${id}`); },
@@ -1407,6 +1409,7 @@ export default function App() {
                     blackouts={scheduleData.blackouts}
                     settings={scheduleData.settings}
                     timeOff={scheduleData.timeOff}
+                    companyHolidays={scheduleData.companyHolidays}
                     onAppointmentChange={handleAppointmentChange}
                     onSelectAppointment={setSelectedAppointment}
                     onViewDateChange={setViewDate}

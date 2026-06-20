@@ -332,6 +332,10 @@ export class ConstraintValidator {
   private validateAvailability(): ScheduleConflict[] {
     const conflicts: ScheduleConflict[] = [];
     const blackouts = this.data.blackouts || [];
+    // Company holidays act as a blanket blackout for all entities on that date.
+    const holidayByDate = new Map<string, string>(
+      (this.data.companyHolidays || []).map(h => [h.date, h.name]),
+    );
 
     this.data.appointments.forEach(appointment => {
       // A completed session already happened — whether or not it fell inside an
@@ -363,7 +367,8 @@ export class ConstraintValidator {
 
       if (technician) {
         const windows: TimeWindow[] = ((technician.availability as any)[dayName] as TimeWindow[]) || [];
-        const blackout = this.findBlackout(blackouts, 'technician', technician.id, dateStr);
+        const blackout = this.findBlackout(blackouts, 'technician', technician.id, dateStr)
+          ?? this.syntheticHolidayBlackout('technician', technician.id, dateStr, holidayByDate);
         const status = this.partyStatus(windows, appStart, appEnd, blackout);
         parties.push({ role: 'Technician', name: technician.name, status, windows, blackoutReason: blackout?.reason });
         // Techs are expected to have availability defined, so an empty day
@@ -376,7 +381,8 @@ export class ConstraintValidator {
 
       if (client) {
         const windows: TimeWindow[] = ((client.availabilityWindows as any)[dayName] as TimeWindow[]) || [];
-        const blackout = this.findBlackout(blackouts, 'client', client.id, dateStr);
+        const blackout = this.findBlackout(blackouts, 'client', client.id, dateStr)
+          ?? this.syntheticHolidayBlackout('client', client.id, dateStr, holidayByDate);
         const status = this.partyStatus(windows, appStart, appEnd, blackout);
         parties.push({ role: 'Client', name: client.name, status, windows, blackoutReason: blackout?.reason });
         // Clients frequently have no availability configured, so we only fault
@@ -439,6 +445,17 @@ export class ConstraintValidator {
     dateStr: string,
   ): Blackout | undefined {
     return blackouts.find(b => b.entityType === entityType && b.entityId === entityId && b.date === dateStr);
+  }
+
+  private syntheticHolidayBlackout(
+    entityType: 'technician' | 'client',
+    entityId: string,
+    dateStr: string,
+    holidayByDate: Map<string, string>,
+  ): Blackout | undefined {
+    const name = holidayByDate.get(dateStr);
+    if (!name) return undefined;
+    return { id: '_holiday', entityType, entityId, date: dateStr, reason: name };
   }
 
   private partyStatus(

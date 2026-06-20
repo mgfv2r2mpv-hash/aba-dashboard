@@ -817,10 +817,13 @@ export default function App() {
     try {
       const { ClaudeScheduler } = await import('./claudeScheduler');
       const scheduler = new ClaudeScheduler(aiSettings.apiKey, scheduleData, aiSettings.model);
-      let sols: WishSolution[];
-      if (kind === 'move') sols = await scheduler.generateMoveThisSolutions(apt);
-      else if (kind === 'replace') sols = await scheduler.generateReplaceThisSolutions(apt);
-      else sols = await scheduler.generateCancelRecoverySolutions(apt);
+      const aptDate = apt.startTime.slice(0, 10);
+      const noteMap = {
+        move: `Move this ${apt.type} appointment on ${aptDate} to a suitable time`,
+        replace: `Replace this ${apt.type} appointment on ${aptDate} with a suitable alternative`,
+        cancel: `Recover from the cancellation of this ${apt.type} appointment on ${aptDate} — suggest a make-up`,
+      } as const;
+      const sols = await scheduler.generateWishSolutions({ kind: 'freeform', note: noteMap[kind], dateStart: aptDate, dateEnd: aptDate });
       if (sols.length === 0) {
         setDebugMsg('AI found no options for this appointment.');
       } else {

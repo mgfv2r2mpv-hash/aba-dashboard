@@ -487,6 +487,7 @@ export interface AccrualRule {
   bonusPerExtraHours?: number;        // Y' — converted hours/interval to be at criterion ('hours')
   bonusPercentAboveGoal?: number;     // e.g. 5 → converted >= goal*1.05 ('percentAboveGoal')
   enabled?: boolean;       // default true; lets a rule be parked without deleting
+  waitingPeriodDays?: number;
 }
 
 // A starting balance for a bucket as of a date — accrual is summed forward from
@@ -505,6 +506,7 @@ export interface PtoConfig {
   unpaidEnabled?: boolean;         // expose a distinct 'unpaid' pool. Default false.
   accruals?: AccrualRule[];        // used only in 'accrual' mode
   openingBalances?: PtoOpeningBalance[];
+  maxBalances?: Partial<Record<PtoBucket, number>>;
 }
 
 export const DEFAULT_PTO_CONFIG: PtoConfig = { mode: 'unlimited', buckets: 'combined' };

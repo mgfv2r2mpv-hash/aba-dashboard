@@ -1,21 +1,27 @@
 // ClientCalendarView — top-level client-centric schedule view.
 //
 // Month sub-view: blackout dates only per client (no appointments).
-// Day/Week sub-view: vertical time axis × horizontal client columns.
-//   - Availability windows: translucent pastel vertical fills.
+// Day sub-view:   vertical time axis × horizontal client columns.
+// Week sub-view:  vertical time axis × seven day columns (client-colored tiles).
+//   - Availability windows (day view): translucent pastel vertical fills.
 //   - Direct-service sessions (client-session): candy-stripe tileStyle.
 //   - Other sessions (supervision, PT, case-planning…): solid fill.
-//   - Heatmap always on in day/week views (red overlay shows busy slots).
+//   - Canceled sessions render muted/struck so cancel-escalation severity shows.
+//   - Session flags (holiday ✦, makeup 🌟, 2-week star ⭐, streak ✓, cancel
+//     escalation badge) match the BCBA/BT lenses via computeSessionFlags.
+//   - Heatmap on in day view (red overlay shows busy slots).
 // Client filter: All / None / individual pills — defaults all selected.
 // Navigation is controlled entirely by the outer Calendar toolbar.
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Client, Blackout, Appointment, DayOfWeek,
+  Client, Blackout, Appointment, DayOfWeek, CompanyHoliday,
 } from '../types';
 import {
   clientPastel, clientDarkBorder, clientAvailBarStyle, tileStyle,
 } from '../calendarColors';
+import { computeSessionFlags, SessionFlags } from '../sessionFlags';
+import { cancelBadgeText, cancelBar } from './clientCalendarShared';
 import {
   format, addDays,
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
@@ -26,7 +32,8 @@ const DAY_START = 6;
 const DAY_END   = 22;
 const HOUR_PX   = 80;   // taller than BCBA calendar → more scroll, larger bands
 const GUTTER    = 56;   // time axis width
-const COL_MIN   = 140;  // min client column width
+const COL_MIN   = 140;  // min client column width (day view)
+const WEEK_COL_MIN = 118; // min day column width (week view — 7 columns)
 
 interface Props {
   clients: Client[];
@@ -35,12 +42,49 @@ interface Props {
   view: 'month' | 'week' | 'day';
   date: Date;
   onPickDay: (d: Date) => void;
+  companyHolidays?: CompanyHoliday[];
 }
 
-export default function ClientCalendarView({ clients, appointments, blackouts, view, date, onPickDay }: Props) {
-  // Heatmap is always on in day/week views — no toggle needed.
-  const heatmap = view !== 'month';
-  const sub: 'month' | 'day' = view === 'month' ? 'month' : 'day';
+// ── Shared time → pixel helpers (day + week grids) ─────────────────────────────
+const toTopPx = (h: number, m: number) => (h + m / 60 - DAY_START) * HOUR_PX;
+const apptTopPx = (a: Appointment) => {
+  const d = new Date(a.startTime);
+  return toTopPx(d.getHours(), d.getMinutes());
+};
+const apptHPx = (a: Appointment) => {
+  const s = new Date(a.startTime);
+  const e = new Date(a.endTime);
+  return ((e.getTime() - s.getTime()) / 3_600_000) * HOUR_PX;
+};
+const winTopPx = (t: string) => {
+  const [h, m] = t.split(':').map(Number);
+  return toTopPx(h, m);
+};
+const winHPx = (start: string, end: string) => {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  return ((eh + em / 60) - (sh + sm / 60)) * HOUR_PX;
+};
+const fmtTime = (d: Date) =>
+  d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+const TOTAL_H = (DAY_END - DAY_START) * HOUR_PX;
+const HOURS = Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i);
+
+export default function ClientCalendarView({
+  clients, appointments, blackouts, view, date, onPickDay, companyHolidays,
+}: Props) {
+  // Heatmap is on in day view only (per-day busy overlay); week shows 7 columns.
+  const heatmap = view === 'day';
+  const sub: 'month' | 'week' | 'day' =
+    view === 'month' ? 'month' : view === 'week' ? 'week' : 'day';
+
+  // Session-flag annotations (holiday / makeup / streak / star / cancel-escalation)
+  // computed once per appointment set + holidays, matching the BCBA/BT lenses.
+  const sessionFlags = useMemo(
+    () => computeSessionFlags(appointments, companyHolidays ?? []),
+    [appointments, companyHolidays],
+  );
 
   const [selIds, setSelIds] = useState<Set<string>>(
     () => new Set(clients.map(c => c.id)),
@@ -115,12 +159,23 @@ export default function ClientCalendarView({ clients, appointments, blackouts, v
           onPickDay={onPickDay}
         />
       )}
+      {sub === 'week' && (
+        <ClientWeekGrid
+          date={date}
+          clients={visible}
+          appointments={appointments}
+          companyHolidays={companyHolidays ?? []}
+          sessionFlags={sessionFlags}
+          onPickDay={onPickDay}
+        />
+      )}
       {sub === 'day' && (
         <ClientDayGrid
           date={date}
           clients={visible}
           appointments={appointments}
           blackouts={blackouts}
+          sessionFlags={sessionFlags}
           heatmap={heatmap}
         />
       )}
@@ -141,6 +196,168 @@ function Pill({ active, color, onClick, children }: {
       color:       active ? 'white' : '#374151',
       cursor: 'pointer', fontSize: 12, fontWeight: 600,
     }}>{children}</button>
+  );
+}
+
+// ── Session tile (shared by day + week grids) ──────────────────────────────────
+// Renders a single absolutely-positioned session block, folding status (completed
+// / canceled) and session flags (holiday / makeup / star / streak / cancel
+// escalation) into the tile — mirroring the BCBA/BT AppointmentBlock.
+function SessionTile({ appt, flags, clientName, top, height, insetLeft = 5, insetRight = 5 }: {
+  appt: Appointment;
+  flags?: SessionFlags;
+  clientName?: string;
+  top: number;
+  height: number;
+  insetLeft?: number;
+  insetRight?: number;
+}) {
+  const isDirect = appt.type === 'client-session';
+  const canceled = appt.status === 'canceled';
+
+  const base = isDirect
+    ? tileStyle(clientName, appt.technician)
+    : { backgroundColor: clientDarkBorder(clientName), backgroundImage: undefined as string | undefined };
+
+  const border = canceled
+    ? `2px solid ${cancelBar(appt.cancellation?.source)}`
+    : `1.5px solid ${clientDarkBorder(clientName)}`;
+
+  // Escalation darkening for canceled blocks (inset shadow overlay), matching admin.
+  const escalationAlpha = canceled && (flags?.cancelEscalation ?? 0) > 1
+    ? (flags!.cancelEscalation! - 1) * 0.08
+    : 0;
+
+  const fg = isDirect ? '#1e3a5f' : '#fff';
+  const showText    = height > 22;
+  const showMarkers = height > 34;
+  const hasMarkers = flags && (
+    flags.isHoliday || flags.isMakeup ||
+    (flags.streakStarLevel ?? 0) > 0 || (flags.completedStreak ?? 0) >= 2
+  );
+
+  const flagTip: string[] = [];
+  if ((flags?.cancelEscalation ?? 0) >= 2) flagTip.push(`${cancelBadgeText(flags!.cancelEscalation!)} cancel #${flags!.cancelEscalation} this month`);
+  if ((flags?.completedStreak ?? 0) >= 2) flagTip.push(`${flags!.completedStreak}-session streak`);
+  if (flags?.streakStarLevel) flagTip.push(`${flags.streakStarLevel} clean 2-week star${flags.streakStarLevel > 1 ? 's' : ''}`);
+  if (flags?.isMakeup) flagTip.push(`Makeup${flags.makeupDates?.length ? ` of ${flags.makeupDates.join(', ')}` : ''}`);
+  if (flags?.isHoliday) flagTip.push(flags.holidayName ?? 'Company holiday');
+
+  return (
+    <div
+      title={[
+        `${appt.title}${canceled ? ' (canceled)' : ''}`,
+        `${fmtTime(new Date(appt.startTime))}–${fmtTime(new Date(appt.endTime))}`,
+        ...flagTip,
+      ].join('\n')}
+      style={{
+        position: 'absolute',
+        top: top + 1, left: insetLeft, right: insetRight,
+        height: Math.max(height - 2, 16),
+        ...base,
+        border,
+        borderRadius: 5, overflow: 'hidden',
+        zIndex: 3, boxSizing: 'border-box',
+        padding: '2px 5px',
+        opacity: canceled ? 0.6 : 1,
+        textDecoration: canceled ? 'line-through' : 'none',
+        boxShadow: escalationAlpha > 0
+          ? `inset 0 0 0 9999px rgba(0,0,0,${escalationAlpha})`
+          : '0 1px 3px rgba(0,0,0,0.14)',
+      }}
+    >
+      {showText && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 3 }}>
+          <span style={{
+            fontSize: 10, fontWeight: 700, lineHeight: 1.3, color: fg,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {appt.title}
+          </span>
+          {(flags?.cancelEscalation ?? 0) >= 2 && (
+            <span style={{
+              fontSize: 9, fontWeight: 800, background: 'rgba(0,0,0,0.18)', color: fg,
+              padding: '0 3px', borderRadius: 3, flexShrink: 0, whiteSpace: 'nowrap',
+            }}>
+              {cancelBadgeText(flags!.cancelEscalation!)}
+            </span>
+          )}
+        </div>
+      )}
+      {showMarkers && hasMarkers && (
+        <div style={{ display: 'flex', gap: 3, alignItems: 'center', marginTop: 2, flexWrap: 'wrap' }}>
+          {flags!.isHoliday && (
+            <span style={{ fontSize: 10, color: 'var(--green-700)', fontWeight: 800 }} title={flags!.holidayName ?? 'Holiday'}>✦</span>
+          )}
+          {flags!.isMakeup && (
+            <span style={{ fontSize: 10 }} title={`Makeup${flags!.makeupDates?.length ? ` of ${flags!.makeupDates.join(', ')}` : ''}`}>🌟</span>
+          )}
+          {(flags!.streakStarLevel ?? 0) > 0 && (
+            <span style={{ fontSize: 10 }} title={`${flags!.streakStarLevel} clean 2-week period${(flags!.streakStarLevel ?? 0) > 1 ? 's' : ''}`}>⭐</span>
+          )}
+          {(flags!.completedStreak ?? 0) >= 2 && (
+            <span style={{ fontSize: 9, fontWeight: 700, color: '#92400e', background: 'rgba(217,119,6,0.15)', padding: '0 3px', borderRadius: 3 }}>
+              {flags!.completedStreak}✓
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Resolve a client's display name from an appointment's client id-or-name field.
+function clientNameOf(clients: Client[], a: Appointment): string | undefined {
+  const c = clients.find(cl => cl.id === a.client || cl.name === a.client);
+  return c?.name ?? a.client;
+}
+
+// Shared full-width hour / half-hour rule lines for the time grids.
+function GridRules() {
+  return (
+    <div style={{
+      position: 'absolute', left: GUTTER, right: 0, top: 0, bottom: 0,
+      zIndex: 1, pointerEvents: 'none',
+    }}>
+      {HOURS.map(h => h > DAY_START && (
+        <div key={h} style={{
+          position: 'absolute', left: 0, right: 0,
+          top: (h - DAY_START) * HOUR_PX,
+          borderTop: `1px solid ${h % 3 === 0 ? '#d1d5db' : '#ececec'}`,
+        }} />
+      ))}
+      {Array.from({ length: (DAY_END - DAY_START) * 2 }, (_, i) => i).map(i =>
+        i % 2 === 1 ? (
+          <div key={i} style={{
+            position: 'absolute', left: 0, right: 0,
+            top: i * HOUR_PX / 2,
+            borderTop: '1px dashed #f0f0f0',
+          }} />
+        ) : null,
+      )}
+    </div>
+  );
+}
+
+// Shared time gutter (hour labels) for the time grids.
+function TimeGutter() {
+  return (
+    <div style={{
+      width: GUTTER, flexShrink: 0,
+      position: 'relative', height: TOTAL_H,
+      background: '#f9fafb', borderRight: '2px solid #d1d5db',
+    }}>
+      {HOURS.map(h => (
+        <div key={h} style={{
+          position: 'absolute',
+          top: (h - DAY_START) * HOUR_PX - (h === DAY_START ? 0 : 6),
+          width: '100%', textAlign: 'right',
+          paddingRight: 7, fontSize: 11, fontWeight: 600, color: '#6b7280',
+        }}>
+          {h === 12 ? '12p' : h > 12 ? `${h - 12}p` : `${h}a`}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -250,30 +467,29 @@ function ClientMonthView({ date, blackouts, clients, onPickDay }: {
 
 // ── Day sub-view: vertical time × horizontal client columns ────────────────────
 
-function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
+function ClientDayGrid({ date, clients, appointments, blackouts, sessionFlags, heatmap }: {
   date: Date;
   clients: Client[];
   appointments: Appointment[];
   blackouts: Blackout[];
+  sessionFlags: Map<string, SessionFlags>;
   heatmap: boolean;
 }) {
   const iso      = format(date, 'yyyy-MM-dd');
   const dow      = format(date, 'EEEE') as DayOfWeek;
-  const totalH   = (DAY_END - DAY_START) * HOUR_PX;
-  const hours    = Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i);
 
+  // Include canceled sessions (so cancel-escalation severity shows); exclude ghosts.
   const dayAppts = useMemo(() =>
-    appointments.filter(a =>
-      a.startTime.startsWith(iso) && a.status !== 'canceled' && !a.isGhost,
-    ),
+    appointments.filter(a => a.startTime.startsWith(iso) && !a.isGhost),
   [appointments, iso]);
 
-  // Heatmap: count visible-client sessions per 30-min slot
+  // Heatmap: count visible-client ACTIVE sessions per 30-min slot.
   const heatSlots = useMemo(() => {
     if (!heatmap || clients.length === 0) return null;
     const n      = (DAY_END - DAY_START) * 2;
     const counts = new Array(n).fill(0);
     for (const a of dayAppts) {
+      if (a.status === 'canceled') continue;
       const match = clients.find(c => c.id === a.client || c.name === a.client);
       if (!match) continue;
       const s  = new Date(a.startTime);
@@ -296,29 +512,6 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
       </div>
     );
   }
-
-  // Helpers for converting time → pixel position
-  const toTopPx = (h: number, m: number) => (h + m / 60 - DAY_START) * HOUR_PX;
-  const apptTopPx = (a: Appointment) => {
-    const d = new Date(a.startTime);
-    return toTopPx(d.getHours(), d.getMinutes());
-  };
-  const apptHPx = (a: Appointment) => {
-    const s = new Date(a.startTime);
-    const e = new Date(a.endTime);
-    return ((e.getTime() - s.getTime()) / 3_600_000) * HOUR_PX;
-  };
-  const winTopPx = (t: string) => {
-    const [h, m] = t.split(':').map(Number);
-    return toTopPx(h, m);
-  };
-  const winHPx = (start: string, end: string) => {
-    const [sh, sm] = start.split(':').map(Number);
-    const [eh, em] = end.split(':').map(Number);
-    return ((eh + em / 60) - (sh + sm / 60)) * HOUR_PX;
-  };
-  const fmtTime = (d: Date) =>
-    d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
   return (
     <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
@@ -383,23 +576,7 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
           {/* ── Grid body ─────────────────────────── */}
           <div style={{ display: 'flex', position: 'relative' }}>
 
-            {/* Time gutter */}
-            <div style={{
-              width: GUTTER, flexShrink: 0,
-              position: 'relative', height: totalH,
-              background: '#f9fafb', borderRight: '2px solid #d1d5db',
-            }}>
-              {hours.map(h => (
-                <div key={h} style={{
-                  position: 'absolute',
-                  top: (h - DAY_START) * HOUR_PX - (h === DAY_START ? 0 : 6),
-                  width: '100%', textAlign: 'right',
-                  paddingRight: 7, fontSize: 11, fontWeight: 600, color: '#6b7280',
-                }}>
-                  {h === 12 ? '12p' : h > 12 ? `${h - 12}p` : `${h}a`}
-                </div>
-              ))}
-            </div>
+            <TimeGutter />
 
             {/* Heatmap row backgrounds (behind everything) */}
             {heatmap && heatSlots && (
@@ -422,32 +599,11 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
               </div>
             )}
 
-            {/* Full-width hour and half-hour lines */}
-            <div style={{
-              position: 'absolute', left: GUTTER, right: 0, top: 0, bottom: 0,
-              zIndex: 1, pointerEvents: 'none',
-            }}>
-              {hours.map(h => h > DAY_START && (
-                <div key={h} style={{
-                  position: 'absolute', left: 0, right: 0,
-                  top: (h - DAY_START) * HOUR_PX,
-                  borderTop: `1px solid ${h % 3 === 0 ? '#d1d5db' : '#ececec'}`,
-                }} />
-              ))}
-              {Array.from({ length: (DAY_END - DAY_START) * 2 }, (_, i) => i).map(i =>
-                i % 2 === 1 ? (
-                  <div key={i} style={{
-                    position: 'absolute', left: 0, right: 0,
-                    top: i * HOUR_PX / 2,
-                    borderTop: '1px dashed #f0f0f0',
-                  }} />
-                ) : null,
-              )}
-            </div>
+            <GridRules />
 
             {/* Client columns */}
             {clients.map((client, ci) => {
-              const windows  = client.availabilityWindows[dow] ?? [];
+              const windows  = (client.availabilityWindows?.[dow]) ?? [];
               const cAppts   = dayAppts.filter(
                 a => a.client === client.id || a.client === client.name,
               );
@@ -457,7 +613,7 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
                   key={client.id}
                   style={{
                     flex: `1 1 ${COL_MIN}px`, minWidth: COL_MIN,
-                    height: totalH, position: 'relative',
+                    height: TOTAL_H, position: 'relative',
                     borderLeft: ci > 0 ? '1px solid #e5e7eb' : undefined,
                     zIndex: 2,
                   }}
@@ -466,9 +622,9 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
                   {windows.map((w, wi) => {
                     const top = winTopPx(w.start);
                     const h   = winHPx(w.start, w.end);
-                    if (h <= 0 || top >= totalH || top + h <= 0) return null;
+                    if (h <= 0 || top >= TOTAL_H || top + h <= 0) return null;
                     const clampedTop = Math.max(0, top);
-                    const clampedH   = Math.min(h, totalH - clampedTop);
+                    const clampedH   = Math.min(h, TOTAL_H - clampedTop);
                     return (
                       <div
                         key={wi}
@@ -489,43 +645,17 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
                     const top  = apptTopPx(appt);
                     const rawH = apptHPx(appt);
                     const h    = Math.max(rawH, 18);
-                    if (top >= totalH || top + h <= 0) return null;
+                    if (top >= TOTAL_H || top + h <= 0) return null;
                     const clampedTop = Math.max(0, top);
-
-                    const isDirect  = appt.type === 'client-session';
-                    const blockStyle = isDirect
-                      ? tileStyle(client.name, appt.technician)
-                      : {
-                          backgroundColor: clientDarkBorder(client.name),
-                          backgroundImage: undefined as string | undefined,
-                        };
-
                     return (
-                      <div
+                      <SessionTile
                         key={appt.id}
-                        title={`${appt.title}\n${fmtTime(new Date(appt.startTime))}–${fmtTime(new Date(appt.endTime))}`}
-                        style={{
-                          position: 'absolute',
-                          top: clampedTop + 1, left: 5, right: 5,
-                          height: Math.max(h - 2, 16),
-                          ...blockStyle,
-                          border:       `1.5px solid ${clientDarkBorder(client.name)}`,
-                          borderRadius:  5, overflow: 'hidden',
-                          zIndex: 3, boxSizing: 'border-box',
-                          padding: '2px 5px',
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.14)',
-                        }}
-                      >
-                        {h > 22 && (
-                          <div style={{
-                            fontSize: 10, fontWeight: 700, lineHeight: 1.3,
-                            color: isDirect ? '#1e3a5f' : '#fff',
-                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                          }}>
-                            {appt.title}
-                          </div>
-                        )}
-                      </div>
+                        appt={appt}
+                        flags={sessionFlags.get(appt.id)}
+                        clientName={client.name}
+                        top={clampedTop}
+                        height={h}
+                      />
                     );
                   })}
                 </div>
@@ -535,33 +665,183 @@ function ClientDayGrid({ date, clients, appointments, blackouts, heatmap }: {
         </div>
       </div>
 
-      {/* Legend */}
+      <DayLegend heatmap={heatmap} />
+    </div>
+  );
+}
+
+// ── Week sub-view: vertical time × seven day columns ───────────────────────────
+
+function ClientWeekGrid({ date, clients, appointments, companyHolidays, sessionFlags, onPickDay }: {
+  date: Date;
+  clients: Client[];
+  appointments: Appointment[];
+  companyHolidays: CompanyHoliday[];
+  sessionFlags: Map<string, SessionFlags>;
+  onPickDay: (d: Date) => void;
+}) {
+  const weekStart = startOfWeek(date, { weekStartsOn: 1 });
+  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const holidayByDate = new Map(companyHolidays.map(h => [h.date, h.name]));
+  const clientIds = new Set(clients.map(c => c.id));
+
+  // Active/canceled sessions for selected clients, indexed by day ISO.
+  const apptsByDay = useMemo(() => {
+    const map = new Map<string, Appointment[]>();
+    for (const a of appointments) {
+      if (a.isGhost) continue;
+      const match = clients.find(c => c.id === a.client || c.name === a.client);
+      if (!match || !clientIds.has(match.id)) continue;
+      const iso = a.startTime.slice(0, 10);
+      (map.get(iso) ?? map.set(iso, []).get(iso)!).push(a);
+    }
+    return map;
+    // clientIds derives from clients; clients is the stable dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointments, clients]);
+
+  if (clients.length === 0) {
+    return (
       <div style={{
-        display: 'flex', gap: 16, padding: '8px 12px', borderTop: '1px solid #e5e7eb',
-        background: '#fafafa', flexWrap: 'wrap', alignItems: 'center',
+        border: '1px solid #e5e7eb', borderRadius: 8,
+        textAlign: 'center', padding: '64px 20px', color: '#9ca3af', fontSize: 14,
       }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Legend</span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#374151' }}>
-          <span style={{ display: 'inline-block', width: 18, height: 14, borderRadius: 3, background: '#d1d5db', opacity: 0.5 }} />
-          Availability window
-        </span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#374151' }}>
-          <span style={{ display: 'inline-block', width: 18, height: 14, borderRadius: 3, background: '#93c5fd',
-            backgroundImage: 'repeating-linear-gradient(45deg,rgba(30,90,180,0.4) 0,rgba(30,90,180,0.4) 3px,transparent 3px,transparent 7px)' }} />
-          Direct session
-        </span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#374151' }}>
-          <span style={{ display: 'inline-block', width: 18, height: 14, borderRadius: 3, background: '#6b7280' }} />
-          Supervision / PT / other
-        </span>
-        {heatmap && (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#374151' }}>
-            <span style={{ display: 'inline-block', width: 18, height: 14, borderRadius: 3,
-              background: 'linear-gradient(to right, rgba(220,38,38,0.08), rgba(220,38,38,0.45))' }} />
-            Heatmap intensity (sessions/slot)
-          </span>
-        )}
+        No clients selected. Choose clients using the filter above.
       </div>
+    );
+  }
+
+  return (
+    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{
+        overflowY: 'auto', overflowX: 'auto', maxHeight: '75vh',
+        WebkitOverflowScrolling: 'touch' as any,
+      }}>
+        <div style={{ minWidth: GUTTER + 7 * WEEK_COL_MIN, display: 'flex', flexDirection: 'column' }}>
+
+          {/* ── Day headers (sticky top) ──────── */}
+          <div style={{
+            display: 'flex', position: 'sticky', top: 0, zIndex: 20,
+            background: '#f9fafb', borderBottom: '2px solid #d1d5db',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.06)',
+          }}>
+            <div style={{ width: GUTTER, flexShrink: 0, borderRight: '2px solid #d1d5db', background: '#f3f4f6' }} />
+            {days.map(day => {
+              const iso = format(day, 'yyyy-MM-dd');
+              const isToday = isSameDay(day, new Date());
+              const holiday = holidayByDate.get(iso);
+              return (
+                <button
+                  key={iso}
+                  onClick={() => onPickDay(day)}
+                  title={holiday ?? format(day, 'EEEE, MMM d')}
+                  style={{
+                    flex: `1 1 ${WEEK_COL_MIN}px`, minWidth: WEEK_COL_MIN,
+                    padding: '6px 6px 5px', textAlign: 'center', cursor: 'pointer',
+                    border: 'none', borderLeft: '1px solid #e5e7eb',
+                    background: holiday ? 'var(--green-50, #f0fdf4)' : 'transparent',
+                    color: isToday ? '#3b82f6' : '#374151',
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                    {format(day, 'EEE')}
+                  </div>
+                  <div style={{ fontSize: 16, fontWeight: isToday ? 800 : 600 }}>
+                    {format(day, 'd')}
+                  </div>
+                  {holiday && (
+                    <div style={{ fontSize: 8.5, color: 'var(--green-700, #15803d)', fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      ✦ {holiday}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ── Grid body ─────────────────────────── */}
+          <div style={{ display: 'flex', position: 'relative' }}>
+            <TimeGutter />
+            <GridRules />
+
+            {days.map((day, di) => {
+              const iso = format(day, 'yyyy-MM-dd');
+              const holiday = holidayByDate.get(iso);
+              const dayAppts = apptsByDay.get(iso) ?? [];
+              return (
+                <div
+                  key={iso}
+                  style={{
+                    flex: `1 1 ${WEEK_COL_MIN}px`, minWidth: WEEK_COL_MIN,
+                    height: TOTAL_H, position: 'relative',
+                    borderLeft: di > 0 ? '1px solid #e5e7eb' : undefined,
+                    background: holiday ? 'rgba(34,197,94,0.06)' : undefined,
+                    zIndex: 2,
+                  }}
+                >
+                  {dayAppts.map(appt => {
+                    const top  = apptTopPx(appt);
+                    const rawH = apptHPx(appt);
+                    const h    = Math.max(rawH, 18);
+                    if (top >= TOTAL_H || top + h <= 0) return null;
+                    const clampedTop = Math.max(0, top);
+                    return (
+                      <SessionTile
+                        key={appt.id}
+                        appt={appt}
+                        flags={sessionFlags.get(appt.id)}
+                        clientName={clientNameOf(clients, appt)}
+                        top={clampedTop}
+                        height={h}
+                        insetLeft={3}
+                        insetRight={3}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <DayLegend heatmap={false} />
+    </div>
+  );
+}
+
+// ── Shared legend ──────────────────────────────────────────────────────────────
+
+function DayLegend({ heatmap }: { heatmap: boolean }) {
+  return (
+    <div style={{
+      display: 'flex', gap: 16, padding: '8px 12px', borderTop: '1px solid #e5e7eb',
+      background: '#fafafa', flexWrap: 'wrap', alignItems: 'center',
+    }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Legend</span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#374151' }}>
+        <span style={{ display: 'inline-block', width: 18, height: 14, borderRadius: 3, background: '#d1d5db', opacity: 0.5 }} />
+        Availability window
+      </span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#374151' }}>
+        <span style={{ display: 'inline-block', width: 18, height: 14, borderRadius: 3, background: '#93c5fd',
+          backgroundImage: 'repeating-linear-gradient(45deg,rgba(30,90,180,0.4) 0,rgba(30,90,180,0.4) 3px,transparent 3px,transparent 7px)' }} />
+        Direct session
+      </span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#374151' }}>
+        <span style={{ display: 'inline-block', width: 18, height: 14, borderRadius: 3, background: '#6b7280' }} />
+        Supervision / PT / other
+      </span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#374151' }}>
+        ✦ Holiday · 🌟 Makeup · ⭐ 2-week star · ✓ streak · <span style={{ fontWeight: 800 }}>2?</span> cancel escalation
+      </span>
+      {heatmap && (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#374151' }}>
+          <span style={{ display: 'inline-block', width: 18, height: 14, borderRadius: 3,
+            background: 'linear-gradient(to right, rgba(220,38,38,0.08), rgba(220,38,38,0.45))' }} />
+          Heatmap intensity (sessions/slot)
+        </span>
+      )}
     </div>
   );
 }

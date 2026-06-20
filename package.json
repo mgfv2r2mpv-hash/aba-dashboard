@@ -11,7 +11,13 @@
     "cap:ios": "npx capacitor-assets generate --ios && node scripts/patch-spm-biometric.cjs && npm run build:client && npx cap sync ios && node scripts/patch-ios-plist.cjs",
     "start": "node dist/server.js",
     "dev": "nodemon --exec ts-node src/server.ts",
-    "dev:client": "vite"
+    "dev:client": "vite",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:debug": "playwright test --debug"
   },
   "repository": {
     "type": "git",
@@ -51,6 +57,14 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/jest-dom": "^6.4.2",
+    "@testing-library/user-event": "^14.5.2",
+    "@playwright/test": "^1.48.2",
+    "@vitest/ui": "^2.0.5",
+    "vitest": "^2.0.5",
+    "jsdom": "^24.1.1",
+    "@vitest/coverage-v8": "^2.0.5"
   }
 }

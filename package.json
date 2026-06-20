@@ -33,7 +33,7 @@
     "@capacitor/filesystem": "^8.1.2",
     "@capacitor/ios": "^8.4.0",
     "@capacitor/share": "^8.0.1",
-    "axios": "^1.15.2",
+    "axios": "^1.16.0",
     "cors": "^2.8.6",
     "date-fns": "^4.1.0",
     "dotenv": "^17.4.2",

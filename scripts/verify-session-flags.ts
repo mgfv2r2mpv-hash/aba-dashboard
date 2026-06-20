@@ -343,6 +343,43 @@ console.log('\ncalculation: multiple flags combined on one session');
   check('combined: makeupDates resolved', cf?.makeupDates?.includes('2026-09-01') === true);
 }
 
+// ── Suite 14: Client (family) cancel does NOT break tech streak ───────────────
+
+console.log('\ncalculation: family cancel does not reset tech streak');
+{
+  const apts: Appointment[] = [
+    completed('2026-08-01', 'T14', 'C14'),   // streak 1
+    completed('2026-08-04', 'T14', 'C14'),   // streak 2
+    canceled('2026-08-06', 'family', 'T14', 'C14'),  // client cancel — streak must NOT reset
+    completed('2026-08-08', 'T14', 'C14'),   // should be streak 3, not 1
+  ];
+  const flags = computeSessionFlags(apts, []);
+
+  check('family cancel: completed before still has streak=2',
+    flags.get(apts[1].id)?.completedStreak === 2);
+  check('family cancel: no streak on the canceled session itself',
+    flags.get(apts[2].id)?.completedStreak === undefined);
+  check('family cancel: completed after continues streak (=3, not 1)',
+    flags.get(apts[3].id)?.completedStreak === 3);
+}
+
+// ── Suite 15: Family cancel does NOT dirty 2-week star window ────────────────
+
+console.log('\ncalculation: family cancel does not dirty 2-week star window');
+{
+  const apts: Appointment[] = [
+    completed('2026-08-01', 'T15', 'C15'),
+    canceled('2026-08-07', 'family', 'T15', 'C15'),  // family cancel — should NOT dirty window
+    completed('2026-08-14', 'T15', 'C15'),  // end of window 1 (still clean) → star earned
+    completed('2026-08-15', 'T15', 'C15'),  // window 2; should see 1 star
+  ];
+  const flags = computeSessionFlags(apts, []);
+
+  check('family cancel in window: window still earns a star',
+    (flags.get(apts[3].id)?.streakStarLevel ?? 0) >= 1,
+    String(flags.get(apts[3].id)?.streakStarLevel));
+}
+
 // ── Result ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${passed} passed, ${failed} failed`);

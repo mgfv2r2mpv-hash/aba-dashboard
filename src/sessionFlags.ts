@@ -55,10 +55,12 @@ function computeStarHistory(
     const firstDay = dateOf(sorted[0]);
     const lastDay = dateOf(sorted[sorted.length - 1]);
 
-    // Pre-index canceled dates for this tech (any source breaks the window).
+    // Pre-index canceled dates for this tech — only bt (tech-initiated) cancellations
+    // dirty a 2-week window. Family / bcba / admin cancellations don't count against
+    // the technician's clean-window record.
     const canceledDates = new Set<string>(
       sorted
-        .filter(a => a.status === 'canceled')
+        .filter(a => a.status === 'canceled' && a.cancellation?.source === 'bt')
         .map(dateOf),
     );
 
@@ -212,11 +214,12 @@ export function computeSessionFlags(
         const streak = (streakByTech.get(apt.technician) ?? 0) + 1;
         streakByTech.set(apt.technician, streak);
         flags.completedStreak = streak;
-      } else if (apt.status === 'canceled') {
+      } else if (apt.status === 'canceled' && apt.cancellation?.source === 'bt') {
+        // Only tech-initiated cancellations break the streak.
+        // Family / bcba / admin cancellations don't reflect on the tech.
         streakByTech.set(apt.technician, 0);
-        // streak not set on canceled sessions
       }
-      // 'scheduled' neither advances nor resets the streak
+      // 'scheduled' and non-bt cancellations neither advance nor reset the streak
 
       // ── 2-week clean star ─────────────────────────────────────────────────
       const history = starHistory.get(apt.technician);

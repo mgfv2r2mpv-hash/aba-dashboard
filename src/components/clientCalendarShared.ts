@@ -1,7 +1,10 @@
 // Shared constants + helpers for the client-centric (Case) calendar surfaces:
-// ClientCalendarView (Month/Week/Day) and AvailabilityHeatmap.
+// ClientCalendarView's Month / Week / Day grids. The Week and Day grids overlap
+// every selected client's availability + sessions as translucent z-layers
+// (tierOf / TIER_COLOR / TIER_LAYOUT) and order clients with clusterByOverlap so
+// clients with similar availability sit adjacent.
 
-import { DayOfWeek } from '../types';
+import { DayOfWeek, Client } from '../types';
 
 export const DAY_S = 6;   // first visible hour
 export const DAY_E = 22;  // last visible hour (exclusive)
@@ -55,6 +58,16 @@ export const TIER_LABEL: Record<SessionTier, string> = {
   supervision: 'Supervision',
   parentTraining: 'Parent training',
   other: 'Other',
+};
+
+// Inset + z per tier so the overlapping stack reads as depth: availability is
+// backmost (handled by the renderer), then direct → other → supervision →
+// parent-training foremost, each inset a little further.
+export const TIER_LAYOUT: Record<SessionTier, { inset: number; z: number }> = {
+  direct:         { inset: 2, z: 12 },
+  other:          { inset: 4, z: 13 },
+  supervision:    { inset: 5, z: 14 },
+  parentTraining: { inset: 8, z: 15 },
 };
 
 // Cancel-escalation badge text — mirrors the admin calendar's scheme so the
@@ -111,4 +124,38 @@ export function assignLanes<T extends { startMin: number; endMin: number; sortKe
   }
   flush();
   return out;
+}
+
+// Greedy nearest-neighbour ordering on each client's weekly availability vector
+// (30-min resolution), so clients whose windows overlap sit adjacent — keeps the
+// overlapping translucent layers legible and groups similar caseloads together.
+export function clusterByOverlap(clients: Client[]): Client[] {
+  if (clients.length <= 1) return clients;
+  const SPD = (DAY_E - DAY_S) * 2;
+  const vecs = clients.map(client =>
+    WEEK_DAYS.flatMap(dow => {
+      const wins = client.availabilityWindows?.[dow] ?? [];
+      return Array.from({ length: SPD }, (_, si) => {
+        const s = DAY_S * 60 + si * 30, e = s + 30;
+        return wins.some(w => toMin(w.start) < e && toMin(w.end) > s) ? 1 : 0;
+      });
+    }),
+  );
+  const dot = (a: number[], b: number[]) => a.reduce((s, v, i) => s + v * b[i], 0);
+  const mag = (a: number[]) => Math.sqrt(a.reduce((s, v) => s + v * v, 0));
+  const sim = (a: number[], b: number[]) => { const ma = mag(a), mb = mag(b); return ma && mb ? dot(a, b) / (ma * mb) : 0; };
+  const total = (v: number[]) => v.reduce((s: number, x: number) => s + x, 0);
+
+  const remaining = clients.map((_, i) => i).sort((a, b) => total(vecs[b]) - total(vecs[a]));
+  const order: number[] = [remaining.shift()!];
+  while (remaining.length) {
+    const last = order[order.length - 1];
+    let best = 0, bestSim = -1;
+    for (let i = 0; i < remaining.length; i++) {
+      const s = sim(vecs[last], vecs[remaining[i]]);
+      if (s > bestSim) { bestSim = s; best = i; }
+    }
+    order.push(remaining.splice(best, 1)[0]);
+  }
+  return order.map(i => clients[i]);
 }

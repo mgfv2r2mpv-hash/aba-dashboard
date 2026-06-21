@@ -4,25 +4,30 @@
  * Given all appointments + company holidays, produces a
  * Map<appointmentId, SessionFlags> used by Calendar markers.
  *
- * Cancel escalation source→entity mapping:
- *   family  → client's monthly count
- *   bt      → tech's monthly count
- *   bcba    → not counted
- *   admin   → not counted
+ * Cancel escalation is now driven by the CONSECUTIVE-cancel run for the
+ * appointment's participants + source (see cancelStats.ts). `cancelEscalation`
+ * carries that run (capped 1..5 for the badge/darkening ramp); `cancelCtx` holds
+ * the full four-window breakdown surfaced in the detail popup.
  *
  * Streak and star are per-technician only.
  */
 
-import { Appointment, CompanyHoliday } from './types';
+import { Appointment, CompanyHoliday, CancellationSource } from './types';
+import { computeCancelContext, CancelContext } from './cancelStats';
 
 export interface SessionFlags {
   /** Per-tech consecutive completed-session count at this appointment. */
   completedStreak?: number;
   /** Cumulative clean 14-day windows earned by this tech as of this appointment. */
   streakStarLevel?: number;
-  /** Running monthly cancel count for the responsible entity (1..5, capped). */
+  /** Consecutive-cancel run for this appt's source, capped 1..5 for the badge. */
   cancelEscalation?: number;
-  cancelEntity?: 'client' | 'tech';
+  /** Raw (uncapped) consecutive-cancel run for this appt's source. */
+  cancelConsecutive?: number;
+  /** This appt's cancellation source (drives the dot color). */
+  cancelSource?: CancellationSource;
+  /** Full four-window cancel breakdown for the detail popup (canceled appts). */
+  cancelCtx?: CancelContext;
   isMakeup?: boolean;
   /** Dates of the session(s) being made up, resolved from makeupForId. */
   makeupDates?: string[];
@@ -32,9 +37,6 @@ export interface SessionFlags {
 
 /** Day string (YYYY-MM-DD) from an ISO start time. */
 const dateOf = (apt: Appointment): string => apt.startTime.slice(0, 10);
-
-/** Year-month string (YYYY-MM) for monthly bucketing. */
-const monthOf = (apt: Appointment): string => apt.startTime.slice(0, 7);
 
 /**
  * Compute cumulative clean 14-day window counts per tech, anchored to
@@ -122,6 +124,25 @@ function starsAtDate(
   return count;
 }
 
+// ── Streak milestone tiers ──────────────────────────────────────────────────
+// The completed-session streak surfaces as an escalating emoji and a green
+// milestone microdot on the calendar tiles (replaces the old 🔥/%10 scheme).
+
+/** Emoji tier for a completed-session streak (null below 2). */
+export function streakEmoji(streak: number): string | null {
+  if (streak < 2) return null;
+  if (streak <= 4) return '🟢';
+  if (streak <= 9) return '⭐️';
+  if (streak <= 14) return '🌟';
+  if (streak <= 19) return '✨';
+  return '🤩'; // 20+ (and every +5 after 20 is also a milestone)
+}
+
+/** True at streak milestones: 2, 5, 10, 15, 20, then every 5 (25, 30, …). */
+export function isStreakMilestone(streak: number): boolean {
+  return streak === 2 || (streak >= 5 && streak % 5 === 0);
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function computeSessionFlags(
@@ -153,8 +174,8 @@ export function computeSessionFlags(
   // Per-tech running streak counter (mutated as we walk in chronological order).
   const streakByTech = new Map<string, number>();
 
-  // Per-(entity-key, month) cancel count — entity-key is `client:ID` or `tech:ID`.
-  const cancelCounts = new Map<string, number>();
+  // Consecutive-run + rolling-30 cancel breakdown per appointment.
+  const cancelCtx = computeCancelContext(active);
 
   // Walk in chronological order so counts accumulate correctly.
   const sorted = [...active].sort((a, b) =>
@@ -183,28 +204,14 @@ export function computeSessionFlags(
       }
     }
 
-    // ── Cancel escalation ────────────────────────────────────────────────────
+    // ── Cancel escalation (consecutive run + rolling-30 breakdown) ───────────
     if (apt.status === 'canceled' && apt.cancellation) {
-      const { source } = apt.cancellation;
-      const ym = monthOf(apt);
-
-      let entityKey: string | undefined;
-      let cancelEntity: 'client' | 'tech' | undefined;
-
-      if (source === 'family' && apt.client) {
-        entityKey = `client:${apt.client}:${ym}`;
-        cancelEntity = 'client';
-      } else if (source === 'bt' && apt.technician) {
-        entityKey = `tech:${apt.technician}:${ym}`;
-        cancelEntity = 'tech';
-      }
-      // bcba and admin: intentionally excluded per business rules.
-
-      if (entityKey && cancelEntity) {
-        const count = (cancelCounts.get(entityKey) ?? 0) + 1;
-        cancelCounts.set(entityKey, count);
-        flags.cancelEscalation = Math.min(count, 5);
-        flags.cancelEntity = cancelEntity;
+      const ctx = cancelCtx.get(apt.id);
+      if (ctx) {
+        flags.cancelSource = ctx.source;
+        flags.cancelConsecutive = ctx.consecutiveForSource;
+        flags.cancelEscalation = Math.min(ctx.consecutiveForSource, 5);
+        flags.cancelCtx = ctx;
       }
     }
 

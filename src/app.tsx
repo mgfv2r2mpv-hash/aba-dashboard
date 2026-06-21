@@ -50,7 +50,7 @@ import {
 import { solveDraft, DraftStatus, PrioritizationChoice } from './draftSolver';
 import DraftTray from './components/DraftTray';
 import { wishSolutionToDraft } from './wish';
-import { computeSessionFlags, SessionFlags } from './sessionFlags';
+import { computeSessionFlags, SessionFlags, streakEmoji } from './sessionFlags';
 
 // Route axios /api/* calls through an in-memory store on iOS/Android,
 // since the Express server isn't reachable from inside the WebView.
@@ -1168,24 +1168,48 @@ export default function App() {
           const flags = detailFlags.get(a.id);
           if (!flags) return null;
           const items: React.ReactNode[] = [];
-          if ((flags.cancelEscalation ?? 0) >= 1) {
-            const n = flags.cancelEscalation!;
-            const suffix = n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th';
-            items.push(<span key="cancel" style={{ ...metaChip, background: '#fee2e2', color: '#b91c1c' }}>⚠ {n}{suffix} consecutive cancel this month</span>);
-          }
           if ((flags.completedStreak ?? 0) >= 2) {
             const s = flags.completedStreak!;
-            if (s % 10 === 0) {
-              items.push(<span key="streak-milestone" style={{ ...metaChip, background: '#fef9c3', color: '#854d0e' }}>🏆 {s}-session streak milestone!</span>);
-            } else {
-              items.push(<span key="streak" style={{ ...metaChip, background: '#fff7ed', color: '#92400e' }}>🔥 {s}-session streak</span>);
-            }
+            items.push(<span key="streak" style={{ ...metaChip, background: '#dcfce7', color: '#166534' }}>{streakEmoji(s)} {s}-session streak</span>);
           }
           if (flags.isHoliday) {
             items.push(<span key="holiday" style={{ ...metaChip, background: '#dcfce7', color: '#15803d' }}>✦ {flags.holidayName ?? 'Holiday'}</span>);
           }
           if (items.length === 0) return null;
           return <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>{items}</div>;
+        })()}
+        {(() => {
+          // Cancel-pressure breakdown — four independent windows (consecutive run
+          // + trailing-30-day count) for the participants touching this session.
+          const ctx = detailFlags.get(a.id)?.cancelCtx;
+          if (!ctx) return null;
+          const dim: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' };
+          const stat = (label: string, run: number, roll: number, key: string) => (
+            <div key={key} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '3px 0' }}>
+              <span style={{ ...dim, minWidth: 92, flexShrink: 0 }}>{label}</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: run >= 2 ? '#b91c1c' : '#374151' }}>{run} in a row</span>
+              <span style={{ fontSize: 12, color: '#6b7280' }}>· {roll} in 30d</span>
+            </div>
+          );
+          const rows: React.ReactNode[] = [];
+          if (a.technician) {
+            rows.push(
+              <div key="bt" style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '3px 0' }}>
+                <span style={{ ...dim, minWidth: 92, flexShrink: 0 }}>BT · this client</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: ctx.bt.withClientConsecutive >= 2 ? '#b91c1c' : '#374151' }}>{ctx.bt.withClientConsecutive} in a row</span>
+                <span style={{ fontSize: 12, color: '#6b7280' }}>· {ctx.bt.perBtCaseRolling30} in 30d · BT all: {ctx.bt.btRolling30} in 30d</span>
+              </div>,
+            );
+          }
+          if (ctx.family.consecutive || ctx.family.rolling30 || ctx.source === 'family') rows.push(stat('Family', ctx.family.consecutive, ctx.family.rolling30, 'fam'));
+          if (ctx.bcba.consecutive || ctx.bcba.rolling30 || ctx.source === 'bcba') rows.push(stat('BCBA', ctx.bcba.consecutive, ctx.bcba.rolling30, 'bcba'));
+          if (ctx.admin.consecutive || ctx.admin.rolling30 || ctx.source === 'admin') rows.push(stat('Admin', ctx.admin.consecutive, ctx.admin.rolling30, 'admin'));
+          return (
+            <div style={{ marginTop: 10, padding: '8px 10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#b91c1c', marginBottom: 2 }}>⚠ Cancellation pressure</div>
+              {rows}
+            </div>
+          );
         })()}
 
         {(status === 'canceled' || status === 'completed') && (
@@ -1439,6 +1463,10 @@ export default function App() {
           // Fixed header in portrait mode: push content down so it doesn't hide
           // behind the header. In landscape the header is sticky (in flow).
           paddingTop: isLandscape ? 0 : headerHeight,
+          // Sticky calendar toolbar offset: in portrait the fixed header overlays
+          // the top `headerHeight` px, so the toolbar must stick below it; in
+          // landscape/split the header isn't fixed, so the toolbar sticks at 0.
+          ['--cal-sticky-top' as any]: (!isLandscape && !splitView) ? `${headerHeight}px` : '0px',
         }}>
         {view === 'cpr' ? (
           <React.Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>Loading…</div>}>

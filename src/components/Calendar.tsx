@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Appointment, Technician, Client, CompanySettings, TimeOff, Blackout, CompanyHoliday } from '../types';
-import { computeSessionFlags, SessionFlags } from '../sessionFlags';
+import { computeSessionFlags, SessionFlags, streakEmoji, isStreakMilestone } from '../sessionFlags';
 import ClientCalendarView from './ClientCalendarView';
 import { DraftMark } from '../draft';
 import { rollupHours, resolveUtilization, HoursByStatus, ptoHoursInRange, reduceRequirementForPto } from '../utilization';
@@ -10,7 +10,7 @@ import { usePinchZoom } from '../hooks/usePinchZoom';
 import ZoomResetPill from './ZoomResetPill';
 import {
   startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek,
-  format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay,
+  format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay, parseISO,
 } from 'date-fns';
 
 interface CalendarProps {
@@ -89,6 +89,9 @@ export default function Calendar({
   const isLandscape = useIsLandscape();
   // iPad and up: roomier rows, wider time axis, richer tiles, taller month cells.
   const roomy = useMinWidth(820);
+  // iPhone portrait: compress the toolbar so view/lens/nav fit one row.
+  const compact = !roomy && !isLandscape;
+  const dateInputRef = useRef<HTMLInputElement>(null);
   const hourHeight = roomy ? HOUR_HEIGHT_WIDE : HOUR_HEIGHT;
   const axisWidth = roomy ? TIME_AXIS_WIDTH_WIDE : TIME_AXIS_WIDTH;
 
@@ -176,10 +179,13 @@ export default function Calendar({
   return (
     <div style={{ padding: 'clamp(8px, 3vw, 24px)', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
       <div style={{
+        position: 'sticky', top: 'var(--cal-sticky-top, 0px)', zIndex: 30,
+        background: 'var(--surface, #fff)',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        marginBottom: 16, gap: 8, flexWrap: 'wrap',
+        marginBottom: 16, gap: compact ? 6 : 8, flexWrap: 'wrap',
+        paddingTop: 4, paddingBottom: 6,
       }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'nowrap' }}>
+        <div style={{ display: 'flex', gap: compact ? 5 : 8, alignItems: 'center', flexWrap: 'nowrap' }}>
           {onAddAppointment && (
             <button
               onClick={onAddAppointment}
@@ -193,9 +199,9 @@ export default function Calendar({
             >+</button>
           )}
           <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
-            <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
-            <ViewBtn active={view === 'week'} onClick={() => setView('week')}>Week</ViewBtn>
-            <ViewBtn active={view === 'day'} onClick={() => setView('day')}>Day</ViewBtn>
+            <ViewBtn active={view === 'month'} onClick={() => setView('month')}>{compact ? 'M' : 'Month'}</ViewBtn>
+            <ViewBtn active={view === 'week'} onClick={() => setView('week')}>{compact ? 'W' : 'Week'}</ViewBtn>
+            <ViewBtn active={view === 'day'} onClick={() => setView('day')}>{compact ? 'D' : 'Day'}</ViewBtn>
           </div>
           <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
             <ViewBtn active={lens === 'bcba'} onClick={() => setLens('bcba')}>BCBA</ViewBtn>
@@ -205,7 +211,18 @@ export default function Calendar({
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <NavBtn onClick={goPrev}>←</NavBtn>
-          <NavBtn onClick={goToday}>Today</NavBtn>
+          <div style={{ position: 'relative', display: 'inline-flex' }}>
+            <NavBtn onClick={() => { const el = dateInputRef.current; if (!el) return; (el.showPicker ? el.showPicker() : el.click()); }}>📅</NavBtn>
+            <input
+              ref={dateInputRef}
+              type="date"
+              value={format(currentDate, 'yyyy-MM-dd')}
+              onChange={e => { if (e.target.value) setCurrentDate(parseISO(e.target.value)); }}
+              aria-label="Jump to date"
+              style={{ position: 'absolute', left: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+            />
+          </div>
+          <NavBtn onClick={goToday}>{compact ? 'T' : 'Today'}</NavBtn>
           <NavBtn onClick={goNext}>→</NavBtn>
         </div>
         <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }}>
@@ -1102,16 +1119,16 @@ function AppointmentChip({ apt, mark, onClick, flags }: { apt: Appointment; mark
   const look = appointmentLook(apt, mark, flags);
   // Build tooltip with flag context for tappable month chips.
   const flagInfo: string[] = [];
-  if (flags?.cancelEscalation && flags.cancelEscalation >= 1) flagInfo.push(`cancel #${flags.cancelEscalation} this month${flags.cancelEscalation >= 2 ? ` ${cancelBadgeText(flags.cancelEscalation)}` : ''}`);
-  if (flags?.completedStreak && flags.completedStreak >= 2) flagInfo.push(`${flags.completedStreak}-session streak`);
+  if (flags?.cancelEscalation && flags.cancelEscalation >= 1) flagInfo.push(`${flags.cancelEscalation} consecutive cancel${flags.cancelEscalation > 1 ? 's' : ''}${flags.cancelEscalation >= 2 ? ` ${cancelBadgeText(flags.cancelEscalation)}` : ''}`);
+  if (flags?.completedStreak && flags.completedStreak >= 2) flagInfo.push(`${streakEmoji(flags.completedStreak) ?? ''} ${flags.completedStreak}-session streak`.trim());
   if (flags?.streakStarLevel) flagInfo.push(`${flags.streakStarLevel} clean 2-week star${flags.streakStarLevel > 1 ? 's' : ''}`);
   if (flags?.isMakeup) flagInfo.push(`Makeup${flags.makeupDates?.length ? ` of ${flags.makeupDates.join(', ')}` : ''}`);
   if (flags?.isHoliday) flagInfo.push(flags.holidayName ?? 'Company holiday');
   const title = [apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), ...flagInfo].join(' · ');
 
   const hasDots = flags && (
-    (flags.cancelEscalation ?? 0) >= 1 ||
-    (flags.completedStreak ?? 0) >= 2 ||
+    (flags.cancelEscalation ?? 0) >= 2 ||
+    isStreakMilestone(flags.completedStreak ?? 0) ||
     flags.streakStarLevel ||
     flags.isMakeup ||
     flags.isHoliday
@@ -1145,9 +1162,9 @@ function AppointmentChip({ apt, mark, onClick, flags }: { apt: Appointment; mark
         <div style={{ display: 'flex', gap: 2, paddingLeft: 7, marginTop: 1 }}>
           {flags?.isHoliday && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--green-700)', flexShrink: 0 }} title="Holiday" />}
           {flags?.isMakeup && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#0891b2', flexShrink: 0 }} title="Makeup" />}
-          {(flags?.completedStreak ?? 0) >= 2 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#d97706', flexShrink: 0 }} title="Streak" />}
+          {isStreakMilestone(flags?.completedStreak ?? 0) && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--green-600, #16a34a)', flexShrink: 0 }} title={`${streakEmoji(flags!.completedStreak!) ?? ''} ${flags!.completedStreak}-session milestone`} />}
           {(flags?.streakStarLevel ?? 0) > 0 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#f59e0b', flexShrink: 0, outline: '1px solid #92400e' }} title="2-week star" />}
-          {(flags?.cancelEscalation ?? 0) >= 1 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: cancelBar(apt.cancellation?.source), flexShrink: 0 }} title={cancelBadgeText(flags!.cancelEscalation!)} />}
+          {(flags?.cancelEscalation ?? 0) >= 2 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: cancelBar(apt.cancellation?.source), flexShrink: 0 }} title={cancelBadgeText(flags!.cancelEscalation!)} />}
         </div>
       )}
     </button>
@@ -1262,14 +1279,14 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
         <div style={{ fontSize: roomy ? 12 : 10, opacity: 0.85, marginTop: 2 }}>
           {format(new Date(apt.startTime), 'h:mm')}–{format(new Date(apt.endTime), 'h:mm a')}
         </div>
-        {/* Always-visible microdots: cancel (red), streak milestone (yellow), holiday (green) */}
-        {flags && ((flags.cancelEscalation ?? 0) >= 1 || (flags.completedStreak != null && flags.completedStreak > 0 && flags.completedStreak % 10 === 0) || flags.isHoliday) && (
+        {/* Always-visible microdots: cancel (red, 2nd+), streak milestone (green), holiday (green) */}
+        {flags && ((flags.cancelEscalation ?? 0) >= 2 || isStreakMilestone(flags.completedStreak ?? 0) || flags.isHoliday) && (
           <div style={{ display: 'flex', gap: 2, marginTop: 2 }}>
-            {(flags.cancelEscalation ?? 0) >= 1 && (
+            {(flags.cancelEscalation ?? 0) >= 2 && (
               <span style={{ width: 4, height: 4, borderRadius: '50%', background: cancelBar(apt.cancellation?.source), flexShrink: 0 }} />
             )}
-            {flags.completedStreak != null && flags.completedStreak > 0 && flags.completedStreak % 10 === 0 && (
-              <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#d97706', flexShrink: 0 }} />
+            {isStreakMilestone(flags.completedStreak ?? 0) && (
+              <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--green-600, #16a34a)', flexShrink: 0 }} />
             )}
             {flags.isHoliday && (
               <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--green-700, #15803d)', flexShrink: 0 }} />
@@ -1294,8 +1311,8 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
               <span style={{ fontSize: 10 }} title={`${flags.streakStarLevel} clean 2-week period${(flags.streakStarLevel ?? 0) > 1 ? 's' : ''}`}>⭐</span>
             )}
             {(flags.completedStreak ?? 0) >= 2 && (
-              <span style={{ fontSize: 9, fontWeight: 700, color: '#92400e', background: 'rgba(217,119,6,0.15)', padding: '0 3px', borderRadius: 3 }}>
-                {flags.completedStreak}✓
+              <span style={{ fontSize: 9, fontWeight: 700, color: '#166534', background: 'rgba(22,163,74,0.14)', padding: '0 3px', borderRadius: 3 }}>
+                {streakEmoji(flags.completedStreak!)} {flags.completedStreak}
               </span>
             )}
           </div>

@@ -63,57 +63,53 @@ function check(name: string, cond: boolean, extra?: string) {
   }
 }
 
-// ── Suite 1: Cancel escalation (family → client count) ───────────────────────
+// ── Suite 1: Cancel escalation = consecutive run (family → client) ───────────
+// Escalation now tracks the CONSECUTIVE-cancel run for the participants + source
+// (see cancelStats.ts), not a calendar-month count.
 
-console.log('\ncalculation: cancel escalation — family source → client count');
+console.log('\ncalculation: cancel escalation — family consecutive run (by client)');
 {
   const apts: Appointment[] = [
-    canceled('2026-06-02', 'family', 'T1', 'C1'),   // C1 month-count = 1
-    canceled('2026-06-09', 'family', 'T1', 'C1'),   // C1 month-count = 2
-    canceled('2026-06-16', 'family', 'T1', 'C1'),   // C1 month-count = 3
+    canceled('2026-06-02', 'family', 'T1', 'C1'),   // run 1
+    canceled('2026-06-09', 'family', 'T1', 'C1'),   // run 2
+    canceled('2026-06-16', 'family', 'T1', 'C1'),   // run 3
   ];
   const flags = computeSessionFlags(apts, []);
 
-  const f0 = flags.get(apts[0].id);
-  const f1 = flags.get(apts[1].id);
-  const f2 = flags.get(apts[2].id);
-
-  check('1st family cancel: escalation=1, entity=client',
-    f0?.cancelEscalation === 1 && f0?.cancelEntity === 'client',
-    JSON.stringify(f0));
-  check('2nd family cancel: escalation=2',
-    f1?.cancelEscalation === 2,
-    JSON.stringify(f1));
-  check('3rd family cancel: escalation=3',
-    f2?.cancelEscalation === 3,
-    JSON.stringify(f2));
+  check('1st family cancel: escalation=1, source=family',
+    flags.get(apts[0].id)?.cancelEscalation === 1 && flags.get(apts[0].id)?.cancelSource === 'family',
+    JSON.stringify(flags.get(apts[0].id)));
+  check('2nd family cancel: escalation=2', flags.get(apts[1].id)?.cancelEscalation === 2);
+  check('3rd family cancel: escalation=3', flags.get(apts[2].id)?.cancelEscalation === 3);
 }
 
-// ── Suite 2: Cancel escalation (bt → tech count) ─────────────────────────────
+// ── Suite 2: bt consecutive keyed on tech + client, capped at 5 ──────────────
 
-console.log('\ncalculation: cancel escalation — bt source → tech count');
+console.log('\ncalculation: cancel escalation — bt consecutive (by tech + client)');
 {
   const apts: Appointment[] = [
-    canceled('2026-06-02', 'bt', 'T2', 'C2'),   // T2 month-count = 1
-    canceled('2026-06-09', 'bt', 'T2', 'C2'),   // T2 month-count = 2
-    canceled('2026-06-16', 'bt', 'T2', 'C3'),   // T2 month-count = 3 (different client, same tech)
-    canceled('2026-06-23', 'bt', 'T2', 'C2'),   // T2 month-count = 4
-    canceled('2026-06-23', 'bt', 'T2', 'C2'),   // T2 month-count = 5 (cap)
-    canceled('2026-06-24', 'bt', 'T2', 'C2'),   // T2 month-count = 6 → capped at 5
+    canceled('2026-06-02', 'bt', 'T2', 'C2'),   // C2 run 1
+    canceled('2026-06-09', 'bt', 'T2', 'C2'),   // C2 run 2
+    canceled('2026-06-16', 'bt', 'T2', 'C3'),   // C3 run 1 (different client — separate run)
+    canceled('2026-06-23', 'bt', 'T2', 'C2'),   // C2 run 3
+    canceled('2026-06-24', 'bt', 'T2', 'C2'),   // C2 run 4
+    canceled('2026-06-25', 'bt', 'T2', 'C2'),   // C2 run 5
+    canceled('2026-06-26', 'bt', 'T2', 'C2'),   // C2 run 6 → escalation capped at 5
   ];
   const flags = computeSessionFlags(apts, []);
 
-  check('bt 4th cancel: escalation=4, entity=tech',
-    flags.get(apts[3].id)?.cancelEscalation === 4 && flags.get(apts[3].id)?.cancelEntity === 'tech');
-  check('bt 5th cancel: escalation=5 (cap)',
-    flags.get(apts[4].id)?.cancelEscalation === 5);
-  check('bt 6th cancel: still capped at 5',
-    flags.get(apts[5].id)?.cancelEscalation === 5);
+  check('different client is a separate run (C3 escalation=1)',
+    flags.get(apts[2].id)?.cancelEscalation === 1);
+  check('C2 4th cancel: escalation=4, source=bt',
+    flags.get(apts[4].id)?.cancelEscalation === 4 && flags.get(apts[4].id)?.cancelSource === 'bt');
+  check('C2 5th cancel: escalation=5', flags.get(apts[5].id)?.cancelEscalation === 5);
+  check('C2 6th cancel: capped at 5 (raw consecutive=6)',
+    flags.get(apts[6].id)?.cancelEscalation === 5 && flags.get(apts[6].id)?.cancelConsecutive === 6);
 }
 
-// ── Suite 3: Cancel escalation — bcba/admin don't count ──────────────────────
+// ── Suite 3: bcba/admin now DO escalate (consecutive) ────────────────────────
 
-console.log('\ncalculation: cancel escalation — bcba/admin not counted');
+console.log('\ncalculation: cancel escalation — bcba/admin consecutive runs');
 {
   const apts: Appointment[] = [
     canceled('2026-06-02', 'bcba', 'T3', 'C4'),
@@ -121,27 +117,26 @@ console.log('\ncalculation: cancel escalation — bcba/admin not counted');
   ];
   const flags = computeSessionFlags(apts, []);
 
-  check('bcba cancel: no escalation',
-    flags.get(apts[0].id)?.cancelEscalation === undefined);
-  check('admin cancel: no escalation',
-    flags.get(apts[1].id)?.cancelEscalation === undefined);
+  // bcba on a direct session keys on tech+client; admin keys on client.
+  check('bcba cancel: escalation=1, source=bcba',
+    flags.get(apts[0].id)?.cancelEscalation === 1 && flags.get(apts[0].id)?.cancelSource === 'bcba');
+  check('admin cancel: escalation=1, source=admin',
+    flags.get(apts[1].id)?.cancelEscalation === 1 && flags.get(apts[1].id)?.cancelSource === 'admin');
 }
 
-// ── Suite 4: Cancel escalation — month boundary resets count ─────────────────
+// ── Suite 4: a non-matching occurrence breaks the run (no month reset) ───────
 
-console.log('\ncalculation: cancel escalation — month boundary resets');
+console.log('\ncalculation: cancel escalation — broken by a completion, not by month');
 {
   const apts: Appointment[] = [
-    canceled('2026-05-30', 'family', 'T4', 'C5'),   // May: C5 count = 1
-    canceled('2026-05-31', 'family', 'T4', 'C5'),   // May: C5 count = 2
-    canceled('2026-06-01', 'family', 'T4', 'C5'),   // June: C5 count = 1 (resets)
+    canceled('2026-05-30', 'family', 'T4', 'C5'),   // run 1
+    canceled('2026-05-31', 'family', 'T4', 'C5'),   // run 2
+    canceled('2026-06-01', 'family', 'T4', 'C5'),   // run 3 (continues across the month)
   ];
   const flags = computeSessionFlags(apts, []);
 
-  check('2nd cancel in May: escalation=2',
-    flags.get(apts[1].id)?.cancelEscalation === 2);
-  check('1st cancel in June: escalation=1 (resets)',
-    flags.get(apts[2].id)?.cancelEscalation === 1);
+  check('2nd consecutive family cancel: escalation=2', flags.get(apts[1].id)?.cancelEscalation === 2);
+  check('cancel across a month boundary keeps the run: escalation=3', flags.get(apts[2].id)?.cancelEscalation === 3);
 }
 
 // ── Suite 5: Completed streak per tech ───────────────────────────────────────

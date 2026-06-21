@@ -57,6 +57,26 @@ export const TIER_LABEL: Record<SessionTier, string> = {
   other: 'Other',
 };
 
+// Cancel-escalation badge text — mirrors the admin calendar's scheme so the
+// Case lens reads the same way (2? → 3! → 4!! → 5🛑).
+export function cancelBadgeText(level: number): string {
+  if (level <= 1) return '';
+  if (level === 2) return '2?';
+  if (level === 3) return '3!';
+  if (level === 4) return '4!!';
+  return '5\u{1F6D1}'; // 🛑
+}
+
+// Cancellation source → coded bar color (theme CSS custom properties).
+export function cancelBar(source?: string): string {
+  switch (source) {
+    case 'family': return 'var(--cancel-family)';
+    case 'bcba':   return 'var(--cancel-bcba)';
+    case 'admin':  return 'var(--cancel-admin)';
+    default:       return 'var(--cancel-bt)';
+  }
+}
+
 // Lay overlapping time intervals into side-by-side lanes so their labels never
 // stack on top of each other. Items are ordered by start time, then by sortKey
 // (alphabetical) for exact ties, and each is given a lane index plus the total

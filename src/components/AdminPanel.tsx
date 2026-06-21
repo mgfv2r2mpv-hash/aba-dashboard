@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, Appointment } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, Appointment, CompanyHoliday } from '../types';
 import { AISettings, ClaudeModel } from './Settings';
 import { resolvePtoConfig, activeBuckets, ptoBucketLabel, computePtoBalances } from '../pto';
 import { computeAuthUsage, computeReportDates } from '../authorization';
@@ -21,6 +21,8 @@ export interface AdminPersist {
   deleteBlackout?(id: string): Promise<void>;
   timeOff?(t: TimeOff): Promise<TimeOff>;
   deleteTimeOff?(id: string): Promise<void>;
+  companyHoliday?(h: CompanyHoliday): Promise<CompanyHoliday>;
+  deleteCompanyHoliday?(id: string): Promise<void>;
   settings?(s: CompanySettings): Promise<CompanySettings>;
   auth?(a: Authorization): Promise<Authorization>;
   deleteAuth?(id: string): Promise<void>;
@@ -170,6 +172,32 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
     try {
       await persist?.deleteBlackout?.(id);
       onDataChange({ ...data, blackouts: (data.blackouts || []).filter(b => b.id !== id) });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const addCompanyHoliday = async (h: CompanyHoliday) => {
+    setSavingId(h.id);
+    setError(null);
+    try {
+      const saved = persist?.companyHoliday ? await persist.companyHoliday(h) : h;
+      onDataChange({ ...data, companyHolidays: [...(data.companyHolidays || []), saved] });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const removeCompanyHoliday = async (id: string) => {
+    setSavingId(id);
+    setError(null);
+    try {
+      await persist?.deleteCompanyHoliday?.(id);
+      onDataChange({ ...data, companyHolidays: (data.companyHolidays || []).filter(h => h.id !== id) });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -423,14 +451,22 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
 
         {activeTab === 'daysoff' && (
           <>
-            <BlackoutsTab
-              blackouts={data.blackouts || []}
-              technicians={data.technicians}
-              clients={data.clients}
+            <CompanyHolidaysTab
+              holidays={data.companyHolidays || []}
               savingId={savingId}
-              onAdd={addBlackout}
-              onRemove={removeBlackout}
+              onAdd={addCompanyHoliday}
+              onRemove={removeCompanyHoliday}
             />
+            <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid var(--border-default)' }}>
+              <BlackoutsTab
+                blackouts={data.blackouts || []}
+                technicians={data.technicians}
+                clients={data.clients}
+                savingId={savingId}
+                onAdd={addBlackout}
+                onRemove={removeBlackout}
+              />
+            </div>
             <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid var(--border-default)' }}>
               <TimeOffTab
                 timeOff={data.timeOff || []}
@@ -1385,6 +1421,108 @@ function AuthCard({ data, auth, saving, onChange, onRemove, onUpsertUsage, onRem
 function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function CompanyHolidaysTab({ holidays, savingId, onAdd, onRemove }: {
+  holidays: CompanyHoliday[];
+  savingId: string | null;
+  onAdd: (h: CompanyHoliday) => void;
+  onRemove: (id: string) => void;
+}) {
+  const [date, setDate] = useState(todayStr());
+  const [name, setName] = useState('');
+
+  const submit = () => {
+    if (!date || !name.trim()) return;
+    onAdd({ id: uuidv4(), date, name: name.trim(), createdAt: new Date().toISOString() });
+    setName('');
+  };
+
+  const today = todayStr();
+  const sorted = [...holidays].sort((a, b) => a.date.localeCompare(b.date));
+  const upcoming = sorted.filter(h => h.date >= today);
+  const past = sorted.filter(h => h.date < today).reverse();
+
+  const renderRow = (h: CompanyHoliday, dim: boolean) => (
+    <div key={h.id} style={{
+      display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
+      border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)',
+      backgroundColor: dim ? 'var(--surface-sunken)' : 'var(--surface-card)',
+      opacity: dim ? 0.75 : 1, flexWrap: 'wrap',
+    }}>
+      <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: '14px', color: '#111827' }}>
+          {formatBlackoutDate(h.date)}
+        </div>
+        <div style={{ fontSize: '13px', color: 'var(--text-body)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{
+            fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', padding: '1px 6px',
+            borderRadius: '8px', backgroundColor: 'var(--green-100)', color: 'var(--green-700)',
+          }}>Holiday</span>
+          {h.name}
+        </div>
+      </div>
+      <button onClick={() => onRemove(h.id)} style={dangerBtn} disabled={savingId === h.id}>
+        {savingId === h.id ? '…' : 'Remove'}
+      </button>
+    </div>
+  );
+
+  return (
+    <div>
+      <h3 style={{ marginBottom: '8px', fontSize: '18px', fontWeight: 'bold' }}>Company Holidays</h3>
+      <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '16px' }}>
+        Company-wide non-working days. Any session on a holiday is flagged with a green star.
+        Holidays also act as a blanket blackout for every tech and client.
+        These ship in the Excel workbook so the same list travels with the schedule file.
+      </p>
+
+      <div style={{ ...cardStyle, marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '14px 16px', alignItems: 'flex-end' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 150px', minWidth: 0 }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Date</span>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '2 1 200px', minWidth: 0 }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Holiday name</span>
+          <input
+            type="text" value={name} onChange={e => setName(e.target.value)}
+            placeholder="e.g. Thanksgiving" style={inputStyle}
+            onKeyDown={e => { if (e.key === 'Enter') submit(); }}
+          />
+        </label>
+        <button onClick={submit} style={{ ...primaryBtn, flex: '0 0 auto' }} disabled={!date || !name.trim()}>
+          + Add holiday
+        </button>
+      </div>
+
+      {holidays.length === 0 ? (
+        <p style={{ color: 'var(--text-faint)', textAlign: 'center', padding: '20px' }}>No company holidays configured.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {upcoming.length > 0 && (
+            <div>
+              <p style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '8px' }}>
+                Upcoming ({upcoming.length})
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {upcoming.map(h => renderRow(h, false))}
+              </div>
+            </div>
+          )}
+          {past.length > 0 && (
+            <div>
+              <p style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', color: '#6b7280', marginBottom: '8px' }}>
+                Past ({past.length})
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {past.map(h => renderRow(h, true))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // "2026-05-08" → "Thu, May 8, 2026" (parsed as a local day, no TZ shift).

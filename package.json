@@ -11,7 +11,13 @@
     "cap:ios": "npx capacitor-assets generate --ios && node scripts/patch-spm-biometric.cjs && npm run build:client && npx cap sync ios && node scripts/patch-ios-plist.cjs",
     "start": "node dist/server.js",
     "dev": "nodemon --exec tsx src/server.ts",
-    "dev:client": "vite"
+    "dev:client": "vite",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:debug": "playwright test --debug"
   },
   "repository": {
     "type": "git",
@@ -27,7 +33,7 @@
     "@capacitor/filesystem": "^8.1.2",
     "@capacitor/ios": "^8.4.0",
     "@capacitor/share": "^8.0.1",
-    "axios": "^1.15.2",
+    "axios": "^1.16.0",
     "cors": "^2.8.6",
     "date-fns": "^4.1.0",
     "dotenv": "^17.4.2",
@@ -49,8 +55,16 @@
     "@vitejs/plugin-react": "^6.0.1",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
-    "tsx": "^4.21.0",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10"
+    "vite": "^8.0.16",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/jest-dom": "^6.4.2",
+    "@testing-library/user-event": "^14.5.2",
+    "@playwright/test": "^1.48.2",
+    "@vitest/ui": "^4.1.9",
+    "vitest": "^4.1.9",
+    "jsdom": "^24.1.1",
+    "@vitest/coverage-v8": "^4.1.9"
   }
 }

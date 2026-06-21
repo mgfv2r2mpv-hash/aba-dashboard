@@ -418,6 +418,8 @@ export default function App() {
     deleteBlackout: async (id) => { await axios.delete(`/api/admin/blackout/${id}`); },
     timeOff: async (t) => (await axios.post('/api/admin/time-off', t)).data.timeOff ?? t,
     deleteTimeOff: async (id) => { await axios.delete(`/api/admin/time-off/${id}`); },
+    companyHoliday: async (h) => (await axios.post('/api/admin/company-holiday', h)).data.holiday ?? h,
+    deleteCompanyHoliday: async (id) => { await axios.delete(`/api/admin/company-holiday/${id}`); },
     settings: async (s) => (await axios.post('/api/admin/settings', s)).data.settings,
     auth: async (a) => (await axios.post('/api/admin/authorization', a)).data.authorization ?? a,
     deleteAuth: async (id) => { await axios.delete(`/api/admin/authorization/${id}`); },
@@ -827,10 +829,13 @@ export default function App() {
     try {
       const { ClaudeScheduler } = await import('./claudeScheduler');
       const scheduler = new ClaudeScheduler(aiSettings.apiKey, scheduleData, aiSettings.model);
-      let sols: WishSolution[];
-      if (kind === 'move') sols = await scheduler.generateMoveThisSolutions(apt);
-      else if (kind === 'replace') sols = await scheduler.generateReplaceThisSolutions(apt);
-      else sols = await scheduler.generateCancelRecoverySolutions(apt);
+      const aptDate = apt.startTime.slice(0, 10);
+      const noteMap = {
+        move: `Move this ${apt.type} appointment on ${aptDate} to a suitable time`,
+        replace: `Replace this ${apt.type} appointment on ${aptDate} with a suitable alternative`,
+        cancel: `Recover from the cancellation of this ${apt.type} appointment on ${aptDate} — suggest a make-up`,
+      } as const;
+      const sols = await scheduler.generateWishSolutions({ kind: 'freeform', note: noteMap[kind], dateStart: aptDate, dateEnd: aptDate });
       if (sols.length === 0) {
         setDebugMsg('AI found no options for this appointment.');
       } else {
@@ -1419,6 +1424,7 @@ export default function App() {
                     blackouts={scheduleData.blackouts}
                     settings={scheduleData.settings}
                     timeOff={scheduleData.timeOff}
+                    companyHolidays={scheduleData.companyHolidays}
                     onAppointmentChange={handleAppointmentChange}
                     onSelectAppointment={setSelectedAppointment}
                     onViewDateChange={setViewDate}

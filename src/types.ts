@@ -487,6 +487,7 @@ export interface AccrualRule {
   bonusPerExtraHours?: number;        // Y' — converted hours/interval to be at criterion ('hours')
   bonusPercentAboveGoal?: number;     // e.g. 5 → converted >= goal*1.05 ('percentAboveGoal')
   enabled?: boolean;       // default true; lets a rule be parked without deleting
+  waitingPeriodDays?: number;
 }
 
 // A starting balance for a bucket as of a date — accrual is summed forward from
@@ -505,6 +506,7 @@ export interface PtoConfig {
   unpaidEnabled?: boolean;         // expose a distinct 'unpaid' pool. Default false.
   accruals?: AccrualRule[];        // used only in 'accrual' mode
   openingBalances?: PtoOpeningBalance[];
+  maxBalances?: Partial<Record<PtoBucket, number>>;
 }
 
 export const DEFAULT_PTO_CONFIG: PtoConfig = { mode: 'unlimited', buckets: 'combined' };
@@ -522,6 +524,18 @@ export interface TimeOff {
   createdAt?: string;          // ISO timestamp when logged
 }
 
+// A company-wide non-working day (e.g. Thanksgiving, July 4th). Unlike a Blackout
+// (which knocks out one specific tech or client) a holiday applies to everyone:
+// any session landing on the date is flagged with a green star, and the day acts
+// as blackout coverage for every entity. Preplaced in the schedule and shipped in
+// the Excel workbook so the same holiday set travels with the program.
+export interface CompanyHoliday {
+  id: string;
+  date: string;                // YYYY-MM-DD (local calendar day)
+  name: string;                // human label shown on the green-star session ("Thanksgiving")
+  createdAt?: string;          // ISO timestamp when logged
+}
+
 export interface ScheduleData {
   id: string;
   version: number;
@@ -535,6 +549,9 @@ export interface ScheduleData {
   // BCBA paid/unpaid leave. Each day's hours shave the week's billable
   // requirement per CompanySettings.ptoBillableDeductionRatio. Optional; absent = [].
   timeOff?: TimeOff[];
+  // Company-wide holidays (non-working days for everyone). Drive the green-star
+  // session marker and act as blackout coverage. Optional; absent = [].
+  companyHolidays?: CompanyHoliday[];
   // Insurance authorizations + manually-entered consumed hours. Optional for
   // backward compatibility; treat absent as [].
   authorizations?: Authorization[];

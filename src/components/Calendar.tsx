@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Appointment, Technician, Client, CompanySettings, TimeOff, Blackout } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Appointment, Technician, Client, CompanySettings, TimeOff, Blackout, CompanyHoliday } from '../types';
+import { computeSessionFlags, SessionFlags } from '../sessionFlags';
 import ClientCalendarView from './ClientCalendarView';
 import { DraftMark } from '../draft';
 import { rollupHours, resolveUtilization, HoursByStatus, ptoHoursInRange, reduceRequirementForPto } from '../utilization';
@@ -38,6 +39,9 @@ interface CalendarProps {
   onAddAppointment?: () => void;
   onMoveThis?: (a: Appointment) => void;
   onReplaceThis?: (a: Appointment) => void;
+  // Company-wide holidays; sessions on these dates get a green-star marker
+  // and the visual cancel/streak flags are computed alongside them.
+  companyHolidays?: CompanyHoliday[];
 }
 
 type View = 'month' | 'week' | 'day';
@@ -76,6 +80,7 @@ export default function Calendar({
   onAddAppointment,
   onMoveThis,
   onReplaceThis,
+  companyHolidays,
 }: CalendarProps) {
   const [view, setView] = useState<View>('month');
   const [lens, setLens] = useState<Lens>('bcba');
@@ -106,6 +111,13 @@ export default function Calendar({
     onLensChange?.(lens);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lens]);
+
+  // Compute session-flag annotations once per appointment set + holidays.
+  // Result is a Map<appointmentId, SessionFlags> passed into chip/block renderers.
+  const sessionFlags = useMemo(
+    () => computeSessionFlags(appointments, companyHolidays || []),
+    [appointments, companyHolidays],
+  );
 
   // The lens hides the other party's appointments: BT = has a technician,
   // BCBA = none. Non-billable appointments (admin tasks, etc.) show in both lenses.
@@ -209,10 +221,11 @@ export default function Calendar({
           view={view}
           date={currentDate}
           onPickDay={(d) => { setCurrentDate(d); setView('day'); }}
+          companyHolidays={companyHolidays}
         />
       )}
       {lens !== 'client' && view === 'month' && (
-        <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens as 'bcba' | 'bt'} settings={settings} timeOff={timeOff} onSelectAppointment={onSelectAppointment} onPickDay={setPickedDay} draftMarks={draftMarks} roomy={roomy} />
+        <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens as 'bcba' | 'bt'} settings={settings} timeOff={timeOff} onSelectAppointment={onSelectAppointment} onPickDay={setPickedDay} draftMarks={draftMarks} roomy={roomy} sessionFlags={sessionFlags} />
       )}
       {lens !== 'client' && view === 'month' && !hideTotals && (
         <div style={{ marginTop: 16 }}>
@@ -232,6 +245,7 @@ export default function Calendar({
           roomy={roomy}
           onMoveThis={onMoveThis}
           onReplaceThis={onReplaceThis}
+          sessionFlags={sessionFlags}
         />
       )}
       {lens !== 'client' && view === 'day' && (
@@ -247,6 +261,7 @@ export default function Calendar({
           roomy={roomy}
           onMoveThis={onMoveThis}
           onReplaceThis={onReplaceThis}
+          sessionFlags={sessionFlags}
         />
       )}
       {lens !== 'client' && (view === 'week' || view === 'day') && !isLandscape && (
@@ -308,7 +323,7 @@ export default function Calendar({
 
 // ---------- Month View ----------
 
-function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelectAppointment, onPickDay, draftMarks, roomy }: {
+function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelectAppointment, onPickDay, draftMarks, roomy, sessionFlags }: {
   currentDate: Date;
   appointments: Appointment[];
   lens: 'bcba' | 'bt';
@@ -318,6 +333,7 @@ function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelec
   onPickDay: (day: Date) => void;
   draftMarks?: Map<string, DraftMark>;
   roomy?: boolean;
+  sessionFlags?: Map<string, SessionFlags>;
 }) {
   const maxChips = roomy ? 6 : 3;
   // Minimum readable width per day column. Below 7×this, the grid scrolls
@@ -398,7 +414,7 @@ function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelec
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {(expanded ? dayAppts : dayAppts.slice(0, maxChips)).map(apt => (
-                    <AppointmentChip key={apt.id} apt={apt} mark={draftMarks?.get(apt.id)} onClick={() => onSelectAppointment(apt)} />
+                    <AppointmentChip key={apt.id} apt={apt} mark={draftMarks?.get(apt.id)} onClick={() => onSelectAppointment(apt)} flags={sessionFlags?.get(apt.id)} />
                   ))}
                   {dayAppts.length > maxChips && !expanded && (
                     <div
@@ -663,7 +679,7 @@ function Legend() {
 // Tiles are color-coded (client pastel background + staff diagonal stripes),
 // the time axis is frozen on side-scroll, and tapping a tile pops a small
 // dialog to view the session in the detail panel.
-function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks, hourHeight: hourHeightBase = HOUR_HEIGHT, axisWidth = TIME_AXIS_WIDTH, roomy = false, onMoveThis, onReplaceThis }: {
+function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange, dragEnabled, draftMarks, hourHeight: hourHeightBase = HOUR_HEIGHT, axisWidth = TIME_AXIS_WIDTH, roomy = false, onMoveThis, onReplaceThis, sessionFlags }: {
   days: Date[];
   appointments: Appointment[];
   onSelectAppointment: (a: Appointment) => void;
@@ -675,6 +691,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
   roomy?: boolean;
   onMoveThis?: (a: Appointment) => void;
   onReplaceThis?: (a: Appointment) => void;
+  sessionFlags?: Map<string, SessionFlags>;
 }) {
   // Pinch-zoom scoped to this grid: scales the hour height so the frozen time
   // axis and day header stay aligned (they read the same value). Two-finger
@@ -868,6 +885,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
                     onClick={() => setTapped(appt)}
                     onPointerDown={draggable ? (e) => beginDrag(appt, e) : undefined}
                     dragHandle={draggable}
+                    flags={sessionFlags?.get(appt.id)}
                     style={{
                       position: 'absolute',
                       top: layout.top,
@@ -1022,6 +1040,25 @@ function appointmentsOn(appointments: Appointment[], date: Date): Appointment[] 
     .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 }
 
+// Badge text for cancel escalation level. Level 1 = first cancel (no visible badge);
+// levels 2–5 escalate visually with progressively alarming symbols.
+function cancelBadgeText(level: number): string {
+  if (level <= 1) return '';
+  if (level === 2) return '2?';
+  if (level === 3) return '3!';
+  if (level === 4) return '4!!';
+  return '5\u{1F6D1}'; // 🛑
+}
+
+// Gold glow box-shadow intensity scaled to completed-streak depth.
+// Returns undefined when the streak isn't worth highlighting yet (< 2).
+function streakGlow(streak: number | undefined): string | undefined {
+  if (!streak || streak < 2) return undefined;
+  if (streak < 5)  return '0 0 0 1px #d97706, 0 0 6px rgba(217,119,6,0.35)';
+  if (streak < 10) return '0 0 0 2px #d97706, 0 0 10px rgba(217,119,6,0.50)';
+  return '0 0 0 2px #b45309, 0 0 14px rgba(180,83,9,0.65)';
+}
+
 // Status-based coloring for the monthly chip view. Two-axis scheme: status ×
 // billability. Completed = blue family (billable=blue-500, non-billable=indigo-500).
 // Pending = gray family (billable=slate-400, non-billable=gray-400). Canceled
@@ -1048,7 +1085,7 @@ function cancelBar(source?: string): string {
   }
 }
 
-function appointmentLook(apt: Appointment, mark?: DraftMark) {
+function appointmentLook(apt: Appointment, mark?: DraftMark, flags?: SessionFlags) {
   const canceled = apt.status === 'canceled';
   const completed = apt.status === 'completed';
 
@@ -1097,17 +1134,40 @@ function appointmentLook(apt: Appointment, mark?: DraftMark) {
     }
   }
 
-  return { canceled, completed, bar, bg, fg, border, opacity, strike, prefix };
+  // Escalation: darken canceled chip background with an inset shadow overlay.
+  // Level 1 = first cancel (no overlay); 2–5 progressively darker.
+  const escalationAlpha = flags?.cancelEscalation && flags.cancelEscalation > 1
+    ? (flags.cancelEscalation - 1) * 0.08
+    : 0;
+
+  return { canceled, completed, bar, bg, fg, border, opacity, strike, prefix, escalationAlpha };
 }
 
-function AppointmentChip({ apt, mark, onClick }: { apt: Appointment; mark?: DraftMark; onClick: () => void }) {
-  const look = appointmentLook(apt, mark);
+function AppointmentChip({ apt, mark, onClick, flags }: { apt: Appointment; mark?: DraftMark; onClick: () => void; flags?: SessionFlags }) {
+  const look = appointmentLook(apt, mark, flags);
+  // Build tooltip with flag context for tappable month chips.
+  const flagInfo: string[] = [];
+  if (flags?.cancelEscalation && flags.cancelEscalation >= 2) flagInfo.push(`${cancelBadgeText(flags.cancelEscalation)} cancel #${flags.cancelEscalation} this month`);
+  if (flags?.completedStreak && flags.completedStreak >= 2) flagInfo.push(`${flags.completedStreak}-session streak`);
+  if (flags?.streakStarLevel) flagInfo.push(`${flags.streakStarLevel} clean 2-week star${flags.streakStarLevel > 1 ? 's' : ''}`);
+  if (flags?.isMakeup) flagInfo.push(`Makeup${flags.makeupDates?.length ? ` of ${flags.makeupDates.join(', ')}` : ''}`);
+  if (flags?.isHoliday) flagInfo.push(flags.holidayName ?? 'Company holiday');
+  const title = [apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), ...flagInfo].join(' · ');
+
+  const hasDots = flags && (
+    (flags.cancelEscalation ?? 0) >= 2 ||
+    (flags.completedStreak ?? 0) >= 2 ||
+    flags.streakStarLevel ||
+    flags.isMakeup ||
+    flags.isHoliday
+  );
+
   return (
     <button
       onClick={e => { e.stopPropagation(); onClick(); }}
-      title={apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : '')}
+      title={title}
       style={{
-        display: 'flex', alignItems: 'stretch', gap: 4,
+        display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 0,
         width: '100%', padding: '2px 4px 2px 3px', marginBottom: 2,
         background: look.bg, color: look.fg,
         border: look.border,
@@ -1117,12 +1177,24 @@ function AppointmentChip({ apt, mark, onClick }: { apt: Appointment; mark?: Draf
         opacity: look.opacity,
         textAlign: 'left',
         boxSizing: 'border-box',
+        boxShadow: look.escalationAlpha > 0 ? `inset 0 0 0 9999px rgba(0,0,0,${look.escalationAlpha})` : undefined,
       }}
     >
-      <span style={{ width: 3, borderRadius: 2, background: look.bar, flexShrink: 0 }} />
-      <span style={{ fontSize: 10.5, fontWeight: 700, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        {look.prefix}{apt.title}
-      </span>
+      <div style={{ display: 'flex', alignItems: 'stretch', gap: 4 }}>
+        <span style={{ width: 3, borderRadius: 2, background: look.bar, flexShrink: 0, alignSelf: 'stretch' }} />
+        <span style={{ fontSize: 10.5, fontWeight: 700, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {look.prefix}{apt.title}
+        </span>
+      </div>
+      {hasDots && (
+        <div style={{ display: 'flex', gap: 2, paddingLeft: 7, marginTop: 1 }}>
+          {flags?.isHoliday && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--green-700)', flexShrink: 0 }} title="Holiday" />}
+          {flags?.isMakeup && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#0891b2', flexShrink: 0 }} title="Makeup" />}
+          {(flags?.completedStreak ?? 0) >= 2 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#d97706', flexShrink: 0 }} title="Streak" />}
+          {(flags?.streakStarLevel ?? 0) > 0 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#f59e0b', flexShrink: 0, outline: '1px solid #92400e' }} title="2-week star" />}
+          {(flags?.cancelEscalation ?? 0) >= 2 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: cancelBar(apt.cancellation?.source), flexShrink: 0 }} title={cancelBadgeText(flags!.cancelEscalation!)} />}
+        </div>
+      )}
     </button>
   );
 }
@@ -1131,7 +1203,7 @@ function AppointmentChip({ apt, mark, onClick }: { apt: Appointment; mark?: Draf
 // coding is the base; status (completed / canceled / ghost / draft) is folded
 // into the border, opacity, strike, and a corner icon rather than overriding
 // the color, so client/staff stay identifiable at a glance.
-function blockLook(apt: Appointment, mark?: DraftMark) {
+function blockLook(apt: Appointment, mark?: DraftMark, flags?: SessionFlags) {
   const canceled = apt.status === 'canceled';
   const completed = apt.status === 'completed';
   const tile = tileStyle(apt.client, apt.technician);
@@ -1155,6 +1227,16 @@ function blockLook(apt: Appointment, mark?: DraftMark) {
     else { border = '1px dashed #2563eb'; prefix = mark === 'add' ? '＋ ' : mark === 'shorten' ? '✂ ' : '✎ '; }
   }
 
+  // Streak glow overrides the default border when the session is completed with
+  // a meaningful streak depth. Draft/ghost/cancel states suppress it.
+  const glow = (!mark && !apt.isGhost && completed) ? streakGlow(flags?.completedStreak) : undefined;
+  if (glow) border = glow; // replaces the 2px solid border set above
+
+  // Escalation darkening for canceled blocks: inset shadow overlay.
+  const escalationAlpha = (!mark && !apt.isGhost && canceled && (flags?.cancelEscalation ?? 0) > 1)
+    ? (flags!.cancelEscalation! - 1) * 0.08
+    : 0;
+
   return {
     canceled, completed,
     backgroundColor: tile.backgroundColor,
@@ -1162,10 +1244,12 @@ function blockLook(apt: Appointment, mark?: DraftMark) {
     border, opacity, strike, prefix,
     color: '#1f2937',
     typeBar: typeAccent(apt.type),
+    glow,
+    escalationAlpha,
   };
 }
 
-function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style, roomy }: {
+function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style, roomy, flags }: {
   apt: Appointment;
   mark?: DraftMark;
   onClick: () => void;
@@ -1173,8 +1257,9 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
   dragHandle?: boolean;
   style: React.CSSProperties;
   roomy?: boolean;
+  flags?: SessionFlags;
 }) {
-  const look = blockLook(apt, mark);
+  const look = blockLook(apt, mark, flags);
   // When drag is enabled, suppress the click (click fires after pointerup
   // and would re-open the detail panel after a drag). Track whether the
   // pointer moved meaningfully between down and up to distinguish tap vs drag.
@@ -1203,6 +1288,7 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
         textDecoration: look.strike ? 'line-through' : 'none',
         touchAction: dragHandle ? 'none' : 'manipulation',
         display: 'flex',
+        boxShadow: look.escalationAlpha > 0 ? `inset 0 0 0 9999px rgba(0,0,0,${look.escalationAlpha})` : undefined,
       }}
       title={apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : '')}
     >
@@ -1211,6 +1297,12 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
       <div style={{ flex: 1, minWidth: 0, padding: roomy ? '5px 8px' : '4px 6px', overflow: 'hidden' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }}>
           <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{look.prefix}{apt.title}</span>
+          {/* Cancel escalation badge — visible on all sizes */}
+          {(flags?.cancelEscalation ?? 0) >= 2 && (
+            <span style={{ fontSize: 9, fontWeight: 800, background: 'rgba(0,0,0,0.18)', padding: '1px 3px', borderRadius: 3, flexShrink: 0, whiteSpace: 'nowrap' }}>
+              {cancelBadgeText(flags!.cancelEscalation!)}
+            </span>
+          )}
         </div>
         <div style={{ fontSize: roomy ? 12 : 10, opacity: 0.85, marginTop: 2 }}>
           {format(new Date(apt.startTime), 'h:mm')}–{format(new Date(apt.endTime), 'h:mm a')}
@@ -1218,6 +1310,25 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
         {roomy && (apt.client || apt.technician) && (
           <div style={{ fontSize: 11, opacity: 0.8, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {[apt.client, apt.technician].filter(Boolean).join(' · ')}
+          </div>
+        )}
+        {/* Marker row — full icons visible on roomy (iPad+) tiles */}
+        {roomy && flags && (flags.isHoliday || flags.isMakeup || (flags.streakStarLevel ?? 0) > 0 || (flags.completedStreak ?? 0) >= 2) && (
+          <div style={{ display: 'flex', gap: 3, alignItems: 'center', marginTop: 3, flexWrap: 'wrap' }}>
+            {flags.isHoliday && (
+              <span style={{ fontSize: 10, color: 'var(--green-700)', fontWeight: 800 }} title={flags.holidayName ?? 'Holiday'}>✦</span>
+            )}
+            {flags.isMakeup && (
+              <span style={{ fontSize: 10 }} title={`Makeup${flags.makeupDates?.length ? ` of ${flags.makeupDates.join(', ')}` : ''}`}>🌟</span>
+            )}
+            {(flags.streakStarLevel ?? 0) > 0 && (
+              <span style={{ fontSize: 10 }} title={`${flags.streakStarLevel} clean 2-week period${(flags.streakStarLevel ?? 0) > 1 ? 's' : ''}`}>⭐</span>
+            )}
+            {(flags.completedStreak ?? 0) >= 2 && (
+              <span style={{ fontSize: 9, fontWeight: 700, color: '#92400e', background: 'rgba(217,119,6,0.15)', padding: '0 3px', borderRadius: 3 }}>
+                {flags.completedStreak}✓
+              </span>
+            )}
           </div>
         )}
       </div>

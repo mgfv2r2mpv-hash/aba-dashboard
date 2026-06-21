@@ -50,6 +50,7 @@ import {
 import { solveDraft, DraftStatus, PrioritizationChoice } from './draftSolver';
 import DraftTray from './components/DraftTray';
 import { wishSolutionToDraft } from './wish';
+import { computeSessionFlags, SessionFlags } from './sessionFlags';
 
 // Route axios /api/* calls through an in-memory store on iOS/Android,
 // since the Express server isn't reachable from inside the WebView.
@@ -260,6 +261,12 @@ export default function App() {
   );
   const calendarAppointments = draftRender ? draftRender.appointments : (scheduleData?.appointments || []);
   const calendarMarks = draftRender ? draftRender.marks : undefined;
+  const detailFlags = React.useMemo<Map<string, SessionFlags>>(
+    () => scheduleData
+      ? computeSessionFlags(scheduleData.appointments, scheduleData.companyHolidays ?? [])
+      : new Map(),
+    [scheduleData],
+  );
 
   // Measure the header height (for the portrait fixed-header layout) and keep
   // it updated if the content/safe-area changes (e.g. data load changes toolbar).
@@ -1157,6 +1164,29 @@ export default function App() {
             : <span style={{ ...metaChip, background: '#f1f5f9', color: '#64748b' }}>Non-billable</span>
           }
         </div>
+        {(() => {
+          const flags = detailFlags.get(a.id);
+          if (!flags) return null;
+          const items: React.ReactNode[] = [];
+          if ((flags.cancelEscalation ?? 0) >= 1) {
+            const n = flags.cancelEscalation!;
+            const suffix = n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th';
+            items.push(<span key="cancel" style={{ ...metaChip, background: '#fee2e2', color: '#b91c1c' }}>⚠ {n}{suffix} consecutive cancel this month</span>);
+          }
+          if ((flags.completedStreak ?? 0) >= 2) {
+            const s = flags.completedStreak!;
+            if (s % 10 === 0) {
+              items.push(<span key="streak-milestone" style={{ ...metaChip, background: '#fef9c3', color: '#854d0e' }}>🏆 {s}-session streak milestone!</span>);
+            } else {
+              items.push(<span key="streak" style={{ ...metaChip, background: '#fff7ed', color: '#92400e' }}>🔥 {s}-session streak</span>);
+            }
+          }
+          if (flags.isHoliday) {
+            items.push(<span key="holiday" style={{ ...metaChip, background: '#dcfce7', color: '#15803d' }}>✦ {flags.holidayName ?? 'Holiday'}</span>);
+          }
+          if (items.length === 0) return null;
+          return <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>{items}</div>;
+        })()}
 
         {(status === 'canceled' || status === 'completed') && (
           <p style={{ color: '#6b7280', marginTop: 8, fontSize: 12 }}>
@@ -1255,6 +1285,24 @@ export default function App() {
                   border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
                 }}
               >✕ Cancel</button>
+              {aiSettings.apiKey && (
+                <>
+                  <button
+                    onClick={() => handleMoveThis(a)}
+                    style={{
+                      flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#f5f3ff', color: '#5b21b6',
+                      border: '1px solid #c4b5fd', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                    }}
+                  >Move This</button>
+                  <button
+                    onClick={() => handleReplaceThis(a)}
+                    style={{
+                      flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#f0f9ff', color: '#0369a1',
+                      border: '1px solid #7dd3fc', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                    }}
+                  >Replace This</button>
+                </>
+              )}
             </>
           )}
           {(status === 'completed' || status === 'canceled') && (

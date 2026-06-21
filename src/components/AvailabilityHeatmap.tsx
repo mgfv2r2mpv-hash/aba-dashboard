@@ -208,14 +208,14 @@ export default function AvailabilityHeatmap({ days, clients, appointments, highl
   );
 }
 
-function HeatmapRow({ row, focused, dimmed, onClick, fadedTier, onFadeTier, fadedClients, onFadeClient }: { row: Row; focused: boolean; dimmed: boolean; onClick: () => void; fadedTier: SessionTier | null; onFadeTier: (tier: SessionTier | null) => void }) {
+function HeatmapRow({ row, focused, dimmed, onClick, fadedTier, onFadeTier, fadedClients, onFadeClient }: { row: Row; focused: boolean; dimmed: boolean; onClick: () => void; fadedTier: SessionTier | null; onFadeTier: (tier: SessionTier | null) => void; fadedClients: Set<string>; onFadeClient: (id: string) => void }) {
   const { client, hue, windowsText, cells, utilPct, bookedHrs, availHrs } = row;
   const utilColor = utilPct >= 70 ? '#059669' : utilPct >= 40 ? '#d97706' : '#94a3b8';
   return (
     <div onClick={() => onFadeClient(client.id)} style={{
       display: "flex", alignItems: "stretch", borderBottom: "1px solid #f1f5f9",
       cursor: "pointer", background: focused ? `hsl(${hue} 70% 97%)` : "white",
-      opacity: opacity, transition: "opacity 0.15s, background 0.15s",
+      opacity: fadedClients.size > 0 && !fadedClients.has(client.id) ? 0.3 : 1, transition: "opacity 0.15s, background 0.15s",
     }}>
       {/* Label: initials + real window times */}
       <div style={{ width: LABEL_W, flexShrink: 0, padding: '5px 8px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>

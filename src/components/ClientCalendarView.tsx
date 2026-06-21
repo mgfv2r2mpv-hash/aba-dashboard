@@ -43,6 +43,7 @@ interface Props {
   date: Date;
   onPickDay: (d: Date) => void;
   companyHolidays?: CompanyHoliday[];
+  onSelectAppointment?: (a: Appointment) => void;
 }
 
 // ── Shared time → pixel helpers (day + week grids) ─────────────────────────────
@@ -72,7 +73,7 @@ const TOTAL_H = (DAY_END - DAY_START) * HOUR_PX;
 const HOURS = Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i);
 
 export default function ClientCalendarView({
-  clients, appointments, blackouts, view, date, onPickDay, companyHolidays,
+  clients, appointments, blackouts, view, date, onPickDay, companyHolidays, onSelectAppointment,
 }: Props) {
   // Heatmap is on in day view only (per-day busy overlay); week shows 7 columns.
   const heatmap = view === 'day';
@@ -167,6 +168,7 @@ export default function ClientCalendarView({
           companyHolidays={companyHolidays ?? []}
           sessionFlags={sessionFlags}
           onPickDay={onPickDay}
+          onSelectAppointment={onSelectAppointment}
         />
       )}
       {sub === 'day' && (
@@ -177,6 +179,7 @@ export default function ClientCalendarView({
           blackouts={blackouts}
           sessionFlags={sessionFlags}
           heatmap={heatmap}
+          onSelectAppointment={onSelectAppointment}
         />
       )}
     </div>
@@ -203,7 +206,7 @@ function Pill({ active, color, onClick, children }: {
 // Renders a single absolutely-positioned session block, folding status (completed
 // / canceled) and session flags (holiday / makeup / star / streak / cancel
 // escalation) into the tile — mirroring the BCBA/BT AppointmentBlock.
-function SessionTile({ appt, flags, clientName, top, height, insetLeft = 5, insetRight = 5 }: {
+function SessionTile({ appt, flags, clientName, top, height, insetLeft = 5, insetRight = 5, onClick }: {
   appt: Appointment;
   flags?: SessionFlags;
   clientName?: string;
@@ -211,6 +214,7 @@ function SessionTile({ appt, flags, clientName, top, height, insetLeft = 5, inse
   height: number;
   insetLeft?: number;
   insetRight?: number;
+  onClick?: () => void;
 }) {
   const isDirect = appt.type === 'client-session';
   const canceled = appt.status === 'canceled';
@@ -223,9 +227,9 @@ function SessionTile({ appt, flags, clientName, top, height, insetLeft = 5, inse
     ? `2px solid ${cancelBar(appt.cancellation?.source)}`
     : `1.5px solid ${clientDarkBorder(clientName)}`;
 
-  // Escalation darkening for canceled blocks (inset shadow overlay), matching admin.
-  const escalationAlpha = canceled && (flags?.cancelEscalation ?? 0) > 1
-    ? (flags!.cancelEscalation! - 1) * 0.08
+  // Escalation darkening for canceled blocks (inset shadow overlay), matching admin. Starts at first sequential cancel.
+  const escalationAlpha = canceled && (flags?.cancelEscalation ?? 0) >= 1
+    ? flags!.cancelEscalation! * 0.06
     : 0;
 
   const fg = isDirect ? '#1e3a5f' : '#fff';
@@ -237,7 +241,7 @@ function SessionTile({ appt, flags, clientName, top, height, insetLeft = 5, inse
   );
 
   const flagTip: string[] = [];
-  if ((flags?.cancelEscalation ?? 0) >= 2) flagTip.push(`${cancelBadgeText(flags!.cancelEscalation!)} cancel #${flags!.cancelEscalation} this month`);
+  if ((flags?.cancelEscalation ?? 0) >= 1) flagTip.push(`cancel #${flags!.cancelEscalation} this month${(flags!.cancelEscalation ?? 0) >= 2 ? ` ${cancelBadgeText(flags!.cancelEscalation!)}` : ''}`);
   if ((flags?.completedStreak ?? 0) >= 2) flagTip.push(`${flags!.completedStreak}-session streak`);
   if (flags?.streakStarLevel) flagTip.push(`${flags.streakStarLevel} clean 2-week star${flags.streakStarLevel > 1 ? 's' : ''}`);
   if (flags?.isMakeup) flagTip.push(`Makeup${flags.makeupDates?.length ? ` of ${flags.makeupDates.join(', ')}` : ''}`);
@@ -245,6 +249,7 @@ function SessionTile({ appt, flags, clientName, top, height, insetLeft = 5, inse
 
   return (
     <div
+      onClick={onClick}
       title={[
         `${appt.title}${canceled ? ' (canceled)' : ''}`,
         `${fmtTime(new Date(appt.startTime))}–${fmtTime(new Date(appt.endTime))}`,
@@ -261,6 +266,7 @@ function SessionTile({ appt, flags, clientName, top, height, insetLeft = 5, inse
         padding: '2px 5px',
         opacity: canceled ? 0.6 : 1,
         textDecoration: canceled ? 'line-through' : 'none',
+        cursor: onClick ? 'pointer' : undefined,
         boxShadow: escalationAlpha > 0
           ? `inset 0 0 0 9999px rgba(0,0,0,${escalationAlpha})`
           : '0 1px 3px rgba(0,0,0,0.14)',
@@ -278,9 +284,23 @@ function SessionTile({ appt, flags, clientName, top, height, insetLeft = 5, inse
             <span style={{
               fontSize: 9, fontWeight: 800, background: 'rgba(0,0,0,0.18)', color: fg,
               padding: '0 3px', borderRadius: 3, flexShrink: 0, whiteSpace: 'nowrap',
+              textDecoration: 'none',
             }}>
               {cancelBadgeText(flags!.cancelEscalation!)}
             </span>
+          )}
+        </div>
+      )}
+      {flags && ((flags.cancelEscalation ?? 0) >= 1 || (flags.completedStreak != null && flags.completedStreak > 0 && flags.completedStreak % 10 === 0) || flags.isHoliday) && (
+        <div style={{ display: 'flex', gap: 2, marginTop: 2 }}>
+          {(flags.cancelEscalation ?? 0) >= 1 && (
+            <span style={{ width: 4, height: 4, borderRadius: '50%', background: cancelBar(appt.cancellation?.source), flexShrink: 0 }} />
+          )}
+          {flags.completedStreak != null && flags.completedStreak > 0 && flags.completedStreak % 10 === 0 && (
+            <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#d97706', flexShrink: 0 }} />
+          )}
+          {flags.isHoliday && (
+            <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--green-700, #15803d)', flexShrink: 0 }} />
           )}
         </div>
       )}
@@ -467,13 +487,14 @@ function ClientMonthView({ date, blackouts, clients, onPickDay }: {
 
 // ── Day sub-view: vertical time × horizontal client columns ────────────────────
 
-function ClientDayGrid({ date, clients, appointments, blackouts, sessionFlags, heatmap }: {
+function ClientDayGrid({ date, clients, appointments, blackouts, sessionFlags, heatmap, onSelectAppointment }: {
   date: Date;
   clients: Client[];
   appointments: Appointment[];
   blackouts: Blackout[];
   sessionFlags: Map<string, SessionFlags>;
   heatmap: boolean;
+  onSelectAppointment?: (a: Appointment) => void;
 }) {
   const iso      = format(date, 'yyyy-MM-dd');
   const dow      = format(date, 'EEEE') as DayOfWeek;
@@ -655,6 +676,7 @@ function ClientDayGrid({ date, clients, appointments, blackouts, sessionFlags, h
                         clientName={client.name}
                         top={clampedTop}
                         height={h}
+                        onClick={onSelectAppointment ? () => onSelectAppointment(appt) : undefined}
                       />
                     );
                   })}
@@ -672,13 +694,14 @@ function ClientDayGrid({ date, clients, appointments, blackouts, sessionFlags, h
 
 // ── Week sub-view: vertical time × seven day columns ───────────────────────────
 
-function ClientWeekGrid({ date, clients, appointments, companyHolidays, sessionFlags, onPickDay }: {
+function ClientWeekGrid({ date, clients, appointments, companyHolidays, sessionFlags, onPickDay, onSelectAppointment }: {
   date: Date;
   clients: Client[];
   appointments: Appointment[];
   companyHolidays: CompanyHoliday[];
   sessionFlags: Map<string, SessionFlags>;
   onPickDay: (d: Date) => void;
+  onSelectAppointment?: (a: Appointment) => void;
 }) {
   const weekStart = startOfWeek(date, { weekStartsOn: 1 });
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -795,6 +818,7 @@ function ClientWeekGrid({ date, clients, appointments, companyHolidays, sessionF
                         height={h}
                         insetLeft={3}
                         insetRight={3}
+                        onClick={onSelectAppointment ? () => onSelectAppointment(appt) : undefined}
                       />
                     );
                   })}

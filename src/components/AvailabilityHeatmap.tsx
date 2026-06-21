@@ -14,7 +14,7 @@
 // The client's initials and the actual window start/end times are printed as
 // text in the row label, so the schedule is legible without reading colors.
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Client, Appointment } from '../types';
 import { clientHue } from '../calendarColors';
 import { format, isSameDay } from 'date-fns';
@@ -47,6 +47,11 @@ interface HeatmapProps {
   appointments: Appointment[];
   highlightId: string | null;
   onHighlight: (id: string | null) => void;
+  fadedTier: SessionTier | null;
+  onFadeTier: (tier: SessionTier | null) => void;
+  fadedClients: Set<string>;
+  onFadeClient: (id: string) => void;
+  onClearFadedClients: () => void;
 }
 
 interface Bar { leftPct: number; widthPct: number; startMin: number; endMin: number; }
@@ -131,7 +136,7 @@ function buildRow(client: Client, days: Date[], appointments: Appointment[]): Ro
   };
 }
 
-export default function AvailabilityHeatmap({ days, clients, appointments, highlightId, onHighlight }: HeatmapProps) {
+export default function AvailabilityHeatmap({ days, clients, appointments, highlightId, onHighlight, fadedTier, onFadeTier, fadedClients, onFadeClient, onClearFadedClients }: HeatmapProps) {
   const ordered = useMemo(() => clusterByOverlap(clients), [clients]);
   const rows = useMemo(() => ordered.map(c => buildRow(c, days, appointments)), [ordered, days, appointments]);
 
@@ -149,12 +154,13 @@ export default function AvailabilityHeatmap({ days, clients, appointments, highl
         <span style={{ fontSize: 11, fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
           Availability &amp; Schedule
         </span>
-        <span style={{ fontSize: 10, color: '#94a3b8' }}>clustered by overlap · click a row to focus</span>
+        <span style={{ fontSize: 10, color: '#94a3b8' }}>click appointment type to toggle transparency</span>
+        <button onClick={onClearFadedClients} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #d1d5db", background: "#f3f4f6", color: "#374151", cursor: "pointer", fontSize: 11, fontWeight: 500 }}>Clear all</button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <LegendSwatch kind="avail" label="Available" />
-          <LegendSwatch kind="direct" label={TIER_LABEL.direct} />
-          <LegendSwatch kind="supervision" label={TIER_LABEL.supervision} />
-          <LegendSwatch kind="parentTraining" label={TIER_LABEL.parentTraining} />
+          <LegendSwatch kind="direct" label={TIER_LABEL.direct} onClick={() => onFadeTier(fadedTier === 'direct' ? null : 'direct')} isFaded={fadedTier === 'direct'} />
+          <LegendSwatch kind="supervision" label={TIER_LABEL.supervision} onClick={() => onFadeTier(fadedTier === 'supervision' ? null : 'supervision')} isFaded={fadedTier === 'supervision'} />
+          <LegendSwatch kind="parentTraining" label={TIER_LABEL.parentTraining} onClick={() => onFadeTier(fadedTier === 'parentTraining' ? null : 'parentTraining')} isFaded={fadedTier === 'parentTraining'} />
         </div>
       </div>
 
@@ -186,7 +192,11 @@ export default function AvailabilityHeatmap({ days, clients, appointments, highl
             <HeatmapRow key={row.client.id} row={row}
               focused={highlightId === row.client.id}
               dimmed={highlightId !== null && highlightId !== row.client.id}
-              onClick={() => onHighlight(highlightId === row.client.id ? null : row.client.id)} />
+              onClick={() => onHighlight(highlightId === row.client.id ? null : row.client.id)}
+              fadedTier={fadedTier}
+              onFadeTier={onFadeTier}
+              fadedClients={fadedClients}
+              onFadeClient={onFadeClient} />
           ))}
 
           {rows.length === 0 && (
@@ -198,14 +208,14 @@ export default function AvailabilityHeatmap({ days, clients, appointments, highl
   );
 }
 
-function HeatmapRow({ row, focused, dimmed, onClick }: { row: Row; focused: boolean; dimmed: boolean; onClick: () => void }) {
+function HeatmapRow({ row, focused, dimmed, onClick, fadedTier, onFadeTier, fadedClients, onFadeClient }: { row: Row; focused: boolean; dimmed: boolean; onClick: () => void; fadedTier: SessionTier | null; onFadeTier: (tier: SessionTier | null) => void; fadedClients: Set<string>; onFadeClient: (id: string) => void }) {
   const { client, hue, windowsText, cells, utilPct, bookedHrs, availHrs } = row;
   const utilColor = utilPct >= 70 ? '#059669' : utilPct >= 40 ? '#d97706' : '#94a3b8';
   return (
-    <div onClick={onClick} style={{
-      display: 'flex', alignItems: 'stretch', borderBottom: '1px solid #f1f5f9',
-      cursor: 'pointer', background: focused ? `hsl(${hue} 70% 97%)` : 'white',
-      opacity: dimmed ? 0.4 : 1, transition: 'opacity 0.15s, background 0.15s',
+    <div onClick={() => onFadeClient(client.id)} style={{
+      display: "flex", alignItems: "stretch", borderBottom: "1px solid #f1f5f9",
+      cursor: "pointer", background: focused ? `hsl(${hue} 70% 97%)` : "white",
+      opacity: fadedClients.size > 0 && !fadedClients.has(client.id) ? 0.3 : 1, transition: "opacity 0.15s, background 0.15s",
     }}>
       {/* Label: initials + real window times */}
       <div style={{ width: LABEL_W, flexShrink: 0, padding: '5px 8px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
@@ -243,13 +253,21 @@ function HeatmapRow({ row, focused, dimmed, onClick }: { row: Row; focused: bool
                 const { inset, z } = TIER_LAYOUT[s.tier];
                 const h = TRACK_H - inset * 2;
                 const color = s.tier === 'direct' ? `hsl(${hue} 72% 48%)` : TIER_COLOR[s.tier];
+                const isFaded = fadedTier === s.tier;
                 return (
                   <div key={`s${i}`} title={s.title}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onFadeTier(fadedTier === s.tier ? null : s.tier);
+                    }}
                     style={{
                       position: 'absolute', top: inset, height: h,
                       left: `${s.bar.leftPct}%`, width: `${s.bar.widthPct}%`,
                       minWidth: 2, background: color, borderRadius: 2, zIndex: z,
                       boxShadow: '0 0 0 1px rgba(255,255,255,0.55)',
+                      opacity: isFaded ? 0.25 : 1,
+                      transition: 'opacity 0.2s ease-in-out',
+                      cursor: 'pointer',
                     }} />
                 );
               })}
@@ -270,13 +288,14 @@ function HeatmapRow({ row, focused, dimmed, onClick }: { row: Row; focused: bool
   );
 }
 
-function LegendSwatch({ kind, label }: { kind: 'avail' | SessionTier; label: string }) {
+function LegendSwatch({ kind, label, onClick, isFaded }: { kind: 'avail' | SessionTier; label: string; onClick?: () => void; isFaded?: boolean }) {
   const bg = kind === 'avail' ? 'hsl(210 70% 86%)'
     : kind === 'direct' ? 'hsl(265 60% 55%)'
     : TIER_COLOR[kind as SessionTier];
+  const isClickable = kind !== 'avail' && onClick;
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, color: '#64748b' }}>
-      <span style={{ width: 11, height: 11, borderRadius: 2, background: bg, border: kind === 'avail' ? '1px solid hsl(210 48% 74%)' : 'none' }} />
+    <span onClick={onClick} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, color: isFaded ? '#cbd5e1' : '#64748b', cursor: isClickable ? 'pointer' : 'default', opacity: isFaded ? 0.6 : 1, transition: 'opacity 0.2s, color 0.2s' }}>
+      <span style={{ width: 11, height: 11, borderRadius: 2, background: bg, border: kind === 'avail' ? '1px solid hsl(210 48% 74%)' : 'none', opacity: isFaded ? 0.4 : 1 }} />
       {label}
     </span>
   );

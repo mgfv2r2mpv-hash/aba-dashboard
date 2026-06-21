@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { ScheduleData, Appointment, ScheduleSolution } from './types';
 import { parseExcelFile, generateExcelFile } from './excelHandler';
@@ -10,6 +11,9 @@ import { ClaudeScheduler, ClaudeModel } from './claudeScheduler';
 import { ExcelEncryption } from './encryption';
 
 dotenv.config();
+
+// ESM has no __dirname; derive it from the module URL (matches createSampleData.ts).
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const PORT = process.env.PORT || 5000;

@@ -222,6 +222,7 @@ export default function Calendar({
           date={currentDate}
           onPickDay={(d) => { setCurrentDate(d); setView('day'); }}
           companyHolidays={companyHolidays}
+          onSelectAppointment={onSelectAppointment}
         />
       )}
       {lens !== 'client' && view === 'month' && (
@@ -702,8 +703,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
   const totalHeight = (VISIBLE_END_HOUR - VISIBLE_START_HOUR) * hourHeight;
   const today = new Date();
   const minWidth = days.length > 1 ? (roomy ? 980 : 760) : undefined;
-  // The tapped tile (shows a small "view session" dialog). Distinct from drag.
-  const [tapped, setTapped] = useState<Appointment | null>(null);
+
 
   // Active drag — only one appointment moves at a time. dragState tracks
   // the snapped delta so we can show a floating preview tooltip and apply
@@ -882,7 +882,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
                     apt={appt}
                     mark={mark}
                     roomy={roomy}
-                    onClick={() => setTapped(appt)}
+                    onClick={() => onSelectAppointment(appt)}
                     onPointerDown={draggable ? (e) => beginDrag(appt, e) : undefined}
                     dragHandle={draggable}
                     flags={sessionFlags?.get(appt.id)}
@@ -903,51 +903,6 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
       </div>
 
       <TileLegend appointments={appointments.filter(a => days.some(d => isSameDay(d, new Date(a.startTime))))} />
-
-      {/* Tap dialog: session name + view button (opens the detail panel). */}
-      {tapped && (
-        <div
-          onClick={() => setTapped(null)}
-          style={{
-            position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.35)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400, padding: 16,
-          }}
-        >
-          <div onClick={e => e.stopPropagation()} style={{
-            background: 'white', borderRadius: 8, padding: 16, maxWidth: 320, width: '100%',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
-          }}>
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{tapped.title}</div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
-              {format(new Date(tapped.startTime), 'EEE M/d, h:mm')}–{format(new Date(tapped.endTime), 'h:mm a')}
-              {tapped.client && <> · {tapped.client}</>}
-              {tapped.technician && <> · {tapped.technician}</>}
-            </div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              <button onClick={() => setTapped(null)} style={{
-                padding: '6px 12px', border: '1px solid #d1d5db', borderRadius: 6,
-                background: 'white', cursor: 'pointer', fontSize: 13,
-              }}>Close</button>
-              {tapped.status !== 'completed' && onMoveThis && (
-                <button onClick={() => { const a = tapped; setTapped(null); onMoveThis(a); }} style={{
-                  padding: '6px 12px', border: '1px solid #f59e0b', borderRadius: 6,
-                  background: '#fffbeb', color: '#b45309', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                }} title="Find minimal same-week moves to place this appointment back">Move This</button>
-              )}
-              {tapped.status !== 'completed' && onReplaceThis && (
-                <button onClick={() => { const a = tapped; setTapped(null); onReplaceThis(a); }} style={{
-                  padding: '6px 12px', border: '1px solid #a855f7', borderRadius: 6,
-                  background: '#faf5ff', color: '#7e22ce', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                }} title="Fill this slot with another session and reschedule the original">Replace This</button>
-              )}
-              <button onClick={() => { const a = tapped; setTapped(null); onSelectAppointment(a); }} style={{
-                padding: '6px 12px', border: 'none', borderRadius: 6,
-                background: '#3b82f6', color: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-              }}>Select / View</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Floating drag preview tooltip */}
       {dragState && (() => {
@@ -1135,9 +1090,9 @@ function appointmentLook(apt: Appointment, mark?: DraftMark, flags?: SessionFlag
   }
 
   // Escalation: darken canceled chip background with an inset shadow overlay.
-  // Level 1 = first cancel (no overlay); 2–5 progressively darker.
-  const escalationAlpha = flags?.cancelEscalation && flags.cancelEscalation > 1
-    ? (flags.cancelEscalation - 1) * 0.08
+  // Level 1+ darkens progressively (6% per level, starting at the first sequential cancel).
+  const escalationAlpha = (flags?.cancelEscalation ?? 0) >= 1
+    ? flags!.cancelEscalation! * 0.06
     : 0;
 
   return { canceled, completed, bar, bg, fg, border, opacity, strike, prefix, escalationAlpha };
@@ -1147,7 +1102,7 @@ function AppointmentChip({ apt, mark, onClick, flags }: { apt: Appointment; mark
   const look = appointmentLook(apt, mark, flags);
   // Build tooltip with flag context for tappable month chips.
   const flagInfo: string[] = [];
-  if (flags?.cancelEscalation && flags.cancelEscalation >= 2) flagInfo.push(`${cancelBadgeText(flags.cancelEscalation)} cancel #${flags.cancelEscalation} this month`);
+  if (flags?.cancelEscalation && flags.cancelEscalation >= 1) flagInfo.push(`cancel #${flags.cancelEscalation} this month${flags.cancelEscalation >= 2 ? ` ${cancelBadgeText(flags.cancelEscalation)}` : ''}`);
   if (flags?.completedStreak && flags.completedStreak >= 2) flagInfo.push(`${flags.completedStreak}-session streak`);
   if (flags?.streakStarLevel) flagInfo.push(`${flags.streakStarLevel} clean 2-week star${flags.streakStarLevel > 1 ? 's' : ''}`);
   if (flags?.isMakeup) flagInfo.push(`Makeup${flags.makeupDates?.length ? ` of ${flags.makeupDates.join(', ')}` : ''}`);
@@ -1155,7 +1110,7 @@ function AppointmentChip({ apt, mark, onClick, flags }: { apt: Appointment; mark
   const title = [apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), ...flagInfo].join(' · ');
 
   const hasDots = flags && (
-    (flags.cancelEscalation ?? 0) >= 2 ||
+    (flags.cancelEscalation ?? 0) >= 1 ||
     (flags.completedStreak ?? 0) >= 2 ||
     flags.streakStarLevel ||
     flags.isMakeup ||
@@ -1192,7 +1147,7 @@ function AppointmentChip({ apt, mark, onClick, flags }: { apt: Appointment; mark
           {flags?.isMakeup && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#0891b2', flexShrink: 0 }} title="Makeup" />}
           {(flags?.completedStreak ?? 0) >= 2 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#d97706', flexShrink: 0 }} title="Streak" />}
           {(flags?.streakStarLevel ?? 0) > 0 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#f59e0b', flexShrink: 0, outline: '1px solid #92400e' }} title="2-week star" />}
-          {(flags?.cancelEscalation ?? 0) >= 2 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: cancelBar(apt.cancellation?.source), flexShrink: 0 }} title={cancelBadgeText(flags!.cancelEscalation!)} />}
+          {(flags?.cancelEscalation ?? 0) >= 1 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: cancelBar(apt.cancellation?.source), flexShrink: 0 }} title={cancelBadgeText(flags!.cancelEscalation!)} />}
         </div>
       )}
     </button>
@@ -1232,9 +1187,9 @@ function blockLook(apt: Appointment, mark?: DraftMark, flags?: SessionFlags) {
   const glow = (!mark && !apt.isGhost && completed) ? streakGlow(flags?.completedStreak) : undefined;
   if (glow) border = glow; // replaces the 2px solid border set above
 
-  // Escalation darkening for canceled blocks: inset shadow overlay.
-  const escalationAlpha = (!mark && !apt.isGhost && canceled && (flags?.cancelEscalation ?? 0) > 1)
-    ? (flags!.cancelEscalation! - 1) * 0.08
+  // Escalation darkening for canceled blocks: inset shadow overlay. Starts at first sequential cancel.
+  const escalationAlpha = (!mark && !apt.isGhost && canceled && (flags?.cancelEscalation ?? 0) >= 1)
+    ? flags!.cancelEscalation! * 0.06
     : 0;
 
   return {
@@ -1297,9 +1252,9 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
       <div style={{ flex: 1, minWidth: 0, padding: roomy ? '5px 8px' : '4px 6px', overflow: 'hidden' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 4 }}>
           <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>{look.prefix}{apt.title}</span>
-          {/* Cancel escalation badge — visible on all sizes */}
+          {/* Cancel escalation badge — visible on all sizes; textDecoration: 'none' overrides parent strikethrough */}
           {(flags?.cancelEscalation ?? 0) >= 2 && (
-            <span style={{ fontSize: 9, fontWeight: 800, background: 'rgba(0,0,0,0.18)', padding: '1px 3px', borderRadius: 3, flexShrink: 0, whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 9, fontWeight: 800, background: 'rgba(0,0,0,0.18)', padding: '1px 3px', borderRadius: 3, flexShrink: 0, whiteSpace: 'nowrap', textDecoration: 'none' }}>
               {cancelBadgeText(flags!.cancelEscalation!)}
             </span>
           )}
@@ -1307,6 +1262,20 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
         <div style={{ fontSize: roomy ? 12 : 10, opacity: 0.85, marginTop: 2 }}>
           {format(new Date(apt.startTime), 'h:mm')}–{format(new Date(apt.endTime), 'h:mm a')}
         </div>
+        {/* Always-visible microdots: cancel (red), streak milestone (yellow), holiday (green) */}
+        {flags && ((flags.cancelEscalation ?? 0) >= 1 || (flags.completedStreak != null && flags.completedStreak > 0 && flags.completedStreak % 10 === 0) || flags.isHoliday) && (
+          <div style={{ display: 'flex', gap: 2, marginTop: 2 }}>
+            {(flags.cancelEscalation ?? 0) >= 1 && (
+              <span style={{ width: 4, height: 4, borderRadius: '50%', background: cancelBar(apt.cancellation?.source), flexShrink: 0 }} />
+            )}
+            {flags.completedStreak != null && flags.completedStreak > 0 && flags.completedStreak % 10 === 0 && (
+              <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#d97706', flexShrink: 0 }} />
+            )}
+            {flags.isHoliday && (
+              <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--green-700, #15803d)', flexShrink: 0 }} />
+            )}
+          </div>
+        )}
         {roomy && (apt.client || apt.technician) && (
           <div style={{ fontSize: 11, opacity: 0.8, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {[apt.client, apt.technician].filter(Boolean).join(' · ')}

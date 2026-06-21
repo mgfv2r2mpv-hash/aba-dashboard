@@ -2,8 +2,13 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import dotenv from 'dotenv'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// Load .env so the dev proxy targets the same port the API server binds
+// (src/server.ts uses process.env.PORT || 5000). Single source of truth.
+dotenv.config()
 
 export default defineConfig({
   root: path.resolve(__dirname, 'public'),
@@ -18,7 +23,7 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: `http://localhost:${process.env.PORT || 5000}`,
         changeOrigin: true,
       },
     },

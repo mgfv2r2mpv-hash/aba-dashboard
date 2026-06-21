@@ -41,7 +41,9 @@ let package = Package(
                 .product(name: "Capacitor", package: "capacitor-swift-pm"),
                 .product(name: "Cordova", package: "capacitor-swift-pm")
             ],
-            path: "ios/Sources/BiometricAuthNative")
+<<<<<<< HEAD
+            path: "ios/Sources/BiometricAuthNative",
+            sources: ["BiometricAuthNative.swift"])
     ]
 )
 `;
@@ -54,9 +56,9 @@ if (!fs.existsSync(PLUGIN_DIR)) {
 fs.writeFileSync(PLUGIN_PKG_PATH, PLUGIN_PACKAGE_SWIFT, 'utf8');
 console.log('[patch-spm-biometric] Wrote Package.swift into @aparajita/capacitor-biometric-auth.');
 
-// Step 1b: add CAPBridgedPlugin conformance to Plugin.swift so Capacitor can discover the plugin
+// Step 1b: add CAPBridgedPlugin conformance to BiometricAuthNative.swift so Capacitor can discover the plugin
 // without Plugin.m (which is excluded to avoid the Xcode 26 mixed-language SPM error).
-const PLUGIN_SWIFT_PATH = path.join(PLUGIN_DIR, 'ios/Plugin/Plugin.swift');
+const PLUGIN_SWIFT_PATH = path.join(PLUGIN_DIR, 'ios/Sources/BiometricAuthNative/BiometricAuthNative.swift');
 if (fs.existsSync(PLUGIN_SWIFT_PATH)) {
   let swiftContent = fs.readFileSync(PLUGIN_SWIFT_PATH, 'utf8');
   if (!swiftContent.includes('CAPBridgedPlugin')) {

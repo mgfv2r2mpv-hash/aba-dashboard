@@ -1,4 +1,4 @@
-name = "aba-dashboard-portal"
+name = "sassi-cal-webportal"
 pages_build_output_dir = "dist"
 
 # Cloudflare Pages dashboard settings (set these when connecting GitHub):

@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Appointment, Technician, Client, CompanySettings, TimeOff, Blackout, CompanyHoliday } from '../types';
-import { computeSessionFlags, SessionFlags } from '../sessionFlags';
+import { computeSessionFlags, SessionFlags, streakEmoji, isStreakMilestone } from '../sessionFlags';
 import ClientCalendarView from './ClientCalendarView';
 import { DraftMark } from '../draft';
 import { rollupHours, resolveUtilization, HoursByStatus, ptoHoursInRange, reduceRequirementForPto } from '../utilization';
@@ -10,7 +10,7 @@ import { usePinchZoom } from '../hooks/usePinchZoom';
 import ZoomResetPill from './ZoomResetPill';
 import {
   startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek,
-  format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay,
+  format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay, parseISO,
 } from 'date-fns';
 
 interface CalendarProps {
@@ -42,6 +42,10 @@ interface CalendarProps {
   // Company-wide holidays; sessions on these dates get a green-star marker
   // and the visual cancel/streak flags are computed alongside them.
   companyHolidays?: CompanyHoliday[];
+  // Optional notice rendered between the sticky toolbar and the grid content
+  // (e.g. pending-sessions banner) so it scrolls with content rather than
+  // sitting above the toolbar and creating a visual gap on portrait iPhone.
+  notice?: React.ReactNode;
 }
 
 type View = 'month' | 'week' | 'day';
@@ -81,6 +85,7 @@ export default function Calendar({
   onMoveThis,
   onReplaceThis,
   companyHolidays,
+  notice,
 }: CalendarProps) {
   const [view, setView] = useState<View>('month');
   const [lens, setLens] = useState<Lens>('bcba');
@@ -89,6 +94,8 @@ export default function Calendar({
   const isLandscape = useIsLandscape();
   // iPad and up: roomier rows, wider time axis, richer tiles, taller month cells.
   const roomy = useMinWidth(820);
+  // iPhone portrait: compress the toolbar so view/lens/nav fit one row.
+  const compact = !roomy && !isLandscape;
   const hourHeight = roomy ? HOUR_HEIGHT_WIDE : HOUR_HEIGHT;
   const axisWidth = roomy ? TIME_AXIS_WIDTH_WIDE : TIME_AXIS_WIDTH;
 
@@ -174,12 +181,20 @@ export default function Calendar({
   );
 
   return (
-    <div style={{ padding: 'clamp(8px, 3vw, 24px)', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
+    <div style={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
+      {/* Sticky toolbar — sits outside the padded content div so it sticks flush
+          at --cal-sticky-top with no top-padding gap, and its background covers
+          the full content width edge-to-edge without a gap on left/right. */}
       <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        marginBottom: 16, gap: 8, flexWrap: 'wrap',
+        position: 'sticky', top: 'var(--cal-sticky-top, 0px)', zIndex: 30,
+        background: 'var(--surface, #fff)',
+        borderBottom: '1px solid #e5e7eb',
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center',
+        gap: 4, paddingTop: 4, paddingBottom: 6,
+        paddingLeft: 'clamp(6px, 2vw, 20px)', paddingRight: 'clamp(6px, 2vw, 20px)',
       }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'nowrap' }}>
+        {/* Single non-wrapping control row; scrolls horizontally instead of wrapping */}
+        <div style={{ display: 'flex', gap: compact ? 4 : 6, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'hidden', flex: '1 1 auto', minWidth: 0 }}>
           {onAddAppointment && (
             <button
               onClick={onAddAppointment}
@@ -188,30 +203,41 @@ export default function Calendar({
               style={{
                 padding: '5px 10px', backgroundColor: '#3b82f6', color: 'white',
                 border: 'none', borderRadius: 5, cursor: 'pointer',
-                fontSize: 16, fontWeight: 700, lineHeight: 1,
+                fontSize: 16, fontWeight: 700, lineHeight: 1, flexShrink: 0,
               }}
             >+</button>
           )}
-          <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
-            <ViewBtn active={view === 'month'} onClick={() => setView('month')}>Month</ViewBtn>
-            <ViewBtn active={view === 'week'} onClick={() => setView('week')}>Week</ViewBtn>
-            <ViewBtn active={view === 'day'} onClick={() => setView('day')}>Day</ViewBtn>
+          <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden', flexShrink: 0 }}>
+            <ViewBtn active={view === 'month'} onClick={() => setView('month')}>{compact ? 'M' : 'Month'}</ViewBtn>
+            <ViewBtn active={view === 'week'} onClick={() => setView('week')}>{compact ? 'W' : 'Week'}</ViewBtn>
+            <ViewBtn active={view === 'day'} onClick={() => setView('day')}>{compact ? 'D' : 'Day'}</ViewBtn>
           </div>
-          <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
+          {/* 📅 placed between D and ← per UX feedback; full-size transparent overlay for iOS WebView */}
+          <div style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
+            <NavBtn onClick={() => {}}>📅</NavBtn>
+            <input
+              type="date"
+              value={format(currentDate, 'yyyy-MM-dd')}
+              onChange={e => { if (e.target.value) setCurrentDate(parseISO(e.target.value)); }}
+              aria-label="Jump to date"
+              style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'auto', cursor: 'pointer', width: '100%', height: '100%' }}
+            />
+          </div>
+          <NavBtn onClick={goPrev}>←</NavBtn>
+          <NavBtn onClick={goToday}>{compact ? 'T' : 'Today'}</NavBtn>
+          <NavBtn onClick={goNext}>→</NavBtn>
+          <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden', flexShrink: 0 }}>
             <ViewBtn active={lens === 'bcba'} onClick={() => setLens('bcba')}>BCBA</ViewBtn>
             <ViewBtn active={lens === 'bt'} onClick={() => setLens('bt')}>BT</ViewBtn>
             <ViewBtn active={lens === 'client'} onClick={() => setLens('client')}>Case</ViewBtn>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <NavBtn onClick={goPrev}>←</NavBtn>
-          <NavBtn onClick={goToday}>Today</NavBtn>
-          <NavBtn onClick={goNext}>→</NavBtn>
-        </div>
         <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }}>
           {headerLabel}
         </h2>
       </div>
+      {notice}
+      <div style={{ padding: 'clamp(8px, 3vw, 24px)', paddingTop: 12 }}>
 
       {lens === 'client' && (
         <ClientCalendarView
@@ -222,6 +248,7 @@ export default function Calendar({
           date={currentDate}
           onPickDay={(d) => { setCurrentDate(d); setView('day'); }}
           companyHolidays={companyHolidays}
+          settings={settings}
           onSelectAppointment={onSelectAppointment}
         />
       )}
@@ -318,6 +345,7 @@ export default function Calendar({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -1040,6 +1068,43 @@ function cancelBar(source?: string): string {
   }
 }
 
+// Rolling cancel count for this appointment's source from cancelCtx.
+function cancelRollingCount(flags: SessionFlags): number {
+  const ctx = flags.cancelCtx;
+  if (!ctx || !flags.cancelSource) return 0;
+  switch (flags.cancelSource) {
+    case 'bt':     return ctx.bt.perBtCaseRolling30;
+    case 'family': return ctx.family.rolling30;
+    case 'admin':  return ctx.admin.rolling30;
+    case 'bcba':   return ctx.bcba.rolling30;
+    default:       return 0;
+  }
+}
+
+// True when this canceled appointment's rolling count meets its source's threshold.
+// BCBA/admin show on 1st cancel; BT/family show on 2nd+.
+function cancelDotShouldShow(flags: SessionFlags): boolean {
+  const count = cancelRollingCount(flags);
+  if (flags.cancelSource === 'bcba' || flags.cancelSource === 'admin') return count >= 1;
+  return count >= 2;
+}
+
+// Background color for the cancel microdot.
+// Admin lightens at count 1 and darkens on each subsequent cancel in the rolling window.
+function cancelDotBackground(flags: SessionFlags): string {
+  const count = cancelRollingCount(flags);
+  switch (flags.cancelSource) {
+    case 'bt':     return '#dc2626';
+    case 'family': return '#f97316';
+    case 'bcba':   return '#eab308';
+    case 'admin': {
+      const alpha = Math.min(0.35 + (count - 1) * 0.2, 0.9);
+      return `rgba(100, 116, 139, ${alpha.toFixed(2)})`;
+    }
+    default: return '#dc2626';
+  }
+}
+
 function appointmentLook(apt: Appointment, mark?: DraftMark, flags?: SessionFlags) {
   const canceled = apt.status === 'canceled';
   const completed = apt.status === 'completed';
@@ -1090,8 +1155,8 @@ function appointmentLook(apt: Appointment, mark?: DraftMark, flags?: SessionFlag
   }
 
   // Escalation: darken canceled chip background with an inset shadow overlay.
-  // Level 1+ darkens progressively (6% per level, starting at the first sequential cancel).
-  const escalationAlpha = (flags?.cancelEscalation ?? 0) >= 1
+  // Starts at ≥ 2 consecutive cancels (first single cancel shows no darkening).
+  const escalationAlpha = (flags?.cancelEscalation ?? 0) >= 2
     ? flags!.cancelEscalation! * 0.06
     : 0;
 
@@ -1102,17 +1167,16 @@ function AppointmentChip({ apt, mark, onClick, flags }: { apt: Appointment; mark
   const look = appointmentLook(apt, mark, flags);
   // Build tooltip with flag context for tappable month chips.
   const flagInfo: string[] = [];
-  if (flags?.cancelEscalation && flags.cancelEscalation >= 1) flagInfo.push(`cancel #${flags.cancelEscalation} this month${flags.cancelEscalation >= 2 ? ` ${cancelBadgeText(flags.cancelEscalation)}` : ''}`);
-  if (flags?.completedStreak && flags.completedStreak >= 2) flagInfo.push(`${flags.completedStreak}-session streak`);
-  if (flags?.streakStarLevel) flagInfo.push(`${flags.streakStarLevel} clean 2-week star${flags.streakStarLevel > 1 ? 's' : ''}`);
+  if (flags?.cancelEscalation && flags.cancelEscalation >= 1) flagInfo.push(`${flags.cancelEscalation} consecutive cancel${flags.cancelEscalation > 1 ? 's' : ''}${flags.cancelEscalation >= 2 ? ` ${cancelBadgeText(flags.cancelEscalation)}` : ''}`);
+  if (flags?.clientCompletedStreak && flags.clientCompletedStreak >= 2) flagInfo.push(`${streakEmoji(flags.clientCompletedStreak) ?? ''} ${flags.clientCompletedStreak}-session client streak`.trim());
+  if (flags?.completedStreak && flags.completedStreak >= 2) flagInfo.push(`${flags.completedStreak} overall streak`.trim());
   if (flags?.isMakeup) flagInfo.push(`Makeup${flags.makeupDates?.length ? ` of ${flags.makeupDates.join(', ')}` : ''}`);
   if (flags?.isHoliday) flagInfo.push(flags.holidayName ?? 'Company holiday');
   const title = [apt.title + (look.canceled ? ' (canceled)' : look.completed ? ' (completed)' : ''), ...flagInfo].join(' · ');
 
   const hasDots = flags && (
-    (flags.cancelEscalation ?? 0) >= 1 ||
-    (flags.completedStreak ?? 0) >= 2 ||
-    flags.streakStarLevel ||
+    (look.canceled && !!flags.cancelSource && cancelDotShouldShow(flags)) ||
+    isStreakMilestone(flags.clientCompletedStreak ?? 0) ||
     flags.isMakeup ||
     flags.isHoliday
   );
@@ -1145,9 +1209,8 @@ function AppointmentChip({ apt, mark, onClick, flags }: { apt: Appointment; mark
         <div style={{ display: 'flex', gap: 2, paddingLeft: 7, marginTop: 1 }}>
           {flags?.isHoliday && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--green-700)', flexShrink: 0 }} title="Holiday" />}
           {flags?.isMakeup && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#0891b2', flexShrink: 0 }} title="Makeup" />}
-          {(flags?.completedStreak ?? 0) >= 2 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#d97706', flexShrink: 0 }} title="Streak" />}
-          {(flags?.streakStarLevel ?? 0) > 0 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#f59e0b', flexShrink: 0, outline: '1px solid #92400e' }} title="2-week star" />}
-          {(flags?.cancelEscalation ?? 0) >= 1 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: cancelBar(apt.cancellation?.source), flexShrink: 0 }} title={cancelBadgeText(flags!.cancelEscalation!)} />}
+          {isStreakMilestone(flags?.clientCompletedStreak ?? 0) && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--green-600, #16a34a)', flexShrink: 0 }} title={`${streakEmoji(flags!.clientCompletedStreak!) ?? ''} ${flags!.clientCompletedStreak}-session client milestone`} />}
+          {look.canceled && !!flags?.cancelSource && cancelDotShouldShow(flags!) && <span style={{ width: 5, height: 5, borderRadius: '50%', background: cancelDotBackground(flags!), flexShrink: 0 }} title={`${cancelRollingCount(flags!)} ${flags!.cancelSource} cancel(s) in rolling window`} />}
         </div>
       )}
     </button>
@@ -1187,8 +1250,8 @@ function blockLook(apt: Appointment, mark?: DraftMark, flags?: SessionFlags) {
   const glow = (!mark && !apt.isGhost && completed) ? streakGlow(flags?.completedStreak) : undefined;
   if (glow) border = glow; // replaces the 2px solid border set above
 
-  // Escalation darkening for canceled blocks: inset shadow overlay. Starts at first sequential cancel.
-  const escalationAlpha = (!mark && !apt.isGhost && canceled && (flags?.cancelEscalation ?? 0) >= 1)
+  // Escalation darkening: starts at ≥ 2 consecutive cancels (first single cancel = no darkening).
+  const escalationAlpha = (!mark && !apt.isGhost && canceled && (flags?.cancelEscalation ?? 0) >= 2)
     ? flags!.cancelEscalation! * 0.06
     : 0;
 
@@ -1262,14 +1325,18 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
         <div style={{ fontSize: roomy ? 12 : 10, opacity: 0.85, marginTop: 2 }}>
           {format(new Date(apt.startTime), 'h:mm')}–{format(new Date(apt.endTime), 'h:mm a')}
         </div>
-        {/* Always-visible microdots: cancel (red), streak milestone (yellow), holiday (green) */}
-        {flags && ((flags.cancelEscalation ?? 0) >= 1 || (flags.completedStreak != null && flags.completedStreak > 0 && flags.completedStreak % 10 === 0) || flags.isHoliday) && (
+        {/* Always-visible microdots: per-source cancel dots, streak milestone (green), holiday (green) */}
+        {flags && (
+          (look.canceled && !!flags.cancelSource && cancelDotShouldShow(flags)) ||
+          isStreakMilestone(flags.clientCompletedStreak ?? 0) ||
+          flags.isHoliday
+        ) && (
           <div style={{ display: 'flex', gap: 2, marginTop: 2 }}>
-            {(flags.cancelEscalation ?? 0) >= 1 && (
-              <span style={{ width: 4, height: 4, borderRadius: '50%', background: cancelBar(apt.cancellation?.source), flexShrink: 0 }} />
+            {look.canceled && !!flags.cancelSource && cancelDotShouldShow(flags) && (
+              <span style={{ width: 4, height: 4, borderRadius: '50%', background: cancelDotBackground(flags), flexShrink: 0 }} />
             )}
-            {flags.completedStreak != null && flags.completedStreak > 0 && flags.completedStreak % 10 === 0 && (
-              <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#d97706', flexShrink: 0 }} />
+            {isStreakMilestone(flags.clientCompletedStreak ?? 0) && (
+              <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--green-600, #16a34a)', flexShrink: 0 }} />
             )}
             {flags.isHoliday && (
               <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--green-700, #15803d)', flexShrink: 0 }} />
@@ -1282,7 +1349,7 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
           </div>
         )}
         {/* Marker row — full icons visible on roomy (iPad+) tiles */}
-        {roomy && flags && (flags.isHoliday || flags.isMakeup || (flags.streakStarLevel ?? 0) > 0 || (flags.completedStreak ?? 0) >= 2) && (
+        {roomy && flags && (flags.isHoliday || flags.isMakeup || isStreakMilestone(flags.clientCompletedStreak ?? 0)) && (
           <div style={{ display: 'flex', gap: 3, alignItems: 'center', marginTop: 3, flexWrap: 'wrap' }}>
             {flags.isHoliday && (
               <span style={{ fontSize: 10, color: 'var(--green-700)', fontWeight: 800 }} title={flags.holidayName ?? 'Holiday'}>✦</span>
@@ -1290,12 +1357,9 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
             {flags.isMakeup && (
               <span style={{ fontSize: 10 }} title={`Makeup${flags.makeupDates?.length ? ` of ${flags.makeupDates.join(', ')}` : ''}`}>🌟</span>
             )}
-            {(flags.streakStarLevel ?? 0) > 0 && (
-              <span style={{ fontSize: 10 }} title={`${flags.streakStarLevel} clean 2-week period${(flags.streakStarLevel ?? 0) > 1 ? 's' : ''}`}>⭐</span>
-            )}
-            {(flags.completedStreak ?? 0) >= 2 && (
-              <span style={{ fontSize: 9, fontWeight: 700, color: '#92400e', background: 'rgba(217,119,6,0.15)', padding: '0 3px', borderRadius: 3 }}>
-                {flags.completedStreak}✓
+            {isStreakMilestone(flags.clientCompletedStreak ?? 0) && (
+              <span style={{ fontSize: 9, fontWeight: 700, color: '#166534', background: 'rgba(22,163,74,0.14)', padding: '0 3px', borderRadius: 3 }}>
+                {streakEmoji(flags.clientCompletedStreak!)} {flags.clientCompletedStreak}
               </span>
             )}
           </div>
@@ -1378,7 +1442,7 @@ function formatHourLabel(h: number): string {
 function ViewBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button onClick={onClick} style={{
-      padding: '5px 10px', border: 'none',
+      padding: '5px 8px', border: 'none',
       backgroundColor: active ? '#3b82f6' : 'white',
       color: active ? 'white' : '#374151',
       cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -1390,7 +1454,7 @@ function ViewBtn({ active, onClick, children }: { active: boolean; onClick: () =
 function NavBtn({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button onClick={onClick} style={{
-      padding: '6px 12px', backgroundColor: '#e5e7eb', border: 'none',
+      padding: '5px 9px', backgroundColor: '#e5e7eb', border: 'none',
       borderRadius: 4, cursor: 'pointer', fontSize: 13,
     }}>{children}</button>
   );

@@ -1,7 +1,10 @@
 // Shared constants + helpers for the client-centric (Case) calendar surfaces:
-// ClientCalendarView (Month/Week/Day) and AvailabilityHeatmap.
+// ClientCalendarView's Month / Week / Day grids. The Week and Day grids overlap
+// every selected client's availability + sessions as translucent z-layers
+// (tierOf / TIER_COLOR / TIER_LAYOUT) and order clients with clusterByOverlap so
+// clients with similar availability sit adjacent.
 
-import { DayOfWeek } from '../types';
+import { DayOfWeek, Client } from '../types';
 
 export const DAY_S = 6;   // first visible hour
 export const DAY_E = 22;  // last visible hour (exclusive)
@@ -57,8 +60,37 @@ export const TIER_LABEL: Record<SessionTier, string> = {
   other: 'Other',
 };
 
+// Inset + z per tier so the overlapping stack reads as depth: availability is
+// backmost (handled by the renderer), then direct → other → supervision →
+// parent-training foremost, each inset a little further.
+export const TIER_LAYOUT: Record<SessionTier, { inset: number; z: number }> = {
+  direct:         { inset: 2, z: 12 },
+  other:          { inset: 4, z: 13 },
+  supervision:    { inset: 5, z: 14 },
+  parentTraining: { inset: 8, z: 15 },
+};
+
 // Cancel-escalation badge text — mirrors the admin calendar's scheme so the
 // Case lens reads the same way (2? → 3! → 4!! → 5🛑).
+/** Merge overlapping/adjacent pixel spans (sorted by top) into contiguous bands. */
+export function mergeSpans(spans: { top: number; h: number }[]): { top: number; h: number }[] {
+  if (!spans.length) return [];
+  const sorted = [...spans].sort((a, b) => a.top - b.top);
+  const merged: { top: number; h: number }[] = [];
+  let cur = { ...sorted[0] };
+  for (let i = 1; i < sorted.length; i++) {
+    const s = sorted[i];
+    if (s.top <= cur.top + cur.h + 1) {
+      cur.h = Math.max(cur.top + cur.h, s.top + s.h) - cur.top;
+    } else {
+      merged.push(cur);
+      cur = { ...s };
+    }
+  }
+  merged.push(cur);
+  return merged;
+}
+
 export function cancelBadgeText(level: number): string {
   if (level <= 1) return '';
   if (level === 2) return '2?';
@@ -111,4 +143,106 @@ export function assignLanes<T extends { startMin: number; endMin: number; sortKe
   }
   flush();
   return out;
+}
+
+// Exact minute overlap between two clients for one day-of-week.
+function pairDayOverlapMin(a: Client, b: Client, dow: DayOfWeek): number {
+  const wa = a.availabilityWindows?.[dow] ?? [];
+  const wb = b.availabilityWindows?.[dow] ?? [];
+  let total = 0;
+  for (const aw of wa) {
+    for (const bw of wb) {
+      const lo = Math.max(toMin(aw.start), toMin(bw.start));
+      const hi = Math.min(toMin(aw.end), toMin(bw.end));
+      if (hi > lo) total += hi - lo;
+    }
+  }
+  return total;
+}
+
+// Total availability-window overlap between two clients summed across all 7 days.
+function pairOverlapMin(a: Client, b: Client): number {
+  return WEEK_DAYS.reduce((s, dow) => s + pairDayOverlapMin(a, b, dow), 0);
+}
+
+// Greedy nearest-neighbor ordering using co-occurrence overlap minutes as edge
+// weight. Seed = client with highest total overlap (most co-schedulable);
+// repeatedly append the unplaced client with the strongest overlap to the last
+// placed one. Tie-break by client name for deterministic output.
+export function orderByCoOccurrence(clients: Client[]): Client[] {
+  if (clients.length <= 1) return clients;
+  const n = clients.length;
+
+  // Build upper-triangle overlap matrix.
+  const ov: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const m = pairOverlapMin(clients[i], clients[j]);
+      ov[i][j] = m;
+      ov[j][i] = m;
+    }
+  }
+
+  // Total overlap degree per client.
+  const degree = ov.map(row => row.reduce((s, v) => s + v, 0));
+
+  // Remaining indices sorted by degree descending, name ascending for ties.
+  const remaining = clients.map((_, i) => i).sort((a, b) =>
+    degree[b] !== degree[a]
+      ? degree[b] - degree[a]
+      : clients[a].name.localeCompare(clients[b].name),
+  );
+
+  const order: number[] = [remaining.shift()!];
+  while (remaining.length) {
+    const last = order[order.length - 1];
+    let best = 0;
+    let bestOv = -1;
+    for (let i = 0; i < remaining.length; i++) {
+      const o = ov[last][remaining[i]];
+      if (
+        o > bestOv ||
+        (o === bestOv && clients[remaining[i]].name < clients[remaining[best]].name)
+      ) {
+        bestOv = o;
+        best = i;
+      }
+    }
+    order.push(remaining.splice(best, 1)[0]);
+  }
+  return order.map(i => clients[i]);
+}
+
+// Greedy nearest-neighbour ordering on each client's weekly availability vector
+// (30-min resolution), so clients whose windows overlap sit adjacent — keeps the
+// overlapping translucent layers legible and groups similar caseloads together.
+export function clusterByOverlap(clients: Client[]): Client[] {
+  if (clients.length <= 1) return clients;
+  const SPD = (DAY_E - DAY_S) * 2;
+  const vecs = clients.map(client =>
+    WEEK_DAYS.flatMap(dow => {
+      const wins = client.availabilityWindows?.[dow] ?? [];
+      return Array.from({ length: SPD }, (_, si) => {
+        const s = DAY_S * 60 + si * 30, e = s + 30;
+        return wins.some(w => toMin(w.start) < e && toMin(w.end) > s) ? 1 : 0;
+      });
+    }),
+  );
+  const dot = (a: number[], b: number[]) => a.reduce((s, v, i) => s + v * b[i], 0);
+  const mag = (a: number[]) => Math.sqrt(a.reduce((s, v) => s + v * v, 0));
+  const sim = (a: number[], b: number[]) => { const ma = mag(a), mb = mag(b); return ma && mb ? dot(a, b) / (ma * mb) : 0; };
+  const total = (v: number[]) => v.reduce((s: number, x: number) => s + x, 0);
+
+  const remaining = clients.map((_, i) => i).sort((a, b) => total(vecs[b]) - total(vecs[a]));
+  const order: number[] = [remaining.shift()!];
+  while (remaining.length) {
+    const last = order[order.length - 1];
+    let best = 0, bestSim = -1;
+    for (let i = 0; i < remaining.length; i++) {
+      const s = sim(vecs[last], vecs[remaining[i]]);
+      if (s > bestSim) { bestSim = s; best = i; }
+    }
+    order.push(remaining.splice(best, 1)[0]);
+  }
+  return order.map(i => clients[i]);
 }

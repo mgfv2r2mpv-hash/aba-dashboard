@@ -50,7 +50,7 @@ import {
 import { solveDraft, DraftStatus, PrioritizationChoice } from './draftSolver';
 import DraftTray from './components/DraftTray';
 import { wishSolutionToDraft } from './wish';
-import { computeSessionFlags, SessionFlags } from './sessionFlags';
+import { computeSessionFlags, SessionFlags, streakEmoji } from './sessionFlags';
 
 // Route axios /api/* calls through an in-memory store on iOS/Android,
 // since the Express server isn't reachable from inside the WebView.
@@ -274,10 +274,10 @@ export default function App() {
     const el = headerRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
-      setHeaderHeight(el.offsetHeight);
+      setHeaderHeight(el.getBoundingClientRect().bottom);
     });
     ro.observe(el);
-    setHeaderHeight(el.offsetHeight);
+    setHeaderHeight(el.getBoundingClientRect().bottom);
     return () => ro.disconnect();
   });
 
@@ -1168,24 +1168,52 @@ export default function App() {
           const flags = detailFlags.get(a.id);
           if (!flags) return null;
           const items: React.ReactNode[] = [];
-          if ((flags.cancelEscalation ?? 0) >= 1) {
-            const n = flags.cancelEscalation!;
-            const suffix = n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th';
-            items.push(<span key="cancel" style={{ ...metaChip, background: '#fee2e2', color: '#b91c1c' }}>⚠ {n}{suffix} consecutive cancel this month</span>);
+          if ((flags.clientCompletedStreak ?? 0) >= 2) {
+            const s = flags.clientCompletedStreak!;
+            items.push(<span key="cstreak" style={{ ...metaChip, background: '#dcfce7', color: '#166534' }}>{streakEmoji(s)} {s} w/ this client</span>);
           }
           if ((flags.completedStreak ?? 0) >= 2) {
             const s = flags.completedStreak!;
-            if (s % 10 === 0) {
-              items.push(<span key="streak-milestone" style={{ ...metaChip, background: '#fef9c3', color: '#854d0e' }}>🏆 {s}-session streak milestone!</span>);
-            } else {
-              items.push(<span key="streak" style={{ ...metaChip, background: '#fff7ed', color: '#92400e' }}>🔥 {s}-session streak</span>);
-            }
+            items.push(<span key="streak" style={{ ...metaChip, background: '#d1fae5', color: '#065f46' }}>{streakEmoji(s)} {s} overall</span>);
           }
           if (flags.isHoliday) {
             items.push(<span key="holiday" style={{ ...metaChip, background: '#dcfce7', color: '#15803d' }}>✦ {flags.holidayName ?? 'Holiday'}</span>);
           }
           if (items.length === 0) return null;
           return <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>{items}</div>;
+        })()}
+        {(() => {
+          // Cancel-pressure breakdown — four independent windows (consecutive run
+          // + trailing-30-day count) for the participants touching this session.
+          const ctx = detailFlags.get(a.id)?.cancelCtx;
+          if (!ctx) return null;
+          const dim: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' };
+          const stat = (label: string, run: number, roll: number, wDays: number, key: string) => (
+            <div key={key} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '3px 0' }}>
+              <span style={{ ...dim, minWidth: 92, flexShrink: 0 }}>{label}</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: run >= 2 ? '#b91c1c' : '#374151' }}>{run} in a row</span>
+              <span style={{ fontSize: 12, color: '#6b7280' }}>· {roll} in {wDays}d</span>
+            </div>
+          );
+          const rows: React.ReactNode[] = [];
+          if (a.technician) {
+            rows.push(
+              <div key="bt" style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '3px 0' }}>
+                <span style={{ ...dim, minWidth: 92, flexShrink: 0 }}>BT · this client</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: ctx.bt.withClientConsecutive >= 2 ? '#b91c1c' : '#374151' }}>{ctx.bt.withClientConsecutive} in a row</span>
+                <span style={{ fontSize: 12, color: '#6b7280' }}>· {ctx.bt.perBtCaseRolling30} in {ctx.family.windowDays}d · BT all: {ctx.bt.btRolling30} in {ctx.family.windowDays}d</span>
+              </div>,
+            );
+          }
+          if (ctx.family.consecutive || ctx.family.rolling30 || ctx.source === 'family') rows.push(stat('Family', ctx.family.consecutive, ctx.family.rolling30, ctx.family.windowDays, 'fam'));
+          if (ctx.bcba.consecutive || ctx.bcba.rolling30 || ctx.source === 'bcba') rows.push(stat('BCBA', ctx.bcba.consecutive, ctx.bcba.rolling30, ctx.bcba.windowDays, 'bcba'));
+          if (ctx.admin.consecutive || ctx.admin.rolling30 || ctx.source === 'admin') rows.push(stat('Admin', ctx.admin.consecutive, ctx.admin.rolling30, ctx.admin.windowDays, 'admin'));
+          return (
+            <div style={{ marginTop: 10, padding: '8px 10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#b91c1c', marginBottom: 2 }}>⚠ Cancellation pressure</div>
+              {rows}
+            </div>
+          );
         })()}
 
         {(status === 'canceled' || status === 'completed') && (
@@ -1354,7 +1382,7 @@ export default function App() {
   return (
     <div style={{
       display: 'flex', height: '100vh', maxWidth: '100vw',
-      overflowX: 'hidden', flexDirection: 'column',
+      overflowX: 'clip' as any, flexDirection: 'column',
       // Side insets matter on landscape iPhones with a notch so chrome
       // doesn't slip under the camera housing.
       paddingLeft: 'env(safe-area-inset-left)',
@@ -1367,12 +1395,14 @@ export default function App() {
         // title doesn't sit under the time/carrier indicators.
         padding: 'calc(env(safe-area-inset-top) + 6px) 12px 6px',
         boxShadow: 'var(--shadow-sm)',
-        // Both orientations: sticky/fixed at top, never scrolls off-screen.
-        position: isLandscape ? 'sticky' : 'fixed',
+        // Both orientations: sticky at top so it participates in the flex
+        // layout and pushes the scroll container below it naturally. Fixed
+        // was tried in portrait but caused a double-offset gap because iOS
+        // WebKit can treat fixed elements as still occupying flex space,
+        // meaning the scroll container's paddingTop and the sticky top offset
+        // both applied, sticking the toolbar headerHeight*2 from the top.
+        position: 'sticky',
         top: 0,
-        left: isLandscape ? undefined : 0,
-        right: isLandscape ? undefined : 0,
-        width: isLandscape ? undefined : '100%',
         zIndex: 10,
         flexShrink: 0,
         boxSizing: 'border-box',
@@ -1433,12 +1463,13 @@ export default function App() {
           // below it without growing the page.
           flexWrap: splitView ? 'nowrap' : 'wrap',
           overflowY: splitView ? 'hidden' : 'auto',
-          overflowX: 'hidden',
+          overflowX: 'clip' as any,
           WebkitOverflowScrolling: 'touch' as any,
           paddingBottom: splitView ? 0 : 'env(safe-area-inset-bottom)',
-          // Fixed header in portrait mode: push content down so it doesn't hide
-          // behind the header. In landscape the header is sticky (in flow).
-          paddingTop: isLandscape ? 0 : headerHeight,
+          // Header is now position:sticky in both orientations so it takes up
+          // space in the flex column — no paddingTop needed, and the calendar
+          // toolbar sticks at top:0 relative to this scroll container.
+          ['--cal-sticky-top' as any]: '0px',
         }}>
         {view === 'cpr' ? (
           <React.Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>Loading…</div>}>
@@ -1452,19 +1483,6 @@ export default function App() {
                   flex: '1 1 320px', minWidth: 0,
                   ...(splitView ? { overflowY: 'auto', minHeight: 0, WebkitOverflowScrolling: 'touch' as any } : {}),
                 }}>
-                  {pendingReview.length > 0 && (
-                    <button
-                      onClick={() => setShowDayReview(true)}
-                      style={{
-                        display: 'block', width: 'calc(100% - 16px)', margin: '8px',
-                        padding: '8px 12px', backgroundColor: '#fef3c7',
-                        border: '1px solid #fcd34d', borderRadius: 6, cursor: 'pointer',
-                        fontSize: 13, fontWeight: 600, color: '#92400e', textAlign: 'left',
-                      }}
-                    >
-                      📋 {pendingReview.length} past session{pendingReview.length === 1 ? '' : 's'} awaiting review — complete or cancel them
-                    </button>
-                  )}
                   <Calendar
                     appointments={calendarAppointments}
                     technicians={scheduleData.technicians}
@@ -1481,6 +1499,19 @@ export default function App() {
                     draftMarks={calendarMarks}
                     onMoveThis={aiSettings.apiKey ? handleMoveThis : undefined}
                     onReplaceThis={aiSettings.apiKey ? handleReplaceThis : undefined}
+                    notice={pendingReview.length > 0 ? (
+                      <button
+                        onClick={() => setShowDayReview(true)}
+                        style={{
+                          display: 'block', width: 'calc(100% - 16px)', margin: '8px',
+                          padding: '8px 12px', backgroundColor: '#fef3c7',
+                          border: '1px solid #fcd34d', borderRadius: 6, cursor: 'pointer',
+                          fontSize: 13, fontWeight: 600, color: '#92400e', textAlign: 'left',
+                        }}
+                      >
+                        📋 {pendingReview.length} past session{pendingReview.length === 1 ? '' : 's'} awaiting review — complete or cancel them
+                      </button>
+                    ) : undefined}
                   />
                 </div>
                 {(() => {

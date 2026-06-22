@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, fireEvent } from '@testing-library/react';
 import ClientCalendarView from './ClientCalendarView';
 import type { Client, Appointment } from '../types';
 
@@ -82,6 +82,28 @@ describe('ClientCalendarView — Case lens', () => {
       container.textContent?.includes('✦') ||
       container.querySelector('[title*="Holiday" i], [title*="Memorial Day"]') !== null;
     expect(hasHolidayMarker).toBe(true);
+  });
+
+  // Filter/focus redesign: the Clients ▾ visibility dropdown and a Clear-focus
+  // control replace All/None, and tapping a client focus pill must not crash.
+  it('renders the Clients dropdown + Clear focus and toggles a focus pill (week)', () => {
+    const c2: Client = { ...client, id: 'c2', name: 'Client 2' };
+    const { container, getByText } = render(
+      <ClientCalendarView
+        clients={[client, c2]}
+        appointments={[apptDirect]}
+        blackouts={[]}
+        view="week"
+        date={anchor}
+        onPickDay={() => {}}
+      />,
+    );
+    expect(container.textContent).toContain('Clients (2/2)');
+    expect(getByText('Clear focus')).toBeTruthy();
+    // Focus pills carry a "Tap to focus" title — tapping one shouldn't throw.
+    const pill = container.querySelector('button[title="Tap to focus"]');
+    expect(pill).toBeTruthy();
+    expect(() => fireEvent.click(pill!)).not.toThrow();
   });
 
   // Defect 1: cancel-escalation severity / session badges do not show in Case lens.

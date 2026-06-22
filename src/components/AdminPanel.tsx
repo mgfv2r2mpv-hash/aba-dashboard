@@ -58,7 +58,7 @@ interface AdminPanelProps {
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 export default function AdminPanel({ data, onDataChange, persist, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings, aiSettings, onSaveAISettings, onClearKey, onRequestUnlock, faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'settings' | 'technicians' | 'clients' | 'auths' | 'daysoff'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'bts' | 'clients' | 'auths' | 'daysoff' | 'candc'>('settings');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reordering, setReordering] = useState<null | 'clients' | 'technicians'>(null);
@@ -341,11 +341,12 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: 'var(--border-hairline)', backgroundColor: 'var(--surface-sunken)' }}>
-        <button onClick={() => setActiveTab('settings')} style={tabStyle(activeTab === 'settings')}>Settings</button>
-        <button onClick={() => setActiveTab('technicians')} style={tabStyle(activeTab === 'technicians')}>Technicians</button>
+        <button onClick={() => setActiveTab('bts')} style={tabStyle(activeTab === 'bts')}>BTs</button>
         <button onClick={() => setActiveTab('clients')} style={tabStyle(activeTab === 'clients')}>Clients</button>
         <button onClick={() => setActiveTab('auths')} style={tabStyle(activeTab === 'auths')}>Auths</button>
         <button onClick={() => setActiveTab('daysoff')} style={tabStyle(activeTab === 'daysoff')}>Time Off</button>
+        <button onClick={() => setActiveTab('candc')} style={tabStyle(activeTab === 'candc')}>C&amp;C</button>
+        <button onClick={() => setActiveTab('settings')} style={tabStyle(activeTab === 'settings')}>Settings</button>
       </div>
 
       {error && (
@@ -356,10 +357,10 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'auto', padding: '24px' }}>
-        {activeTab === 'technicians' && (
+        {activeTab === 'bts' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: 8 }}>
-              <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Manage Technicians ({data.technicians.length})</h3>
+              <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Manage BTs ({data.technicians.length})</h3>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {data.technicians.length > 1 && (
                   <SortMenu
@@ -451,12 +452,26 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
 
         {activeTab === 'daysoff' && (
           <>
-            <CompanyHolidaysTab
-              holidays={data.companyHolidays || []}
-              savingId={savingId}
-              onAdd={addCompanyHoliday}
-              onRemove={removeCompanyHoliday}
+            <PtoEditor
+              settings={data.settings}
+              saving={savingId === 'settings'}
+              onSave={persistSettings}
             />
+            <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid var(--border-default)' }}>
+              <ClinicianAvailEditor
+                settings={data.settings}
+                saving={savingId === 'settings'}
+                onSave={persistSettings}
+              />
+            </div>
+            <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid var(--border-default)' }}>
+              <CompanyHolidaysTab
+                holidays={data.companyHolidays || []}
+                savingId={savingId}
+                onAdd={addCompanyHoliday}
+                onRemove={removeCompanyHoliday}
+              />
+            </div>
             <div style={{ marginTop: 32, paddingTop: 24, borderTop: '2px solid var(--border-default)' }}>
               <BlackoutsTab
                 blackouts={data.blackouts || []}
@@ -478,6 +493,14 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
               />
             </div>
           </>
+        )}
+
+        {activeTab === 'candc' && (
+          <CandcEditor
+            settings={data.settings}
+            saving={savingId === 'settings'}
+            onSave={persistSettings}
+          />
         )}
 
         {activeTab === 'settings' && (
@@ -2150,6 +2173,344 @@ function PtoConfigEditor({ value, onChange }: { value: PtoConfig; onChange: (c: 
   );
 }
 
+// ── Company & Compliance tab ──────────────────────────────────────────────────
+
+function CandcEditor({ settings, saving, onSave }: {
+  settings: CompanySettings;
+  saving: boolean;
+  onSave: (next: CompanySettings) => void | Promise<boolean | void>;
+}) {
+  const [justSaved, setJustSaved] = useState(false);
+  const s = (n: number | undefined) => (n === undefined ? '' : String(n));
+  const u = resolveUtilization(settings.utilization);
+  // Supervision
+  const [directPct, setDirectPct] = useState(s(settings.supervisionDirectHoursPercent));
+  const [rbtPct, setRbtPct] = useState(s(settings.supervisionRBTHoursPercent));
+  const [techPct, setTechPct] = useState(s(settings.supervisionTechHoursPercent));
+  const [maxPct, setMaxPct] = useState(s(settings.supervisionMaxHoursPercent));
+  const [prefMinPct, setPrefMinPct] = useState(s(settings.supervisionPreferredMinPercent ?? 15));
+  const [prefMaxPct, setPrefMaxPct] = useState(s(settings.supervisionPreferredMaxPercent ?? 20));
+  const [minContacts, setMinContacts] = useState(s(settings.rbtMinContactsPerMonth ?? 2));
+  const [techMinContacts, setTechMinContacts] = useState(s(settings.techMinContactsPerMonth ?? 1));
+  const [contactsSeparateDays, setContactsSeparateDays] = useState(settings.contactsMustOccurOnSeparateDays ?? true);
+  const [pendingUncheck, setPendingUncheck] = useState(false);
+  // Parent Training
+  const [periodUnit, setPeriodUnit] = useState<TrainingPeriodUnit>(settings.parentTraining.periodUnit);
+  const [ptMin, setPtMin] = useState(s(settings.parentTraining.minimumHours));
+  const [ptTargetMin, setPtTargetMin] = useState(s(settings.parentTraining.targetMinHours));
+  const [ptTargetMax, setPtTargetMax] = useState(s(settings.parentTraining.targetMaxHours));
+  // Billable
+  const [bcbaWeekly, setBcbaWeekly] = useState(s(u.bcbaWeeklyBillableHours));
+  const [btWeekly, setBtWeekly] = useState(s(u.btWeeklyDirectHours));
+  const [bcbaMonthly, setBcbaMonthly] = useState(s(u.bcbaMonthlyBillableHours));
+  const [bcbaMonthly5, setBcbaMonthly5] = useState(s(u.bcbaMonthlyBillableHours5Week));
+  const [clientUtilPct, setClientUtilPct] = useState(s(settings.utilization?.clientUtilizationPercent ?? 80));
+  const [minClientSessionHrs, setMinClientSessionHrs] = useState(s(settings.utilization?.minClientSessionHoursPerWeek ?? 10));
+  // Cancellation
+  const [codes, setCodes] = useState<CancellationCode[]>(() => resolveCancellationCodes(settings).map(c => ({ ...c })));
+  const [unplannedHrs, setUnplannedHrs] = useState(s(settings.cancellationNotice?.unplannedHoursThreshold ?? 24));
+  const [plannedDays, setPlannedDays] = useState(s(settings.cancellationNotice?.plannedDaysThreshold ?? 30));
+
+  const num = (str: string, fallback: number) => { const n = parseFloat(str); return Number.isFinite(n) ? n : fallback; };
+  const optNum = (str: string) => { if (str.trim() === '') return undefined; const n = parseFloat(str); return Number.isFinite(n) ? n : undefined; };
+
+  const save = async () => {
+    const next: CompanySettings = {
+      ...settings,
+      supervisionDirectHoursPercent: num(directPct, settings.supervisionDirectHoursPercent),
+      supervisionRBTHoursPercent: num(rbtPct, settings.supervisionRBTHoursPercent),
+      supervisionTechHoursPercent: optNum(techPct),
+      supervisionMaxHoursPercent: optNum(maxPct),
+      supervisionPreferredMinPercent: num(prefMinPct, 15),
+      supervisionPreferredMaxPercent: num(prefMaxPct, 20),
+      rbtMinContactsPerMonth: num(minContacts, 2),
+      techMinContactsPerMonth: num(techMinContacts, 1),
+      contactsMustOccurOnSeparateDays: contactsSeparateDays,
+      parentTraining: {
+        minimumHours: num(ptMin, settings.parentTraining.minimumHours),
+        targetMinHours: num(ptTargetMin, settings.parentTraining.targetMinHours),
+        targetMaxHours: num(ptTargetMax, settings.parentTraining.targetMaxHours),
+        periodUnit,
+      },
+      utilization: {
+        bcbaWeeklyBillableHours: num(bcbaWeekly, u.bcbaWeeklyBillableHours),
+        btWeeklyDirectHours: num(btWeekly, u.btWeeklyDirectHours),
+        bcbaMonthlyBillableHours: num(bcbaMonthly, u.bcbaMonthlyBillableHours),
+        bcbaMonthlyBillableHours5Week: num(bcbaMonthly5, u.bcbaMonthlyBillableHours5Week),
+        clientUtilizationPercent: num(clientUtilPct, 80),
+        minClientSessionHoursPerWeek: num(minClientSessionHrs, 10),
+      },
+      cancellationReasons: codes,
+      cancellationNotice: {
+        unplannedHoursThreshold: num(unplannedHrs, 24),
+        plannedDaysThreshold: num(plannedDays, 30),
+      },
+    };
+    setJustSaved(false);
+    const ok = await onSave(next);
+    if (ok !== false) { setJustSaved(true); window.setTimeout(() => setJustSaved(false), 2500); }
+  };
+
+  const saveBar = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <button onClick={save} style={primaryBtn} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+      {justSaved && <span style={{ color: 'var(--status-met)', fontWeight: 600, fontSize: 13 }}>✓ Saved</span>}
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: 8, flexWrap: 'wrap' }}>
+        <h3 style={{ fontSize: '18px', fontWeight: 'bold' }}>Company and Compliance</h3>
+        {saveBar}
+      </div>
+
+      <SettingsSection title="Supervision Targets">
+        <NumField label="Per-case Company Min. (% of Direct Service Hours)" value={directPct} onChange={setDirectPct} suffix="%" defaultValue={5} />
+        <NumField label="Per-Credentialed BT Company Min. (% of Direct Service Hours)" value={rbtPct} onChange={setRbtPct} suffix="%" defaultValue={5} hint="BACB floor is 5%." />
+        <NumField label="Per-BT Company Min. (% of Direct Service Hours)" value={techPct} onChange={setTechPct} suffix="%" placeholder="—" />
+        <NumField label="Per-Credentialed BT Min. Contacts Count" value={minContacts} onChange={setMinContacts} suffix="contacts" defaultValue={2} hint="BACB cadence requires at least 2/month." />
+        <NumField label="Per-BT Company Min. Monthly Contacts Count" value={techMinContacts} onChange={setTechMinContacts} suffix="contacts" defaultValue={1} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={pendingUncheck ? true : contactsSeparateDays}
+              onChange={e => {
+                if (!e.target.checked) { setPendingUncheck(true); }
+                else { setContactsSeparateDays(true); setPendingUncheck(false); }
+              }}
+              style={{ width: 15, height: 15 }}
+            />
+            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Contacts Must Occur on Separate Days?</span>
+          </label>
+          {pendingUncheck && (
+            <div style={{ marginLeft: 23, padding: '8px 10px', backgroundColor: 'var(--amber-100)', border: '1px solid var(--amber-300)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--amber-700)' }}>
+              <p style={{ margin: '0 0 6px' }}>
+                Unchecking means multiple supervision sessions on the same calendar day, for the same technician, will each count as a separate contact toward the monthly minimum.
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => { setContactsSeparateDays(false); setPendingUncheck(false); }} style={{ padding: '4px 10px', fontSize: 12, fontWeight: 600, backgroundColor: 'var(--status-pace)', color: 'var(--white)', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>Confirm</button>
+                <button onClick={() => setPendingUncheck(false)} style={{ padding: '4px 10px', fontSize: 12, fontWeight: 600, backgroundColor: 'var(--border-default)', color: 'var(--text-body)', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+        <NumField label="Insurer Max. Supervision % (% of Direct Service Hours)" value={maxPct} onChange={setMaxPct} suffix="%" placeholder="—" />
+        <NumField label="BCBA Preferred Sup. Min. (% of Direct Hours)" value={prefMinPct} onChange={setPrefMinPct} suffix="%" defaultValue={15} />
+        <NumField label="BCBA Preferred Sup. Max. (% of Direct Hours)" value={prefMaxPct} onChange={setPrefMaxPct} suffix="%" defaultValue={20} />
+      </SettingsSection>
+
+      <SettingsSection title="Parent Training Targets">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Period</span>
+          <select value={periodUnit} onChange={e => setPeriodUnit(e.target.value as TrainingPeriodUnit)} style={inputStyle}>
+            <option value="week">Per week</option>
+            <option value="month">Per month</option>
+            <option value="sixMonths">Per 6 months</option>
+            <option value="year">Per year</option>
+          </select>
+        </div>
+        <NumField label={`Minimum hours / ${periodUnit}`} value={ptMin} onChange={setPtMin} suffix="h" />
+        <NumField label={`Target min hours / ${periodUnit}`} value={ptTargetMin} onChange={setPtTargetMin} suffix="h" />
+        <NumField label={`Target max hours / ${periodUnit}`} value={ptTargetMax} onChange={setPtTargetMax} suffix="h" />
+      </SettingsSection>
+
+      <SettingsSection title="Billable &amp; Utilization Targets">
+        <NumField label="BCBA fully-utilized weekly billables" value={bcbaWeekly} onChange={setBcbaWeekly} suffix="h/wk" />
+        <NumField label="BT fully-utilized weekly direct hours" value={btWeekly} onChange={setBtWeekly} suffix="h/wk" hint="Aggregate BT direct hours your caseload generates." />
+        <NumField label="BCBA monthly goal (4-week month)" value={bcbaMonthly} onChange={setBcbaMonthly} suffix="h/mo" />
+        <NumField label="BCBA monthly goal (5-week month)" value={bcbaMonthly5} onChange={setBcbaMonthly5} suffix="h/mo" hint="Used when the month spans 5+ weeks." />
+        <NumField label="Client utilization % (direct service hrs in auth)" value={clientUtilPct} onChange={setClientUtilPct} suffix="%" defaultValue={80} hint="Target % of authorized direct-service hours to fill. Default 80%." />
+        <NumField label="Min client session hours / wk" value={minClientSessionHrs} onChange={setMinClientSessionHrs} suffix="h/wk" defaultValue={10} hint="Minimum weekly direct-service hours per client. Default 10 h." />
+      </SettingsSection>
+
+      <SettingsSection title="Cancellation Codes">
+        <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 4px' }}>
+          Added, edited, or retired codes apply to the cancel dialog once you press <strong>Save</strong>.
+        </p>
+        <CancellationCodesEditor codes={codes} onChange={setCodes} />
+      </SettingsSection>
+
+      <SettingsSection title="Cancellation Notice">
+        <NumField label="Unplanned: adequate notice if more than" value={unplannedHrs} onChange={setUnplannedHrs} suffix="hours" />
+        <NumField label="Planned: adequate notice if more than" value={plannedDays} onChange={setPlannedDays} suffix="days" />
+      </SettingsSection>
+
+      <div style={{ marginTop: '8px', paddingTop: '12px', borderTop: 'var(--border-hairline)' }}>
+        {saveBar}
+      </div>
+    </div>
+  );
+}
+
+// ── PTO config (Time Off tab) ─────────────────────────────────────────────────
+
+function PtoEditor({ settings, saving, onSave }: {
+  settings: CompanySettings;
+  saving: boolean;
+  onSave: (next: CompanySettings) => void | Promise<boolean | void>;
+}) {
+  const [justSaved, setJustSaved] = useState(false);
+  const s = (n: number | undefined) => (n === undefined ? '' : String(n));
+  const [ptoRatio, setPtoRatio] = useState(s(settings.ptoBillableDeductionRatio ?? DEFAULT_PTO_DEDUCTION_RATIO));
+  const [ptoCfg, setPtoCfg] = useState<PtoConfig>(() => resolvePtoConfig(settings.pto));
+
+  const num = (str: string, fallback: number) => { const n = parseFloat(str); return Number.isFinite(n) ? n : fallback; };
+
+  const save = async () => {
+    const next: CompanySettings = {
+      ...settings,
+      ptoBillableDeductionRatio: num(ptoRatio, DEFAULT_PTO_DEDUCTION_RATIO),
+      pto: ptoCfg,
+    };
+    setJustSaved(false);
+    const ok = await onSave(next);
+    if (ok !== false) { setJustSaved(true); window.setTimeout(() => setJustSaved(false), 2500); }
+  };
+
+  return (
+    <div>
+      <SettingsSection title="Accrual Rules">
+        <NumField
+          label="Billable requirement removed per PTO hour"
+          value={ptoRatio}
+          onChange={setPtoRatio}
+          suffix="h / PTO h"
+          hint={`1 = every leave hour drops the week's requirement by an hour. Set 0.625 if an 8h day should remove 5 billable hours (~3 non-billable hours/day assumed). Currently 8h off = −${(() => { const r = parseFloat(ptoRatio); return Number.isFinite(r) ? Math.round(8 * r * 100) / 100 : 8; })()}h.`}
+        />
+        <PtoConfigEditor value={ptoCfg} onChange={setPtoCfg} />
+      </SettingsSection>
+      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button onClick={save} style={primaryBtn} disabled={saving}>{saving ? 'Saving…' : 'Save accrual rules'}</button>
+        {justSaved && <span style={{ color: 'var(--status-met)', fontWeight: 600, fontSize: 13 }}>✓ Saved</span>}
+      </div>
+    </div>
+  );
+}
+
+// ── BCBA clinician availability (Time Off tab) ────────────────────────────────
+
+const availTimeInput: React.CSSProperties = {
+  fontSize: '12px', padding: '2px 4px', border: '1px solid #d1d5db',
+  borderRadius: 3, width: 70, boxSizing: 'border-box',
+};
+
+function ClinicianAvailEditor({ settings, saving, onSave }: {
+  settings: CompanySettings;
+  saving: boolean;
+  onSave: (next: CompanySettings) => void | Promise<boolean | void>;
+}) {
+  const [justSaved, setJustSaved] = useState(false);
+  const [avail, setAvail] = useState<{ [key in DayOfWeek]?: TimeWindow[] }>(
+    () => settings.clinicianAvailability ?? {}
+  );
+
+  const updateWindow = (day: DayOfWeek, idx: number, field: 'start' | 'end', value: string) => {
+    const next = { ...avail };
+    const list = (next[day] || []).slice();
+    list[idx] = { ...list[idx], [field]: value };
+    next[day] = list;
+    setAvail(next);
+  };
+  const addWindow = (day: DayOfWeek) => {
+    const next = { ...avail };
+    next[day] = [...(next[day] || []), { start: '09:00', end: '17:00' }];
+    setAvail(next);
+  };
+  const removeWindow = (day: DayOfWeek, idx: number) => {
+    const next = { ...avail };
+    next[day] = (next[day] || []).filter((_, i) => i !== idx);
+    if ((next[day] || []).length === 0) delete next[day];
+    setAvail(next);
+  };
+  const clearDay = (day: DayOfWeek) => {
+    const next = { ...avail };
+    delete next[day];
+    setAvail(next);
+  };
+  const copyMondayToWeekdays = () => {
+    const monWindows = avail['Monday'] || [];
+    const next = { ...avail };
+    (['Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
+      if (monWindows.length === 0) { delete next[d]; }
+      else { next[d] = monWindows.map(w => ({ ...w })); }
+    });
+    setAvail(next);
+  };
+
+  const handleTogglePreset = (key: PresetKey) => {
+    const preset = PRESET_WINDOWS[key];
+    const active = isPresetActive(avail, preset);
+    setAvail(togglePreset(avail, preset, !active));
+  };
+
+  const save = async () => {
+    const next: CompanySettings = { ...settings, clinicianAvailability: avail };
+    setJustSaved(false);
+    const ok = await onSave(next);
+    if (ok !== false) { setJustSaved(true); window.setTimeout(() => setJustSaved(false), 2500); }
+  };
+
+  return (
+    <div>
+      <SettingsSection title="BCBA Availability">
+        <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 8px' }}>
+          Sets the grid range for the Case calendar. Sessions outside these windows fall outside BCBA coverage.
+        </p>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {(Object.keys(PRESET_WINDOWS) as PresetKey[]).map(key => (
+            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox" checked={isPresetActive(avail, PRESET_WINDOWS[key])} onChange={() => handleTogglePreset(key)} style={{ cursor: 'pointer' }} />
+              {PRESET_LABELS[key]}
+            </label>
+          ))}
+          <button onClick={copyMondayToWeekdays} style={chipBtn}>Copy Mon → Tue–Fri</button>
+          <button onClick={() => setAvail({})} style={{ ...chipBtn, color: 'var(--status-behind)', borderColor: 'var(--red-300)' }}>Clear all</button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          {DAYS.map((day, dayIdx) => {
+            const windows = avail[day] || [];
+            return (
+              <div key={day} style={{
+                display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap',
+                padding: '6px 8px', borderRadius: '4px',
+                background: dayIdx % 2 === 0 ? 'var(--surface-sunken)' : 'var(--surface-card)',
+                border: '1px solid #e5e7eb', boxSizing: 'border-box', width: '100%', minWidth: 0,
+              }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-body)', width: '36px', flexShrink: 0 }}>{day.slice(0, 3)}</span>
+                {windows.length === 0 && <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>Off</span>}
+                {windows.map((w, idx) => (
+                  <span key={idx} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '3px',
+                    backgroundColor: 'var(--sage-50)', border: '1px solid var(--sage-200)',
+                    borderRadius: 'var(--radius-sm)', padding: '2px 6px',
+                  }}>
+                    <input type="time" step="900" value={w.start} onChange={e => updateWindow(day, idx, 'start', e.target.value)} style={availTimeInput} />
+                    <span style={{ fontSize: '12px', color: '#6b7280' }}>–</span>
+                    <input type="time" step="900" value={w.end} onChange={e => updateWindow(day, idx, 'end', e.target.value)} style={availTimeInput} />
+                    <button onClick={() => removeWindow(day, idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#9ca3af', padding: '0 2px', lineHeight: 1 }} title="Remove">×</button>
+                  </span>
+                ))}
+                <button onClick={() => addWindow(day)} style={{ ...chipBtn, fontSize: '11px', padding: '2px 8px' }}>+ window</button>
+                {windows.length > 0 && (
+                  <button onClick={() => clearDay(day)} style={{ ...chipBtn, fontSize: '11px', padding: '2px 8px', marginLeft: 'auto' }}>Off</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </SettingsSection>
+      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button onClick={save} style={primaryBtn} disabled={saving}>{saving ? 'Saving…' : 'Save availability'}</button>
+        {justSaved && <span style={{ color: 'var(--status-met)', fontWeight: 600, fontSize: 13 }}>✓ Saved</span>}
+      </div>
+    </div>
+  );
+}
+
+// ── Settings editor (residual: Data, AI, Lock, Report dates, Session defaults) ─
+
 function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard, onDownload, onClearData,
   aiSettings, onSaveAISettings, onClearKey, onRequestUnlock,
   faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin
@@ -2173,38 +2534,10 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
 }) {
   const [justSaved, setJustSaved] = useState(false);
   const s = (n: number | undefined) => (n === undefined ? '' : String(n));
-  const [directPct, setDirectPct] = useState(s(settings.supervisionDirectHoursPercent));
-  const [rbtPct, setRbtPct] = useState(s(settings.supervisionRBTHoursPercent));
-  const [techPct, setTechPct] = useState(s(settings.supervisionTechHoursPercent));
-  const [maxPct, setMaxPct] = useState(s(settings.supervisionMaxHoursPercent));
-  const [ptMin, setPtMin] = useState(s(settings.parentTraining.minimumHours));
-  const [ptTargetMin, setPtTargetMin] = useState(s(settings.parentTraining.targetMinHours));
-  const [ptTargetMax, setPtTargetMax] = useState(s(settings.parentTraining.targetMaxHours));
-  const [periodUnit, setPeriodUnit] = useState<TrainingPeriodUnit>(settings.parentTraining.periodUnit);
-  const [unplannedHrs, setUnplannedHrs] = useState(s(settings.cancellationNotice?.unplannedHoursThreshold ?? 24));
-  const [plannedDays, setPlannedDays] = useState(s(settings.cancellationNotice?.plannedDaysThreshold ?? 30));
-  const u = resolveUtilization(settings.utilization);
-  const [bcbaWeekly, setBcbaWeekly] = useState(s(u.bcbaWeeklyBillableHours));
-  const [btWeekly, setBtWeekly] = useState(s(u.btWeeklyDirectHours));
-  const [bcbaMonthly, setBcbaMonthly] = useState(s(u.bcbaMonthlyBillableHours));
-  const [bcbaMonthly5, setBcbaMonthly5] = useState(s(u.bcbaMonthlyBillableHours5Week));
-  const [minContacts, setMinContacts] = useState(s(settings.rbtMinContactsPerMonth ?? 2));
-  const [techMinContacts, setTechMinContacts] = useState(s(settings.techMinContactsPerMonth ?? 1));
-  const [contactsSeparateDays, setContactsSeparateDays] = useState(settings.contactsMustOccurOnSeparateDays ?? true);
-  const [pendingUncheck, setPendingUncheck] = useState(false);
-  const [prefMinPct, setPrefMinPct] = useState(s(settings.supervisionPreferredMinPercent ?? 15));
-  const [prefMaxPct, setPrefMaxPct] = useState(s(settings.supervisionPreferredMaxPercent ?? 20));
   const [draftLeadVal, setDraftLeadVal] = useState(s(settings.reportDraftLead?.value ?? 4));
   const [draftLeadUnit, setDraftLeadUnit] = useState<'days' | 'weeks'>(settings.reportDraftLead?.unit ?? 'weeks');
   const [finalLeadVal, setFinalLeadVal] = useState(s(settings.reportFinalLead?.value ?? 2));
   const [finalLeadUnit, setFinalLeadUnit] = useState<'days' | 'weeks'>(settings.reportFinalLead?.unit ?? 'weeks');
-  // Cancellation reason codes — seeded from the company's set (or the built-in
-  // defaults). Saved with the rest of the settings via the "Save settings" button.
-  const [codes, setCodes] = useState<CancellationCode[]>(() => resolveCancellationCodes(settings).map(c => ({ ...c })));
-  const [ptoRatio, setPtoRatio] = useState(s(settings.ptoBillableDeductionRatio ?? DEFAULT_PTO_DEDUCTION_RATIO));
-  const [ptoCfg, setPtoCfg] = useState<PtoConfig>(() => resolvePtoConfig(settings.pto));
-  const [clientUtilPct, setClientUtilPct] = useState(s(settings.utilization?.clientUtilizationPercent ?? 80));
-  const [minClientSessionHrs, setMinClientSessionHrs] = useState(s(settings.utilization?.minClientSessionHoursPerWeek ?? 10));
 
   // BCBA (non-direct) session-length defaults — auto-fill a new appointment's end.
   const bsd = settings.bcbaSessionDefaults || DEFAULT_BCBA_SESSION_DEFAULTS;
@@ -2241,47 +2574,12 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
     const n = parseFloat(str);
     return Number.isFinite(n) ? n : fallback;
   };
-  const optNum = (str: string) => {
-    if (str.trim() === '') return undefined;
-    const n = parseFloat(str);
-    return Number.isFinite(n) ? n : undefined;
-  };
 
   const save = async () => {
     const next: CompanySettings = {
-      ...settings, // preserve clinicianAvailability + any legacy fields
-      supervisionDirectHoursPercent: num(directPct, settings.supervisionDirectHoursPercent),
-      supervisionRBTHoursPercent: num(rbtPct, settings.supervisionRBTHoursPercent),
-      supervisionTechHoursPercent: optNum(techPct),
-      supervisionMaxHoursPercent: optNum(maxPct),
-      parentTraining: {
-        minimumHours: num(ptMin, settings.parentTraining.minimumHours),
-        targetMinHours: num(ptTargetMin, settings.parentTraining.targetMinHours),
-        targetMaxHours: num(ptTargetMax, settings.parentTraining.targetMaxHours),
-        periodUnit,
-      },
-      cancellationNotice: {
-        unplannedHoursThreshold: num(unplannedHrs, 24),
-        plannedDaysThreshold: num(plannedDays, 30),
-      },
-      utilization: {
-        bcbaWeeklyBillableHours: num(bcbaWeekly, u.bcbaWeeklyBillableHours),
-        btWeeklyDirectHours: num(btWeekly, u.btWeeklyDirectHours),
-        bcbaMonthlyBillableHours: num(bcbaMonthly, u.bcbaMonthlyBillableHours),
-        bcbaMonthlyBillableHours5Week: num(bcbaMonthly5, u.bcbaMonthlyBillableHours5Week),
-        clientUtilizationPercent: num(clientUtilPct, 80),
-        minClientSessionHoursPerWeek: num(minClientSessionHrs, 10),
-      },
-      rbtMinContactsPerMonth: num(minContacts, 2),
-      techMinContactsPerMonth: num(techMinContacts, 1),
-      contactsMustOccurOnSeparateDays: contactsSeparateDays,
-      supervisionPreferredMinPercent: num(prefMinPct, 15),
-      supervisionPreferredMaxPercent: num(prefMaxPct, 20),
+      ...settings,
       reportDraftLead: { value: num(draftLeadVal, 4), unit: draftLeadUnit },
       reportFinalLead: { value: num(finalLeadVal, 2), unit: finalLeadUnit },
-      cancellationReasons: codes,
-      ptoBillableDeductionRatio: num(ptoRatio, DEFAULT_PTO_DEDUCTION_RATIO),
-      pto: ptoCfg,
       bcbaSessionDefaults: {
         supervisionPercentOfWeeklyDirect: num(supPct, DEFAULT_BCBA_SESSION_DEFAULTS.supervisionPercentOfWeeklyDirect),
         reassessmentHours: num(reassessHrs, DEFAULT_BCBA_SESSION_DEFAULTS.reassessmentHours),
@@ -2536,83 +2834,6 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
       {/* App Lock — always visible on native */}
       {appLockSection}
 
-      {/* ── MIDDLE: core compliance / practice settings ── */}
-      <SettingsSection title="Supervision Targets">
-        <NumField label="Per-case Company Min. (% of Direct Service Hours)" value={directPct} onChange={setDirectPct} suffix="%" defaultValue={5} />
-        <NumField label="Per-Credentialed BT Company Min. (% of Direct Service Hours)" value={rbtPct} onChange={setRbtPct} suffix="%" defaultValue={5} hint="BACB floor is 5%." />
-        <NumField label="Per-BT Company Min. (% of Direct Service Hours)" value={techPct} onChange={setTechPct} suffix="%" placeholder="—" />
-        <NumField label="Per-Credentialed BT Min. Contacts Count" value={minContacts} onChange={setMinContacts} suffix="contacts" defaultValue={2} hint="BACB cadence requires at least 2/month." />
-        <NumField label="Per-BT Company Min. Monthly Contacts Count" value={techMinContacts} onChange={setTechMinContacts} suffix="contacts" defaultValue={1} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={pendingUncheck ? true : contactsSeparateDays}
-              onChange={e => {
-                if (!e.target.checked) {
-                  setPendingUncheck(true);
-                } else {
-                  setContactsSeparateDays(true);
-                  setPendingUncheck(false);
-                }
-              }}
-              style={{ width: 15, height: 15 }}
-            />
-            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Contacts Must Occur on Separate Days?</span>
-          </label>
-          {pendingUncheck && (
-            <div style={{ marginLeft: 23, padding: '8px 10px', backgroundColor: 'var(--amber-100)', border: '1px solid var(--amber-300)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--amber-700)' }}>
-              <p style={{ margin: '0 0 6px' }}>
-                Unchecking means multiple supervision sessions on the same calendar day, for the same technician, will each count as a separate contact toward the monthly minimum.
-              </p>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => { setContactsSeparateDays(false); setPendingUncheck(false); }} style={{ padding: '4px 10px', fontSize: 12, fontWeight: 600, backgroundColor: 'var(--status-pace)', color: 'var(--white)', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>Confirm</button>
-                <button onClick={() => setPendingUncheck(false)} style={{ padding: '4px 10px', fontSize: 12, fontWeight: 600, backgroundColor: 'var(--border-default)', color: 'var(--text-body)', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>Cancel</button>
-              </div>
-            </div>
-          )}
-        </div>
-        <NumField label="Insurer Max. Supervision % (% of Direct Service Hours)" value={maxPct} onChange={setMaxPct} suffix="%" placeholder="—" />
-        <NumField label="BCBA Preferred Sup. Min. (% of Direct Hours)" value={prefMinPct} onChange={setPrefMinPct} suffix="%" defaultValue={15} />
-        <NumField label="BCBA Preferred Sup. Max. (% of Direct Hours)" value={prefMaxPct} onChange={setPrefMaxPct} suffix="%" defaultValue={20} />
-      </SettingsSection>
-
-      <SettingsSection title="Parent Training Targets">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-body)' }}>Period</span>
-          <select value={periodUnit} onChange={e => setPeriodUnit(e.target.value as TrainingPeriodUnit)} style={inputStyle}>
-            <option value="week">Per week</option>
-            <option value="month">Per month</option>
-            <option value="sixMonths">Per 6 months</option>
-            <option value="year">Per year</option>
-          </select>
-        </div>
-        <NumField label={`Minimum hours / ${periodUnit}`} value={ptMin} onChange={setPtMin} suffix="h" />
-        <NumField label={`Target min hours / ${periodUnit}`} value={ptTargetMin} onChange={setPtTargetMin} suffix="h" />
-        <NumField label={`Target max hours / ${periodUnit}`} value={ptTargetMax} onChange={setPtTargetMax} suffix="h" />
-      </SettingsSection>
-
-      <SettingsSection title="Billable &amp; Utilization Targets">
-        <NumField label="BCBA fully-utilized weekly billables" value={bcbaWeekly} onChange={setBcbaWeekly} suffix="h/wk" />
-        <NumField label="BT fully-utilized weekly direct hours" value={btWeekly} onChange={setBtWeekly} suffix="h/wk" hint="Aggregate BT direct hours your caseload generates." />
-        <NumField label="BCBA monthly goal (4-week month)" value={bcbaMonthly} onChange={setBcbaMonthly} suffix="h/mo" />
-        <NumField label="BCBA monthly goal (5-week month)" value={bcbaMonthly5} onChange={setBcbaMonthly5} suffix="h/mo" hint="Used when the month spans 5+ weeks." />
-        <NumField label="Client utilization % (direct service hrs in auth)" value={clientUtilPct} onChange={setClientUtilPct} suffix="%" defaultValue={80} hint="Target % of authorized direct-service hours to fill. Default 80%." />
-        <NumField label="Min client session hours / wk" value={minClientSessionHrs} onChange={setMinClientSessionHrs} suffix="h/wk" defaultValue={10} hint="Minimum weekly direct-service hours per client. Default 10 h." />
-      </SettingsSection>
-
-      <SettingsSection title="Cancellation Codes">
-        <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 4px' }}>
-          Added, edited, or retired codes apply to the cancel dialog once you press <strong>Save settings</strong>.
-        </p>
-        <CancellationCodesEditor codes={codes} onChange={setCodes} />
-      </SettingsSection>
-
-      <SettingsSection title="Cancellation Notice">
-        <NumField label="Unplanned: adequate notice if more than" value={unplannedHrs} onChange={setUnplannedHrs} suffix="hours" />
-        <NumField label="Planned: adequate notice if more than" value={plannedDays} onChange={setPlannedDays} suffix="days" />
-      </SettingsSection>
-
       {/* ── BOTTOM: already-configured security items (management) ── */}
 
       {/* AI Integration — bottom when key is set */}
@@ -2620,17 +2841,6 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
 
       {/* Schedule Password — bottom management when set */}
       {hasExistingPw && schedulePwSection}
-
-      <SettingsSection title="Time off">
-        <NumField
-          label="Billable requirement removed per PTO hour"
-          value={ptoRatio}
-          onChange={setPtoRatio}
-          suffix="h / PTO h"
-          hint={`1 = every leave hour drops the week's requirement by an hour. Set 0.625 if an 8h day should remove 5 billable hours (~3 non-billable hours/day assumed). Currently 8h off = −${(() => { const r = parseFloat(ptoRatio); return Number.isFinite(r) ? Math.round(8 * r * 100) / 100 : 8; })()}h.`}
-        />
-        <PtoConfigEditor value={ptoCfg} onChange={setPtoCfg} />
-      </SettingsSection>
 
       <SettingsSection title="Report due dates (before auth end)">
         <LeadField label="Initial draft due" value={draftLeadVal} unit={draftLeadUnit} onChangeValue={setDraftLeadVal} onChangeUnit={setDraftLeadUnit} />
@@ -2647,10 +2857,6 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
         <NumField label="Parent training / coordination of care" value={parentTrainHrs} onChange={setParentTrainHrs} suffix="h" />
         <NumField label="Other" value={otherHrs} onChange={setOtherHrs} suffix="h" />
       </SettingsSection>
-
-      <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
-        Clinician availability is still configured in the Setup Wizard.
-      </p>
 
       <div style={{ marginTop: '8px', paddingTop: '12px', borderTop: 'var(--border-hairline)' }}>
         {saveBar}

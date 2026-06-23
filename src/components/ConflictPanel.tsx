@@ -127,9 +127,11 @@ interface ConflictPanelProps {
   onMute?: (key: string) => void;
   onUnmute?: (key: string) => void;
   onConfirmDismiss?: (key: string) => void;
+  defaultCollapsed?: boolean;
 }
 
-export default function ConflictPanel({ conflicts, appointments = [], onSelectAppointment, fill, mutedKeys, onMute, onUnmute, onConfirmDismiss }: ConflictPanelProps) {
+export default function ConflictPanel({ conflicts, appointments = [], onSelectAppointment, fill, mutedKeys, onMute, onUnmute, onConfirmDismiss, defaultCollapsed = false }: ConflictPanelProps) {
+  const [collapsed, setCollapsed] = React.useState(defaultCollapsed);
   const [showMuted, setShowMuted] = React.useState(false);
   const muted = new Set(mutedKeys || []);
   const active = sortConflicts(conflicts.filter(c => !muted.has(conflictKey(c))));
@@ -247,37 +249,45 @@ export default function ConflictPanel({ conflicts, appointments = [], onSelectAp
       padding: '16px', boxSizing: 'border-box',
       ...(fill ? { minHeight: '100%' } : { borderBottom: '1px solid #e5e7eb' }),
     }}>
-      <h3 style={{ marginBottom: '12px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+      <h3
+        onClick={() => setCollapsed(c => !c)}
+        style={{ marginBottom: collapsed ? 0 : '12px', display: 'flex', gap: '8px', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+      >
+        <span>{collapsed ? '▸' : '▾'}</span>
         Issues Found
         {errorCount > 0 && <span style={{ color: '#dc2626', fontWeight: 'bold' }}>({errorCount} error{errorCount !== 1 ? 's' : ''})</span>}
         {warningCount > 0 && <span style={{ color: '#f59e0b', fontWeight: 'bold' }}>({warningCount} warning{warningCount !== 1 ? 's' : ''})</span>}
       </h3>
-      <div>
-        {active.length === 0 && mutedConflicts.length > 0 && (
-          <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 8px' }}>No active issues — all muted below.</p>
-        )}
-        {active.map((conflict, idx) => renderCard(conflict, idx, false))}
-      </div>
+      {!collapsed && (
+        <>
+          <div>
+            {active.length === 0 && mutedConflicts.length > 0 && (
+              <p style={{ color: '#6b7280', fontSize: 12, margin: '0 0 8px' }}>No active issues — all muted below.</p>
+            )}
+            {active.map((conflict, idx) => renderCard(conflict, idx, false))}
+          </div>
 
-      {mutedConflicts.length > 0 && (
-        <div style={{ marginTop: 8, borderTop: '1px dashed #d1d5db', paddingTop: 8 }}>
-          <button
-            onClick={() => setShowMuted(s => !s)}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-              fontSize: 12, fontWeight: 700, color: '#6b7280',
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}
-          >
-            <span>🔇 Muted ({mutedConflicts.length})</span>
-            <span>{showMuted ? '▾' : '▸'}</span>
-          </button>
-          {showMuted && (
-            <div style={{ marginTop: 8 }}>
-              {mutedConflicts.map((conflict, idx) => renderCard(conflict, idx, true))}
+          {mutedConflicts.length > 0 && (
+            <div style={{ marginTop: 8, borderTop: '1px dashed #d1d5db', paddingTop: 8 }}>
+              <button
+                onClick={() => setShowMuted(s => !s)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                  fontSize: 12, fontWeight: 700, color: '#6b7280',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                <span>🔇 Muted ({mutedConflicts.length})</span>
+                <span>{showMuted ? '▾' : '▸'}</span>
+              </button>
+              {showMuted && (
+                <div style={{ marginTop: 8 }}>
+                  {mutedConflicts.map((conflict, idx) => renderCard(conflict, idx, true))}
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   );

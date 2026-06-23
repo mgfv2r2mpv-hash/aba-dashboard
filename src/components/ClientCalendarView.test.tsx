@@ -98,7 +98,7 @@ describe('ClientCalendarView — Case lens', () => {
         onPickDay={() => {}}
       />,
     );
-    expect(container.textContent).toContain('Clients (2/2)');
+    expect(container.textContent).toContain('2/2 clients');
     expect(getByText('Clear focus')).toBeTruthy();
     // Focus pills carry a "Tap to focus" title — tapping one shouldn't throw.
     const pill = container.querySelector('button[title="Tap to focus"]');

@@ -95,9 +95,15 @@ function focusedConflicts(data: ScheduleData, weekStartMs: number[]): Conflict[]
     for (let j = i + 1; j < sessions.length; j++) {
       const a = sessions[i], b = sessions[j];
       if (overlapHours(a, b) <= 0) continue;
-      const sameTech = !!a.technician && (a.technician === b.technician);
+      // A real tech double-book needs the SAME tech PROVIDING both sessions —
+      // i.e. both are BT-bucket work. On a parent-training / case-planning
+      // session the technician field names the OBSERVED BT (not a provider), so
+      // it overlapping that BT's own direct is required concurrent care (how
+      // supervision earns credit), never a double-book.
+      const sameTechProvider = bucketOf(a) === 'bt' && bucketOf(b) === 'bt'
+        && !!a.technician && a.technician === b.technician;
       const bothBcbaBillable = bucketOf(a) === 'bcba' && bucketOf(b) === 'bcba';
-      if (sameTech || bothBcbaBillable) {
+      if (sameTechProvider || bothBcbaBillable) {
         conflicts.push({ ids: [a.id, b.id], kind: 'double-book' });
       }
     }

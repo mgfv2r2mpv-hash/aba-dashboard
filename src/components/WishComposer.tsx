@@ -7,6 +7,7 @@ import ImpactSummary from './ImpactSummary';
 import TrimPanel from './TrimPanel';
 import { solveComplianceFill } from '../localSolver';
 import { monthPeriod } from '../compliance';
+import { copyToClipboard } from '../lib/clipboard';
 
 // "Wish It": a structured natural-language composer that asks the AI for up to 3
 // ways to reshape the schedule toward a goal, then lets the BCBA Accept (apply),
@@ -69,7 +70,8 @@ export default function WishComposer({ data, aiSettings, onAccept, onCustomize, 
     try {
       const scheduler = new ClaudeScheduler(aiSettings.apiKey || 'preview', data, aiSettings.model);
       const prompt = scheduler.buildWishPrompt(wish);
-      await navigator.clipboard.writeText(prompt);
+      const ok = await copyToClipboard(prompt);
+    if (!ok) throw new Error('Copy failed');
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {

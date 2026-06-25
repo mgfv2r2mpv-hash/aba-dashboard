@@ -6,6 +6,7 @@ import { summarizeFixIt } from '../fixit';
 import { wishSolutionToDraft, computeSolutionImpact } from '../wish';
 import ImpactSummary from './ImpactSummary';
 import TrimPanel from './TrimPanel';
+import { copyToClipboard } from '../lib/clipboard';
 
 // "Fix It" 🔧 — the compliance-remediation panel that sits at the top of the
 // Compliance tab. The BCBA picks which clinical tools the AI may use and which
@@ -135,11 +136,13 @@ export default function FixItPanel({ data, aiSettings, conflicts, onAccept, onCu
               style={{ flex: 1, fontFamily: 'monospace', fontSize: 11, padding: 10, border: '1px solid #d1d5db', borderRadius: 6, resize: 'none', overflowY: 'auto' }}
             />
             <button
-              onClick={() => {
-                navigator.clipboard.writeText(previewPrompt).catch(() => {});
-                setCopyFlash(true);
-                if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
-                copyTimeoutRef.current = setTimeout(() => setCopyFlash(false), 2000);
+              onClick={async () => {
+                const ok = await copyToClipboard(previewPrompt);
+                if (ok) {
+                  setCopyFlash(true);
+                  if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+                  copyTimeoutRef.current = setTimeout(() => setCopyFlash(false), 2000);
+                }
               }}
               style={{ marginTop: 10, padding: '7px 14px', background: copyFlash ? '#15803d' : '#ea580c', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 13, alignSelf: 'flex-end', transition: 'background 0.2s' }}
             >{copyFlash ? '✓ Copied!' : 'Copy to clipboard'}</button>

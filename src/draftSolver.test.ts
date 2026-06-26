@@ -35,7 +35,7 @@ describe('solveDraft — adjacent BCBA-billable sessions (regression)', () => {
   // its technician field. That BT is being observed, not providing — so the PT
   // overlapping that BT's own direct session is required concurrent care (it's
   // how supervision earns credit), NOT a tech double-book.
-  it('does NOT flag PT-naming-a-BT overlapping that BT\'s own direct session', () => {
+  it("does NOT flag PT-naming-a-BT overlapping that BT's own direct session", () => {
     const direct = appt({ id: 'd', type: 'client-session', technician: 'SB', startTime: '2026-06-01T14:45:00', endTime: '2026-06-01T16:30:00' });
     const sup = appt({ id: 'sup', type: 'supervision', startTime: '2026-06-01T14:45:00', endTime: '2026-06-01T15:30:00' });
     const pt = appt({ id: 'pt', type: 'parent-training', technician: 'SB', startTime: '2026-06-01T15:30:00', endTime: '2026-06-01T16:30:00' });
@@ -50,5 +50,26 @@ describe('solveDraft — adjacent BCBA-billable sessions (regression)', () => {
     const d2 = appt({ id: 'd2', type: 'client-session', technician: 'SB', client: 'XX', startTime: '2026-06-01T14:30:00', endTime: '2026-06-01T15:30:00' });
     const status = solveDraft(data([d1]), [newAddOp(d2)], NOW, {} as CompanySettings);
     expect(status.grade).toBe('red');
+  });
+
+  // Regression for the reshuffleMobile path: when the new appointment is in the
+  // future, solveDraft routes through reshuffleMobile instead of the all-past
+  // shortcut. Touching BCBA sessions must still grade green on that path.
+  it('does NOT flag future touching BCBA sessions (reshuffleMobile path)', () => {
+    const FUTURE_NOW = new Date('2026-05-01T09:00:00');
+    const sup = appt({ id: 'sup', type: 'supervision', startTime: '2026-06-01T14:45:00', endTime: '2026-06-01T15:30:00' });
+    const pt = appt({ id: 'pt', type: 'parent-training', technician: 'SB', startTime: '2026-06-01T15:30:00', endTime: '2026-06-01T16:30:00' });
+    const status = solveDraft(data([sup]), [newAddOp(pt)], FUTURE_NOW, {} as CompanySettings);
+    expect(status.grade).toBe('green');
+  });
+
+  // Two different BTs delivering direct service to the same client at the same
+  // time is a billing conflict — insurers reject duplicate direct-service claims
+  // for the same client in the same slot.
+  it('flags two overlapping direct sessions for the same client from different BTs', () => {
+    const d1 = appt({ id: 'd1', type: 'client-session', technician: 'SB', client: 'CO', startTime: '2026-06-01T14:00:00', endTime: '2026-06-01T15:00:00' });
+    const d2 = appt({ id: 'd2', type: 'client-session', technician: 'KW', client: 'CO', startTime: '2026-06-01T14:30:00', endTime: '2026-06-01T15:30:00' });
+    const status = solveDraft(data([d1]), [newAddOp(d2)], NOW, {} as CompanySettings);
+    expect(status.grade).not.toBe('green');
   });
 });

@@ -102,8 +102,13 @@ function focusedConflicts(data: ScheduleData, weekStartMs: number[]): Conflict[]
       // supervision earns credit), never a double-book.
       const sameTechProvider = bucketOf(a) === 'bt' && bucketOf(b) === 'bt'
         && !!a.technician && a.technician === b.technician;
+      // Two direct-service sessions for the same client at the same time are a
+      // billing conflict regardless of which BT provides each — insurers reject
+      // duplicate direct-service claims for the same client in the same slot.
+      const sameClientDirects = a.type === 'client-session' && b.type === 'client-session'
+        && !!a.client && a.client === b.client;
       const bothBcbaBillable = bucketOf(a) === 'bcba' && bucketOf(b) === 'bcba';
-      if (sameTechProvider || bothBcbaBillable) {
+      if (sameTechProvider || sameClientDirects || bothBcbaBillable) {
         conflicts.push({ ids: [a.id, b.id], kind: 'double-book' });
       }
     }

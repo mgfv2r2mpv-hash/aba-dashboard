@@ -340,6 +340,8 @@ export interface SlotQuery {
   clientId?: string;         // resolve client availability + blackouts
   techId?: string;          // resolve tech availability + blackouts
   useClinicianAvailability?: boolean; // intersect with settings.clinicianAvailability (supervision)
+  clinicianBusy?: boolean;  // also treat the BCBA's own sessions as busy (BCBA can't double-book)
+  anchorTechId?: string;    // restrict mustOverlapDirect anchors to THIS tech's directs (supervision credit)
   fromDate?: Date;          // default: now
   throughDate?: string;     // YYYY-MM-DD hard deadline (default: month end)
   weekendsOk?: boolean;     // default false
@@ -366,6 +368,7 @@ export function findOpenSlots(data: ScheduleData, q: SlotQuery, limit = 8): Slot
 
   const client = q.clientId ? data.clients.find(c => c.id === q.clientId) : undefined;
   const tech = q.techId ? data.technicians.find(t => t.id === q.techId) : undefined;
+  const anchorTech = q.anchorTechId ? data.technicians.find(t => t.id === q.anchorTechId) : undefined;
   const out: SlotCandidate[] = [];
 
   // Corrections operate on now-and-future only. Never propose a slot that has
@@ -390,8 +393,8 @@ export function findOpenSlots(data: ScheduleData, q: SlotQuery, limit = 8): Slot
       // When PT must coincide with a direct session, the client's own directs
       // are NOT treated as busy — parent-training is allowed to run alongside
       // them (the parent is present). Other appointments still block.
-      const busy = busyIntervals(data, dateStr, client, tech, q.mustOverlapDirect === true);
-      const directIntervals = q.mustOverlapDirect ? directIntervalsFor(data, dateStr, client) : null;
+      const busy = busyIntervals(data, dateStr, client, tech, q.mustOverlapDirect === true, q.clinicianBusy === true);
+      const directIntervals = q.mustOverlapDirect ? directIntervalsFor(data, dateStr, client, anchorTech) : null;
       for (const w of windows) {
         // PT-coincides mode: anchor candidates to the direct sessions so the
         // slot actually overlaps one. Otherwise fill the earliest free gaps.
@@ -436,14 +439,20 @@ function intersect(a: Interval[], b: Interval[]): Interval[] {
   return out;
 }
 
+// BCBA-led session types — these occupy the supervising clinician, so when
+// `clinicianBusy` is set they block a new BCBA slot even if they belong to a
+// different client/tech (the BCBA can't be in two places at once).
+const CLINICIAN_TYPES: readonly Appointment['type'][] = ['supervision', 'parent-training', 'case-planning', 'reassessment'];
+
 function busyIntervals(
   data: ScheduleData, dateStr: string, client: Client | undefined, tech: Technician | undefined,
-  allowOverlapClientDirect = false,
+  allowOverlapClientDirect = false, includeClinician = false,
 ): Interval[] {
   return data.appointments
     .filter(a => a.status !== 'canceled' && !a.isGhost && a.startTime.slice(0, 10) === dateStr && (
       (client && (a.client === client.id || a.client === client.name)) ||
-      (tech && (a.technician === tech.id || a.technician === tech.name))
+      (tech && (a.technician === tech.id || a.technician === tech.name)) ||
+      (includeClinician && CLINICIAN_TYPES.includes(a.type))
     ))
     // PT-coincides-with-direct mode: don't let the client's own direct sessions
     // block the slot (they are the slots we want to land on).
@@ -453,11 +462,14 @@ function busyIntervals(
     .sort((x, y) => x.start - y.start);
 }
 
-function directIntervalsFor(data: ScheduleData, dateStr: string, client: Client | undefined): Interval[] {
+function directIntervalsFor(
+  data: ScheduleData, dateStr: string, client: Client | undefined, tech?: Technician | undefined,
+): Interval[] {
   if (!client) return [];
   return data.appointments
     .filter(a => a.type === 'client-session' && a.status !== 'canceled' && !a.isGhost && a.startTime.slice(0, 10) === dateStr &&
-      (a.client === client.id || a.client === client.name))
+      (a.client === client.id || a.client === client.name) &&
+      (!tech || a.technician === tech.id || a.technician === tech.name))
     .map(a => ({ start: minutesOfDay(a.startTime), end: minutesOfDay(a.endTime) }));
 }
 

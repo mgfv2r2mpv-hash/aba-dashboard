@@ -31,9 +31,24 @@ export interface AdminPersist {
   reorder?(entity: 'clients' | 'technicians', ids: string[]): Promise<void>;
 }
 
+// The inner sections of the admin surface. Roster/auth sections are also mounted
+// (scoped to a single tab) inside the C&C hub; settings/time-off/cancellation
+// settings stay under the ⚙️ Admin view.
+export type AdminTab = 'settings' | 'bts' | 'clients' | 'auths' | 'daysoff' | 'candc';
+const ALL_ADMIN_TABS: AdminTab[] = ['bts', 'clients', 'auths', 'daysoff', 'candc', 'settings'];
+const ADMIN_TAB_LABELS: Record<AdminTab, string> = {
+  bts: 'BTs', clients: 'Clients', auths: 'Auths', daysoff: 'Time Off', candc: 'C&C', settings: 'Settings',
+};
+
 interface AdminPanelProps {
   data: ScheduleData;
   onDataChange: (data: ScheduleData) => void;
+  // Restrict which sections render (and in what order). Defaults to all six.
+  // When exactly one tab is shown the internal tab bar is hidden, letting a
+  // parent (the C&C hub) own the chrome.
+  tabs?: AdminTab[];
+  // Which tab to open on mount; falls back to the first visible tab.
+  initialTab?: AdminTab;
   // Platform-specific persistence; absent = local state only (webportal mode).
   persist?: AdminPersist;
   // Data-lifecycle actions surfaced at the bottom of the Settings tab.
@@ -57,8 +72,12 @@ interface AdminPanelProps {
 }
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-export default function AdminPanel({ data, onDataChange, persist, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings, aiSettings, onSaveAISettings, onClearKey, onRequestUnlock, faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'settings' | 'bts' | 'clients' | 'auths' | 'daysoff' | 'candc'>('settings');
+export default function AdminPanel({ data, onDataChange, tabs, initialTab, persist, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings, aiSettings, onSaveAISettings, onClearKey, onRequestUnlock, faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin }: AdminPanelProps) {
+  const visibleTabs = (tabs && tabs.length > 0 ? tabs : ALL_ADMIN_TABS);
+  const showTabBar = visibleTabs.length > 1;
+  const [activeTab, setActiveTab] = useState<AdminTab>(
+    initialTab && visibleTabs.includes(initialTab) ? initialTab : visibleTabs[0]
+  );
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reordering, setReordering] = useState<null | 'clients' | 'technicians'>(null);
@@ -339,15 +358,16 @@ export default function AdminPanel({ data, onDataChange, persist, onImportFile, 
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-      {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: 'var(--border-hairline)', backgroundColor: 'var(--surface-sunken)' }}>
-        <button onClick={() => setActiveTab('bts')} style={tabStyle(activeTab === 'bts')}>BTs</button>
-        <button onClick={() => setActiveTab('clients')} style={tabStyle(activeTab === 'clients')}>Clients</button>
-        <button onClick={() => setActiveTab('auths')} style={tabStyle(activeTab === 'auths')}>Auths</button>
-        <button onClick={() => setActiveTab('daysoff')} style={tabStyle(activeTab === 'daysoff')}>Time Off</button>
-        <button onClick={() => setActiveTab('candc')} style={tabStyle(activeTab === 'candc')}>C&amp;C</button>
-        <button onClick={() => setActiveTab('settings')} style={tabStyle(activeTab === 'settings')}>Settings</button>
-      </div>
+      {/* Tabs — hidden when the parent (C&C hub) scopes us to a single section. */}
+      {showTabBar && (
+        <div style={{ display: 'flex', borderBottom: 'var(--border-hairline)', backgroundColor: 'var(--surface-sunken)' }}>
+          {visibleTabs.map(t => (
+            <button key={t} onClick={() => setActiveTab(t)} style={tabStyle(activeTab === t)}>
+              {t === 'candc' ? 'C&C' : ADMIN_TAB_LABELS[t]}
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && (
         <div style={{ padding: '8px 16px', backgroundColor: 'var(--status-behind-bg)', color: 'var(--red-800)', fontSize: '13px' }}>
@@ -2624,6 +2644,12 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
       }
       setJustSaved(true);
       window.setTimeout(() => setJustSaved(false), 2500);
+    } else if (changingPw) {
+      // Save was rejected (e.g. the schedule failed to load, so the settings
+      // write threw). Don't leave the password form looking unchanged as if it
+      // saved — say so where the user is editing it. The global error banner
+      // carries the underlying message but can be scrolled off-screen.
+      setPwError('Couldn’t save — re-import your schedule and try again.');
     }
   };
 

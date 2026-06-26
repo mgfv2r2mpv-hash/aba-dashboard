@@ -20,6 +20,25 @@ export function useMinWidth(px: number): boolean {
   return matches;
 }
 
+// Reactive `(max-width: Npx)` media query — the inverse of useMinWidth. Used to
+// collapse chrome on narrow screens (e.g. show the Admin tab as just ⚙️ on an
+// iPhone in portrait).
+export function useMaxWidth(px: number): boolean {
+  const query = `(max-width: ${px}px)`;
+  const [matches, setMatches] = useState(() =>
+    typeof window === 'undefined' ? false : window.matchMedia(query).matches
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia(query);
+    const handler = (e: MediaQueryListEvent) => setMatches(e.matches);
+    setMatches(mq.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [query]);
+  return matches;
+}
+
 // ── Device-class detection ───────────────────────────────────────────────────
 // Belt-and-suspenders companion to the width query. A bare width breakpoint mis-
 // classifies real hardware: the iPad Air 11" is 820px portrait (fine) but an iPad

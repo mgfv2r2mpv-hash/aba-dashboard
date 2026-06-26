@@ -417,12 +417,12 @@ export interface Appointment {
 export const SUPERVISION_COUNTING_TYPES: readonly Appointment['type'][] = ['supervision', 'parent-training', 'case-planning'];
 
 // True for a session eligible for supervision credit. Supervision always
-// qualifies (credit is decided by overlap); parent-training / case-planning
-// qualify only when they name a BT. The credited hours are the time-overlap with
+// qualifies (credit is decided by overlap); parent-training / case-planning / reassessment
+// qualify only when they name a BT (BT must be present and assisting). The credited hours are the time-overlap with
 // the relevant BT's direct session(s) — partial overlap → partial credit.
 export function countsAsSupervision(a: Pick<Appointment, 'type' | 'technician'>): boolean {
   if (a.type === 'supervision') return true;
-  if (a.type === 'parent-training' || a.type === 'case-planning') return !!a.technician;
+  if (a.type === 'parent-training' || a.type === 'case-planning' || a.type === 'reassessment') return !!a.technician;
   return false;
 }
 

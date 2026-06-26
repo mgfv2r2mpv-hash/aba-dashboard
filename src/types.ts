@@ -683,6 +683,13 @@ export interface FixItOptions {
   // Weighting hints passed to the AI prompt.
   prioritizeBtSupervision?: boolean;
   prioritizeParentTraining?: boolean;
+  // Scope the whole remediation to a single case: gaps, supervisable windows,
+  // tech gaps, and diagnostics are all narrowed to this client. Used by the
+  // per-case "Fix it" dialog on the Cases table.
+  focusClientId?: string;
+  // Free-text BCBA guidance, appended to the prompt (scrubbed for PII) so the
+  // model resolves conflicts according to the BCBA's stated priorities.
+  guidance?: string;
 }
 
 export const DEFAULT_FIXIT_OPTIONS: FixItOptions = {

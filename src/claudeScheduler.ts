@@ -119,8 +119,23 @@ export class ClaudeScheduler {
     const u = resolveUtilization(s.utilization);
 
     const excluded = new Set(options.excludedClientIds);
+    // Per-case scoping: narrow every section to a single client when set.
+    const focusClientId = options.focusClientId;
+    const focusClient = focusClientId
+      ? this.data.clients.find(c => c.id === focusClientId)
+      : undefined;
+    const focusTechIds = focusClient
+      ? new Set(this.data.technicians
+          .filter(t => (t.assignments || []).some(a => a.clientId === focusClient.id || a.clientId === focusClient.name))
+          .map(t => t.id))
+      : null;
+    const focusTok = focusClient
+      ? (this.anonMap.clients.get(focusClient.id) || this.anonMap.clients.get(focusClient.name) || 'CLIENT_?')
+      : undefined;
+
     const clientGaps = computeClientCompliance(this.data, period)
       .filter(r => !excluded.has(r.client.id))
+      .filter(r => !focusClientId || r.client.id === focusClientId)
       .filter(r => r.projected.hoursToGo > 0 || r.actual.hoursToGo > 0)
       .sort((a, b) => b.projected.hoursToGo - a.projected.hoursToGo) // most behind first
       .map(r => {
@@ -132,6 +147,7 @@ export class ClaudeScheduler {
       });
 
     const techGaps = computeTechCompliance(this.data, period)
+      .filter(r => !focusTechIds || focusTechIds.has(r.tech.id))
       .filter(r => r.projected.companyHoursToGo > 0 || (r.projected.bacbHoursToGo ?? 0) > 0)
       .map(r => {
         const token = this.anonMap.technicians.get(r.tech.id) || this.anonMap.technicians.get(r.tech.name) || 'TECH_?';
@@ -155,7 +171,8 @@ export class ClaudeScheduler {
     // Precomputed supervisable windows: direct sessions where the BCBA is
     // available and not already double-booked. Giving the model these concrete
     // slots is much more reliable than asking it to derive them from raw JSON.
-    const supWindows = buildSupervisableWindows(this.data, now, horizonEnd);
+    const supWindows = buildSupervisableWindows(this.data, now, horizonEnd)
+      .filter(w => !focusClientId || w.clientId === focusClientId);
     const tok = (m: Map<string, string>, id: string, name: string) => m.get(id) || m.get(name) || name;
     const aptTok = (id: string) => this.anonMap.appointments.get(id) || id;
     const supWindowLines = supWindows.map(w => {
@@ -168,6 +185,7 @@ export class ClaudeScheduler {
     // (only include clients with gaps that have no free windows)
     const diagnostics = buildFeasibilityDiagnostics(this.data, now, horizonEnd);
     const blockedDiagLines = diagnostics
+      .filter(d => !focusClientId || d.clientId === focusClientId)
       .filter(d => d.blocker !== null && d.futureDirects > 0)
       .map(d => {
         const ct = tok(this.anonMap.clients, d.clientId, d.clientName);
@@ -176,6 +194,9 @@ export class ClaudeScheduler {
 
     const strategies = allowedStrategies(options);
     const scrubbedConflicts = conflicts.map(c => scrubText(c, this.data, this.anonMap));
+    const scrubbedGuidance = options.guidance && options.guidance.trim()
+      ? scrubText(options.guidance.trim(), this.data, this.anonMap)
+      : '';
     const billableMin = u.bcbaWeeklyBillableMin ?? u.bcbaWeeklyBillableHours;
 
     const priorityLines = [
@@ -187,7 +208,7 @@ export class ClaudeScheduler {
 
 NOW: ${now.toISOString()}
 HORIZON: ${horizonEnd.toISOString().slice(0, 10)}
-
+${focusTok ? `FOCUS: Address ONLY case ${focusTok}. Ignore every other case; propose sessions for this case only.\n` : ''}
 FITNESS FUNCTION: Maximize (1) cases reaching the target supervision %, (2) techs hitting BACB 5% + company target, (3) BCBA billable ≈ ${billableMin ?? 'goal'}h/week. A 15-20% overage is acceptable as a cancellation buffer — DO NOT refuse to add sessions solely because they push billable slightly over the weekly goal.
 
 GAPS TO CLOSE (sorted most behind first):
@@ -203,6 +224,7 @@ ${blockedDiagLines.length ? `\nBLOCKERS (why BCBA cannot supervise these clients
 
 ALLOWED STRATEGIES: ${strategies.length ? strategies.join(', ') : '(none selected — return one solution with empty ops explaining why)'}
 ${priorityLines.length ? '\n' + priorityLines.join('\n') : ''}
+${scrubbedGuidance ? `\nBCBA GUIDANCE (honor within the HARD RULES; if it conflicts with a hard rule, follow the rule and say so in reasoning): ${scrubbedGuidance}` : ''}
 
 HARD RULES — verify every op against ALL before outputting:
 1. Never touch any appointment whose start < NOW.

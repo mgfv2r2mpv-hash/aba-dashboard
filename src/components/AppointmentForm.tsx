@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Appointment, Technician, Client, DayOfWeek, Authorization, ScheduleData, CompanySettings, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS } from '../types';
 import { makeupCandidates, findAuthFor } from '../authorization';
+import { overlapHours } from '../compliance';
 import { v4 as uuidv4 } from 'uuid';
 
 interface AppointmentFormProps {
@@ -74,6 +75,11 @@ export default function AppointmentForm({
   const needsSupervisedBt = type === 'parent-training' || type === 'case-planning';
   const [technicianId, setTechnicianId] = useState(appointment?.technician || '');
   const [clientId, setClientId] = useState(appointment?.client || '');
+  // btPresent: for non-direct non-supervision types, whether a BT is named on the session.
+  // Initialized true when editing an appointment that already has a technician set.
+  const [btPresent, setBtPresent] = useState(() =>
+    !!appointment?.id && !!appointment.technician && appointment.type !== 'client-session'
+  );
   // An appointment is a single calendar day plus a start and end clock time —
   // sessions never cross midnight (insurance is billed per-day). We keep the
   // canonical model as full local-ISO startTime/endTime strings (the rest of
@@ -139,6 +145,14 @@ export default function AppointmentForm({
     setEndClock(minToClock(clockToMin(startArg) + h * 60));
   };
 
+  // BTs filtered to those assigned to this client, or all BTs if no client or no assignments.
+  const techsForClient = (clientName: string): Technician[] => {
+    const client = clients.find(c => c.name === clientName);
+    if (!client) return technicians;
+    const filtered = technicians.filter(t => t.assignments?.some(a => a.clientId === client.id));
+    return filtered.length > 0 ? filtered : technicians;
+  };
+
   const handleStartChange = (newStart: string) => {
     const prevDuration = startClock && endClock ? clockToMin(endClock) - clockToMin(startClock) : undefined;
     setStartClock(newStart);
@@ -153,13 +167,39 @@ export default function AppointmentForm({
 
   const handleTypeChange = (t: Appointment['type']) => {
     setType(t);
+    if (t !== 'client-session') {
+      setBtPresent(false);
+      setTechnicianId('');
+    }
     applyAuthDefaultEnd(t, clientId, startClock, date);
   };
 
   const handleClientChange = (c: string) => {
     setClientId(c);
+    // Reset BT if they're no longer in the filtered set for the new client.
+    if (technicianId) {
+      const client = clients.find(cl => cl.name === c);
+      if (client) {
+        const filtered = technicians.filter(t => t.assignments?.some(a => a.clientId === client.id));
+        if (filtered.length > 0 && !filtered.find(t => t.name === technicianId)) {
+          setTechnicianId('');
+        }
+      }
+    }
     applyAuthDefaultEnd(type, c, startClock, date);
   };
+
+  // Inline conflict warning for direct service: another client-session for the same
+  // client that overlaps this appointment's time slot.
+  const conflictingDirectAppt = (type === 'client-session' && clientId && startTime && endTime)
+    ? (allAppointments || []).find(a =>
+        a.id !== appointment?.id &&
+        a.type === 'client-session' &&
+        a.client === clientId &&
+        a.status !== 'canceled' &&
+        overlapHours(a, { startTime, endTime } as Appointment) > 0
+      )
+    : undefined;
 
   // Canceled, not-fully-made-up sessions for this client within the auth
   // covering the chosen date (same calendar month when no auth covers it).
@@ -440,6 +480,72 @@ export default function AppointmentForm({
     : type === 'case-planning' ? 'var(--type-case-planning)'
     : 'var(--type-admin)';
 
+  // Assignment section varies by type.
+  const assignmentSection = (() => {
+    // Client dropdown — shared by all types.
+    const clientDropdown = (
+      <div>
+        <label style={labelStyle}>Client {type === 'supervision' && '*'}</label>
+        <select value={clientId} onChange={(e) => handleClientChange(e.target.value)} style={inputStyle}>
+          <option value="">— None —</option>
+          {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+        </select>
+        {type === 'supervision' && (
+          <p style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+            Supervision is logged against the client. The BT being supervised is
+            inferred from whoever has a direct session with this client during this
+            time; if no one does, it's BCBA-solo time and won't count toward compliance.
+          </p>
+        )}
+      </div>
+    );
+
+    if (type === 'supervision') {
+      return clientDropdown;
+    }
+
+    const filteredTechs = techsForClient(clientId);
+    const btDropdown = (
+      <div>
+        <label style={labelStyle}>
+          {needsSupervisedBt ? 'Supervised BT (optional)' : 'Technician (optional)'}
+        </label>
+        <select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} style={inputStyle}>
+          <option value="">— None —</option>
+          {filteredTechs.map(t => <option key={t.id} value={t.name}>{t.name}{t.isRBT ? ' (RBT)' : ''}</option>)}
+        </select>
+      </div>
+    );
+
+    if (type === 'client-session') {
+      return (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+          {clientDropdown}
+          {btDropdown}
+        </div>
+      );
+    }
+
+    // All other types: client first, then optional BT via checkbox.
+    return (
+      <div style={{ display: 'grid', gap: '12px' }}>
+        {clientDropdown}
+        <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={btPresent}
+            onChange={(e) => {
+              setBtPresent(e.target.checked);
+              if (!e.target.checked) setTechnicianId('');
+            }}
+          />
+          <span style={{ fontSize: 13 }}>BT present?</span>
+        </label>
+        {btPresent && btDropdown}
+      </div>
+    );
+  })();
+
   const content = (
     <>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
@@ -511,33 +617,7 @@ export default function AppointmentForm({
           </div>
 
           <div style={groupHeader('Assignment')}>Assignment</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-            {type !== 'supervision' && (
-              <div>
-                <label style={labelStyle}>
-                  {needsSupervisedBt ? 'Supervised BT (optional)' : 'Technician (Optional)'}
-                </label>
-                <select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} style={inputStyle}>
-                  <option value="">— None —</option>
-                  {technicians.map(t => <option key={t.id} value={t.name}>{t.name}{t.isRBT ? ' (RBT)' : ''}</option>)}
-                </select>
-              </div>
-            )}
-            <div>
-              <label style={labelStyle}>Client {type === 'supervision' && '*'}</label>
-              <select value={clientId} onChange={(e) => handleClientChange(e.target.value)} style={inputStyle}>
-                <option value="">— None —</option>
-                {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-              </select>
-              {type === 'supervision' && (
-                <p style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
-                  Supervision is logged against the client. The BT being supervised is
-                  inferred from whoever has a direct session with this client during this
-                  time; if no one does, it's BCBA-solo time and won't count toward compliance.
-                </p>
-              )}
-            </div>
-          </div>
+          {assignmentSection}
 
           <div style={groupHeader('Options')}>Options</div>
           <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginTop: '4px', flexWrap: 'wrap' }}>
@@ -669,6 +749,17 @@ export default function AppointmentForm({
           )}
 
         </div>
+
+        {conflictingDirectAppt && (
+          <div style={{
+            marginTop: 12, padding: '8px 12px',
+            background: '#fffbeb', border: '1px solid #fbbf24',
+            borderRadius: 'var(--radius-md)', fontSize: 13, color: '#92400e',
+          }}>
+            ⚠ {clientId}{conflictingDirectAppt.technician ? ` / ${conflictingDirectAppt.technician}` : ''} is assigned to a Direct Service appointment at this time:{' '}
+            {conflictingDirectAppt.startTime.slice(11, 16)}–{conflictingDirectAppt.endTime.slice(11, 16)}
+          </div>
+        )}
 
         <div style={{
           display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap',

@@ -3,7 +3,7 @@ import { Appointment, Technician, Client, CompanySettings, TimeOff, Blackout, Co
 import { computeSessionFlags, SessionFlags, streakEmoji, isStreakMilestone } from '../sessionFlags';
 import ClientCalendarView from './ClientCalendarView';
 import { DraftMark } from '../draft';
-import { rollupHours, resolveUtilization, HoursByStatus, ptoHoursInRange, reduceRequirementForPto } from '../utilization';
+import { rollupHours, resolveUtilization, HoursByStatus, ptoHoursInRange, reduceRequirementForPto, bucketOf } from '../utilization';
 import { tileStyle, clientPastel, clientDarkBorder, legendStripeStyle } from '../calendarColors';
 import { useMinWidth, useIsLandscape } from '../useMediaQuery';
 import { usePinchZoom } from '../hooks/usePinchZoom';
@@ -126,10 +126,13 @@ export default function Calendar({
     [appointments, companyHolidays],
   );
 
-  // The lens hides the other party's appointments: BT = has a technician,
-  // BCBA = none. Non-billable appointments (admin tasks, etc.) show in both lenses.
+  // The lens separates appointments by delivery bucket. BCBA-type sessions
+  // (supervision, parent-training, case-planning, reassessment) belong on the
+  // BCBA lens even when they name a supervised BT in the technician field —
+  // that field is the observed BT, not the service provider. Non-billable
+  // sessions (admin tasks, meetings) show in both lenses.
   const lensAppts = appointments.filter(a =>
-    a.isBillable === false || (lens === 'bt' ? !!a.technician : !a.technician)
+    a.isBillable === false || (lens === 'bt' ? bucketOf(a) === 'bt' : bucketOf(a) === 'bcba')
   );
 
   // When a schedule loads with no appointments in the currently-shown range,

@@ -7,6 +7,10 @@ import {
 } from '../compliance';
 import { ComplianceCache } from '../complianceCache';
 import { BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
+import {
+  ActualLevel, ProjectedLevel,
+  getActualLevel, getProjectedLevel, actualSectionStatus, projectedSectionStatus,
+} from '../caseStatus';
 import CompleteTimePrompt from './CompleteTimePrompt';
 import ConflictPanel from './ConflictPanel';
 import FixItPanel from './FixItPanel';
@@ -334,66 +338,8 @@ function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }: {
 
 // ---------- Per-client card ----------
 
-// "Within 2 percentage-points of the minimum" → Risky (sub-level of Good).
-const RISKY_MARGIN = 2;
-
-// Five-level supervision band:
-//   behind → below company min
-//   good   → above company min, below BCBA preferred min
-//   ideal  → between BCBA preferred min and preferred max
-//   high   → above BCBA preferred max, below insurer cap
-//   over   → above insurer cap
-type ActualLevel = 'na' | 'behind' | 'good' | 'ideal' | 'high' | 'over';
-type ProjectedLevel = 'behind' | 'risky' | 'ok' | 'ideal' | 'high' | 'over';
-// 'risky' and 'ok' are sub-levels of Good used only for the inner section badge.
-
-function getActualLevel(
-  directHours: number, pct: number,
-  targetPct: number, preferredPct: number, preferredMaxPct: number, maxPct?: number,
-): ActualLevel {
-  if (directHours === 0) return 'na';
-  if (maxPct !== undefined && pct > maxPct) return 'over';
-  if (pct > preferredMaxPct) return 'high';
-  if (pct >= preferredPct) return 'ideal';
-  if (pct >= targetPct) return 'good';
-  return 'behind';
-}
-
-function getProjectedLevel(
-  directHours: number, pct: number,
-  targetPct: number, preferredPct: number, preferredMaxPct: number, maxPct?: number,
-): ProjectedLevel {
-  if (directHours === 0) return 'behind';
-  if (maxPct !== undefined && pct > maxPct) return 'over';
-  if (pct > preferredMaxPct) return 'high';
-  if (pct >= preferredPct) return 'ideal';
-  if (pct >= targetPct + RISKY_MARGIN) return 'ok';
-  if (pct >= targetPct) return 'risky';
-  return 'behind';
-}
-
-// Status badge for the ACTUAL supervision section (inner card, not overall).
-function actualSectionStatus(level: ActualLevel): { text: string; color: string } {
-  switch (level) {
-    case 'na':     return { text: 'N/A',    color: '#6b7280' };
-    case 'over':   return { text: 'Over',   color: CAP_OVER };
-    case 'high':   return { text: 'High',   color: 'var(--status-pace)' };
-    case 'ideal':  return { text: 'Ideal',  color: 'var(--status-met)' };
-    case 'good':   return { text: 'Good',   color: 'var(--status-met)' };
-    case 'behind': return { text: 'Behind', color: 'var(--status-behind)' };
-  }
-}
-
-function projectedSectionStatus(level: ProjectedLevel): { text: string; color: string } {
-  switch (level) {
-    case 'over':   return { text: 'Over',   color: CAP_OVER };
-    case 'high':   return { text: 'High',   color: 'var(--status-pace)' };
-    case 'ideal':  return { text: 'Ideal',  color: 'var(--status-met)' };
-    case 'ok':     return { text: 'OK',     color: 'var(--status-met)' };
-    case 'risky':  return { text: 'Risky',  color: 'var(--status-behind)' };
-    case 'behind': return { text: 'Behind', color: 'var(--status-behind)' };
-  }
-}
+// Supervision-band thresholds, levels, and section badges now live in
+// ../caseStatus (shared with the Cases home-screen table).
 
 type BadgeResult = { text: string; bgColor: string; cardBg?: string; isCritical: boolean; isAmazing: boolean };
 const mkBadge = (text: string, bgColor: string, cardBg?: string, isCritical = false, isAmazing = false): BadgeResult =>

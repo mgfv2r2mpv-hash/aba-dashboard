@@ -5,7 +5,7 @@ import { AISettings } from './Settings';
 import { AdminPersist } from './AdminPanel';
 import AdminPanel from './AdminPanel';
 import ComplianceDashboard from './ComplianceDashboard';
-import CaseloadView from './CaseloadView';
+import CasesHome from './CasesHome';
 import CCSettingsPopup from './CCSettingsPopup';
 
 // Consolidated "C&C" hub — the single home for compliance & cases. Replaces the
@@ -91,7 +91,7 @@ export default function CCHub(props: Props) {
 
       <div style={{ flex: 1, overflow: 'auto', minWidth: 0 }}>
         {tab === 'cases' && (
-          <CaseloadView data={data} now={now} />
+          <CasesHome data={data} now={now} />
         )}
         {tab === 'issues' && (
           <ComplianceDashboard

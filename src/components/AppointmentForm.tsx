@@ -72,7 +72,7 @@ export default function AppointmentForm({
   // an OPTIONAL "supervised BT" — the technician field names the BT being observed
   // (not a provider), and the overlap with that BT's direct earns supervision.
   // Supervision itself stays client-only (the BT is inferred from the overlap).
-  const needsSupervisedBt = type === 'parent-training' || type === 'case-planning';
+  const needsSupervisedBt = type === 'parent-training' || type === 'case-planning' || type === 'reassessment';
   const [technicianId, setTechnicianId] = useState(appointment?.technician || '');
   const [clientId, setClientId] = useState(appointment?.client || '');
   // btPresent: for non-direct non-supervision types, whether a BT is named on the session.

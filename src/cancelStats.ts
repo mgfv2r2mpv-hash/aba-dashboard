@@ -122,7 +122,7 @@ function runAsOf(
 }
 
 /** Count dates falling in [asOf-(windowDays-1), asOf] inclusive (P3c). */
-function countInWindow(dates: string[], asOf: string, windowDays = 30): number {
+export function countInWindow(dates: string[], asOf: string, windowDays = 30): number {
   const lo = offsetDays(asOf, -(windowDays - 1));
   let n = 0;
   for (const d of dates) if (d >= lo && d <= asOf) n++;

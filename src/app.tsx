@@ -9,7 +9,7 @@ import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolu
 import Calendar, { HoursSummary } from './components/Calendar';
 import ConflictPanel, { conflictKey } from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
-import type { AdminPersist } from './components/AdminPanel';
+import type { AdminPersist, AdminTab } from './components/AdminPanel';
 import FileUpload from './components/FileUpload';
 import { AISettings, ClaudeModel } from './components/Settings';
 import AppointmentForm from './components/AppointmentForm';
@@ -21,11 +21,11 @@ import ImportPreview from './components/ImportPreview';
 
 const WishComposer = React.lazy(() => import('./components/WishComposer'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
-const ComplianceDashboard = React.lazy(() => import('./components/ComplianceDashboard'));
+const CCHub = React.lazy(() => import('./components/CCHub'));
 const CaseloadView = React.lazy(() => import('./components/CaseloadView'));
 const SetupWizard = React.lazy(() => import('./components/SetupWizard'));
 const CprView = React.lazy(() => import('./components/CprView'));
-import { useMinWidth, useIsTablet, useIsLandscape } from './useMediaQuery';
+import { useMinWidth, useMaxWidth, useIsTablet, useIsLandscape } from './useMediaQuery';
 import LockScreen from './components/LockScreen';
 import PasswordPrompt from './components/PasswordPrompt';
 import {
@@ -35,6 +35,7 @@ import {
   isFaceIdEnabled, enableFaceId, disableFaceId, recoverPinViaBiometric,
   clearStaleAtRest,
 } from './appLock';
+import { resolveAtRestAIConfig } from './aiConfigPolicy';
 import { isBiometricAvailable, checkBiometryFull, biometricAuthenticate, getBiometryLabel, BiometryLabel, getCachedBiometryAvailable, getCachedBiometryLabel } from './biometric';
 import { pastIncompleteAppointments } from './compliance';
 import {
@@ -49,6 +50,7 @@ import {
 } from './draft';
 import { solveDraft, DraftStatus, PrioritizationChoice } from './draftSolver';
 import DraftTray from './components/DraftTray';
+import FindTimeModal from './components/FindTimeModal';
 import { wishSolutionToDraft } from './wish';
 import { computeSessionFlags, SessionFlags, streakEmoji } from './sessionFlags';
 
@@ -120,6 +122,9 @@ export default function App() {
   const [solutions, setSolutions] = useState<ScheduleSolution[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [view, setView] = useState<'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish' | 'cpr'>('schedule');
+  // Which Admin section opens on entry. The C&C hub's view-only settings popup
+  // deep-links to the editable 'candc' tab; normal Admin entry resets to settings.
+  const [adminInitialTab, setAdminInitialTab] = useState<AdminTab>('settings');
   const [showWizard, setShowWizard] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
@@ -137,6 +142,8 @@ export default function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [recoveryTarget, setRecoveryTarget] = useState<Appointment | null>(null);
+  // Local "find a spot" rescheduler target (Move This / Replace This).
+  const [findTime, setFindTime] = useState<{ apt: Appointment; mode: 'move' | 'replace' } | null>(null);
   const [recoverySolutions, setRecoverySolutions] = useState<{ title: string; solutions: WishSolution[] } | null>(null);
   // The month/week the calendar is showing. Conflicts are scoped to this so the
   // Issues panel reflects what you're looking at, not just today.
@@ -335,7 +342,10 @@ export default function App() {
     // (Native + unlocked only; web has no at-rest store.)
     const pin = unlockedPinRef.current;
     if (isNative && pin) {
-      if (settings.apiKey) void saveAIConfig({ apiKey: settings.apiKey, model: settings.model, schedulePassword: settings.schedulePassword }, pin);
+      // Persist whenever there's a key OR a schedule password — never let an
+      // empty key wipe a just-set password from the at-rest config.
+      const action = resolveAtRestAIConfig(settings);
+      if (action.kind === 'save') void saveAIConfig(action.config, pin);
       else void clearAIConfig();
     }
   };
@@ -830,6 +840,7 @@ export default function App() {
     kind: 'move' | 'replace' | 'cancel',
     apt: Appointment,
     title: string,
+    range?: { dateStart: string; dateEnd: string },
   ) => {
     if (!scheduleData || !aiSettings.apiKey) return;
     setAiLoading(true);
@@ -837,12 +848,14 @@ export default function App() {
       const { ClaudeScheduler } = await import('./claudeScheduler');
       const scheduler = new ClaudeScheduler(aiSettings.apiKey, scheduleData, aiSettings.model);
       const aptDate = apt.startTime.slice(0, 10);
+      const dateStart = range?.dateStart ?? aptDate;
+      const dateEnd = range?.dateEnd ?? aptDate;
       const noteMap = {
         move: `Move this ${apt.type} appointment on ${aptDate} to a suitable time`,
         replace: `Replace this ${apt.type} appointment on ${aptDate} with a suitable alternative`,
         cancel: `Recover from the cancellation of this ${apt.type} appointment on ${aptDate} — suggest a make-up`,
       } as const;
-      const sols = await scheduler.generateWishSolutions({ kind: 'freeform', note: noteMap[kind], dateStart: aptDate, dateEnd: aptDate });
+      const sols = await scheduler.generateWishSolutions({ kind: 'freeform', note: noteMap[kind], dateStart, dateEnd });
       if (sols.length === 0) {
         setDebugMsg('AI found no options for this appointment.');
       } else {
@@ -855,11 +868,33 @@ export default function App() {
     }
   };
 
-  const handleMoveThis = (apt: Appointment) =>
-    runRecoveryAI('move', apt, `Move options — ${apt.title || apt.type}`);
+  // Move This / Replace This open the LOCAL find-a-spot picker (no AI needed).
+  // The picker offers an AI escape hatch only when the local search comes up empty.
+  const handleMoveThis = (apt: Appointment) => setFindTime({ apt, mode: 'move' });
 
-  const handleReplaceThis = (apt: Appointment) =>
-    runRecoveryAI('replace', apt, `Replacement options — ${apt.title || apt.type}`);
+  const handleReplaceThis = (apt: Appointment) => setFindTime({ apt, mode: 'replace' });
+
+  // Picker "Use this time" / "Set time" → stage the move into the draft tray.
+  const applyFindTime = (moved: Appointment) => {
+    stageOps([newMoveOp(moved)]);
+    setFindTime(null);
+    setSelectedAppointment(null);
+    setView('schedule');
+  };
+
+  // Picker escape hatch: ask AI to search the rest of the month (now → month end).
+  const askFindTimeAi = () => {
+    if (!findTime) return;
+    const now = new Date();
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const dateStart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const dateEnd = `${monthEnd.getFullYear()}-${pad(monthEnd.getMonth() + 1)}-${pad(monthEnd.getDate())}`;
+    const { apt, mode } = findTime;
+    const title = mode === 'replace' ? `Replacement options — ${apt.title || apt.type}` : `Move options — ${apt.title || apt.type}`;
+    setFindTime(null);
+    runRecoveryAI(mode, apt, title, { dateStart, dateEnd });
+  };
 
   const handleFindReplacement = (apt: Appointment) => {
     setRecoveryTarget(null);
@@ -1313,23 +1348,21 @@ export default function App() {
                   border: '1px solid #fca5a5', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
                 }}
               >✕ Cancel</button>
-              {aiSettings.apiKey && (
-                <>
-                  <button
-                    onClick={() => handleMoveThis(a)}
-                    style={{
-                      flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#f5f3ff', color: '#5b21b6',
-                      border: '1px solid #c4b5fd', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                    }}
-                  >Move This</button>
-                  <button
-                    onClick={() => handleReplaceThis(a)}
-                    style={{
-                      flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#f0f9ff', color: '#0369a1',
-                      border: '1px solid #7dd3fc', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
-                    }}
-                  >Replace This</button>
-                </>
+              <button
+                onClick={() => handleMoveThis(a)}
+                style={{
+                  flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#f5f3ff', color: '#5b21b6',
+                  border: '1px solid #c4b5fd', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                }}
+              >Move This</button>
+              {new Date(a.endTime).getTime() >= Date.now() && (
+                <button
+                  onClick={() => handleReplaceThis(a)}
+                  style={{
+                    flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#f0f9ff', color: '#0369a1',
+                    border: '1px solid #7dd3fc', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+                  }}
+                >Replace This</button>
               )}
             </>
           )}
@@ -1439,7 +1472,10 @@ export default function App() {
                   fontSize: 16, fontWeight: 700, lineHeight: 1,
                 }}
               >+</button>
-              <NavButtons view={view} onChange={setView} compSummary={compSummary}
+              <NavButtons
+                view={view}
+                onChange={(v) => { if (v === 'admin') setAdminInitialTab('settings'); setView(v); }}
+                compSummary={compSummary}
                 conflictCount={activeConflicts.length}
                 conflictHasError={activeConflicts.some(c => c.severity === 'error')} />
             </>
@@ -1497,8 +1533,8 @@ export default function App() {
                     onLensChange={setCalLens}
                     hideTotals={dockPane}
                     draftMarks={calendarMarks}
-                    onMoveThis={aiSettings.apiKey ? handleMoveThis : undefined}
-                    onReplaceThis={aiSettings.apiKey ? handleReplaceThis : undefined}
+                    onMoveThis={handleMoveThis}
+                    onReplaceThis={handleReplaceThis}
                     notice={pendingReview.length > 0 ? (
                       <button
                         onClick={() => setShowDayReview(true)}
@@ -1676,6 +1712,8 @@ export default function App() {
                 <AdminPanel
                   data={scheduleData}
                   onDataChange={commitFull}
+                  tabs={['settings', 'daysoff', 'candc']}
+                  initialTab={adminInitialTab}
                   persist={serverPersist}
                   onImportFile={triggerImportPicker}
                   onRerunWizard={() => setShowWizard(true)}
@@ -1695,10 +1733,14 @@ export default function App() {
             )}
             {view === 'compliance' && (
               <React.Suspense fallback={null}>
-                <ComplianceDashboard
+                <CCHub
                   data={scheduleData}
+                  onDataChange={commitFull}
+                  persist={serverPersist}
+                  now={viewDate}
                   cache={compCache}
                   conflicts={visibleConflicts}
+                  conflictCount={activeConflicts.length}
                   aiSettings={aiSettings}
                   mutedConflictKeys={mutedConflicts}
                   onMuteConflict={muteConflict}
@@ -1709,6 +1751,7 @@ export default function App() {
                   onSelectAppointment={(a) => { setView('schedule'); setSelectedAppointment(a); }}
                   onAcceptFix={acceptFix}
                   onCustomizeFix={customizeFix}
+                  onOpenAdminCandC={() => { setAdminInitialTab('candc'); setView('admin'); }}
                 />
               </React.Suspense>
             )}
@@ -1831,6 +1874,20 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Local find-a-spot rescheduler (Move This / Replace This) */}
+      {findTime && scheduleData && (
+        <FindTimeModal
+          appointment={findTime.apt}
+          mode={findTime.mode}
+          scheduleData={scheduleData}
+          aiAvailable={!!aiSettings.apiKey}
+          aiLoading={aiLoading}
+          onApply={applyFindTime}
+          onAskAi={askFindTimeAi}
+          onClose={() => setFindTime(null)}
+        />
       )}
 
       {/* AI recovery / move / replace solutions picker */}
@@ -1979,19 +2036,23 @@ function NavButtons({ view, onChange, compSummary, conflictCount, conflictHasErr
   const badgeCount = (conflictCount ?? 0) + compRed + compYellow;
   const badgeColor = (conflictHasError || compRed > 0) ? '#ef4444'
     : badgeCount > 0 ? '#f59e0b' : '#10b981';
+  // Collapse the Admin tab to just its gear on iPhone portrait so the nav row
+  // doesn't wrap. aria-label/title keep it accessible either way.
+  const compactAdmin = useMaxWidth(480);
 
   const btn = (
     label: string,
     key: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish' | 'cpr',
     badge?: React.ReactNode,
+    ariaLabel?: string,
   ) => {
     const active = view === key;
     return (
       <button
         key={key}
         onClick={() => onChange(key)}
-        aria-label={label}
-        title={label}
+        aria-label={ariaLabel ?? label}
+        title={ariaLabel ?? label}
         style={{
           padding: '5px 10px', border: 'none', borderRadius: 5,
           backgroundColor: active ? 'var(--brand-accent)' : '#374151',
@@ -2009,17 +2070,17 @@ function NavButtons({ view, onChange, compSummary, conflictCount, conflictHasErr
   return (
     <>
       {btn('📅 Cal', 'schedule')}
-      {btn('Fix', 'compliance', (
+      {btn('⚖️ C&C', 'compliance', (
         <span style={{
           minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9,
           backgroundColor: badgeColor, color: 'white',
           fontSize: 11, fontWeight: 700,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         }}>{badgeCount}</span>
-      ))}
+      ), 'Compliance & Cases')}
       {btn('✨Wish', 'wish')}
       {btn('CPR', 'cpr')}
-      {btn('⚙️Admin', 'admin')}
+      {btn(compactAdmin ? '⚙️' : '⚙️Admin', 'admin', undefined, 'Admin')}
     </>
   );
 }

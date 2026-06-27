@@ -1055,6 +1055,7 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
   const [maxStr, setMaxStr] = useState(client.parentTrainingMaxHours !== undefined ? String(client.parentTrainingMaxHours) : '');
   const [utilStr, setUtilStr] = useState(client.directUtilizationTarget !== undefined ? String(client.directUtilizationTarget) : '');
   const [supIdealStr, setSupIdealStr] = useState(client.supervisionIdealPct !== undefined ? String(client.supervisionIdealPct) : '');
+  const [dischargeStr, setDischargeStr] = useState(client.anticipatedDischarge || '');
   const [editing, setEditing] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
 
@@ -1189,9 +1190,9 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
         )}
         <label style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 180px' }}>
           <span style={{ whiteSpace: 'nowrap' }}>Anticipated discharge:</span>
-          <input value={client.anticipatedDischarge || ''}
-            onBlur={e => { if ((e.target.value || undefined) !== client.anticipatedDischarge) onChange({ anticipatedDischarge: e.target.value || undefined }); }}
-            defaultValue={client.anticipatedDischarge || ''}
+          <input value={dischargeStr}
+            onChange={e => setDischargeStr(e.target.value)}
+            onBlur={() => { const v = dischargeStr.trim() || undefined; if (v !== client.anticipatedDischarge) onChange({ anticipatedDischarge: v }); }}
             placeholder="date / note" style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
         </label>
       </div>

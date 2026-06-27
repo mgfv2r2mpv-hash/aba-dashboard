@@ -857,7 +857,10 @@ export default function App() {
       } as const;
       const sols = await scheduler.generateWishSolutions({ kind: 'freeform', note: noteMap[kind], dateStart, dateEnd });
       if (sols.length === 0) {
-        setDebugMsg('AI found no options for this appointment.');
+        // debugMsg only renders in the empty (no-schedule) state, so once a
+        // schedule is loaded it's swallowed — surface a visible notice instead
+        // so the action never reads as a silent no-op.
+        alert('No AI options found for this appointment. Try adjusting availability, or use Wish It for a broader rework.');
       } else {
         setRecoverySolutions({ title, solutions: sols });
       }

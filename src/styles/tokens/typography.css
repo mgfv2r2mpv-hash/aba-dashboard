@@ -1,0 +1,47 @@
+/* ============================================================================
+   TYPOGRAPHY — No Outcome ABA / SAssi
+   Information-dense, mobile/iPad-first, so the working scale runs tight (13px
+   body). Display sizes are for marketing/specimen cards. Atkinson Hyperlegible
+   is the brand face (loaded via the <link> in index.html).
+   ========================================================================== */
+
+:root {
+  /* ── Families ──────────────────────────────────────────────────────────── */
+  --font-sans: 'Atkinson Hyperlegible', -apple-system, BlinkMacSystemFont,
+               'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, SFMono-Regular,
+               Menlo, Consolas, monospace;
+
+  /* ── Size scale ────────────────────────────────────────────────────────── */
+  --text-2xs:  10px; /* eyebrow labels, legend keys, calendar chip meta */
+  --text-xs:   11px; /* badge text, micro-meta */
+  --text-sm:   12px; /* secondary labels, helper text */
+  --text-base: 13px; /* DEFAULT body / button label */
+  --text-md:   14px; /* form inputs, comfortable body */
+  --text-lg:   16px; /* detail titles, section headings */
+  --text-xl:   18px; /* view headings */
+  --text-2xl:  22px; /* display — specimen / wizard titles */
+  --text-3xl:  28px;
+  --text-4xl:  36px;
+  --text-5xl:  48px;
+
+  /* ── Weights ───────────────────────────────────────────────────────────
+     Atkinson Hyperlegible ships 400 + 700; 500/600 fall back to the nearest.
+     Treat 700 as true "bold"; 800 renders as bold too but marks top hierarchy. */
+  --weight-normal:   400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+  --weight-heavy:    800;
+
+  /* ── Line heights ──────────────────────────────────────────────────────── */
+  --leading-tight:  1.2;  /* titles, chips */
+  --leading-snug:   1.35;
+  --leading-normal: 1.5;  /* running text */
+
+  /* ── Letter spacing ────────────────────────────────────────────────────── */
+  --tracking-tight:  -0.01em;
+  --tracking-normal:  0;
+  --tracking-label:   0.06em; /* UPPERCASE eyebrows / type labels */
+  --tracking-wide:    0.03em; /* uppercase status pills */
+}

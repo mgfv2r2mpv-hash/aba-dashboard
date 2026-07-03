@@ -1,0 +1,11 @@
+/* No Outcome ABA / SAssi — design-token entry point.
+   Imported once from src/index.tsx. A manifest of @imports only; never add
+   rules here directly. Everything reachable from here ships.
+
+   NOTE: the Atkinson Hyperlegible webfonts are loaded via the preconnected
+   <link> in public/index.html (faster than a CSS @import), so there is no
+   fonts.css here — typography.css only declares the family stack. */
+
+@import "./tokens/colors.css";
+@import "./tokens/typography.css";
+@import "./tokens/spacing.css";

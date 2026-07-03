@@ -23,7 +23,11 @@ import { Rail, CommandBar, ZenStrip } from './components/shell';
 import type { RailItem, RailKey } from './components/shell';
 import { SAssiDock, buildDockIssues } from './components/dock';
 import type { DockIssue } from './components/dock';
+import { useHomeTodos } from './hooks/useHomeTodos';
+import type { HomeTodo } from './hooks/useHomeTodos';
+import type { RitualAction } from './components/HomeView';
 
+const HomeView = React.lazy(() => import('./components/HomeView'));
 const WishComposer = React.lazy(() => import('./components/WishComposer'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
 const CCHub = React.lazy(() => import('./components/CCHub'));
@@ -133,6 +137,11 @@ export default function App() {
   const [showWizard, setShowWizard] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
+  // Home to-dos (net-new, local-only) + the seed for "Start → session": an
+  // id-less appointment the form treats as new and prefills from the to-do.
+  const homeTodos = useHomeTodos();
+  const [sessionSeed, setSessionSeed] = useState<Partial<Appointment> | null>(null);
+  const [startedTodoId, setStartedTodoId] = useState<string | null>(null);
   // Wish view is now a full page (view === 'wish') rather than a modal.
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   // Whether the selected appointment's detail panel is expanded into its inline
@@ -1507,6 +1516,33 @@ export default function App() {
     return scheduler.generateWishSolutions({ kind: 'freeform', note });
   };
 
+  // ── Home wiring (M4) ───────────────────────────────────────────────────
+  // Ritual/flag routing: the SAssi dock is wide-only (>=1024) and already on
+  // screen there, so 'assistant' only needs a fallback on narrow widths.
+  const homeGo = (action: RitualAction) => {
+    switch (action) {
+      case 'assistant': if (!showDock) setView('caseload'); break;
+      case 'week': setView('schedule'); break;
+      case 'home':
+      case 'todos': break; // handled within HomeView
+    }
+  };
+
+  // "Start → session": seed the appointment form (client + type) and remember
+  // which to-do to mark done once the block is confirmed onto the calendar.
+  const startSessionFromTodo = (todo: HomeTodo) => {
+    // The appointment form keys its client <select> by name, so resolve the
+    // to-do's client id → name for the prefill to take.
+    const c = scheduleData?.clients.find(cl => cl.id === todo.clientId || cl.name === todo.clientId);
+    setSessionSeed({
+      title: todo.text,
+      client: c?.name ?? todo.clientId,
+      type: todo.sessionType || 'client-session',
+    });
+    setStartedTodoId(todo.id);
+  };
+  const clearSessionSeed = () => { setSessionSeed(null); setStartedTodoId(null); };
+
   return (
     <div style={{
       display: 'flex', height: '100vh', maxWidth: '100vw',
@@ -1823,12 +1859,18 @@ export default function App() {
               </React.Suspense>
             )}
             {view === 'home' && (
-              <div style={{ flex: 1, minWidth: 0, padding: 24 }}>
-                <h2 style={{ margin: '0 0 6px', color: 'var(--text-primary)', fontSize: 18, fontWeight: 800 }}>Home</h2>
-                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
-                  Your start-here rituals, caseload trends, and to-dos land here.
-                </p>
-              </div>
+              <React.Suspense fallback={null}>
+                <HomeView
+                  data={scheduleData}
+                  now={viewDate}
+                  conflictCount={activeConflicts.length}
+                  complianceFlagCount={attentionCount}
+                  todos={homeTodos.todos}
+                  onAddTodo={homeTodos.add}
+                  onStartSession={startSessionFromTodo}
+                  onGo={homeGo}
+                />
+              </React.Suspense>
             )}
           </>
         ) : (
@@ -2026,6 +2068,25 @@ export default function App() {
           initialType={calLens === 'bcba' ? 'supervision' : 'client-session'}
           onSave={handleSaveAppointments}
           onCancel={() => setShowAddAppointment(false)}
+        />
+      )}
+
+      {/* Home "Start → session": the seed is an id-less appointment the form
+          treats as new and prefills from the to-do; saving marks the to-do done. */}
+      {sessionSeed && scheduleData && (
+        <AppointmentForm
+          appointment={sessionSeed as Appointment}
+          allAppointments={scheduleData.appointments}
+          authorizations={scheduleData.authorizations}
+          technicians={scheduleData.technicians}
+          clients={scheduleData.clients}
+          settings={scheduleData.settings}
+          onSave={(apps) => {
+            handleSaveAppointments(apps);
+            if (startedTodoId) homeTodos.markDone(startedTodoId);
+            clearSessionSeed();
+          }}
+          onCancel={clearSessionSeed}
         />
       )}
 

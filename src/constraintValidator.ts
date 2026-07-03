@@ -363,7 +363,7 @@ export class ConstraintValidator {
       const parties: PartyAvailability[] = [];
       const blockingMessages: string[] = [];
       const affectedTechnicians: string[] = [];
-      let tentativeNote: string | undefined;
+      const tentativeNotes: string[] = [];
 
       if (technician) {
         const windows: TimeWindow[] = ((technician.availability as any)[dayName] as TimeWindow[]) || [];
@@ -371,6 +371,21 @@ export class ConstraintValidator {
           ?? this.syntheticHolidayBlackout('technician', technician.id, dateStr, holidayByDate);
         const status = this.partyStatus(windows, appStart, appEnd, blackout);
         parties.push({ role: 'Technician', name: technician.name, status, windows, blackoutReason: blackout?.reason });
+        // Per-case availability: a BT can be limited to specific windows for THIS
+        // client (e.g. Hannah covers Client One only Mon/Wed/Fri). When the slot
+        // is inside the BT's general availability but outside their per-case
+        // window, it's allowed-but-tentative — confirm before save, mirroring
+        // parent-training-outside-availability. Outside GENERAL stays a hard error.
+        if (status === 'ok' && client) {
+          const asg = technician.assignments.find(a => a.clientId === client.id || a.clientId === client.name);
+          const caseAvail = asg?.availability;
+          if (caseAvail && Object.keys(caseAvail).length > 0) {
+            const caseWindows: TimeWindow[] = ((caseAvail as any)[dayName] as TimeWindow[]) || [];
+            if (this.partyStatus(caseWindows, appStart, appEnd, undefined) !== 'ok') {
+              tentativeNotes.push(`${technician.name}: ${this.minutesToTime(appStart)}–${this.minutesToTime(appEnd)} is outside case availability for ${client.name} on ${dayName} — allowed, pending confirmation`);
+            }
+          }
+        }
         // Techs are expected to have availability defined, so an empty day
         // ('none') is a real conflict for a tech (preserves prior behavior).
         if (status !== 'ok') {
@@ -396,16 +411,16 @@ export class ConstraintValidator {
         if ((status === 'outside' && !ptOutsideOk) || status === 'blackout') {
           blockingMessages.push(this.partyMessage(client.name, dayName, status, windows, blackout));
         } else if (ptOutsideOk) {
-          tentativeNote = `${client.name}: parent training ${this.minutesToTime(appStart)}–${this.minutesToTime(appEnd)} is outside set availability on ${dayName} — allowed, pending confirmation`;
+          tentativeNotes.push(`${client.name}: parent training ${this.minutesToTime(appStart)}–${this.minutesToTime(appEnd)} is outside set availability on ${dayName} — allowed, pending confirmation`);
         }
       }
 
       if (blockingMessages.length === 0) {
-        if (tentativeNote) {
+        if (tentativeNotes.length > 0) {
           conflicts.push({
             type: 'availability-conflict',
             severity: 'warning',
-            message: tentativeNote,
+            message: tentativeNotes.join('; '),
             affectedAppointments: [appointment.id],
             availabilityDetail: {
               day: dayName,

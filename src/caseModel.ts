@@ -354,3 +354,205 @@ export function computeBtState(
     directHoursWeek,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Home trend cards (M4)
+// ---------------------------------------------------------------------------
+// Pace-vs-actual-vs-projection cards for the Home view. Shares the same pace
+// math as Caseload (computeCaseState / computeBtState) rather than duplicating
+// it; derives an honest cumulative weekly (month) / daily (week) series from the
+// real appointment feed. Persons with no target are omitted — no invented data.
+
+export type TrendStatus = 'met' | 'pace' | 'behind' | 'over';
+export interface TrendSeries { pace: number[]; actual: number[]; proj: number[]; }
+export interface TrendWindow {
+  target: number;          // hours the window aims for
+  actual: number;          // booked (delivered + still-scheduled) to date
+  proj: number;            // whole-window booked+scheduled trajectory
+  status: TrendStatus;
+  metric: 'hours';
+  impact?: string;         // off-track note (week window only)
+  series: TrendSeries;
+}
+export interface PersonTrend {
+  id: string;
+  who: string;
+  role: 'client' | 'tech';
+  subtitle: string;
+  month: TrendWindow;
+  week: TrendWindow;
+}
+
+const round1 = (x: number): number => Math.round(x * 10) / 10;
+
+// Signed hours with the regulated glyphs: −6.5h / +2.0h.
+function fmtSignedHours(h: number): string {
+  return `${h < 0 ? '−' : '+'}${round1(Math.abs(h)).toFixed(1)}h`;
+}
+
+// 7-day cumulative bucket ends (exclusive) spanning [start, end).
+function weekBoundsWithin(start: Date, end: Date): Date[] {
+  const bounds: Date[] = [];
+  let cur = new Date(start);
+  let guard = 0;
+  while (cur.getTime() < end.getTime() && guard++ < 8) {
+    const next = new Date(cur);
+    next.setDate(next.getDate() + 7);
+    bounds.push(new Date(Math.min(next.getTime(), end.getTime())));
+    cur = next;
+  }
+  return bounds.length ? bounds : [new Date(end)];
+}
+
+// Daily cumulative bucket ends across `count` days from `start`.
+function dayBoundsFrom(start: Date, count: number): Date[] {
+  const bounds: Date[] = [];
+  for (let i = 1; i <= count; i++) {
+    const b = new Date(start);
+    b.setDate(b.getDate() + i);
+    bounds.push(b);
+  }
+  return bounds;
+}
+
+// Build a window from appts already constrained to the window's period.
+// `behindPct` is the fraction of target below which the person is "behind";
+// `overAt` (optional, hours) flags an overage as "over".
+function buildTrendWindow(params: {
+  appts: Appointment[];
+  bounds: Date[];
+  now: Date;
+  target: number;
+  behindPct: number;
+  overAt?: number;
+  withImpact?: boolean;
+}): TrendWindow {
+  const { appts, bounds, now, target, behindPct, overAt, withImpact } = params;
+  const n = bounds.length;
+  const hoursBefore = (t: Date): number =>
+    appts
+      .filter(a => new Date(a.startTime).getTime() < t.getTime())
+      .reduce((s, a) => s + durationHours(a), 0);
+
+  const pace = bounds.map((_, i) => round1((target * (i + 1)) / n));
+  let cur = bounds.findIndex(b => b.getTime() > now.getTime());
+  if (cur < 0) cur = n - 1;
+  const actualSeries = bounds.slice(0, cur + 1).map(b => round1(hoursBefore(b)));
+  const projFinal = round1(hoursBefore(bounds[n - 1]));
+  const actualToDate = actualSeries[actualSeries.length - 1] ?? 0;
+  const proj = bounds.map((b, i) => {
+    if (i <= cur) return round1(hoursBefore(b));
+    const remain = n - 1 - cur;
+    const step = remain > 0 ? (projFinal - actualToDate) / remain : 0;
+    return round1(actualToDate + step * (i - cur));
+  });
+
+  const status: TrendStatus =
+    overAt != null && projFinal > overAt + 0.01 ? 'over'
+      : target <= 0 ? 'met'
+        : projFinal >= target * 0.98 ? 'met'
+          : projFinal >= target * (behindPct / 100) ? 'pace'
+            : 'behind';
+
+  let impact: string | undefined;
+  if (withImpact && status !== 'met') {
+    const delta = projFinal - target;
+    impact = `${delta < 0 ? '↘' : '↗'} ${fmtSignedHours(delta)} vs plan this week`;
+  }
+
+  return {
+    target: round1(target),
+    actual: actualToDate,
+    proj: projFinal,
+    status,
+    metric: 'hours',
+    impact,
+    series: { pace, actual: actualSeries, proj },
+  };
+}
+
+export function computeHomeTrends(data: ScheduleData, now: Date = new Date()): PersonTrend[] {
+  const period = monthPeriod(now);
+  const wk = weekRange(now);
+  const monthBounds = weekBoundsWithin(period.start, period.end);
+  const numWeeks = monthBounds.length;
+  const weekBounds = dayBoundsFrom(wk.start, 7);
+  const trends: PersonTrend[] = [];
+
+  const withinMonth = (a: Appointment) => inRange(a, period.start, period.end);
+  const withinWeek = (a: Appointment) => inRange(a, wk.start, wk.end);
+
+  for (const client of data.clients) {
+    const cs = computeCaseState(data, client, now);
+
+    // Direct hours card (weekly authorized × weeks-in-month).
+    if (cs.direct.authPerWk > 0) {
+      const directAll = data.appointments.filter(a =>
+        a.type === 'client-session' && a.status !== 'canceled' && matchesClient(a, client));
+      const utilPct = client.directUtilizationTarget ?? 75;
+      trends.push({
+        id: `${client.id}-direct`,
+        who: client.name,
+        role: 'client',
+        subtitle: 'Client · direct hours',
+        month: buildTrendWindow({
+          appts: directAll.filter(withinMonth), bounds: monthBounds, now,
+          target: cs.direct.authPerWk * numWeeks, behindPct: utilPct,
+        }),
+        week: buildTrendWindow({
+          appts: directAll.filter(withinWeek), bounds: weekBounds, now,
+          target: cs.direct.authPerWk, behindPct: utilPct, withImpact: true,
+        }),
+      });
+    }
+
+    // Supervision hours card (monthly floor/preferred/cap band).
+    if (cs.supervision.directHoursMonth > 0 && cs.supervision.preferredH > 0) {
+      const supAll = data.appointments.filter(a =>
+        countsAsSupervision(a) && a.status !== 'canceled' && matchesClient(a, client));
+      const behindPct = cs.supervision.preferredH > 0
+        ? (cs.supervision.floorH / cs.supervision.preferredH) * 100
+        : 100;
+      trends.push({
+        id: `${client.id}-supervision`,
+        who: `${client.name} · supervision`,
+        role: 'client',
+        subtitle: 'Client · supervision',
+        month: buildTrendWindow({
+          appts: supAll.filter(withinMonth), bounds: monthBounds, now,
+          target: cs.supervision.preferredH, behindPct, overAt: cs.supervision.capH,
+        }),
+        week: buildTrendWindow({
+          appts: supAll.filter(withinWeek), bounds: weekBounds, now,
+          target: cs.supervision.preferredH / numWeeks, behindPct,
+          overAt: cs.supervision.capH / numWeeks, withImpact: true,
+        }),
+      });
+    }
+  }
+
+  for (const tech of data.technicians) {
+    const weeklyAssigned = (tech.assignments || []).reduce((s, x) => s + (x.hoursPerWeek || 0), 0);
+    if (weeklyAssigned <= 0) continue;
+    const directAll = data.appointments.filter(a =>
+      a.type === 'client-session' && a.status !== 'canceled' &&
+      (a.technician === tech.id || a.technician === tech.name));
+    const BT_BEHIND_PCT = 80;
+    trends.push({
+      id: `${tech.id}-direct`,
+      who: tech.name,
+      role: 'tech',
+      subtitle: tech.isRBT ? 'Credentialed BT' : 'Behavior technician',
+      month: buildTrendWindow({
+        appts: directAll.filter(withinMonth), bounds: monthBounds, now,
+        target: weeklyAssigned * numWeeks, behindPct: BT_BEHIND_PCT,
+      }),
+      week: buildTrendWindow({
+        appts: directAll.filter(withinWeek), bounds: weekBounds, now,
+        target: weeklyAssigned, behindPct: BT_BEHIND_PCT, withImpact: true,
+      }),
+    });
+  }
+
+  return trends;
+}

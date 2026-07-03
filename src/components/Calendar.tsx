@@ -216,14 +216,17 @@ export default function Calendar({
             <ViewBtn active={view === 'day'} onClick={() => setView('day')}>{compact ? 'D' : 'Day'}</ViewBtn>
           </div>
           {/* 📅 placed between D and ← per UX feedback; full-size transparent overlay for iOS WebView */}
-          <div style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
+          <div style={{ position: 'relative', display: 'inline-flex', flexShrink: 0, overflow: 'hidden' }}>
             <NavBtn onClick={() => {}}>📅</NavBtn>
             <input
               type="date"
               value={format(currentDate, 'yyyy-MM-dd')}
               onChange={e => { if (e.target.value) setCurrentDate(parseISO(e.target.value)); }}
               aria-label="Jump to date"
-              style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'auto', cursor: 'pointer', width: '100%', height: '100%' }}
+              // Native WebKit date inputs carry a large intrinsic min-width; without
+              // the wrapper's overflow:hidden + these caps the transparent overlay
+              // spills right and swallows taps meant for the adjacent ← button.
+              style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'auto', cursor: 'pointer', width: '100%', height: '100%', minWidth: 0, maxWidth: '100%' }}
             />
           </div>
           <NavBtn onClick={goPrev}>←</NavBtn>

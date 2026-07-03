@@ -18,6 +18,11 @@ import DayReview from './components/DayReview';
 import CompleteTimePrompt from './components/CompleteTimePrompt';
 import AgendaRail from './components/AgendaRail';
 import ImportPreview from './components/ImportPreview';
+import { Button } from './components/ui';
+import { Rail, CommandBar, ZenStrip } from './components/shell';
+import type { RailItem, RailKey } from './components/shell';
+import { SAssiDock, buildDockIssues } from './components/dock';
+import type { DockIssue } from './components/dock';
 
 const WishComposer = React.lazy(() => import('./components/WishComposer'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
@@ -121,7 +126,7 @@ export default function App() {
   const [mutedConflicts, setMutedConflicts] = useState<string[]>([]);
   const [solutions, setSolutions] = useState<ScheduleSolution[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [view, setView] = useState<'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish' | 'cpr'>('schedule');
+  const [view, setView] = useState<'home' | 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish' | 'cpr'>('schedule');
   // Which Admin section opens on entry. The C&C hub's view-only settings popup
   // deep-links to the editable 'candc' tab; normal Admin entry resets to settings.
   const [adminInitialTab, setAdminInitialTab] = useState<AdminTab>('settings');
@@ -254,6 +259,10 @@ export default function App() {
   // scrolling (calendar | bounded context pane). Other views and narrow screens
   // keep the single page-scroll layout.
   const splitView = dockPane && view === 'schedule';
+  // Shell layout: phones (<640) drop the vertical rail for a bottom nav; the
+  // always-on SAssi dock only appears when there's room for it (≥1024).
+  const compactRail = useMaxWidth(639);
+  const showDock = useMinWidth(1024);
 
   // Draft sandbox derivations. The Sched view renders the PREVIEW (staged ops
   // applied) with per-appointment marks; the status badge grades it.
@@ -1415,76 +1424,115 @@ export default function App() {
     return renderSelectedDetail(a);
   };
 
+  // ── Shell derivations (M2) ─────────────────────────────────────────────
+  // Map the string view-state onto the left rail, and route rail taps back.
+  const activeRail: RailKey =
+    view === 'home' ? 'home'
+      : view === 'compliance' || view === 'caseload' ? 'caseload'
+        : view === 'cpr' ? 'cpr'
+          : view === 'admin' ? 'settings'
+            : 'calendar';
+
+  const onRailSelect = (key: RailKey) => {
+    switch (key) {
+      case 'home': setView('home'); break;
+      case 'calendar': setView('schedule'); break;
+      case 'caseload': setView('compliance'); break;
+      case 'cpr': setView('cpr'); break;
+      case 'setup': setShowWizard(true); break;
+      case 'settings': setAdminInitialTab('settings'); setView('admin'); break;
+    }
+  };
+
+  const caseloadBadge = activeConflicts.length + attentionCount;
+  const railItems: RailItem[] = [
+    { key: 'home', icon: '🧭', label: 'Home' },
+    { key: 'calendar', icon: '📅', label: 'Calendar' },
+    { key: 'caseload', icon: '📊', label: 'Caseload', badge: caseloadBadge > 0 ? caseloadBadge : undefined },
+    { key: 'cpr', icon: '📈', label: 'CPR' },
+    { key: 'setup', icon: '🌱', label: 'Setup' },
+    { key: 'settings', icon: '⚙️', label: 'Settings' },
+  ];
+
+  const viewTitle =
+    view === 'home' ? 'Home'
+      : view === 'schedule' ? 'Calendar'
+        : view === 'compliance' || view === 'caseload' ? 'Caseload'
+          : view === 'cpr' ? 'CPR & analysis'
+            : view === 'admin' ? 'Settings'
+              : view === 'wish' ? 'Ask SAssi'
+                : 'SAssi';
+
+  // Command-bar actions are contextual: onboarding entries before data loads,
+  // "new session" once a schedule is in hand.
+  const commandActions = !scheduleData ? (
+    <>
+      {compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), 'var(--brand-ai)')}
+      <FileUpload onUpload={handleFileUpload} loading={loading} />
+      {compactBtn('CPR', 'CPR & Analysis', () => setView('cpr'), view === 'cpr' ? 'var(--brand-accent)' : '#374151')}
+    </>
+  ) : view === 'schedule' ? (
+    <Button variant="primary" size="sm" onClick={() => setShowAddAppointment(true)} aria-label="Add appointment">
+      + New session
+    </Button>
+  ) : undefined;
+
+  const hereText = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const nextText = pendingReview.length > 0
+    ? `Next: ${pendingReview.length} past session${pendingReview.length === 1 ? '' : 's'} to review`
+    : undefined;
+  const aiActive = !!aiSettings.apiKey;
+  const aiTitle = aiActive ? `AI: ${aiSettings.model}` : 'No AI key set — add in Settings';
+
+  // ── Dock feed (M3) ─────────────────────────────────────────────────────
+  // Normalize the live conflict + compliance feeds into the one-at-a-time queue.
+  const dockIssues = buildDockIssues(activeConflicts, compSummary);
+
+  const reviewConflictIssue = (issue: DockIssue) => {
+    const id = issue.appointmentIds?.[0];
+    const appt = id ? scheduleData?.appointments.find(a => a.id === id) ?? null : null;
+    setView('schedule');
+    if (appt) setSelectedAppointment(appt);
+  };
+
+  const muteConflictIssue = (issue: DockIssue) => {
+    if (issue.conflictKey) muteConflict(issue.conflictKey);
+  };
+
+  // "Ask SAssi…" freeform → the existing Wish engine, surfaced as dock cards.
+  const generateDockWish = async (note: string): Promise<WishSolution[]> => {
+    if (!scheduleData || !aiSettings.apiKey) return [];
+    const { ClaudeScheduler } = await import('./claudeScheduler');
+    const scheduler = new ClaudeScheduler(aiSettings.apiKey, scheduleData, aiSettings.model);
+    return scheduler.generateWishSolutions({ kind: 'freeform', note });
+  };
+
   return (
     <div style={{
       display: 'flex', height: '100vh', maxWidth: '100vw',
-      overflowX: 'clip' as any, flexDirection: 'column',
+      overflowX: 'clip' as any, flexDirection: compactRail ? 'column' : 'row',
       // Side insets matter on landscape iPhones with a notch so chrome
       // doesn't slip under the camera housing.
       paddingLeft: 'env(safe-area-inset-left)',
       paddingRight: 'env(safe-area-inset-right)',
     }}>
-      <header ref={headerRef as React.RefObject<HTMLElement>} style={{
-        backgroundColor: 'var(--surface-header)',
-        color: 'white',
-        // Top padding includes the iOS status bar / notch inset so the
-        // title doesn't sit under the time/carrier indicators.
-        padding: 'calc(env(safe-area-inset-top) + 6px) 12px 6px',
-        boxShadow: 'var(--shadow-sm)',
-        // Both orientations: sticky at top so it participates in the flex
-        // layout and pushes the scroll container below it naturally. Fixed
-        // was tried in portrait but caused a double-offset gap because iOS
-        // WebKit can treat fixed elements as still occupying flex space,
-        // meaning the scroll container's paddingTop and the sticky top offset
-        // both applied, sticking the toolbar headerHeight*2 from the top.
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-        flexShrink: 0,
-        boxSizing: 'border-box',
-      }}>
-        {/* Row 1: app name + AI status dot */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
-          <h1 style={{ fontSize: '14px', fontWeight: 700, margin: 0, whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>SAssi · ABA Calendar</h1>
-          <span
-            title={aiSettings.apiKey ? `AI: ${aiSettings.model}` : 'No AI key set — add in Settings'}
-            style={{
-              width: 8, height: 8, borderRadius: '50%',
-              backgroundColor: aiSettings.apiKey ? '#10b981' : '#ef4444',
-              display: 'inline-block', flexShrink: 0,
-            }}
+      {/* Wide/tablet: vertical rail on the left; phones get a bottom bar below. */}
+      {!compactRail && (
+        <Rail items={railItems} active={activeRail} onSelect={onRailSelect} orientation="vertical" />
+      )}
+
+      {/* Main column: command bar + zen strip + the scrolling view region. */}
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
+        <div ref={headerRef as React.RefObject<HTMLDivElement>} style={{ flexShrink: 0, zIndex: 10 }}>
+          <CommandBar title={viewTitle} actions={commandActions} aiActive={aiActive} aiTitle={aiTitle} />
+          <ZenStrip
+            hereText={hereText}
+            nextText={nextText}
+            conflictCount={activeConflicts.length}
+            complianceCount={attentionCount}
+            onFlagClick={() => setView('compliance')}
           />
         </div>
-        {/* Row 2: nav buttons */}
-        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-          {!scheduleData ? (
-            <>
-              {compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), 'var(--brand-ai)')}
-              <FileUpload onUpload={handleFileUpload} loading={loading} />
-              {compactBtn('CPR', 'CPR & Analysis', () => setView('cpr'), view === 'cpr' ? 'var(--brand-accent)' : '#374151')}
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => setShowAddAppointment(true)}
-                aria-label="Add appointment"
-                title="Add appointment"
-                style={{
-                  padding: '5px 10px', backgroundColor: 'var(--brand-primary)', color: 'white',
-                  border: 'none', borderRadius: 5, cursor: 'pointer',
-                  fontSize: 16, fontWeight: 700, lineHeight: 1,
-                }}
-              >+</button>
-              <NavButtons
-                view={view}
-                onChange={(v) => { if (v === 'admin') setAdminInitialTab('settings'); setView(v); }}
-                compSummary={compSummary}
-                conflictCount={activeConflicts.length}
-                conflictHasError={activeConflicts.some(c => c.severity === 'error')} />
-            </>
-          )}
-        </div>
-      </header>
 
       <div
         ref={mainScrollRef as React.RefObject<HTMLDivElement>}
@@ -1774,6 +1822,14 @@ export default function App() {
                 />
               </React.Suspense>
             )}
+            {view === 'home' && (
+              <div style={{ flex: 1, minWidth: 0, padding: 24 }}>
+                <h2 style={{ margin: '0 0 6px', color: 'var(--text-primary)', fontSize: 18, fontWeight: 800 }}>Home</h2>
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+                  Your start-here rituals, caseload trends, and to-dos land here.
+                </p>
+              </div>
+            )}
           </>
         ) : (
           <div style={{
@@ -1802,7 +1858,29 @@ export default function App() {
             </p>
           </div>
         )}
-      </div>
+        </div>
+      </div>{/* /main column */}
+
+      {/* Always-on SAssi dock (wide only in M2; schedule keeps its inline pane
+          until M3 folds it into the dock). */}
+      {showDock && view !== 'schedule' && (
+        <SAssiDock
+          issues={dockIssues}
+          issueCount={issueCount}
+          aiEnabled={aiActive}
+          onReviewConflict={reviewConflictIssue}
+          onMuteConflict={muteConflictIssue}
+          onFixCompliance={() => setView('compliance')}
+          onGenerateWish={generateDockWish}
+          onAcceptWish={acceptWish}
+          onCustomizeWish={customizeWish}
+        />
+      )}
+
+      {/* Phones: rail collapses to a bottom bar. */}
+      {compactRail && (
+        <Rail items={railItems} active={activeRail} onSelect={onRailSelect} orientation="bottom" />
+      )}
 
       {showWizard && (
         <React.Suspense fallback={null}>
@@ -2022,68 +2100,5 @@ export default function App() {
         </button>
       )}
     </div>
-  );
-}
-
-// Three-way segmented control for the active view. Sits inline in the header
-// at compact-button size so it doesn't blow up the chrome.
-function NavButtons({ view, onChange, compSummary, conflictCount, conflictHasError }: {
-  view: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish' | 'cpr';
-  onChange: (v: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish' | 'cpr') => void;
-  compSummary?: ComplianceSummary | null;
-  conflictCount?: number;
-  conflictHasError?: boolean;
-}) {
-  const compRed = compSummary?.red ?? 0;
-  const compYellow = compSummary?.yellow ?? 0;
-  const badgeCount = (conflictCount ?? 0) + compRed + compYellow;
-  const badgeColor = (conflictHasError || compRed > 0) ? '#ef4444'
-    : badgeCount > 0 ? '#f59e0b' : '#10b981';
-  // Collapse the Admin tab to just its gear on iPhone portrait so the nav row
-  // doesn't wrap. aria-label/title keep it accessible either way.
-  const compactAdmin = useMaxWidth(480);
-
-  const btn = (
-    label: string,
-    key: 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish' | 'cpr',
-    badge?: React.ReactNode,
-    ariaLabel?: string,
-  ) => {
-    const active = view === key;
-    return (
-      <button
-        key={key}
-        onClick={() => onChange(key)}
-        aria-label={ariaLabel ?? label}
-        title={ariaLabel ?? label}
-        style={{
-          padding: '5px 10px', border: 'none', borderRadius: 5,
-          backgroundColor: active ? 'var(--brand-accent)' : '#374151',
-          color: 'white', cursor: 'pointer',
-          fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
-          display: 'inline-flex', alignItems: 'center', gap: 4,
-        }}
-      >
-        {badge}
-        {label}
-      </button>
-    );
-  };
-
-  return (
-    <>
-      {btn('📅 Cal', 'schedule')}
-      {btn('⚖️ C&C', 'compliance', (
-        <span style={{
-          minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9,
-          backgroundColor: badgeColor, color: 'white',
-          fontSize: 11, fontWeight: 700,
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        }}>{badgeCount}</span>
-      ), 'Compliance & Cases')}
-      {btn('✨Wish', 'wish')}
-      {btn('CPR', 'cpr')}
-      {btn(compactAdmin ? '⚙️' : '⚙️Admin', 'admin', undefined, 'Admin')}
-    </>
   );
 }

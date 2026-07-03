@@ -1,0 +1,18 @@
+/* No Outcome ABA / SAssi — app shell chrome (rail · command bar · zen strip · dock). */
+
+export { LogoMark } from './LogoMark';
+export type { LogoMarkProps } from './LogoMark';
+
+export { Rail } from './Rail';
+export type { RailProps, RailItem, RailKey } from './Rail';
+
+export { CommandBar } from './CommandBar';
+export type { CommandBarProps } from './CommandBar';
+
+export { ZenStrip } from './ZenStrip';
+export type { ZenStripProps } from './ZenStrip';
+
+export { AssistantDock } from './AssistantDock';
+export type { AssistantDockProps } from './AssistantDock';
+
+export { Enso, SAssiWord } from './SAssiMark';

@@ -174,6 +174,41 @@ function tentativePtOutside(data: ScheduleData, weekStartMs: number[]): string[]
   return ids;
 }
 
+// Sessions where the BT is limited to specific windows for THIS client (per-case
+// availability) and the slot falls outside them, while still inside the BT's
+// general availability. Allowed but tentative — mirrors tentativePtOutside so a
+// clean draft surfaces as yellow (BCBA confirms) rather than green.
+export function tentativeTechCaseOutside(data: ScheduleData, weekStartMs: number[]): string[] {
+  const inAffectedWeek = (a: Appointment) =>
+    weekStartMs.some(w => { const t = ms(a.startTime); return t >= w && t < w + 7 * 86400000; });
+  const clientById = new Map(data.clients.map(c => [c.id, c]));
+  const clientByName = new Map(data.clients.map(c => [c.name, c]));
+  const techById = new Map(data.technicians.map(t => [t.id, t]));
+  const techByName = new Map(data.technicians.map(t => [t.name, t]));
+  const ids: string[] = [];
+  for (const a of data.appointments) {
+    if (!isActive(a) || !inAffectedWeek(a) || !a.technician || !a.client) continue;
+    const tech = techById.get(a.technician) || techByName.get(a.technician);
+    const client = clientById.get(a.client) || clientByName.get(a.client);
+    if (!tech || !client) continue;
+    const asg = tech.assignments.find(x => x.clientId === client.id || x.clientId === client.name);
+    const caseAvail = asg?.availability;
+    if (!caseAvail || Object.keys(caseAvail).length === 0) continue;
+    const day = DAY_NAMES[new Date(a.startTime).getDay()];
+    const caseWindows = (caseAvail as any)[day] as TimeWindow[] | undefined;
+    const s = minutesOfDay(a.startTime), e = minutesOfDay(a.endTime);
+    // Per-case coverage: unlike windowsCover, an ABSENT day is "not available for
+    // this case" → not covered. A restricted assignment with the slot uncovered
+    // (while inside general availability) is tentative.
+    const caseCovered = Array.isArray(caseWindows) && caseWindows.length > 0
+      && caseWindows.some(w => s >= toMin(w.start) && e <= toMin(w.end));
+    if (windowsCover((tech.availability as any)[day], s, e) && !caseCovered) {
+      ids.push(a.id);
+    }
+  }
+  return ids;
+}
+
 // Relocate `appt` to its first feasible in-week slot (for its client+tech) that
 // is not before `now`. Returns a moved clone, or null if no slot exists.
 function relocate(
@@ -354,9 +389,10 @@ export function solveDraft(
   // starting schedule already was.
   const aboveTarget = previewBillable > target + 0.01 && previewBillable > baseBillable + 0.01;
 
-  // Out-of-window parent-training slots a flagged parent can still make — allowed
-  // but tentative, so a clean draft surfaces as yellow (BCBA confirms) not green.
-  const tentative = tentativePtOutside(resolved, weeks);
+  // Out-of-window parent-training slots a flagged parent can still make, plus BT
+  // sessions outside their per-case availability — allowed but tentative, so a
+  // clean draft surfaces as yellow (BCBA confirms) not green.
+  const tentative = [...tentativePtOutside(resolved, weeks), ...tentativeTechCaseOutside(resolved, weeks)];
 
   if (clean && !belowFloor) {
     if (aboveTarget) {

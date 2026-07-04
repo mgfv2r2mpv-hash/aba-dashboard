@@ -204,7 +204,7 @@ export default function Calendar({
               aria-label="Add appointment"
               title="Add appointment"
               style={{
-                padding: '5px 10px', backgroundColor: '#3b82f6', color: 'white',
+                padding: '5px 10px', backgroundColor: 'var(--sage-500)', color: 'white',
                 border: 'none', borderRadius: 5, cursor: 'pointer',
                 fontSize: 16, fontWeight: 700, lineHeight: 1, flexShrink: 0,
               }}
@@ -332,8 +332,8 @@ export default function Calendar({
               <button
                 onClick={() => openDayIn('day')}
                 style={{
-                  flex: 1, padding: '10px 12px', borderRadius: 6, border: '1px solid #3b82f6',
-                  background: '#3b82f6', color: 'white', cursor: 'pointer', fontSize: 14, fontWeight: 600,
+                  flex: 1, padding: '10px 12px', borderRadius: 6, border: '1px solid var(--sage-500)',
+                  background: 'var(--sage-500)', color: 'white', cursor: 'pointer', fontSize: 14, fontWeight: 600,
                 }}
               >
                 Day view
@@ -428,14 +428,14 @@ function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelec
                 onClick={() => onPickDay(day)}
                 title="Open week or day view"
                 style={{
-                  backgroundColor: inCurrentMonth ? '#ffffff' : '#f3f4f6',
+                  backgroundColor: isToday ? 'var(--sage-50)' : inCurrentMonth ? '#ffffff' : '#f3f4f6',
                   minHeight: roomy ? 168 : 110, padding: roomy ? 8 : 6, opacity: inCurrentMonth ? 1 : 0.5,
                   cursor: 'pointer', overflow: 'hidden',
                 }}
               >
                 <div style={{
                   fontWeight: isToday ? 700 : 400,
-                  marginBottom: 4, color: isToday ? '#3b82f6' : '#374151', fontSize: roomy ? 15 : 12,
+                  marginBottom: 4, color: isToday ? 'var(--sage-700)' : '#374151', fontSize: roomy ? 15 : 12,
                 }}>{format(day, 'd')}</div>
                 {/* Sunday: weekly totals always appear at the top, before appointments. */}
                 {dow === 0 && (
@@ -454,13 +454,13 @@ function MonthView({ currentDate, appointments, lens, settings, timeOff, onSelec
                   {dayAppts.length > maxChips && !expanded && (
                     <div
                       onClick={e => { e.stopPropagation(); toggleRow(rowIdx); }}
-                      style={{ fontSize: 10, color: '#3b82f6', fontWeight: 600, cursor: 'pointer' }}
+                      style={{ fontSize: 10, color: 'var(--sage-600)', fontWeight: 600, cursor: 'pointer' }}
                     >+{dayAppts.length - maxChips} more ▾</div>
                   )}
                   {dayAppts.length > maxChips && expanded && (
                     <div
                       onClick={e => { e.stopPropagation(); toggleRow(rowIdx); }}
-                      style={{ fontSize: 10, color: '#3b82f6', fontWeight: 600, cursor: 'pointer' }}
+                      style={{ fontSize: 10, color: 'var(--sage-600)', fontWeight: 600, cursor: 'pointer' }}
                     >Show less ▴</div>
                   )}
                 </div>
@@ -853,8 +853,8 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
             <div key={day.toISOString()} style={{
               flex: 1, textAlign: 'center', padding: '8px 4px',
               fontSize: 12, fontWeight: 600,
-              color: isToday ? '#3b82f6' : '#374151',
-              backgroundColor: isToday ? '#eff6ff' : 'transparent',
+              color: isToday ? 'var(--sage-700)' : '#374151',
+              backgroundColor: isToday ? 'var(--sage-50)' : 'transparent',
               borderLeft: '1px solid #f3f4f6',
             }}>
               <div>{format(day, 'EEE')}</div>
@@ -887,7 +887,7 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
               data-day-iso={dayISO}
               style={{
                 flex: 1, position: 'relative', borderLeft: '1px solid #f3f4f6',
-                backgroundColor: isToday ? '#fafbff' : 'transparent',
+                backgroundColor: isToday ? 'var(--sage-50)' : 'transparent',
               }}>
               {/* Hour / half-hour / quarter-hour grid lines (decreasing weight). */}
               {hours.map(h => {
@@ -901,6 +901,18 @@ function TimeGrid({ days, appointments, onSelectAppointment, onAppointmentChange
                   </React.Fragment>
                 );
               })}
+              {/* Now-line: a 2px sage marker with a left dot at the current time,
+                  shown only in today's column when within the visible band. */}
+              {isToday && (() => {
+                const nowHrs = today.getHours() + today.getMinutes() / 60;
+                if (nowHrs < VISIBLE_START_HOUR || nowHrs > VISIBLE_END_HOUR) return null;
+                const nowTop = (nowHrs - VISIBLE_START_HOUR) * hourHeight;
+                return (
+                  <div style={{ position: 'absolute', left: 0, right: 0, top: nowTop, height: 0, borderTop: '2px solid var(--sage-600)', zIndex: 2, pointerEvents: 'none' }}>
+                    <div style={{ position: 'absolute', left: -3, top: -4, width: 8, height: 8, borderRadius: '50%', background: 'var(--sage-600)' }} />
+                  </div>
+                );
+              })()}
               {/* Appointments */}
               {laid.map(({ appt, lane, lanes }) => {
                 const layout = appointmentLayout(appt, hourHeight);
@@ -1251,6 +1263,13 @@ function blockLook(apt: Appointment, mark?: DraftMark, flags?: SessionFlags) {
     else { border = '1px dashed #2563eb'; prefix = mark === 'add' ? '＋ ' : mark === 'shorten' ? '✂ ' : '✎ '; }
   }
 
+  // Past-but-still-scheduled sessions recede to 55% — they already happened and
+  // are waiting to be reviewed/completed, so they shouldn't compete with the
+  // live week. Completed/canceled/ghost/draft keep their own treatment.
+  if (!canceled && !completed && !apt.isGhost && !mark && new Date(apt.endTime).getTime() < Date.now()) {
+    opacity = 0.55;
+  }
+
   // Streak glow overrides the default border when the session is completed with
   // a meaningful streak depth. Draft/ghost/cancel states suppress it.
   const glow = (!mark && !apt.isGhost && completed) ? streakGlow(flags?.completedStreak) : undefined;
@@ -1449,7 +1468,7 @@ function ViewBtn({ active, onClick, children }: { active: boolean; onClick: () =
   return (
     <button onClick={onClick} style={{
       padding: '5px 8px', border: 'none',
-      backgroundColor: active ? '#3b82f6' : 'white',
+      backgroundColor: active ? 'var(--sage-500)' : 'white',
       color: active ? 'white' : '#374151',
       cursor: 'pointer', fontSize: 13, fontWeight: 600,
       whiteSpace: 'nowrap',

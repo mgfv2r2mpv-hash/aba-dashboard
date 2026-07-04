@@ -80,19 +80,19 @@ export default function CasesHome({ data, now = new Date(), onFixIt }: Props) {
 
   return (
     <div style={{ padding: '8px 4px' }}>
-      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Cases ({monthLabel})</h2>
-      <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 4, color: 'var(--text-primary)' }}>Cases ({monthLabel})</h2>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
         Month projection per case: utilization, cancellations (tap a cell for the full breakdown),
         supervision % and parent training (actual / projected), status, and the factors driving each flag.
       </p>
 
       {rows.length === 0 ? (
-        <p style={{ color: '#9ca3af' }}>No clients yet.</p>
+        <p style={{ color: 'var(--text-faint)' }}>No clients yet.</p>
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#374151' }}>
+              <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--sage-200)', color: 'var(--text-primary)' }}>
                 {HEADERS.map((h, i) => (
                   <th key={i} style={{ padding: '6px 8px', whiteSpace: 'nowrap', verticalAlign: 'bottom' }}>{h}</th>
                 ))}
@@ -124,7 +124,7 @@ export default function CasesHome({ data, now = new Date(), onFixIt }: Props) {
   );
 }
 
-const td: CSSProperties = { padding: '6px 8px', borderBottom: '1px solid #f3f4f6', verticalAlign: 'top' };
+const td: CSSProperties = { padding: '6px 8px', borderBottom: '1px solid var(--sage-100)', verticalAlign: 'top' };
 
 function CaseRow({ row, settings, onOpenCancels, onFixIt }: {
   row: Row;

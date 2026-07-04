@@ -91,8 +91,8 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
       style={{
         padding: '5px 14px', border: 'none', borderRadius: 5, cursor: 'pointer',
         fontSize: 13, fontWeight: 600,
-        background: compView === v ? '#1d4ed8' : 'transparent',
-        color: compView === v ? 'white' : '#374151',
+        background: compView === v ? 'var(--sage-600)' : 'transparent',
+        color: compView === v ? 'var(--white)' : 'var(--text-body)',
       }}
     >{label}</button>
   );
@@ -319,7 +319,7 @@ function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }: {
         onClick={() => onSelect(a)}
         style={{
           background: 'none', border: 'none', padding: 0, textAlign: 'left',
-          fontSize: 13, fontWeight: 600, color: '#1d4ed8', cursor: 'pointer',
+          fontSize: 13, fontWeight: 600, color: 'var(--sage-700)', cursor: 'pointer',
           textDecoration: 'underline',
         }}
       >{a.title}</button>

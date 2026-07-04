@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="1024" height="1024" role="img" aria-label="No Outcome ABA — SAssi">
+  <defs>
+    <clipPath id="tile"><rect x="6" y="6" width="188" height="188" rx="42"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <!-- tile field -->
+    <rect x="6" y="6" width="188" height="188" fill="#f4f7f1"/>
+
+    <!-- month grid, headed s a s s i -->
+    <rect x="14" y="14" width="172" height="22" fill="#e7ede0"/>
+    <g font-family="'Atkinson Hyperlegible', system-ui, sans-serif" font-size="12" font-weight="700" fill="#9aa79a" text-anchor="middle" letter-spacing="0.5">
+      <text x="31.2" y="29">s</text>
+      <text x="65.6" y="29">a</text>
+      <text x="100" y="29">s</text>
+      <text x="134.4" y="29">s</text>
+      <text x="168.8" y="29">i</text>
+    </g>
+    <g stroke="#dce3d4" stroke-width="1.3">
+      <line x1="48.4" y1="14" x2="48.4" y2="186"/>
+      <line x1="82.8" y1="14" x2="82.8" y2="186"/>
+      <line x1="117.2" y1="14" x2="117.2" y2="186"/>
+      <line x1="151.6" y1="14" x2="151.6" y2="186"/>
+      <line x1="14" y1="36" x2="186" y2="36"/>
+      <line x1="14" y1="73.5" x2="186" y2="73.5"/>
+      <line x1="14" y1="111" x2="186" y2="111"/>
+      <line x1="14" y1="148.5" x2="186" y2="148.5"/>
+      <rect x="14" y="14" width="172" height="172" fill="none" stroke="#cdd6c4" stroke-width="1.6"/>
+    </g>
+
+    <!-- calendar tiles: the month's story top->bottom.
+         week 1 = red/orange cancels; week 2 = greens overtaking;
+         week 3 = greens (a completed check); week 4 = mixed pendings. -->
+    <g>
+      <!-- week 1: cancels -->
+      <rect x="18.2" y="48.75" width="26" height="12" rx="3" fill="#dc2626"/>
+      <rect x="87" y="48.75" width="26" height="12" rx="3" fill="#f97316"/>
+      <rect x="155.8" y="48.75" width="26" height="12" rx="3" fill="#dc2626"/>
+      <!-- week 2: greens overtaking, one lingering cancel -->
+      <rect x="18.2" y="86.25" width="26" height="12" rx="3" fill="#f97316"/>
+      <rect x="52.6" y="86.25" width="26" height="12" rx="3" fill="#16a34a"/>
+      <rect x="121.4" y="86.25" width="26" height="12" rx="3" fill="#16a34a"/>
+      <!-- week 3: greens; a completed session (check) -->
+      <rect x="18.2" y="123.75" width="26" height="12" rx="3" fill="#3b82f6"/>
+      <rect x="87" y="123.75" width="26" height="12" rx="3" fill="#16a34a"/>
+      <path d="M95 137.75 l10 0 l-5 7 z" fill="#16a34a"/>
+      <rect x="155.8" y="123.75" width="26" height="12" rx="3" fill="#16a34a"/>
+      <!-- week 4: mixed violet/blue/amber/green pendings -->
+      <rect x="18.2" y="161.25" width="26" height="12" rx="3" fill="#16a34a"/>
+      <rect x="52.6" y="161.25" width="26" height="12" rx="3" fill="#7c3aed"/>
+      <rect x="87" y="161.25" width="26" height="12" rx="3" fill="#0ea5e9"/>
+      <rect x="121.4" y="161.25" width="26" height="12" rx="3" fill="#f59e0b"/>
+      <!-- dashed ghost tile (a drafted, unconfirmed session) -->
+      <rect x="154.8" y="159.25" width="30" height="16" rx="4" fill="none" stroke="#9bb083" stroke-width="2" stroke-dasharray="4 4"/>
+    </g>
+
+    <!-- "NO": N as a mountain zigzag, O as a near-closed ensō. Hung ~1.3deg
+         off true over a square (un-rotated) drop shadow, at 85% opacity. -->
+    <g stroke="#3a4448" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      <g transform="translate(2.5,3.5)" opacity="0.16">
+        <path d="M31 167 L31 55 L100 167 L100 55"/>
+        <path d="M113.4 109.7 A40 40 0 1 1 137.3 133.6"/>
+      </g>
+      <g transform="rotate(1.3 100 111)" opacity="0.85">
+        <path d="M31 167 L31 55 L100 167 L100 55"/>
+        <path d="M113.4 109.7 A40 40 0 1 1 137.3 133.6"/>
+      </g>
+    </g>
+
+    <!-- a small heap of tiles spilling past the grid's bottom-right corner -->
+    <g>
+      <rect x="171" y="178" width="26" height="12" rx="3" fill="#16a34a" transform="rotate(-8 184 184)"/>
+      <rect x="176" y="184" width="26" height="12" rx="3" fill="#7c3aed" transform="rotate(6 189 190)"/>
+      <rect x="182" y="190" width="26" height="12" rx="3" fill="#f59e0b" transform="rotate(-3 195 196)"/>
+    </g>
+  </g>
+</svg>

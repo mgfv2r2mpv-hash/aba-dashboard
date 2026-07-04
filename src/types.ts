@@ -193,6 +193,15 @@ export interface CompanySettings {
   // 8h PTO day removes 5 billable hours from the 25h/wk requirement. The reduced
   // week is floored at 0. Stored in the workbook so it travels with the schedule.
   ptoBillableDeductionRatio?: number;
+  // When true, company holidays in a period reduce billable/hours targets (Home
+  // trend cards + BCBA billable). Default false — holidays are informational only.
+  // Hours/auth targets (client direct, BT direct) shrink proportionally to the
+  // holiday days lost; billable targets drop by holidayBillableHoursPerDay per day.
+  holidayAffectsBillable?: boolean;
+  // Billable hours removed per company-holiday day when holidayAffectsBillable is
+  // on (e.g. 5 / 6 / 5.5 / 6.25 — the billable hours a normal working day carries).
+  // Default 8. Mirrors ptoBillableDeductionRatio's per-day intent for whole days off.
+  holidayBillableHoursPerDay?: number;
   // PTO buckets / accrual / balances (Upgrade 2). Absent = DEFAULT_PTO_CONFIG
   // (unlimited mode, one combined pool, no balances).
   pto?: PtoConfig;

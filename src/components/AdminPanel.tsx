@@ -2376,6 +2376,8 @@ function PtoEditor({ settings, saving, onSave }: {
   const s = (n: number | undefined) => (n === undefined ? '' : String(n));
   const [ptoRatio, setPtoRatio] = useState(s(settings.ptoBillableDeductionRatio ?? DEFAULT_PTO_DEDUCTION_RATIO));
   const [ptoCfg, setPtoCfg] = useState<PtoConfig>(() => resolvePtoConfig(settings.pto));
+  const [holAffects, setHolAffects] = useState<boolean>(settings.holidayAffectsBillable ?? false);
+  const [holPerDay, setHolPerDay] = useState(s(settings.holidayBillableHoursPerDay ?? 8));
 
   const num = (str: string, fallback: number) => { const n = parseFloat(str); return Number.isFinite(n) ? n : fallback; };
 
@@ -2383,6 +2385,8 @@ function PtoEditor({ settings, saving, onSave }: {
     const next: CompanySettings = {
       ...settings,
       ptoBillableDeductionRatio: num(ptoRatio, DEFAULT_PTO_DEDUCTION_RATIO),
+      holidayAffectsBillable: holAffects,
+      holidayBillableHoursPerDay: num(holPerDay, 8),
       pto: ptoCfg,
     };
     setJustSaved(false);
@@ -2401,6 +2405,22 @@ function PtoEditor({ settings, saving, onSave }: {
           hint={`1 = every leave hour drops the week's requirement by an hour. Set 0.625 if an 8h day should remove 5 billable hours (~3 non-billable hours/day assumed). Currently 8h off = −${(() => { const r = parseFloat(ptoRatio); return Number.isFinite(r) ? Math.round(8 * r * 100) / 100 : 8; })()}h.`}
         />
         <PtoConfigEditor value={ptoCfg} onChange={setPtoCfg} />
+      </SettingsSection>
+      <SettingsSection title="Holidays">
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-body)' }}>
+          <input type="checkbox" checked={holAffects} onChange={e => setHolAffects(e.target.checked)} />
+          Holidays reduce billable targets
+        </label>
+        {holAffects && (
+          <NumField
+            label="Billable hours removed per holiday day"
+            value={holPerDay}
+            onChange={setHolPerDay}
+            defaultValue={8}
+            suffix="h / holiday"
+            hint="A company holiday in the week or month lowers billable targets by this many hours per day, and shrinks hours targets (client direct, technician direct) proportionally to the working days lost."
+          />
+        )}
       </SettingsSection>
       <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
         <button onClick={save} style={primaryBtn} disabled={saving}>{saving ? 'Saving…' : 'Save accrual rules'}</button>

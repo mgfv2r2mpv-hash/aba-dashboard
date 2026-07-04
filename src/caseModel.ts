@@ -17,6 +17,7 @@ import {
   computeTechContactDays,
 } from './compliance';
 import { computeAuthUsage, computeReportDates, findAuthFor, inAuthSpan } from './authorization';
+import { holidaysInRange, holidayAdjustTarget } from './holidayAdjust';
 
 // ---------------------------------------------------------------------------
 // Time helpers
@@ -364,11 +365,13 @@ export function computeBtState(
 // real appointment feed. Persons with no target are omitted — no invented data.
 
 export type TrendStatus = 'met' | 'pace' | 'behind' | 'over';
-export interface TrendSeries { pace: number[]; actual: number[]; proj: number[]; }
+export interface TrendSeries { pace: number[]; actual: number[]; proj: number[]; labels: string[]; }
 export interface TrendWindow {
   target: number;          // hours the window aims for
   actual: number;          // booked (delivered + still-scheduled) to date
   proj: number;            // whole-window booked+scheduled trajectory
+  util?: number;           // projection utilization % headline (proj÷target, or sup÷direct)
+  targetPct?: number;      // target % the util is measured against (supervision card)
   status: TrendStatus;
   metric: 'hours';
   impact?: string;         // off-track note (week window only)
@@ -384,6 +387,22 @@ export interface PersonTrend {
 }
 
 const round1 = (x: number): number => Math.round(x * 10) / 10;
+
+const sumHours = (appts: Appointment[]): number =>
+  appts.reduce((s, a) => s + durationHours(a), 0);
+
+// Attach a projection-utilization % (proj ÷ target) to a freshly built window.
+const withUtil = (w: TrendWindow): TrendWindow =>
+  ({ ...w, util: w.target > 0 ? Math.round((w.proj / w.target) * 100) : 0 });
+
+// Short axis label for a bucket end: weekday for daily buckets, M/D (week-ending)
+// for weekly buckets. The representative day is the last day the bucket includes.
+const WEEKDAY = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+function axisLabel(boundEnd: Date, mode: 'day' | 'week'): string {
+  const rep = new Date(boundEnd);
+  rep.setDate(rep.getDate() - 1);
+  return mode === 'day' ? WEEKDAY[rep.getDay()] : `${rep.getMonth() + 1}/${rep.getDate()}`;
+}
 
 // Signed hours with the regulated glyphs: −6.5h / +2.0h.
 function fmtSignedHours(h: number): string {
@@ -424,10 +443,11 @@ function buildTrendWindow(params: {
   now: Date;
   target: number;
   behindPct: number;
+  labelMode: 'day' | 'week';
   overAt?: number;
   withImpact?: boolean;
 }): TrendWindow {
-  const { appts, bounds, now, target, behindPct, overAt, withImpact } = params;
+  const { appts, bounds, now, target, behindPct, labelMode, overAt, withImpact } = params;
   const n = bounds.length;
   const hoursBefore = (t: Date): number =>
     appts
@@ -467,7 +487,7 @@ function buildTrendWindow(params: {
     status,
     metric: 'hours',
     impact,
-    series: { pace, actual: actualSeries, proj },
+    series: { pace, actual: actualSeries, proj, labels: bounds.map(b => axisLabel(b, labelMode)) },
   };
 }
 
@@ -482,51 +502,76 @@ export function computeHomeTrends(data: ScheduleData, now: Date = new Date()): P
   const withinMonth = (a: Appointment) => inRange(a, period.start, period.end);
   const withinWeek = (a: Appointment) => inRange(a, wk.start, wk.end);
 
+  // Holiday-adjusted hours targets (settings-gated). A holiday in the period is
+  // one fewer working day to deliver the same authorized/assigned hours, so the
+  // target shrinks proportionally. Supervision is a ratio → left unadjusted.
+  const holEnabled = data.settings.holidayAffectsBillable ?? false;
+  const holPerDay = data.settings.holidayBillableHoursPerDay ?? 8;
+  const monthHolidays = holidaysInRange(data.companyHolidays, period.start, period.end);
+  const weekHolidays = holidaysInRange(data.companyHolidays, wk.start, wk.end);
+  const adjustHours = (base: number, holidays: number, workdays: number): number =>
+    holidayAdjustTarget({ kind: 'hours', base, holidays, enabled: holEnabled, perDayHours: holPerDay, expectedWorkdays: workdays });
+
   for (const client of data.clients) {
     const cs = computeCaseState(data, client, now);
 
-    // Direct hours card (weekly authorized × weeks-in-month).
+    // This case's non-canceled direct sessions — shared by the direct card and
+    // the supervision card's %-of-direct denominator.
+    const directAll = data.appointments.filter(a =>
+      a.type === 'client-session' && a.status !== 'canceled' && matchesClient(a, client));
+
+    // Direct hours card (weekly authorized × weeks-in-month), holiday-adjusted.
+    // util % = projection ÷ authorized (100% when the booked week fills the auth).
     if (cs.direct.authPerWk > 0) {
-      const directAll = data.appointments.filter(a =>
-        a.type === 'client-session' && a.status !== 'canceled' && matchesClient(a, client));
       const utilPct = client.directUtilizationTarget ?? 75;
       trends.push({
         id: `${client.id}-direct`,
         who: client.name,
         role: 'client',
         subtitle: 'Client · direct hours',
-        month: buildTrendWindow({
+        month: withUtil(buildTrendWindow({
           appts: directAll.filter(withinMonth), bounds: monthBounds, now,
-          target: cs.direct.authPerWk * numWeeks, behindPct: utilPct,
-        }),
-        week: buildTrendWindow({
+          target: adjustHours(cs.direct.authPerWk * numWeeks, monthHolidays, 5 * numWeeks),
+          behindPct: utilPct, labelMode: 'week',
+        })),
+        week: withUtil(buildTrendWindow({
           appts: directAll.filter(withinWeek), bounds: weekBounds, now,
-          target: cs.direct.authPerWk, behindPct: utilPct, withImpact: true,
-        }),
+          target: adjustHours(cs.direct.authPerWk, weekHolidays, 5),
+          behindPct: utilPct, withImpact: true, labelMode: 'day',
+        })),
       });
     }
 
-    // Supervision hours card (monthly floor/preferred/cap band).
-    if (cs.supervision.directHoursMonth > 0 && cs.supervision.preferredH > 0) {
+    // Supervision card: supervised % = supervision hours ÷ direct hours (both
+    // completed + pending) within the period, vs the target sup % (per-case
+    // supervisionIdealPct, else the company supervisionDirectHoursPercent).
+    const directMonthH = sumHours(directAll.filter(withinMonth));
+    const directWeekH = sumHours(directAll.filter(withinWeek));
+    if (directMonthH > 0) {
       const supAll = data.appointments.filter(a =>
         countsAsSupervision(a) && a.status !== 'canceled' && matchesClient(a, client));
-      const behindPct = cs.supervision.preferredH > 0
-        ? (cs.supervision.floorH / cs.supervision.preferredH) * 100
-        : 100;
+      const targetPct = client.supervisionIdealPct
+        ?? data.settings.supervisionDirectHoursPercent ?? 15;
+      const behindPct = 67; // below ~two-thirds of target reads as behind
+      const capPct = data.settings.supervisionMaxHoursPercent; // insurer cap → over-flag
+      // supervised % = this window's projected sup hours ÷ its projected direct hours.
+      const withSupUtil = (w: TrendWindow, directH: number): TrendWindow =>
+        ({ ...w, targetPct, util: directH > 0 ? Math.round((w.proj / directH) * 100) : 0 });
       trends.push({
         id: `${client.id}-supervision`,
         who: `${client.name} · supervision`,
         role: 'client',
         subtitle: 'Client · supervision',
-        month: buildTrendWindow({
+        month: withSupUtil(buildTrendWindow({
           appts: supAll.filter(withinMonth), bounds: monthBounds, now,
-          target: cs.supervision.preferredH, behindPct, overAt: cs.supervision.capH,
-        }),
-        week: buildTrendWindow({
+          target: (directMonthH * targetPct) / 100, behindPct, labelMode: 'week',
+          overAt: capPct ? (directMonthH * capPct) / 100 : undefined,
+        }), directMonthH),
+        week: withSupUtil(buildTrendWindow({
           appts: supAll.filter(withinWeek), bounds: weekBounds, now,
-          target: cs.supervision.preferredH / numWeeks, behindPct,
-          overAt: cs.supervision.capH / numWeeks, withImpact: true,
-        }),
+          target: (directWeekH * targetPct) / 100, behindPct, withImpact: true, labelMode: 'day',
+          overAt: capPct ? (directWeekH * capPct) / 100 : undefined,
+        }), directWeekH),
       });
     }
   }
@@ -543,14 +588,16 @@ export function computeHomeTrends(data: ScheduleData, now: Date = new Date()): P
       who: tech.name,
       role: 'tech',
       subtitle: tech.isRBT ? 'Credentialed BT' : 'Behavior technician',
-      month: buildTrendWindow({
+      month: withUtil(buildTrendWindow({
         appts: directAll.filter(withinMonth), bounds: monthBounds, now,
-        target: weeklyAssigned * numWeeks, behindPct: BT_BEHIND_PCT,
-      }),
-      week: buildTrendWindow({
+        target: adjustHours(weeklyAssigned * numWeeks, monthHolidays, 5 * numWeeks),
+        behindPct: BT_BEHIND_PCT, labelMode: 'week',
+      })),
+      week: withUtil(buildTrendWindow({
         appts: directAll.filter(withinWeek), bounds: weekBounds, now,
-        target: weeklyAssigned, behindPct: BT_BEHIND_PCT, withImpact: true,
-      }),
+        target: adjustHours(weeklyAssigned, weekHolidays, 5),
+        behindPct: BT_BEHIND_PCT, withImpact: true, labelMode: 'day',
+      })),
     });
   }
 

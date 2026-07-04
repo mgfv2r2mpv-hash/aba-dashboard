@@ -40,6 +40,13 @@ const direct = (date: string, hours: number, over: Partial<Appointment> = {}): A
   isFixed: false, isBillable: true, type: 'client-session', status: 'scheduled', ...over,
 });
 
+// A supervision session (counts as supervision unconditionally) of `hours`.
+const sup = (date: string, hours: number, over: Partial<Appointment> = {}): Appointment => ({
+  id: `sup-${date}-${hours}`, title: '', client: 'c1',
+  startTime: `${date}T13:00:00`, endTime: `${date}T${String(13 + hours).padStart(2, '0')}:00:00`,
+  isFixed: false, isBillable: true, type: 'supervision', status: 'scheduled', ...over,
+});
+
 describe('computeHomeTrends — direct card', () => {
   const data = makeData({
     clients: [client()],
@@ -111,5 +118,79 @@ describe('computeHomeTrends — omission & techs', () => {
     expect(card!.role).toBe('tech');
     expect(card!.month.target).toBe(12 * NUM_WEEKS);
     expect(card!.subtitle).toBe('Credentialed BT');
+  });
+});
+
+describe('computeHomeTrends — utilization %', () => {
+  it('direct week util = projection ÷ authorized (100% when the week is full)', () => {
+    const data = makeData({
+      clients: [client()], authorizations: [auth({ weekly: { direct: 10 } })],
+      appointments: [direct('2026-06-15', 10)], // Mon of the NOW week
+    });
+    const card = computeHomeTrends(data, NOW).find(t => t.id === 'c1-direct');
+    expect(card!.week.util).toBe(100);
+  });
+
+  it('direct week util reflects a partially booked week (16 of 20 → 80%)', () => {
+    const data = makeData({
+      clients: [client()], authorizations: [auth({ weekly: { direct: 20 } })],
+      appointments: [direct('2026-06-15', 8), direct('2026-06-16', 8)],
+    });
+    const card = computeHomeTrends(data, NOW).find(t => t.id === 'c1-direct');
+    expect(card!.week.util).toBe(80);
+  });
+});
+
+describe('computeHomeTrends — supervision % card', () => {
+  it('reports supervised % vs target and honors the per-case override', () => {
+    const data = makeData({
+      clients: [client({ supervisionIdealPct: 25 })],
+      settings: { supervisionDirectHoursPercent: 10 } as CompanySettings,
+      appointments: [
+        direct('2026-06-08', 10), direct('2026-06-15', 10), // 20h direct this month
+        sup('2026-06-15', 4),                               // 4h supervision this month
+      ],
+    });
+    const card = computeHomeTrends(data, NOW).find(t => t.id === 'c1-supervision');
+    expect(card).toBeDefined();
+    expect(card!.month.targetPct).toBe(25);   // per-case override beats the global 10
+    expect(card!.month.util).toBe(20);        // 4h sup ÷ 20h direct
+  });
+
+  it('falls back to the company supervision target with no per-case override', () => {
+    const data = makeData({
+      clients: [client()],
+      settings: { supervisionDirectHoursPercent: 15 } as CompanySettings,
+      appointments: [direct('2026-06-15', 10), sup('2026-06-15', 2)],
+    });
+    const card = computeHomeTrends(data, NOW).find(t => t.id === 'c1-supervision');
+    expect(card!.month.targetPct).toBe(15);
+  });
+});
+
+describe('computeHomeTrends — sparkline labels & holiday adjustment', () => {
+  it('labels the axis: 7 daily points for the week, one per week for the month', () => {
+    const data = makeData({
+      clients: [client()], authorizations: [auth()],
+      appointments: [direct('2026-06-15', 8)],
+    });
+    const card = computeHomeTrends(data, NOW).find(t => t.id === 'c1-direct');
+    expect(card!.week.series.labels).toHaveLength(7);
+    expect(card!.month.series.labels).toHaveLength(NUM_WEEKS);
+    expect(card!.week.series.labels[0]).toMatch(/^(Su|Mo|Tu|We|Th|Fr|Sa)$/);
+  });
+
+  it('shrinks the month direct target when a holiday falls in the period', () => {
+    const base = makeData({
+      clients: [client()], authorizations: [auth({ weekly: { direct: 10 } })], appointments: [],
+    });
+    const withHol = {
+      ...base,
+      settings: { holidayAffectsBillable: true, holidayBillableHoursPerDay: 8 } as CompanySettings,
+      companyHolidays: [{ id: 'h', date: '2026-06-18', name: 'Holiday' }],
+    };
+    const plain = computeHomeTrends(base, NOW).find(t => t.id === 'c1-direct');
+    const adj = computeHomeTrends(withHol, NOW).find(t => t.id === 'c1-direct');
+    expect(adj!.month.target).toBeLessThan(plain!.month.target);
   });
 });

@@ -16,12 +16,11 @@ import {
 // Cases home screen — one row per case with the month projection (Risk),
 // month/week utilization, per-entity cancel pressure (compact + popover),
 // supervision % and parent-training (actual / projected), the supervision band
-// status, and the compliance factors driving any flag. The per-row "Fix it"
-// button is wired in Phase 3 (inert here unless onFixIt is provided).
+// status, and the compliance factors driving any flag. Remediation ("Fix it")
+// now lives in the SAssi dock, so the per-case row button was removed.
 interface Props {
   data: ScheduleData;
   now?: Date;
-  onFixIt?: (clientId: string) => void;
 }
 
 interface Row {
@@ -40,7 +39,7 @@ const durationHours = (a: Appointment): number => {
 };
 const matchesClient = (a: Appointment, c: Client): boolean => a.client === c.id || a.client === c.name;
 
-export default function CasesHome({ data, now = new Date(), onFixIt }: Props) {
+export default function CasesHome({ data, now = new Date() }: Props) {
   const [popover, setPopover] = useState<{ caseName: string; cancels: CaseCancelSummary } | null>(null);
 
   const rows: Row[] = useMemo(() => {
@@ -76,7 +75,7 @@ export default function CasesHome({ data, now = new Date(), onFixIt }: Props) {
   }, [data, now]);
 
   const monthLabel = rows[0]?.state.monthLabel || '';
-  const HEADERS = ['Risk', 'Case', 'Util (Wk / Mo)', 'Cancels', 'Adm/BCBA', 'Sup % (A/P)', 'PT (A/P)', 'Status', 'Factors', ''];
+  const HEADERS = ['Risk', 'Case', 'Util (Wk / Mo)', 'Cancels', 'Adm/BCBA', 'Sup % (A/P)', 'PT (A/P)', 'Status', 'Factors'];
 
   return (
     <div style={{ padding: '8px 4px' }}>
@@ -105,7 +104,6 @@ export default function CasesHome({ data, now = new Date(), onFixIt }: Props) {
                   row={r}
                   settings={data.settings}
                   onOpenCancels={() => setPopover({ caseName: r.state.client.name, cancels: r.cancels })}
-                  onFixIt={onFixIt}
                 />
               ))}
             </tbody>
@@ -126,11 +124,10 @@ export default function CasesHome({ data, now = new Date(), onFixIt }: Props) {
 
 const td: CSSProperties = { padding: '6px 8px', borderBottom: '1px solid var(--sage-100)', verticalAlign: 'top' };
 
-function CaseRow({ row, settings, onOpenCancels, onFixIt }: {
+function CaseRow({ row, settings, onOpenCancels }: {
   row: Row;
   settings: ScheduleData['settings'];
   onOpenCancels: () => void;
-  onFixIt?: (clientId: string) => void;
 }) {
   const { state: s, compliance, risk, cancels, ptActual } = row;
   const th = resolveSupervisionThresholds(settings, s.client);
@@ -199,21 +196,6 @@ function CaseRow({ row, settings, onOpenCancels, onFixIt }: {
             ))}
           </ul>
         )}
-      </td>
-      {/* Fix it (wired in Phase 3) */}
-      <td style={{ ...td, whiteSpace: 'nowrap' }}>
-        <button
-          onClick={onFixIt ? () => onFixIt(s.client.id) : undefined}
-          disabled={!onFixIt}
-          title={onFixIt ? 'Fix it' : 'Coming in the per-case Fix-it dialog'}
-          style={{
-            padding: '4px 10px', borderRadius: 5, fontSize: 12, fontWeight: 600,
-            border: '1px solid var(--brand-fix, #ea580c)',
-            background: onFixIt ? 'var(--brand-fix, #ea580c)' : '#f3f4f6',
-            color: onFixIt ? 'white' : '#9ca3af',
-            cursor: onFixIt ? 'pointer' : 'not-allowed',
-          }}
-        >Fix it</button>
       </td>
     </tr>
   );

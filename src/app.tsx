@@ -31,6 +31,7 @@ const HomeView = React.lazy(() => import('./components/HomeView'));
 const WishComposer = React.lazy(() => import('./components/WishComposer'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
 const CCHub = React.lazy(() => import('./components/CCHub'));
+import type { HubTab } from './components/CCHub';
 const CaseloadView = React.lazy(() => import('./components/CaseloadView'));
 const SetupWizard = React.lazy(() => import('./components/SetupWizard'));
 const CprView = React.lazy(() => import('./components/CprView'));
@@ -145,6 +146,9 @@ export default function App() {
   // Narrow-screen SAssi dock: below 1024 the always-on column has no room, so
   // the same dock opens from a FAB as a slide-up sheet.
   const [dockSheetOpen, setDockSheetOpen] = useState(false);
+  // Which Caseload sub-tab to open — the dock's "fix compliance" routes to Issues
+  // (where FixItPanel does remediation), now that the per-case Fix It is gone.
+  const [ccInitialTab, setCcInitialTab] = useState<HubTab>('cases');
   // Wish view is now a full page (view === 'wish') rather than a modal.
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   // Whether the selected appointment's detail panel is expanded into its inline
@@ -1450,7 +1454,7 @@ export default function App() {
     switch (key) {
       case 'home': setView('home'); break;
       case 'calendar': setView('schedule'); break;
-      case 'caseload': setView('compliance'); break;
+      case 'caseload': setCcInitialTab('cases'); setView('compliance'); break;
       case 'cpr': setView('cpr'); break;
       case 'setup': setShowWizard(true); break;
       case 'settings': setAdminInitialTab('settings'); setView('admin'); break;
@@ -1825,6 +1829,7 @@ export default function App() {
             {view === 'compliance' && (
               <React.Suspense fallback={null}>
                 <CCHub
+                  initialTab={ccInitialTab}
                   data={scheduleData}
                   onDataChange={commitFull}
                   persist={serverPersist}
@@ -1916,7 +1921,7 @@ export default function App() {
           aiEnabled={aiActive}
           onReviewConflict={reviewConflictIssue}
           onMuteConflict={muteConflictIssue}
-          onFixCompliance={() => setView('compliance')}
+          onFixCompliance={() => { setCcInitialTab('issues'); setView('compliance'); }}
           onGenerateWish={generateDockWish}
           onAcceptWish={acceptWish}
           onCustomizeWish={customizeWish}
@@ -1985,7 +1990,7 @@ export default function App() {
               aiEnabled={aiActive}
               onReviewConflict={(i) => { setDockSheetOpen(false); reviewConflictIssue(i); }}
               onMuteConflict={muteConflictIssue}
-              onFixCompliance={() => { setDockSheetOpen(false); setView('compliance'); }}
+              onFixCompliance={() => { setDockSheetOpen(false); setCcInitialTab('issues'); setView('compliance'); }}
               onGenerateWish={generateDockWish}
               onAcceptWish={acceptWish}
               onCustomizeWish={customizeWish}

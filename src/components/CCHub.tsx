@@ -61,7 +61,7 @@ export default function CCHub(props: Props) {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       {/* Sub-tab bar + settings gear */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px clamp(8px, 3vw, 24px)', borderBottom: 'var(--border-hairline)', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 6, padding: 2, gap: 2, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', background: 'var(--sage-100)', borderRadius: 6, padding: 2, gap: 2, flexWrap: 'wrap' }}>
           {tabs.map(t => {
             const active = tab === t.key;
             return (
@@ -70,9 +70,9 @@ export default function CCHub(props: Props) {
                 onClick={() => setTab(t.key)}
                 style={{
                   padding: '5px 14px', border: 'none', borderRadius: 5, cursor: 'pointer',
-                  fontSize: 13, fontWeight: 600,
-                  background: active ? '#1d4ed8' : 'transparent',
-                  color: active ? 'white' : '#374151',
+                  fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-sans)',
+                  background: active ? 'var(--sage-600)' : 'transparent',
+                  color: active ? 'var(--white)' : 'var(--text-body)',
                   display: 'inline-flex', alignItems: 'center', gap: 6,
                 }}
               >
@@ -80,7 +80,7 @@ export default function CCHub(props: Props) {
                 {!!t.badge && t.badge > 0 && (
                   <span style={{
                     minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8,
-                    background: active ? 'rgba(255,255,255,0.3)' : '#ef4444', color: 'white',
+                    background: active ? 'rgba(255,255,255,0.3)' : 'var(--red-500)', color: 'var(--white)',
                     fontSize: 10, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   }}>{t.badge}</span>
                 )}

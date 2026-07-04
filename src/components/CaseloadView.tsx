@@ -18,19 +18,19 @@ export default function CaseloadView({ data, now = new Date() }: { data: Schedul
 
   return (
     <div style={{ padding: '8px 4px' }}>
-      <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Caseload ({monthLabel})</h2>
-      <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 4, color: 'var(--text-primary)' }}>Caseload ({monthLabel})</h2>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
         Weekly authorized direct vs. actual (75% staffing), monthly supervision against the floor/preferred band,
         cadence pacing, and the binding cliff per case.
       </p>
 
       {states.length === 0 ? (
-        <p style={{ color: '#9ca3af' }}>No clients yet.</p>
+        <p style={{ color: 'var(--text-faint)' }}>No clients yet.</p>
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#374151' }}>
+              <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--sage-200)', color: 'var(--text-primary)' }}>
                 {['Case', 'Auth/wk', 'Actual/wk', '%', 'Sup %', 'Floor', 'Cadence', 'Contacts', 'PT (mo)', 'Cliff'].map(h => (
                   <th key={h} style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
@@ -77,7 +77,7 @@ function FlagRow({ f }: { f: CorrectionFlag }) {
 }
 
 function CaseRow({ s }: { s: CaseState }) {
-  const td: CSSProperties = { padding: '6px 8px', borderBottom: '1px solid #f3f4f6', whiteSpace: 'nowrap' };
+  const td: CSSProperties = { padding: '6px 8px', borderBottom: '1px solid var(--sage-100)', whiteSpace: 'nowrap' };
   const pct1 = (n: number) => (Math.round(n * 10) / 10).toString();
 
   const staffColor = s.direct.authPerWk === 0 ? '#9ca3af' : s.direct.below75 ? '#b45309' : '#15803d';

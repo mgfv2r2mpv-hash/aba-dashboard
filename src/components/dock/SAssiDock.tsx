@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { AssistantDock } from '../shell';
 import type { WishSolution } from '../../types';
 import { IssueCard } from './IssueCard';
@@ -24,6 +24,16 @@ export interface SAssiDockProps {
   onCustomizeWish: (sol: WishSolution) => void;
   /** `column` = wide always-on rail; `sheet` = narrow slide-up. */
   variant?: 'column' | 'sheet';
+  /**
+   * Schedule-view context folded into the dock body atop the wish/issue queue:
+   * hours totals, the draft tray, and draft-AI options. Undefined on other views.
+   */
+  contextTop?: ReactNode;
+  /**
+   * Selected-appointment detail/edit card, shown in the dock's pinned `selected`
+   * slot above the body (column layouts only — the phone keeps its own sheet).
+   */
+  selected?: ReactNode;
 }
 
 type WishState =
@@ -43,6 +53,8 @@ export function SAssiDock({
   onAcceptWish,
   onCustomizeWish,
   variant = 'column',
+  contextTop,
+  selected,
 }: SAssiDockProps) {
   const queue = useIssueQueue(issues);
   const [wish, setWish] = useState<WishState>({ status: 'idle' });
@@ -59,8 +71,9 @@ export function SAssiDock({
 
   const hasWish = wish.status !== 'idle';
   const body =
-    hasWish || queue.current ? (
+    contextTop || hasWish || queue.current ? (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {contextTop}
         {wish.status !== 'idle' && (
           <WishThread
             wish={wish}
@@ -86,6 +99,7 @@ export function SAssiDock({
     <AssistantDock
       issueCount={issueCount}
       variant={variant}
+      selected={selected}
       onWish={handleWish}
       wishDisabled={!aiEnabled}
       wishPlaceholder={aiEnabled ? undefined : 'Add a Claude API key in Settings to ask SAssi'}

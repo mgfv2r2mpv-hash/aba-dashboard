@@ -83,14 +83,14 @@ export function AssistantDock({
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 18, minHeight: 0 }}>
         {selected}
-        {children ?? (
+        {children ?? (selected ? null : (
           <div style={{ textAlign: 'center', padding: '26px 10px', color: 'var(--sage-700)' }}>
             <div style={{ fontSize: 14.5, fontWeight: 800 }}>No open items.</div>
             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.55 }}>
               No conflicts, no compliance flags. Hours are within targets.
             </div>
           </div>
-        )}
+        ))}
       </div>
 
       <div style={{ padding: 14, borderTop: '1px solid var(--sage-100)' }}>

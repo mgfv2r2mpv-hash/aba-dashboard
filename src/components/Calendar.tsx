@@ -197,7 +197,7 @@ export default function Calendar({
         paddingLeft: 'clamp(6px, 2vw, 20px)', paddingRight: 'clamp(6px, 2vw, 20px)',
       }}>
         {/* Single non-wrapping control row; scrolls horizontally instead of wrapping */}
-        <div style={{ display: 'flex', gap: compact ? 4 : 6, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'hidden', flex: '1 1 auto', minWidth: 0 }}>
+        <div style={{ display: 'flex', gap: compact ? 4 : 6, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch' as any, scrollbarWidth: 'none' as any, flex: '1 1 auto', minWidth: 0 }}>
           {onAddAppointment && (
             <button
               onClick={onAddAppointment}
@@ -233,9 +233,9 @@ export default function Calendar({
           <NavBtn onClick={goToday}>{compact ? 'T' : 'Today'}</NavBtn>
           <NavBtn onClick={goNext}>→</NavBtn>
           <div style={{ display: 'flex', gap: 4, border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden', flexShrink: 0 }}>
-            <ViewBtn active={lens === 'bcba'} onClick={() => setLens('bcba')}>BCBA</ViewBtn>
+            <ViewBtn active={lens === 'bcba'} onClick={() => setLens('bcba')}>{compact ? 'BA' : 'BCBA'}</ViewBtn>
             <ViewBtn active={lens === 'bt'} onClick={() => setLens('bt')}>BT</ViewBtn>
-            <ViewBtn active={lens === 'client'} onClick={() => setLens('client')}>Case</ViewBtn>
+            <ViewBtn active={lens === 'client'} onClick={() => setLens('client')}>{compact ? 'Cs' : 'Case'}</ViewBtn>
           </div>
         </div>
         <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, flex: '1 1 100%', textAlign: 'center' }}>

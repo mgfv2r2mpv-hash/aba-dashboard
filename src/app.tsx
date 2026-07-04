@@ -19,7 +19,7 @@ import CompleteTimePrompt from './components/CompleteTimePrompt';
 import AgendaRail from './components/AgendaRail';
 import ImportPreview from './components/ImportPreview';
 import { Button } from './components/ui';
-import { Rail, CommandBar, ZenStrip } from './components/shell';
+import { Rail, CommandBar, ZenStrip, DockChip, DockOverlay, resolveDockMode } from './components/shell';
 import type { RailItem, RailKey } from './components/shell';
 import { SAssiDock, buildDockIssues } from './components/dock';
 import type { DockIssue } from './components/dock';
@@ -146,6 +146,9 @@ export default function App() {
   // Narrow-screen SAssi dock: below 1024 the always-on column has no room, so
   // the same dock opens from a FAB as a slide-up sheet.
   const [dockSheetOpen, setDockSheetOpen] = useState(false);
+  // Tablet-portrait: the dock collapses to a top-right chip; this tracks whether
+  // it's currently rolled open over the right side.
+  const [dockOpen, setDockOpen] = useState(false);
   // Which Caseload sub-tab to open — the dock's "fix compliance" routes to Issues
   // (where FixItPanel does remediation), now that the per-case Fix It is gone.
   const [ccInitialTab, setCcInitialTab] = useState<HubTab>('cases');
@@ -270,19 +273,17 @@ export default function App() {
   // to the phone shell. Phones in portrait keep the single-column slide-up sheet.
   const isTablet = useIsTablet();
   const dockPane = useMinWidth(744) || isTablet;
-  // Wide screens in the schedule view get a two-pane split with independent
-  // scrolling (calendar | bounded context pane). Other views and narrow screens
-  // keep the single page-scroll layout.
-  const splitView = dockPane && view === 'schedule';
-  // Shell layout: phones (<640) drop the vertical rail for a bottom nav; the
+  // Shell layout: phones (≤639) drop the vertical rail for a bottom nav; the
   // always-on SAssi dock only appears when there's room for it (≥1024).
   const compactRail = useMaxWidth(639);
   const showDock = useMinWidth(1024);
-  // The SAssi dock renders as a persistent column when there's room, else as a
-  // FAB-triggered slide-up sheet. The schedule view keeps the column at the same
-  // breakpoint its old inline pane used (≥744 / any tablet), so iPad-portrait
-  // scheduling stays side-by-side; every other view uses the ≥1024 shell width.
-  const dockAsColumn = view === 'schedule' ? dockPane : showDock;
+  // The SAssi dock has three presentations by width: a phone slide-up sheet, a
+  // tablet-portrait collapsible chip that rolls open over the right side, and the
+  // desktop permanent column (see resolveDockMode).
+  const dockMode = resolveDockMode({ compactRail, showDock });
+  // Only the permanent column splits the schedule view into two independently-
+  // scrolling panes; the chip/sheet modes keep the calendar as one full-width page.
+  const splitView = dockMode === 'column' && view === 'schedule';
 
   // Draft sandbox derivations. The Sched view renders the PREVIEW (staged ops
   // applied) with per-appointment marks; the status badge grades it.
@@ -331,21 +332,24 @@ export default function App() {
   // closes, preventing the jarring "drag back up" experience on portrait iPhones.
   useEffect(() => {
     if (selectedAppointment) {
-      if (dockPane) {
+      if (dockMode !== 'sheet') {
+        // Chip/column show the detail in the dock's selected slot — roll the chip
+        // open if it's collapsed, then scroll the detail into view.
+        if (dockMode === 'chip') setDockOpen(true);
         if (detailPanelRef.current) {
           detailPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
       } else {
         savedScrollRef.current = mainScrollRef.current?.scrollTop ?? 0;
       }
-    } else if (!dockPane) {
+    } else if (dockMode === 'sheet') {
       const saved = savedScrollRef.current;
       const scrollEl = mainScrollRef.current;
       // Delay matches the sheet close animation (300ms) so the scroll happens
       // after the sheet is off-screen, not while it's still visible.
       setTimeout(() => { if (scrollEl) scrollEl.scrollTop = saved; }, 320);
     }
-  }, [selectedAppointment, dockPane]);
+  }, [selectedAppointment, dockMode]);
 
   // A new selection (or clearing it) always starts on the read-only detail, not
   // mid-edit, so the panel collapses back from any prior expanded edit form.
@@ -355,8 +359,13 @@ export default function App() {
   // (typically a drag-to-reschedule) would be silent — auto-open the sheet so the
   // DraftTray is visible. Closing the sheet leaves the draft staged.
   useEffect(() => {
-    if (draftActive && view === 'schedule' && !dockAsColumn) setDockSheetOpen(true);
-  }, [draftActive, view, dockAsColumn]);
+    if (!draftActive || view !== 'schedule') return;
+    // A freshly staged draft (usually a drag-to-reschedule) must not be silent:
+    // phones open the sheet, tablet-portrait rolls the chip open. The permanent
+    // column is always visible, so it needs nothing.
+    if (dockMode === 'sheet') setDockSheetOpen(true);
+    else if (dockMode === 'chip') setDockOpen(true);
+  }, [draftActive, view, dockMode]);
 
   // Keep conflicts in sync with the schedule AND the viewed month. Admin edits
   // (availability, blackouts, add/remove people) flow through setScheduleData
@@ -1611,6 +1620,7 @@ export default function App() {
   return (
     <div style={{
       display: 'flex', height: '100vh', maxWidth: '100vw',
+      position: 'relative',
       overflowX: 'clip' as any, flexDirection: compactRail ? 'column' : 'row',
       // Side insets matter on landscape iPhones with a notch so chrome
       // doesn't slip under the camera housing.
@@ -1624,15 +1634,29 @@ export default function App() {
 
       {/* Main column: command bar + zen strip + the scrolling view region. */}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
-        <div ref={headerRef as React.RefObject<HTMLDivElement>} style={{ flexShrink: 0, zIndex: 10 }}>
-          <CommandBar title={viewTitle} actions={commandActions} aiActive={aiActive} aiTitle={aiTitle} />
-          <ZenStrip
-            hereText={hereText}
-            nextText={nextText}
-            conflictCount={activeConflicts.length}
-            complianceCount={attentionCount}
-            onFlagClick={() => setView('compliance')}
-          />
+        <div
+          ref={headerRef as React.RefObject<HTMLDivElement>}
+          style={{
+            flexShrink: 0, zIndex: 10,
+            display: dockMode === 'chip' ? 'flex' : undefined,
+            alignItems: dockMode === 'chip' ? 'stretch' : undefined,
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <CommandBar title={viewTitle} actions={commandActions} aiActive={aiActive} aiTitle={aiTitle} />
+            <ZenStrip
+              hereText={hereText}
+              nextText={nextText}
+              conflictCount={activeConflicts.length}
+              complianceCount={attentionCount}
+              onFlagClick={() => setView('compliance')}
+            />
+          </div>
+          {/* Tablet-portrait: the collapsed dock sits as the merged right cell
+              beside the two header rows; tapping it rolls the overlay open. */}
+          {dockMode === 'chip' && scheduleData && !dockOpen && (
+            <DockChip issueCount={issueCount} onOpen={() => setDockOpen(true)} controlsId="sassi-dock-overlay" />
+          )}
         </div>
 
       <div
@@ -1683,7 +1707,7 @@ export default function App() {
                     onSelectAppointment={setSelectedAppointment}
                     onViewDateChange={setViewDate}
                     onLensChange={setCalLens}
-                    hideTotals={dockPane}
+                    hideTotals={dockMode === 'column'}
                     draftMarks={calendarMarks}
                     onMoveThis={handleMoveThis}
                     onReplaceThis={handleReplaceThis}
@@ -1840,7 +1864,7 @@ export default function App() {
           (schedule: ≥744/tablet; others: ≥1024). On the schedule view it also
           carries the folded-in hours totals, draft tray, day agenda, and the
           selected-session detail/edit (P5b — replaces the old inline pane). */}
-      {dockAsColumn && (view !== 'schedule' || scheduleData) && (
+      {dockMode === 'column' && (view !== 'schedule' || scheduleData) && (
         <SAssiDock
           issues={view === 'schedule' && draftActive ? [] : dockIssues}
           issueCount={issueCount}
@@ -1859,7 +1883,7 @@ export default function App() {
       {/* Narrow: the same dock reached from a FAB as a slide-up sheet, so
           phone users get the assistant on every view — schedule included (P5b).
           On schedule the draft tray rides in here; a staged draft auto-opens it. */}
-      {!dockAsColumn && scheduleData && (
+      {dockMode === 'sheet' && scheduleData && (
         <>
           {/* Hide the FAB while the appointment detail sheet is up, so it doesn't
               float over the open detail. */}
@@ -1931,6 +1955,26 @@ export default function App() {
             />
           </div>
         </>
+      )}
+
+      {/* Tablet-portrait: the dock's collapsed chip lives in the header; here it
+          rolls open as an overlay over the right side (same dock, every view). */}
+      {dockMode === 'chip' && scheduleData && (
+        <DockOverlay id="sassi-dock-overlay" open={dockOpen} onClose={() => setDockOpen(false)}>
+          <SAssiDock
+            issues={view === 'schedule' && draftActive ? [] : dockIssues}
+            issueCount={issueCount}
+            aiEnabled={aiActive}
+            contextTop={scheduleContextTop}
+            selected={view === 'schedule' && selectedAppointment ? renderDetailOrEdit(selectedAppointment) : undefined}
+            onReviewConflict={reviewConflictIssue}
+            onMuteConflict={muteConflictIssue}
+            onFixCompliance={() => { setDockOpen(false); setCcInitialTab('issues'); setView('compliance'); }}
+            onGenerateWish={generateDockWish}
+            onAcceptWish={acceptWish}
+            onCustomizeWish={customizeWish}
+          />
+        </DockOverlay>
       )}
 
       {/* Phones: rail collapses to a bottom bar. */}

@@ -129,3 +129,22 @@ export function useIsTablet(): boolean {
   }, []);
   return cls === 'tablet';
 }
+
+// Reactive `prefers-reduced-motion` hook — true when the user has asked the OS
+// to minimize non-essential motion. Gate entrance / roll-open animations on this
+// so the dock unfurl (and similar) become instant for those users.
+export function useReducedMotion(): boolean {
+  const query = '(prefers-reduced-motion: reduce)';
+  const [reduce, setReduce] = useState(() =>
+    typeof window === 'undefined' ? false : window.matchMedia(query).matches
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia(query);
+    const handler = (e: MediaQueryListEvent) => setReduce(e.matches);
+    setReduce(mq.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  return reduce;
+}

@@ -16,3 +16,12 @@ export { AssistantDock } from './AssistantDock';
 export type { AssistantDockProps } from './AssistantDock';
 
 export { Enso, SAssiWord } from './SAssiMark';
+
+export { DockChip } from './DockChip';
+export type { DockChipProps } from './DockChip';
+
+export { DockOverlay } from './DockOverlay';
+export type { DockOverlayProps } from './DockOverlay';
+
+export { resolveDockMode } from './dockMode';
+export type { DockMode } from './dockMode';

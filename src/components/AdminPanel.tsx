@@ -873,7 +873,7 @@ function ReorderList({ items, onCommit, onCancel }: {
             style={{
               display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
               border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)',
-              background: dragId === it.id ? '#eff6ff' : 'white',
+              background: dragId === it.id ? 'var(--sage-50)' : 'white',
               boxShadow: dragId === it.id ? '0 2px 8px rgba(0,0,0,0.12)' : 'none',
               // Row stays scrollable on touch; only the ≡ handle suppresses
               // scrolling so vertical drags reorder instead of pan.
@@ -2895,7 +2895,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
 function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ ...cardStyle, marginBottom: '16px' }}>
-      <p style={{ fontSize: '13px', fontWeight: 700, color: '#111827', marginBottom: '12px' }}>{title}</p>
+      <p style={{ fontSize: '11px', fontWeight: 800, letterSpacing: 'var(--tracking-wide, .06em)', textTransform: 'uppercase', color: 'var(--sage-700)', marginBottom: '12px' }}>{title}</p>
       <div style={{ display: 'grid', gap: '12px' }}>{children}</div>
     </div>
   );
@@ -2947,7 +2947,7 @@ function AISettingsSection({ model, onModelChange, hasExistingKey, replacingKey,
                 border: model === opt.value ? '2px solid var(--brand-primary)' : 'var(--border-hairline)',
                 borderRadius: '6px',
                 cursor: 'pointer',
-                backgroundColor: model === opt.value ? '#eff6ff' : 'white',
+                backgroundColor: model === opt.value ? 'var(--sage-50)' : 'white',
               }}
             >
               <input
@@ -3149,7 +3149,7 @@ function NumField({ label, value, onChange, suffix, hint, placeholder, defaultVa
           placeholder={placeholder ?? (defaultValue !== undefined ? String(defaultValue) : undefined)}
           style={{ ...inputStyle, width: '120px' }}
         />
-        {suffix && <span style={{ fontSize: '12px', color: '#6b7280' }}>{suffix}</span>}
+        {suffix && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{suffix}</span>}
       </div>
       {hint && <span style={{ fontSize: '11px', color: 'var(--text-faint)' }}>{hint}</span>}
     </div>

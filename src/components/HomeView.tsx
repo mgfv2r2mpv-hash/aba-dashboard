@@ -30,26 +30,44 @@ const STATUS_COLOR: Record<TrendStatus, string> = {
   over: 'var(--status-over)',
 };
 
+const STATUS_BG: Record<TrendStatus, string> = {
+  met: 'var(--status-met-bg)',
+  pace: 'var(--status-pace-bg)',
+  behind: 'var(--status-behind-bg)',
+  over: 'var(--status-over-bg)',
+};
+
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-// ── Trend sparkline: dashed pace · dotted projection · solid actual + dot ────
+// ── Trend sparkline: dashed pace · dotted projection · solid actual + dot,
+//    over a dated x-axis with drop-dots from each delivered day to the axis ────
 function Trend({ w }: { w: TrendWindow }) {
-  const W = 132, H = 40, P = 3;
-  const { pace, actual, proj } = w.series;
+  const W = 140, PLOT_H = 40, P = 3;
+  const { pace, actual, proj, labels } = w.series;
   const n = Math.max(pace.length - 1, 1);
   const max = Math.max(...pace, ...proj, ...actual, 0.001) * 1.08;
+  const AXIS_Y = PLOT_H - P;
+  const H = AXIS_Y + 12;              // room for the axis + a label band
   const x = (i: number) => P + (i / n) * (W - 2 * P);
-  const y = (v: number) => H - P - (v / max) * (H - 2 * P);
+  const y = (v: number) => AXIS_Y - (v / max) * (PLOT_H - 2 * P);
   const pts = (arr: number[]) => arr.map((v, i) => `${x(i)},${y(v)}`).join(' ');
   const col = STATUS_COLOR[w.status];
   const lastX = x(actual.length - 1);
   const lastY = y(actual[actual.length - 1] ?? 0);
   return (
-    <svg width={W} height={H} aria-hidden="true" style={{ flexShrink: 0 }}>
+    <svg width={W} height={H} aria-hidden="true" style={{ flexShrink: 0, overflow: 'visible' }}>
+      {/* drop-dots: faint tick from each delivered day down to the axis */}
+      {actual.map((v, i) => (
+        <line key={`drop-${i}`} x1={x(i)} y1={y(v)} x2={x(i)} y2={AXIS_Y} stroke={col} strokeWidth="1" strokeDasharray="1 2" opacity="0.35" />
+      ))}
       <polyline points={pts(pace)} fill="none" stroke="var(--slate-300)" strokeWidth="1.5" strokeDasharray="4 3" />
       <polyline points={pts(proj)} fill="none" stroke={col} strokeWidth="1.5" strokeDasharray="1.5 3" opacity="0.7" />
       <polyline points={pts(actual)} fill="none" stroke={col} strokeWidth="2.5" strokeLinecap="round" />
       {actual.length > 0 && <circle cx={lastX} cy={lastY} r="3" fill={col} />}
+      <line x1={P} y1={AXIS_Y} x2={W - P} y2={AXIS_Y} stroke="var(--slate-200)" strokeWidth="1" />
+      {labels.map((lab, i) => (
+        <text key={`lab-${i}`} x={x(i)} y={AXIS_Y + 9} textAnchor="middle" fontSize="6.5" fontWeight="700" fill="var(--text-faint)" fontFamily="var(--font-sans)">{lab}</text>
+      ))}
     </svg>
   );
 }
@@ -60,6 +78,11 @@ function PersonCard({ p, win, onFlag }: { p: PersonTrend; win: 'week' | 'month';
   const projColor = w.status === 'behind' ? 'var(--status-behind)'
     : w.status === 'over' ? 'var(--status-over)'
       : 'var(--sage-700)';
+  // Supervision cards carry targetPct and headline the supervised %; direct/BT
+  // cards headline delivered hours with a utilization chip. directH is recovered
+  // from the window target (= directH × targetPct / 100).
+  const isSup = w.targetPct != null;
+  const directH = w.targetPct ? (w.target * 100) / w.targetPct : 0;
   return (
     <div style={{ background: 'var(--white)', border: '1px solid var(--sage-200)', borderRadius: 'var(--radius-xl)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -71,13 +94,29 @@ function PersonCard({ p, win, onFlag }: { p: PersonTrend; win: 'week' | 'month';
         <StatusPill intent={w.status}>{w.status}</StatusPill>
       </div>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 21, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1 }}>{w.actual.toFixed(1)}h</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>of {w.target.toFixed(1)}h this {win}</div>
-          <div style={{ fontSize: 11, fontWeight: 700, marginTop: 3, color: projColor }}>
-            → {w.proj.toFixed(1)}h projected
+        {isSup ? (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <div style={{ fontSize: 21, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1 }}>{w.util ?? 0}%</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>supervised</div>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>target {w.targetPct}% of direct</div>
+            <div style={{ fontSize: 11, fontWeight: 700, marginTop: 3, color: projColor }}>
+              {w.proj.toFixed(1)}h sup · {directH.toFixed(1)}h direct
+            </div>
           </div>
-        </div>
+        ) : (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
+              <div style={{ fontSize: 21, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1 }}>{w.actual.toFixed(1)}h</div>
+              <span style={{ fontSize: 10.5, fontWeight: 800, color: STATUS_COLOR[w.status], background: STATUS_BG[w.status], borderRadius: 'var(--radius-sm)', padding: '1px 6px' }}>{w.util ?? 0}% util</span>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>of {w.target.toFixed(1)}h this {win}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, marginTop: 3, color: projColor }}>
+              → {w.proj.toFixed(1)}h projected
+            </div>
+          </div>
+        )}
         <div style={{ marginLeft: 'auto' }}><Trend w={w} /></div>
       </div>
       {win === 'week' && w.impact && (

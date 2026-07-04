@@ -590,8 +590,8 @@ function CapBar({ hours, target }: { hours: HoursByStatus; target: number }) {
   return (
     <div style={{ position: 'relative', marginTop: 4 }}>
       <div style={{ height: 8, background: '#e5e7eb', borderRadius: 3, overflow: 'hidden', display: 'flex' }}>
-        <div style={{ width: `${pct(hours.completed)}%`, background: '#16a34a' }} />
-        <div style={{ width: `${pct(hours.scheduled)}%`, background: '#9ca3af' }} />
+        <div style={{ width: `${pct(hours.completed)}%`, background: 'var(--appt-completed)' }} />
+        <div style={{ width: `${pct(hours.scheduled)}%`, background: 'var(--appt-pending)' }} />
         <div style={{ width: `${pct(hours.canceledFamily)}%`, background: 'var(--cancel-family)' }} />
         <div style={{ width: `${pct(hours.canceledStaff)}%`, background: 'var(--cancel-bt)' }} />
       </div>
@@ -682,10 +682,8 @@ function MonthTotalRow({ lens, hours, goal, weeklyTarget, monthWeeks }: {
 
 function Legend() {
   const items: { c: string; label: string }[] = [
-    { c: '#94a3b8', label: 'Pending (billable)' },
-    { c: '#9ca3af', label: 'Pending (non-bill.)' },
-    { c: 'var(--blue-500)', label: 'Done (billable)' },
-    { c: 'var(--indigo-500)', label: 'Done (non-bill.)' },
+    { c: 'var(--appt-completed)', label: 'Completed' },
+    { c: 'var(--appt-pending)', label: 'Pending' },
     { c: 'var(--cancel-family)', label: 'Cancel: family' },
     { c: 'var(--cancel-bt)', label: 'Cancel: BT' },
     { c: 'var(--cancel-bcba)', label: 'Cancel: BCBA' },
@@ -1060,10 +1058,6 @@ function streakGlow(streak: number | undefined): string | undefined {
   return '0 0 0 2px #b45309, 0 0 14px rgba(180,83,9,0.65)';
 }
 
-// Status-based coloring for the monthly chip view. Two-axis scheme: status ×
-// billability. Completed = blue family (billable=blue-500, non-billable=indigo-500).
-// Pending = gray family (billable=slate-400, non-billable=gray-400). Canceled
-// keeps orange/red split by who canceled.
 // Map appointment type to its brand accent color (load-bearing color language).
 function typeAccent(type: Appointment['type']): string {
   switch (type) {

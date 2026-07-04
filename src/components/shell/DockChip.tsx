@@ -24,10 +24,14 @@ export function DockChip({ issueCount, onOpen, controlsId }: DockChipProps) {
       style={{
         alignSelf: 'stretch',
         flexShrink: 0,
+        // Match the expanded dock width so opening it is a purely vertical
+        // "unfurl" straight down — the collapsed tile and the open panel share
+        // the same right edge and width (DockOverlay is also var(--dock-width)).
+        width: 'var(--dock-width)',
+        maxWidth: '92vw',
         display: 'flex',
         alignItems: 'center',
         gap: 9,
-        minWidth: 44,
         minHeight: 44,
         padding: 'calc(env(safe-area-inset-top) + 10px) 16px 10px',
         border: 'none',

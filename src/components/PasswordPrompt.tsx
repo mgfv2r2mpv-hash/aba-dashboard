@@ -84,7 +84,7 @@ export default function PasswordPrompt({ title, message, username = 'aba-schedul
             type="submit"
             disabled={!password}
             style={{
-              padding: '8px 16px', backgroundColor: password ? '#3b82f6' : '#93c5fd',
+              padding: '8px 16px', backgroundColor: password ? 'var(--brand-primary)' : 'var(--sage-300)',
               color: 'white', border: 'none', borderRadius: 6,
               cursor: password ? 'pointer' : 'default',
             }}

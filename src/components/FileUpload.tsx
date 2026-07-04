@@ -33,7 +33,7 @@ export default function FileUpload({ onUpload, loading }: FileUploadProps) {
         disabled={loading}
         style={{
           padding: '5px 9px',
-          backgroundColor: loading ? '#d1d5db' : '#3b82f6',
+          backgroundColor: loading ? 'var(--slate-300)' : 'var(--brand-primary)',
           color: 'white',
           border: 'none',
           borderRadius: 5,

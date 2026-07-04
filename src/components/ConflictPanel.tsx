@@ -115,7 +115,7 @@ function cardBackground(c: ScheduleConflict): string {
   // Info — check sub-type
   const msg = c.message.toLowerCase();
   if (msg.includes('no bt') || msg.includes('unstaff')) return '#fefce8'; // light yellow
-  return '#eff6ff'; // default info: light blue
+  return 'var(--intent-info-bg)'; // default info: light blue
 }
 
 interface ConflictPanelProps {
@@ -151,7 +151,7 @@ export default function ConflictPanel({ conflicts, appointments = [], onSelectAp
     switch (severity) {
       case 'error': return '#dc2626';
       case 'warning': return '#f59e0b';
-      default: return '#3b82f6';
+      default: return 'var(--intent-info)';
     }
   };
 
@@ -219,7 +219,7 @@ export default function ConflictPanel({ conflicts, appointments = [], onSelectAp
                 onClick={() => onSelectAppointment?.(a)}
                 style={{
                   textAlign: 'left', background: 'transparent', border: 'none',
-                  padding: 0, color: '#1d4ed8', cursor: 'pointer',
+                  padding: 0, color: 'var(--blue-700)', cursor: 'pointer',
                   fontSize: 12, textDecoration: 'underline',
                 }}
               >

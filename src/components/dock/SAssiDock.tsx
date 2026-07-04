@@ -22,6 +22,8 @@ export interface SAssiDockProps {
   onGenerateWish: (note: string) => Promise<WishSolution[]>;
   onAcceptWish: (sol: WishSolution) => void;
   onCustomizeWish: (sol: WishSolution) => void;
+  /** `column` = wide always-on rail; `sheet` = narrow slide-up. */
+  variant?: 'column' | 'sheet';
 }
 
 type WishState =
@@ -40,6 +42,7 @@ export function SAssiDock({
   onGenerateWish,
   onAcceptWish,
   onCustomizeWish,
+  variant = 'column',
 }: SAssiDockProps) {
   const queue = useIssueQueue(issues);
   const [wish, setWish] = useState<WishState>({ status: 'idle' });
@@ -82,6 +85,7 @@ export function SAssiDock({
   return (
     <AssistantDock
       issueCount={issueCount}
+      variant={variant}
       onWish={handleWish}
       wishDisabled={!aiEnabled}
       wishPlaceholder={aiEnabled ? undefined : 'Add a Claude API key in Settings to ask SAssi'}

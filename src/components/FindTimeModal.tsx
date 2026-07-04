@@ -108,7 +108,7 @@ export default function FindTimeModal({
                 </div>
                 <button
                   onClick={() => useOption(o)}
-                  style={{ padding: '5px 12px', border: 'none', borderRadius: 6, background: '#3b82f6', color: 'white', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+                  style={{ padding: '5px 12px', border: 'none', borderRadius: 6, background: 'var(--brand-primary)', color: 'white', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
                 >Use this time</button>
               </div>
             ))}

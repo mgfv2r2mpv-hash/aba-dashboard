@@ -212,8 +212,8 @@ export default function ClientCalendarView({
         <button onClick={clearFocus} disabled={focusIds.size === 0 && bandMin === null} style={{
           padding: '5px 12px', borderRadius: 14, whiteSpace: 'nowrap',
           border: '1px solid #d1d5db',
-          background: (focusIds.size === 0 && bandMin === null) ? '#f9fafb' : '#eff6ff',
-          color: (focusIds.size === 0 && bandMin === null) ? '#9ca3af' : '#1d4ed8',
+          background: (focusIds.size === 0 && bandMin === null) ? 'var(--slate-50)' : 'var(--blue-50)',
+          color: (focusIds.size === 0 && bandMin === null) ? 'var(--slate-400)' : 'var(--blue-700)',
           cursor: (focusIds.size === 0 && bandMin === null) ? 'default' : 'pointer',
           fontSize: 12, fontWeight: 600,
         }}>Clear focus</button>
@@ -594,10 +594,10 @@ function GuideLine({ min, hourPx, gs = DAY_START }: { min: number; hourPx: numbe
   const top = minToPx(min, hourPx, gs);
   return (
     <div style={{ position: 'absolute', left: GUTTER, right: 0, top, zIndex: 60, pointerEvents: 'none' }}>
-      <div style={{ borderTop: '2px dashed #2563eb' }} />
+      <div style={{ borderTop: '2px dashed var(--blue-600)' }} />
       <span style={{
         position: 'absolute', left: 4, top: -9, fontSize: 10, fontWeight: 800,
-        color: '#1d4ed8', background: 'rgba(255,255,255,0.9)', padding: '0 4px', borderRadius: 4,
+        color: 'var(--blue-700)', background: 'rgba(255,255,255,0.9)', padding: '0 4px', borderRadius: 4,
       }}>{fmtMin(min)}</span>
     </div>
   );
@@ -658,12 +658,12 @@ function ClientMonthView({ date, blackouts, clients, onPickDay }: {
                 background: inMonth ? '#fff' : '#f8f8f8',
                 minHeight: 96, padding: '5px 5px 4px',
                 cursor: 'pointer', opacity: inMonth ? 1 : 0.4,
-                borderTop: isToday ? '3px solid #3b82f6' : '3px solid transparent',
+                borderTop: isToday ? '3px solid var(--brand-primary)' : '3px solid transparent',
               }}
             >
               <div style={{
                 fontSize: 13, fontWeight: isToday ? 700 : 400,
-                color: isToday ? '#3b82f6' : '#374151', marginBottom: 4,
+                color: isToday ? 'var(--brand-primary)' : 'var(--text-body)', marginBottom: 4,
               }}>
                 {format(day, 'd')}
               </div>
@@ -1016,7 +1016,7 @@ function ClientWeekGrid({ date, clients, appointments, companyHolidays, focusIds
                     padding: '6px 6px 5px', textAlign: 'center', cursor: 'pointer',
                     border: 'none', borderLeft: '1px solid #e5e7eb',
                     background: holiday ? 'var(--green-50, #f0fdf4)' : 'transparent',
-                    color: isToday ? '#3b82f6' : '#374151',
+                    color: isToday ? 'var(--brand-primary)' : 'var(--text-body)',
                   }}
                 >
                   <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>

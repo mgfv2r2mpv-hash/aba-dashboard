@@ -1352,7 +1352,7 @@ export default function App() {
             <button
               onClick={() => promoteGhost(a)}
               style={{
-                flex: '1 1 auto', padding: '6px 12px', backgroundColor: '#3b82f6', color: 'white',
+                flex: '1 1 auto', padding: '6px 12px', backgroundColor: 'var(--brand-primary)', color: 'white',
                 border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
               }}
             >Promote</button>
@@ -1372,7 +1372,7 @@ export default function App() {
             title={locked ? 'Reopen to edit' : undefined}
             style={{
               flex: '1 1 auto', padding: '6px 12px',
-              backgroundColor: locked ? '#e5e7eb' : '#3b82f6', color: locked ? '#9ca3af' : 'white',
+              backgroundColor: locked ? 'var(--slate-200)' : 'var(--brand-primary)', color: locked ? 'var(--slate-400)' : 'white',
               border: 'none', borderRadius: '4px', cursor: locked ? 'not-allowed' : 'pointer', fontSize: '13px',
             }}
           >Edit</button>
@@ -2057,7 +2057,7 @@ export default function App() {
                   >Customize</button>
                   <button
                     onClick={() => { setRecoverySolutions(null); acceptWish(sol); }}
-                    style={{ padding: '5px 12px', border: 'none', borderRadius: 6, background: '#3b82f6', color: 'white', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+                    style={{ padding: '5px 12px', border: 'none', borderRadius: 6, background: 'var(--brand-primary)', color: 'white', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
                   >Accept</button>
                 </div>
               </div>

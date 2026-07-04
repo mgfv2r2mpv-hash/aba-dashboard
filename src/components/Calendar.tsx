@@ -684,8 +684,8 @@ function Legend() {
   const items: { c: string; label: string }[] = [
     { c: '#94a3b8', label: 'Pending (billable)' },
     { c: '#9ca3af', label: 'Pending (non-bill.)' },
-    { c: '#3b82f6', label: 'Done (billable)' },
-    { c: '#6366f1', label: 'Done (non-bill.)' },
+    { c: 'var(--blue-500)', label: 'Done (billable)' },
+    { c: 'var(--indigo-500)', label: 'Done (non-bill.)' },
     { c: 'var(--cancel-family)', label: 'Cancel: family' },
     { c: 'var(--cancel-bt)', label: 'Cancel: BT' },
     { c: 'var(--cancel-bcba)', label: 'Cancel: BCBA' },
@@ -1260,7 +1260,7 @@ function blockLook(apt: Appointment, mark?: DraftMark, flags?: SessionFlags) {
     border = '1px dashed #9ca3af'; opacity = 0.5; prefix = '👻 ';
   } else if (mark) {
     if (mark === 'remove') { border = '1px dashed #fca5a5'; opacity = 0.6; strike = true; prefix = '🗑 '; }
-    else { border = '1px dashed #2563eb'; prefix = mark === 'add' ? '＋ ' : mark === 'shorten' ? '✂ ' : '✎ '; }
+    else { border = '1px dashed var(--brand-primary)'; prefix = mark === 'add' ? '＋ ' : mark === 'shorten' ? '✂ ' : '✎ '; }
   }
 
   // Past-but-still-scheduled sessions recede to 55% — they already happened and

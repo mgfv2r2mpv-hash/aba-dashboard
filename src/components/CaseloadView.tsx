@@ -122,7 +122,7 @@ function NeedRow({ n }: { n: CorrectionNeed }) {
     <li style={{ fontSize: 12, padding: '6px 10px', border: '1px solid #f3f4f6', borderLeft: `3px solid ${color}`, borderRadius: 4, background: 'white' }}>
       <span style={{ fontSize: 10, fontWeight: 700, color, marginRight: 8 }}>{tag}</span>
       {n.detail}
-      {n.note && <div style={{ fontSize: 11, color: '#2563eb', marginTop: 2 }}>↳ {n.note}</div>}
+      {n.note && <div style={{ fontSize: 11, color: 'var(--blue-600)', marginTop: 2 }}>↳ {n.note}</div>}
     </li>
   );
 }

@@ -7,7 +7,7 @@ import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
 import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, Cancellation, cancellationReasonLabel } from './types';
 import Calendar, { HoursSummary } from './components/Calendar';
-import ConflictPanel, { conflictKey } from './components/ConflictPanel';
+import { conflictKey } from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
 import type { AdminPersist, AdminTab } from './components/AdminPanel';
 import FileUpload from './components/FileUpload';
@@ -185,7 +185,6 @@ export default function App() {
   const importInputRef = React.useRef<HTMLInputElement | null>(null);
   const headerRef = React.useRef<HTMLElement | null>(null);
   const mainScrollRef = React.useRef<HTMLDivElement | null>(null);
-  const [panelCollapsed, setPanelCollapsed] = useState(false);
   const mainScrollLastRef = React.useRef(0);
   const savedScrollRef = React.useRef<number>(0);
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -279,6 +278,11 @@ export default function App() {
   // always-on SAssi dock only appears when there's room for it (≥1024).
   const compactRail = useMaxWidth(639);
   const showDock = useMinWidth(1024);
+  // The SAssi dock renders as a persistent column when there's room, else as a
+  // FAB-triggered slide-up sheet. The schedule view keeps the column at the same
+  // breakpoint its old inline pane used (≥744 / any tablet), so iPad-portrait
+  // scheduling stays side-by-side; every other view uses the ≥1024 shell width.
+  const dockAsColumn = view === 'schedule' ? dockPane : showDock;
 
   // Draft sandbox derivations. The Sched view renders the PREVIEW (staged ops
   // applied) with per-appointment marks; the status badge grades it.
@@ -327,7 +331,6 @@ export default function App() {
   // closes, preventing the jarring "drag back up" experience on portrait iPhones.
   useEffect(() => {
     if (selectedAppointment) {
-      setPanelCollapsed(false);
       if (dockPane) {
         if (detailPanelRef.current) {
           detailPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -347,6 +350,13 @@ export default function App() {
   // A new selection (or clearing it) always starts on the read-only detail, not
   // mid-edit, so the panel collapses back from any prior expanded edit form.
   useEffect(() => { setInlineEdit(false); }, [selectedAppointment?.id]);
+
+  // On phones the schedule dock lives behind a FAB, so a freshly staged draft
+  // (typically a drag-to-reschedule) would be silent — auto-open the sheet so the
+  // DraftTray is visible. Closing the sheet leaves the draft staged.
+  useEffect(() => {
+    if (draftActive && view === 'schedule' && !dockAsColumn) setDockSheetOpen(true);
+  }, [draftActive, view, dockAsColumn]);
 
   // Keep conflicts in sync with the schedule AND the viewed month. Admin edits
   // (availability, blackouts, add/remove people) flow through setScheduleData
@@ -1551,6 +1561,53 @@ export default function App() {
   };
   const clearSessionSeed = () => { setSessionSeed(null); setStartedTodoId(null); };
 
+  // ── Schedule view: dock context (M5 P5b) ───────────────────────────────
+  // The old inline pane's content, folded into the SAssi dock body: hours
+  // totals, the draft tray, and draft-AI options up top; the day's agenda as the
+  // calm idle state. Conflicts now flow through the dock's issue queue, and the
+  // selected appointment rides the dock's `selected` slot (column) or its own
+  // phone sheet — so neither of those renders here.
+  const scheduleContextTop = view === 'schedule' && scheduleData ? (
+    <>
+      {!draftActive && calLens !== 'client' && (
+        <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} timeOff={scheduleData.timeOff} currentDate={viewDate} />
+      )}
+      {draftActive && draftStatus && (
+        <DraftTray
+          base={scheduleData}
+          ops={draftOps}
+          status={draftStatus}
+          hasApiKey={!!aiSettings.apiKey}
+          aiLoading={aiLoading}
+          onResetOp={resetOp}
+          onResetAll={cancelDraft}
+          onCancel={cancelDraft}
+          onAccept={acceptDraft}
+          onSaveAnyway={saveAnyway}
+          onAI={runDraftAI}
+          onPickChoice={pickChoice}
+          onLogGhosts={logAddsAsGhosts}
+        />
+      )}
+      {solutions.length > 0 && (
+        <SolutionPanel
+          solutions={solutions}
+          heading="AI options (within the month)"
+          onAccept={acceptAiSolution}
+          onCustomize={customizeAiSolution}
+          onReject={rejectAiSet}
+        />
+      )}
+      {!draftActive && solutions.length === 0 && dockIssues.length === 0 && !selectedAppointment && (
+        <AgendaRail
+          appointments={scheduleData.appointments}
+          date={viewDate}
+          onSelect={setSelectedAppointment}
+        />
+      )}
+    </>
+  ) : null;
+
   return (
     <div style={{
       display: 'flex', height: '100vh', maxWidth: '100vw',
@@ -1645,139 +1702,6 @@ export default function App() {
                     ) : undefined}
                   />
                 </div>
-                {(() => {
-                  // Draft tray / conflicts / AI options / idle agenda — the
-                  // middle of the docked pane (and the only content of the narrow
-                  // in-flow pane; the selected appointment is a slide-up sheet there).
-                  const middle = (
-                    <>
-                    {draftActive && draftStatus && (
-                      <DraftTray
-                        base={scheduleData}
-                        ops={draftOps}
-                        status={draftStatus}
-                        hasApiKey={!!aiSettings.apiKey}
-                        aiLoading={aiLoading}
-                        onResetOp={resetOp}
-                        onResetAll={cancelDraft}
-                        onCancel={cancelDraft}
-                        onAccept={acceptDraft}
-                        onSaveAnyway={saveAnyway}
-                        onAI={runDraftAI}
-                        onPickChoice={pickChoice}
-                        onLogGhosts={logAddsAsGhosts}
-                      />
-                    )}
-                    {!draftActive && visibleConflicts.length > 0 && (
-                      <ConflictPanel
-                        conflicts={visibleConflicts}
-                        appointments={scheduleData?.appointments}
-                        onSelectAppointment={setSelectedAppointment}
-                        fill={splitView && solutions.length === 0}
-                        mutedKeys={mutedConflicts}
-                        onMute={muteConflict}
-                        onUnmute={unmuteConflict}
-                        onConfirmDismiss={confirmDismissConflict}
-                        defaultCollapsed={!dockPane}
-                      />
-                    )}
-                    {solutions.length > 0 && (
-                      <SolutionPanel
-                        solutions={solutions}
-                        heading="AI options (within the month)"
-                        onAccept={acceptAiSolution}
-                        onCustomize={customizeAiSolution}
-                        onReject={rejectAiSet}
-                      />
-                    )}
-                    {!draftActive && visibleConflicts.length === 0 && solutions.length === 0 && !selectedAppointment && (
-                      <AgendaRail
-                        appointments={scheduleData.appointments}
-                        date={viewDate}
-                        onSelect={setSelectedAppointment}
-                      />
-                    )}
-                    </>
-                  );
-
-                  // Wide: a frozen, full-height pane. Totals pinned to the top
-                  // (≤25%), conflicts/agenda filling the remaining ~75%, and the
-                  // selected appointment sliding up from the bottom — 25% for the
-                  // read-only detail, expanding to 50% (shrinking the middle) for
-                  // inline edits, all animated. Overflow in any band scrolls
-                  // within the band, never growing the frozen pane.
-                  if (splitView) {
-                    const canCollapse = true;
-                    const collapsed = panelCollapsed;
-                    return (
-                      <div style={{
-                        position: 'relative',
-                        flex: '0 0 auto',
-                        width: collapsed ? 20 : 400,
-                        transition: 'width 0.25s ease',
-                        minHeight: 0, height: '100%',
-                        overflow: 'hidden',
-                      }}>
-                        {canCollapse && (
-                          <button
-                            onClick={() => setPanelCollapsed(c => !c)}
-                            aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
-                            style={{
-                              position: 'absolute', left: 0, top: 40,
-                              width: 20, height: 48, zIndex: 20,
-                              clipPath: 'polygon(100% 0%, 0% 50%, 100% 100%)',
-                              backgroundColor: '#94a3b8',
-                              border: 'none', cursor: 'pointer', padding: 0,
-                            }}
-                          />
-                        )}
-                        <div ref={detailPanelRef} style={{
-                          position: 'absolute',
-                          left: 20, top: 0, bottom: 0,
-                          width: 380,
-                          borderLeft: '1px solid #e5e7eb',
-                          display: 'flex', flexDirection: 'column',
-                          minHeight: 0, overflow: 'hidden',
-                        }}>
-                          {!draftActive && calLens !== 'client' && (
-                            <div style={{ flexShrink: 0, maxHeight: 'max(160px, 25%)', overflowY: 'auto', padding: '10px 14px', borderBottom: '1px solid #e5e7eb', WebkitOverflowScrolling: 'touch' as any }}>
-                              <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} timeOff={scheduleData.timeOff} currentDate={viewDate} />
-                            </div>
-                          )}
-                          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
-                            {middle}
-                          </div>
-                          <div style={{
-                            flexShrink: 0, overflow: 'hidden',
-                            display: 'flex', flexDirection: 'column',
-                            borderTop: selectedAppointment ? '1px solid #e5e7eb' : 'none',
-                            maxHeight: selectedAppointment ? (inlineEdit ? '50%' : '25%') : 0,
-                            transition: 'max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                          }}>
-                            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
-                              {selectedAppointment && renderDetailOrEdit(selectedAppointment)}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  // Narrow: issues flow under the calendar (the selected
-                  // appointment is handled by the slide-up sheet below).
-                  if (draftActive || visibleConflicts.length > 0 || solutions.length > 0) {
-                    return (
-                      <div ref={detailPanelRef} style={{
-                        flex: '0 0 auto', width: 'min(350px, 100%)', borderLeft: '1px solid #e5e7eb',
-                        display: 'flex', flexDirection: 'column',
-                      }}>
-                        {middle}
-                      </div>
-                    );
-                  }
-                  return null;
-                })()}
-
                 {/* Narrow: the selected appointment's detail / inline edit as a
                     slide-up bottom sheet (replaces the old edit modal on phones).
                     Kept mounted so it animates in and out. */}
@@ -1912,13 +1836,17 @@ export default function App() {
         </div>
       </div>{/* /main column */}
 
-      {/* Wide (≥1024): the always-on SAssi dock column. The schedule view keeps
-          its inline conflict/draft pane; other views dock the assistant here. */}
-      {showDock && view !== 'schedule' && (
+      {/* The always-on SAssi dock column — beside every view when there's room
+          (schedule: ≥744/tablet; others: ≥1024). On the schedule view it also
+          carries the folded-in hours totals, draft tray, day agenda, and the
+          selected-session detail/edit (P5b — replaces the old inline pane). */}
+      {dockAsColumn && (view !== 'schedule' || scheduleData) && (
         <SAssiDock
-          issues={dockIssues}
+          issues={view === 'schedule' && draftActive ? [] : dockIssues}
           issueCount={issueCount}
           aiEnabled={aiActive}
+          contextTop={scheduleContextTop}
+          selected={view === 'schedule' && selectedAppointment ? renderDetailOrEdit(selectedAppointment) : undefined}
           onReviewConflict={reviewConflictIssue}
           onMuteConflict={muteConflictIssue}
           onFixCompliance={() => { setCcInitialTab('issues'); setView('compliance'); }}
@@ -1928,10 +1856,14 @@ export default function App() {
         />
       )}
 
-      {/* Narrow (<1024): the same dock reached from a FAB as a slide-up sheet,
-          so phone/tablet users get the assistant on every non-schedule view. */}
-      {!showDock && view !== 'schedule' && scheduleData && (
+      {/* Narrow: the same dock reached from a FAB as a slide-up sheet, so
+          phone users get the assistant on every view — schedule included (P5b).
+          On schedule the draft tray rides in here; a staged draft auto-opens it. */}
+      {!dockAsColumn && scheduleData && (
         <>
+          {/* Hide the FAB while the appointment detail sheet is up, so it doesn't
+              float over the open detail. */}
+          {!(view === 'schedule' && selectedAppointment) && (
           <button
             type="button"
             onClick={() => setDockSheetOpen(true)}
@@ -1954,6 +1886,7 @@ export default function App() {
               }}>{issueCount}</span>
             )}
           </button>
+          )}
 
           {/* Backdrop */}
           <div
@@ -1985,9 +1918,10 @@ export default function App() {
             </div>
             <SAssiDock
               variant="sheet"
-              issues={dockIssues}
+              issues={view === 'schedule' && draftActive ? [] : dockIssues}
               issueCount={issueCount}
               aiEnabled={aiActive}
+              contextTop={scheduleContextTop}
               onReviewConflict={(i) => { setDockSheetOpen(false); reviewConflictIssue(i); }}
               onMuteConflict={muteConflictIssue}
               onFixCompliance={() => { setDockSheetOpen(false); setCcInitialTab('issues'); setView('compliance'); }}

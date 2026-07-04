@@ -20,6 +20,8 @@ export interface AssistantDockProps {
   onWish: (text: string) => void;
   wishPlaceholder?: string;
   wishDisabled?: boolean;
+  /** `column` = the wide always-on rail; `sheet` = filling a narrow slide-up. */
+  variant?: 'column' | 'sheet';
 }
 
 export function AssistantDock({
@@ -29,7 +31,9 @@ export function AssistantDock({
   onWish,
   wishPlaceholder = 'Ask SAssi… e.g. “free Jordan Friday PM”',
   wishDisabled = false,
+  variant = 'column',
 }: AssistantDockProps) {
+  const isSheet = variant === 'sheet';
   const [wish, setWish] = useState('');
   const subtitle =
     issueCount === 0
@@ -49,10 +53,11 @@ export function AssistantDock({
     <aside
       aria-label="SAssi assistant"
       style={{
-        width: 'var(--dock-width)',
+        width: isSheet ? '100%' : 'var(--dock-width)',
+        flex: isSheet ? 1 : undefined,
         flexShrink: 0,
         background: 'var(--white)',
-        borderLeft: '1px solid var(--sage-200)',
+        borderLeft: isSheet ? 'none' : '1px solid var(--sage-200)',
         display: 'flex',
         flexDirection: 'column',
         minHeight: 0,
@@ -63,7 +68,7 @@ export function AssistantDock({
           display: 'flex',
           alignItems: 'center',
           gap: 10,
-          padding: 'calc(env(safe-area-inset-top) + 16px) 18px 16px',
+          padding: isSheet ? '16px 18px' : 'calc(env(safe-area-inset-top) + 16px) 18px 16px',
           borderBottom: '1px solid var(--sage-100)',
         }}
       >

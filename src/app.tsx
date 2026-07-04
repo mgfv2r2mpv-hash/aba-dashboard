@@ -142,6 +142,9 @@ export default function App() {
   const homeTodos = useHomeTodos();
   const [sessionSeed, setSessionSeed] = useState<Partial<Appointment> | null>(null);
   const [startedTodoId, setStartedTodoId] = useState<string | null>(null);
+  // Narrow-screen SAssi dock: below 1024 the always-on column has no room, so
+  // the same dock opens from a FAB as a slide-up sheet.
+  const [dockSheetOpen, setDockSheetOpen] = useState(false);
   // Wish view is now a full page (view === 'wish') rather than a modal.
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   // Whether the selected appointment's detail panel is expanded into its inline
@@ -1443,6 +1446,7 @@ export default function App() {
             : 'calendar';
 
   const onRailSelect = (key: RailKey) => {
+    setDockSheetOpen(false);
     switch (key) {
       case 'home': setView('home'); break;
       case 'calendar': setView('schedule'); break;
@@ -1903,8 +1907,8 @@ export default function App() {
         </div>
       </div>{/* /main column */}
 
-      {/* Always-on SAssi dock (wide only in M2; schedule keeps its inline pane
-          until M3 folds it into the dock). */}
+      {/* Wide (≥1024): the always-on SAssi dock column. The schedule view keeps
+          its inline conflict/draft pane; other views dock the assistant here. */}
       {showDock && view !== 'schedule' && (
         <SAssiDock
           issues={dockIssues}
@@ -1917,6 +1921,77 @@ export default function App() {
           onAcceptWish={acceptWish}
           onCustomizeWish={customizeWish}
         />
+      )}
+
+      {/* Narrow (<1024): the same dock reached from a FAB as a slide-up sheet,
+          so phone/tablet users get the assistant on every non-schedule view. */}
+      {!showDock && view !== 'schedule' && scheduleData && (
+        <>
+          <button
+            type="button"
+            onClick={() => setDockSheetOpen(true)}
+            aria-label={issueCount > 0 ? `Open SAssi — ${issueCount} open items` : 'Open SAssi'}
+            style={{
+              position: 'fixed', right: 16,
+              bottom: compactRail ? 'calc(env(safe-area-inset-bottom) + 76px)' : 'calc(env(safe-area-inset-bottom) + 20px)',
+              zIndex: 1080, width: 56, height: 56, borderRadius: '50%',
+              background: 'var(--sage-600)', color: 'var(--white)', border: 'none',
+              boxShadow: 'var(--shadow-pop, 0 8px 24px rgba(0,0,0,0.22))', cursor: 'pointer',
+              fontSize: 24, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <span aria-hidden="true">✨</span>
+            {issueCount > 0 && (
+              <span aria-hidden="true" style={{
+                position: 'absolute', top: -2, right: -2, minWidth: 20, height: 20, padding: '0 5px',
+                borderRadius: 'var(--radius-pill)', background: 'var(--red-500)', color: 'var(--white)',
+                fontSize: 11, fontWeight: 800, lineHeight: '20px', textAlign: 'center', border: '2px solid var(--white)',
+              }}>{issueCount}</span>
+            )}
+          </button>
+
+          {/* Backdrop */}
+          <div
+            onClick={() => setDockSheetOpen(false)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 1090, background: 'rgba(0,0,0,0.4)',
+              opacity: dockSheetOpen ? 1 : 0, pointerEvents: dockSheetOpen ? 'auto' : 'none',
+              transition: 'opacity var(--duration-normal, 0.25s) var(--ease-standard, ease)',
+            }}
+          />
+
+          {/* Slide-up sheet — kept mounted so it animates in/out. */}
+          <div style={{
+            position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 1100, height: '82vh',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            background: 'var(--white)', borderTopLeftRadius: 16, borderTopRightRadius: 16,
+            boxShadow: '0 -6px 24px rgba(0,0,0,0.18)',
+            transform: dockSheetOpen ? 'translateY(0)' : 'translateY(100%)',
+            transition: 'transform var(--duration-normal, 0.3s) var(--ease-standard, cubic-bezier(0.4,0,0.2,1))',
+            paddingBottom: 'env(safe-area-inset-bottom)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '6px 10px 0' }}>
+              <button
+                type="button"
+                onClick={() => setDockSheetOpen(false)}
+                aria-label="Close SAssi"
+                style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 20, color: 'var(--text-muted)', lineHeight: 1, padding: 4 }}
+              >✕</button>
+            </div>
+            <SAssiDock
+              variant="sheet"
+              issues={dockIssues}
+              issueCount={issueCount}
+              aiEnabled={aiActive}
+              onReviewConflict={(i) => { setDockSheetOpen(false); reviewConflictIssue(i); }}
+              onMuteConflict={muteConflictIssue}
+              onFixCompliance={() => { setDockSheetOpen(false); setView('compliance'); }}
+              onGenerateWish={generateDockWish}
+              onAcceptWish={acceptWish}
+              onCustomizeWish={customizeWish}
+            />
+          </div>
+        </>
       )}
 
       {/* Phones: rail collapses to a bottom bar. */}

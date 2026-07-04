@@ -6,20 +6,21 @@ import { AdminPersist } from './AdminPanel';
 import AdminPanel from './AdminPanel';
 import ComplianceDashboard from './ComplianceDashboard';
 import CasesHome from './CasesHome';
-import CaseFixItDialog from './CaseFixItDialog';
 import CCSettingsPopup from './CCSettingsPopup';
 
 // Consolidated "C&C" hub — the single home for compliance & cases. Replaces the
 // old "Fix" tab. Home is the cases summary (CaseloadView for now; CasesHome in
 // Phase 2). Roster (clients/technicians) and auths are mounted here by scoping
 // AdminPanel to a single section, pulling them out of the ⚙️ Admin view.
-type HubTab = 'cases' | 'issues' | 'clients' | 'technicians' | 'auths';
+export type HubTab = 'cases' | 'issues' | 'clients' | 'technicians' | 'auths';
 
 interface Props {
   data: ScheduleData;
   onDataChange: (data: ScheduleData) => void;
   persist?: AdminPersist;
   now: Date;
+  /** Which sub-tab to open on entry (e.g. the SAssi dock routes here to Issues). */
+  initialTab?: HubTab;
   // Compliance/issues wiring (threaded straight to ComplianceDashboard).
   cache?: ComplianceCache | null;
   conflicts?: ScheduleConflict[];
@@ -40,14 +41,8 @@ interface Props {
 
 export default function CCHub(props: Props) {
   const { data, onDataChange, persist, now, conflictCount, onOpenAdminCandC } = props;
-  const [tab, setTab] = useState<HubTab>('cases');
+  const [tab, setTab] = useState<HubTab>(props.initialTab ?? 'cases');
   const [showSettings, setShowSettings] = useState(false);
-  const [fixCaseId, setFixCaseId] = useState<string | null>(null);
-
-  // The per-case Fix-it dialog needs the AI key + the accept/customize wiring;
-  // when those aren't provided (e.g. webportal) the row button stays inert.
-  const canFix = !!props.aiSettings && !!props.onAcceptFix && !!props.onCustomizeFix;
-  const fixClient = fixCaseId ? data.clients.find(c => c.id === fixCaseId) : undefined;
 
   const tabs: { key: HubTab; label: string; badge?: number }[] = [
     { key: 'cases', label: 'Cases' },
@@ -98,7 +93,7 @@ export default function CCHub(props: Props) {
 
       <div style={{ flex: 1, overflow: 'auto', minWidth: 0 }}>
         {tab === 'cases' && (
-          <CasesHome data={data} now={now} onFixIt={canFix ? setFixCaseId : undefined} />
+          <CasesHome data={data} now={now} />
         )}
         {tab === 'issues' && (
           <ComplianceDashboard
@@ -133,20 +128,6 @@ export default function CCHub(props: Props) {
           settings={data.settings}
           onClose={() => setShowSettings(false)}
           onEdit={onOpenAdminCandC}
-        />
-      )}
-
-      {fixClient && canFix && props.aiSettings && props.onAcceptFix && props.onCustomizeFix && (
-        <CaseFixItDialog
-          data={data}
-          clientId={fixClient.id}
-          clientName={fixClient.name}
-          conflicts={props.conflicts || []}
-          aiSettings={props.aiSettings}
-          now={now}
-          onAccept={props.onAcceptFix}
-          onCustomize={props.onCustomizeFix}
-          onClose={() => setFixCaseId(null)}
         />
       )}
     </div>

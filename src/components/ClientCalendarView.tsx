@@ -28,7 +28,7 @@ import { computeSessionFlags, SessionFlags, streakEmoji, isStreakMilestone } fro
 import {
   cancelBadgeText, cancelBar, tierOf, TIER_COLOR, TIER_LAYOUT, TIER_LABEL,
   clusterByOverlap, orderByCoOccurrence, toMin, fmtMin, assignLanes,
-  mergeSpans, SessionTier,
+  mergeSpans, availabilityDensity, SessionTier,
 } from './clientCalendarShared';
 import { usePinchZoom } from '../hooks/usePinchZoom';
 import ZoomResetPill from './ZoomResetPill';
@@ -951,6 +951,16 @@ function ClientWeekGrid({ date, clients, appointments, companyHolidays, focusIds
   // Order clients so similar availability sits adjacent (consistent layering).
   const ordered = useMemo(() => clusterByOverlap(clients), [clients]);
 
+  // Availability-density base (always on): how many clients are free in each
+  // 30-min slot per weekday, normalised against the busiest slot of the week so
+  // denser = darker. One calm sage wash replaces the per-client pastel stack —
+  // the at-a-glance "where is there room to place a replacement?" signal.
+  const weekDensity = useMemo(() => {
+    const perDay = WEEK_DOWS.map(dow => availabilityDensity(ordered, dow, gs * 60, ge * 60, 30));
+    const maxCount = Math.max(1, ...perDay.flat().map(s => s.count));
+    return { perDay, maxCount };
+  }, [ordered, gs, ge]);
+
   // A tapped time band focuses clients available then (any weekday); otherwise the
   // manual focus set. Empty band → everyone dimmed (P4a fix).
   const availableAtBand = useMemo(
@@ -1134,74 +1144,54 @@ function ClientWeekGrid({ date, clients, appointments, companyHolidays, focusIds
                     zIndex: 2,
                   }}
                 >
-                  {/* Heatmap: red intensity bands showing how many available-at-band clients overlap each 30-min slot */}
-                  {bandMin != null && availableAtBand && availableAtBand.size > 0 && (() => {
-                    const SLOT = 30;
-                    const total = availableAtBand.size;
-                    const slots: Array<{ top: number; h: number; frac: number }> = [];
-                    for (let min = gs * 60; min < ge * 60; min += SLOT) {
-                      const slotEnd = min + SLOT;
-                      let count = 0;
-                      for (const c of ordered) {
-                        if (!availableAtBand.has(c.id)) continue;
-                        const wins = c.availabilityWindows?.[dowName] ?? [];
-                        if (wins.some(w => toMin(w.start) < slotEnd && toMin(w.end) > min)) count++;
-                      }
-                      if (count === 0) continue;
-                      slots.push({ top: (min / 60 - gs) * hourPx, h: (SLOT / 60) * hourPx, frac: count / total });
-                    }
-                    return slots.map(({ top, h, frac }, hi) => (
-                      <div key={`heat-${hi}`} style={{
-                        position: 'absolute', top, left: 0, right: 0, height: h,
-                        background: `rgba(220,38,38,${(0.06 + frac * 0.38).toFixed(2)})`,
+                  {/* Base layer: availability density — a single calm sage wash,
+                      darker where more clients are free (normalised against the
+                      busiest slot of the week). Replaces the per-client pastels. */}
+                  {weekDensity.perDay[di].map((slot, si) => {
+                    if (slot.count === 0) return null;
+                    const top = (slot.startMin / 60 - gs) * hourPx;
+                    return (
+                      <div key={`dens-${si}`} style={{
+                        position: 'absolute', top, left: 0, right: 0, height: (30 / 60) * hourPx,
+                        background: 'var(--sage-500)',
+                        opacity: 0.08 + (slot.count / weekDensity.maxCount) * 0.46,
                         zIndex: 0, pointerEvents: 'none', transition: 'opacity 0.15s',
                       }} />
-                    ));
-                  })()}
-                  {/* Pass 0: availability layers (backmost, per client) */}
-                  {ordered.map(client => {
-                    const hue = clientHue(client.name);
-                    const dim = isDim(client.id);
-                    const focused = isFocused(client.id);
-                    const wins = client.availabilityWindows?.[dowName] ?? [];
-                    const focusBoost = focused ? 20 : 0;
-                    const availOpacity = dim
-                      ? (bandMin != null ? 0.04 : 0.10)
-                      : focused
-                        ? (bandMin != null ? 0.22 : 0.70)
-                        : 0.40;
-                    return (
-                      <React.Fragment key={client.id}>
-                        {wins.map((w, wi) => {
-                          const top = winTopPx(w.start, hourPx, gs);
-                          const h   = winHPx(w.start, w.end, hourPx);
-                          if (h <= 0 || top >= totalH || top + h <= 0) return null;
-                          const clampedTop = Math.max(0, top);
-                          const clampedH   = Math.min(h, totalH - clampedTop);
-                          return (
-                            <div key={`a${wi}`} title={`${client.name} available ${w.start}–${w.end}`}
-                              style={{
-                                position: 'absolute', top: clampedTop, left: 2, right: 2, height: clampedH,
-                                background: `hsl(${hue} 70% 88%)`, border: `1px solid hsl(${hue} 48% 76%)`,
-                                borderRadius: 4, zIndex: 1 + focusBoost,
-                                opacity: availOpacity,
-                                transition: 'opacity 0.15s',
-                              }} />
-                          );
-                        })}
-                      </React.Fragment>
                     );
                   })}
-                  {/* Pass 1: tier-merged background bands — one block per contiguous cluster per type */}
+                  {/* Focus / band highlight: outline the availability of the clients
+                      in focus (or free at the tapped time band) over the calm base,
+                      so replacement candidates stand out without repainting the grid. */}
+                  {(bandMin != null || focusIds.size > 0) && ordered.filter(c => isFocused(c.id)).flatMap(client => {
+                    const wins = client.availabilityWindows?.[dowName] ?? [];
+                    return wins.map((w, wi) => {
+                      const top = winTopPx(w.start, hourPx, gs);
+                      const h = winHPx(w.start, w.end, hourPx);
+                      if (h <= 0 || top >= totalH || top + h <= 0) return null;
+                      const clampedTop = Math.max(0, top);
+                      const clampedH = Math.min(h, totalH - clampedTop);
+                      return (
+                        <div key={`foc-${client.id}-${wi}`} title={`${client.name} available ${w.start}–${w.end}`}
+                          style={{
+                            position: 'absolute', top: clampedTop, left: 2, right: 2, height: clampedH,
+                            border: '1.5px solid var(--sage-600)', borderRadius: 4,
+                            background: 'rgba(107,124,71,0.10)', zIndex: 3, pointerEvents: 'none',
+                          }} />
+                      );
+                    });
+                  })}
+                  {/* Pass 1: session bands — one block per contiguous cluster per
+                      type. Calm light fill + a strong left type-accent (not a heavy
+                      wash), so sessions read as legible blocks. All-canceled clusters
+                      become a dashed "open / fillable" slot that pops for backfilling. */}
                   {tierBands.map(({ tier, top, h, status }, bi) => {
-                    const hexC = TIER_COLOR[tier].replace('#', '');
+                    const accent = TIER_COLOR[tier];
+                    const hexC = accent.replace('#', '');
                     const r = parseInt(hexC.slice(0, 2), 16);
                     const g = parseInt(hexC.slice(2, 4), 16);
                     const b = parseInt(hexC.slice(4, 6), 16);
-                    const alpha = status === 'all-canceled' ? 0.25 : 0.60;
-                    const borderColor = status === 'all-completed'
-                      ? '#16a34a'
-                      : `rgba(${r},${g},${b},0.9)`;
+                    const canceled = status === 'all-canceled';
+                    const completed = status === 'all-completed';
                     const { inset } = TIER_LAYOUT[tier];
                     return (
                       <div
@@ -1209,10 +1199,12 @@ function ClientWeekGrid({ date, clients, appointments, companyHolidays, focusIds
                         style={{
                           position: 'absolute', top: top + 1, left: inset, right: inset,
                           height: Math.max(h - 2, 12),
-                          background: `rgba(${r},${g},${b},${alpha})`,
-                          borderLeft: `3px solid ${borderColor}`,
-                          borderRadius: 3, zIndex: 10, boxSizing: 'border-box',
-                          opacity: status === 'all-canceled' ? 0.7 : 1,
+                          background: canceled ? 'var(--white)' : `rgba(${r},${g},${b},0.16)`,
+                          border: canceled
+                            ? '1.5px dashed var(--slate-300, #cbd5e1)'
+                            : completed ? '1px solid #16a34a' : `1px solid rgba(${r},${g},${b},0.35)`,
+                          borderLeft: `4px solid ${completed ? '#16a34a' : accent}`,
+                          borderRadius: 4, zIndex: 10, boxSizing: 'border-box',
                           transition: 'opacity 0.15s',
                         }}
                       />

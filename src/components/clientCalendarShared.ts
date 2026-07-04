@@ -145,6 +145,34 @@ export function assignLanes<T extends { startMin: number; endMin: number; sortKe
   return out;
 }
 
+// Availability density for one day-of-week: for each `slotMin` window in
+// [gsMin, geMin), how many of the given clients are available. The Case grid
+// shades these so denser (more-available) times read darker — the at-a-glance
+// "where is there room to place a replacement?" signal that replaces the old
+// per-client pastel stack. Pure data (minutes + count); the renderer maps to px
+// and normalises the alpha against the busiest slot.
+export interface DensitySlot { startMin: number; count: number; }
+
+export function availabilityDensity(
+  clients: Client[],
+  dow: DayOfWeek,
+  gsMin: number,
+  geMin: number,
+  slotMin = 30,
+): DensitySlot[] {
+  const slots: DensitySlot[] = [];
+  for (let min = gsMin; min < geMin; min += slotMin) {
+    const end = min + slotMin;
+    let count = 0;
+    for (const c of clients) {
+      const wins = c.availabilityWindows?.[dow] ?? [];
+      if (wins.some(w => toMin(w.start) < end && toMin(w.end) > min)) count++;
+    }
+    slots.push({ startMin: min, count });
+  }
+  return slots;
+}
+
 // Exact minute overlap between two clients for one day-of-week.
 function pairDayOverlapMin(a: Client, b: Client, dow: DayOfWeek): number {
   const wa = a.availabilityWindows?.[dow] ?? [];

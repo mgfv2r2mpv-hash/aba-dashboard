@@ -764,6 +764,10 @@ export default function AppointmentForm({
         <div style={{
           display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap',
           position: 'sticky', bottom: 0, marginTop: 18, paddingTop: 14,
+          // In the phone slide-up sheet this sticky row pins to the bottom of a
+          // fixed panel, so it must inset itself past the home indicator / bottom
+          // nav — the outer sheet padding doesn't reach a nested sticky element.
+          paddingBottom: variant === 'inline' ? 'max(14px, env(safe-area-inset-bottom))' : undefined,
           borderTop: 'var(--border-hairline)',
           background: 'var(--surface-card)',
         }}>

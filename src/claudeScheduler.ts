@@ -7,10 +7,13 @@ import {
   anonymizeSchedule,
   scrubText,
   deAnonymizeText,
+  resolveClientReferences,
+  containsEntityName,
+  EntityResolution,
   AnonymizationMap,
 } from './anonymizer';
 import { summarizeWish } from './wish';
-import { parseWishSolutions, parseChatTurn } from './wish';
+import { parseWishSolutions, parseChatTurn, parseToolTurn } from './wish';
 import { allowedStrategies } from './fixit';
 import { computeClientCompliance, computeTechCompliance, monthPeriod } from './compliance';
 import { resolveUtilization } from './utilization';
@@ -30,14 +33,74 @@ export interface SassiMessage {
   content: string;
 }
 
+// One tappable answer in a clarify turn (or a local disambiguation prompt):
+// `label` is shown on the chip; `value` is the message sent when it's tapped.
+export interface ClarifyOption {
+  label: string;
+  value: string;
+}
+
 // The result of one chat turn: `raw` is the model's token-space reply (stored
 // back into history), `reply` is de-anonymized for display, `ops` is the complete
-// current proposal (empty on a pure explanation turn).
+// current proposal (empty on a pure explanation turn). `questions` is present only
+// on a clarify turn — render its options as chips instead of staging a proposal.
 export interface SassiChatResult {
   raw: string;
   reply: string;
   ops: WishOp[];
+  questions?: ClarifyOption[];
 }
+
+// sAssI answers through exactly one of these two tools every turn (tool_choice
+// 'any', parallel disabled), which structurally prevents the old prose-dump:
+// `respond` carries the reply plus the COMPLETE proposal as ops; `clarify` asks a
+// question with tappable options when a decision is needed before acting. The
+// schemas are static so they stay behind the prompt cache.
+const RESPOND_TOOL = {
+  name: 'respond',
+  description: 'Reply to the BCBA and, when proposing schedule changes, return the COMPLETE current set of proposed ops (not a delta). Use ops:[] when only explaining.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      reply: { type: 'string', description: 'Short, plain-language message to the BCBA — what changed and why, with a follow-up question when useful.' },
+      ops: {
+        type: 'array',
+        description: 'The COMPLETE proposal every time it changes. Empty when only explaining.',
+        items: {
+          type: 'object',
+          properties: {
+            op: { type: 'string', enum: ['add', 'move', 'remove', 'setFixed', 'complete', 'cancel', 'blackout'] },
+            apt: { type: 'string', description: 'APT_n token of the target (move/remove/setFixed/complete/cancel).' },
+            type: { type: 'string', description: 'add: appointment type (supervision|parent-training|case-planning|client-session|reassessment|other).' },
+            client: { type: 'string', description: 'add: CLIENT_n token.' },
+            tech: { type: 'string', description: 'add/supervision: TECH_n token of the BT being observed.' },
+            start: { type: 'string', description: 'add/move: local ISO start (YYYY-MM-DDTHH:mm:ss), must be ≥ NOW.' },
+            end: { type: 'string', description: 'add/move: local ISO end.' },
+            isFixed: { type: 'boolean', description: 'setFixed: true locks (non-movable), false unlocks.' },
+            source: { type: 'string', enum: ['bt', 'bcba', 'admin', 'family'], description: 'cancel: who initiated it.' },
+            reason: { type: 'string', description: 'cancel: reason code (e.g. sick, pto, holiday, weather).' },
+            unplanned: { type: 'boolean', description: 'cancel: unplanned (callout/sick) vs planned.' },
+          },
+          required: ['op'],
+        },
+      },
+    },
+    required: ['reply', 'ops'],
+  },
+};
+
+const CLARIFY_TOOL = {
+  name: 'clarify',
+  description: 'Ask the BCBA a single question when you need a decision before acting (which client, which time, which session). Offer the likely answers as tappable options.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      reply: { type: 'string', description: 'The question to ask the BCBA.' },
+      options: { type: 'array', items: { type: 'string' }, description: 'Tappable answers — tapping one sends it back as the BCBA’s reply.' },
+    },
+    required: ['reply', 'options'],
+  },
+};
 
 export class ClaudeScheduler {
   private client: Anthropic;
@@ -139,6 +202,16 @@ export class ClaudeScheduler {
     if (this.containsRawNames(system)) {
       throw new Error('Anonymization check failed: system prompt would leak PII. Aborting Claude call.');
     }
+    // Fail-closed backstop on the free-text path: the caller scrubs each user turn,
+    // but if any roster name (or name component) survived scrubbing, abort rather
+    // than transmit it. Only the newest user turn (the last message) is checked —
+    // earlier user turns were already guarded when new, and assistant turns are the
+    // model's own token-space words, where a common English word can legitimately
+    // collide with a client's name component (e.g. a client "May" vs. the month).
+    const lastMsg = history[history.length - 1];
+    if (lastMsg && lastMsg.role === 'user' && containsEntityName(lastMsg.content, this.data)) {
+      throw new Error('Anonymization check failed: an outgoing message would leak PII. Aborting Claude call.');
+    }
     const lastIdx = history.length - 1;
     const messages = history.map((m, i) =>
       i === lastIdx
@@ -147,13 +220,38 @@ export class ClaudeScheduler {
     );
     const response = await this.client.messages.create({
       model: this.model,
-      max_tokens: 3000,
+      // Roomy enough that a full-month proposal's tool JSON isn't truncated
+      // (a max_tokens cutoff would leave partial, unparseable tool input).
+      max_tokens: 8000,
       system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] as any,
+      // Force exactly one structured tool call — no free-form prose can leak out.
+      // (Tools render before the system block, so the system cache breakpoint
+      // already covers them; no separate tool-level breakpoint is needed.)
+      tools: [RESPOND_TOOL, CLARIFY_TOOL] as any,
+      tool_choice: { type: 'any', disable_parallel_tool_use: true } as any,
       messages: messages as any,
     });
-    const content = response.content[0];
-    const raw = content && content.type === 'text' ? content.text : '';
-    const turn = parseChatTurn(raw, token => this.anonMap.reverse.get(token));
+    const reverse = (token: string) => this.anonMap.reverse.get(token);
+    const toolUse = response.content.find((c: any) => c.type === 'tool_use') as any;
+    if (toolUse && toolUse.name === 'clarify') {
+      const input = toolUse.input || {};
+      const opts: any[] = Array.isArray(input.options) ? input.options : [];
+      const questions: ClarifyOption[] = opts.map((o) => {
+        const label = deAnonymizeText(String(o), this.anonMap);
+        return { label, value: label };
+      });
+      const reply = deAnonymizeText(typeof input.reply === 'string' ? input.reply : '', this.anonMap);
+      return { raw: JSON.stringify(input), reply, ops: [], questions };
+    }
+    if (toolUse && toolUse.name === 'respond') {
+      const turn = parseToolTurn(toolUse.input, reverse);
+      return { raw: JSON.stringify(toolUse.input || {}), reply: deAnonymizeText(turn.reply, this.anonMap), ops: turn.ops };
+    }
+    // Defensive fallback: tool_choice:'any' should always yield a tool call, but if
+    // the model somehow returned a text block, parse it the old way rather than blank.
+    const textBlock = response.content.find((c: any) => c.type === 'text') as any;
+    const raw = textBlock && typeof textBlock.text === 'string' ? textBlock.text : '';
+    const turn = parseChatTurn(raw, reverse);
     return { raw, reply: deAnonymizeText(turn.reply, this.anonMap), ops: turn.ops };
   }
 
@@ -161,6 +259,20 @@ export class ClaudeScheduler {
   // the anonymizer guarantees no client/tech names ride to the API.
   scrub(text: string): string {
     return scrubText(text, this.data, this.anonMap);
+  }
+
+  // Map an appointment id to its anonymized APT_n token (null if it isn't in the
+  // session's base). Lets the dock inject a deictic "this appointment = APT_n" note
+  // for the focused session into the outgoing user turn.
+  aptToken(id: string): string | null {
+    return this.anonMap.appointments.get(id) ?? null;
+  }
+
+  // Resolve short client references ("SB", "Sammy") the user typed to full names
+  // locally and report any that match more than one client. Runs BEFORE scrub, so
+  // Claude only ever sees tokens — never names.
+  resolveEntities(text: string): EntityResolution {
+    return resolveClientReferences(text, this.data);
   }
 
   // Let a live session switch models (Sonnet ⇄ Haiku) without rebuilding the
@@ -214,13 +326,13 @@ NOW: ${now.toISOString()}
 PERIOD: ${ctx.periodLabel} (through ${period.end.toISOString().slice(0, 10)})
 BCBA availability: ${clinicianAvail}
 
-YOUR JOB — fill the BCBA's OWN week toward their weekly-hours target, COMPLIANCE-FIRST.
-- The BCBA already has ~${ctx.bcbaScheduledHrs}h of their own billable work (supervision / parent-training / case-planning / reassessment) scheduled this period. The user tells you their target in chat (e.g. "fill my week to 25 hours") — work toward it.
+YOUR JOB — help the BCBA fill and refine their OWN calendar across the period above, COMPLIANCE-FIRST, and carry out the everyday edits they ask for.
+- The BCBA already has ~${ctx.bcbaScheduledHrs}h of their own billable work (supervision / parent-training / case-planning / reassessment) scheduled this period. They tell you their weekly-hours target in chat (e.g. "fill my week to 25 hours") — work toward it week over week across the period.
 - Every session you add must move a case toward its ideal supervision range (${ctx.idealMinPct}%–${ctx.idealMaxPct}% of direct hours) or otherwise advance compliance. Prioritize the cases most behind.
 - This is a back-and-forth. Propose a plan, then adjust it as the BCBA reacts ("I have parent training Tuesday", "move that earlier", "why did you pick that slot?"). Explain your moves plainly so they can fine-tune with you.
 
 HARD RULES — verify every op:
-1. Only ADD sessions. Do NOT move or remove existing sessions unless the BCBA explicitly asks.
+1. Default to ADDING sessions. Move, remove, lock (setFixed), complete, or cancel an existing session only when the BCBA explicitly asks for that edit.
 2. Every op's start must be ≥ NOW. Never propose, add, or move a session into the past — the BCBA cannot perform an appointment that already happened.
 3. The BCBA runs EVERY supervision/parent-training/case-planning/reassessment item and can be in only one at a time. No two such items (your new ops AND existing schedule rows) may overlap in time.
 4. Supervision earns credit only when placed INSIDE an existing direct (client-session) window for the same client — name that BT in the tech field.
@@ -242,12 +354,12 @@ TECHNICIANS: ${JSON.stringify(anon.technicians)}
 ${anon.blackouts.length ? `BLACKOUT DAYS (each blocks only the named entity): ${JSON.stringify(anon.blackouts)}` : ''}
 ${anon.timeOff.length ? `BCBA TIME OFF: ${JSON.stringify(anon.timeOff)}` : ''}
 
-HOW TO REPLY — every message, output STRICT JSON only (no prose outside it, no markdown fences):
-{"reply":"a short, plain-language message to the BCBA — say what you changed and WHY in clinical-but-friendly terms, and ask a follow-up when useful","ops":[ ...the COMPLETE current set of proposed sessions... ]}
-- ops item shape: {"op":"add","title":"...","type":"supervision|parent-training|case-planning","client":"CLIENT_n","tech":"TECH_n or null","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss"}
-- Return the COMPLETE proposal every time you CHANGE it (not just the delta) — the calendar preview is replaced with your ops each turn.
-- Return "ops":[] ONLY when you are just answering/explaining and the proposal is unchanged (e.g. the BCBA asked "why?").
+HOW TO REPLY — call exactly ONE tool every turn:
+- respond({reply, ops}) — reply is a short, plain-language message (what changed and WHY, clinical-but-friendly, with a follow-up when useful). ops is the COMPLETE current proposal, not a delta — the calendar preview is replaced with your ops each turn. Use ops:[] when you're only answering/explaining (e.g. the BCBA asked "why?").
+- clarify({reply, options}) — when you need a decision before acting (which client, which time, which session), ask ONE question and offer the likely answers as options.
+- op shapes: add {op:"add",type,client:"CLIENT_n",tech:"TECH_n"|null,start,end}; move {op:"move",apt:"APT_n",start,end}; lock {op:"setFixed",apt:"APT_n",isFixed:true|false}; complete {op:"complete",apt:"APT_n"}; cancel {op:"cancel",apt:"APT_n",source:"bt|bcba|admin|family",reason,unplanned:true|false}. "add" ops must NOT include an id.
 - If nothing can be added compliantly, DON'T say "no options": explain the specific blocker per case (from BLOCKERS) and suggest what the BCBA could change (add availability, free a slot, relax the cap).
+- When the BCBA says "this appointment"/"that one", resolve it to the APT token given in a [context: this appointment = APT_n] note on the latest message.
 ISO times are local (no timezone suffix). Verify: every op start ≥ NOW; no two BCBA items overlap; tokens exist in CLIENTS/TECHNICIANS; skip malformed tokens.`;
   }
 

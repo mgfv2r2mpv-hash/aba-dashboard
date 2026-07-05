@@ -6,9 +6,12 @@
 // JSON reply into WishSolutions, and converting a chosen solution into the draft
 // ops + blackouts the rest of the app already knows how to preview and commit.
 
-import { WishRequest, WishSolution, WishOp, ScheduleData, Appointment, Blackout, Client, Technician } from './types';
+import {
+  WishRequest, WishSolution, WishOp, ScheduleData, Appointment, Blackout, Client, Technician,
+  Cancellation, CANCELLATION_SOURCES, CANCELLATION_REASONS, activeCancellationCodes, applicableSources,
+} from './types';
 import { computeClientCompliance, computeTechCompliance, monthPeriod, CompliancePeriod } from './compliance';
-import { DraftOp, newAddOp, newMoveOp, newRemoveOp, applyOps } from './draft';
+import { DraftOp, newAddOp, newMoveOp, newRemoveOp, newEditOp, applyOps } from './draft';
 import { v4 as uuidv4 } from 'uuid';
 
 const APPT_TYPES: Appointment['type'][] = [
@@ -105,6 +108,27 @@ export function parseOps(rawOps: any, rev: (v: any) => string | undefined): Wish
         if (ro.reason) b.reason = String(ro.reason);
         ops.push(b);
       }
+    } else if (kind === 'setfixed') {
+      const id = rev(ro.apt ?? ro.appointmentId);
+      if (id && typeof ro.isFixed === 'boolean') ops.push({ op: 'setFixed', appointmentId: id, isFixed: ro.isFixed });
+    } else if (kind === 'complete') {
+      const id = rev(ro.apt ?? ro.appointmentId);
+      if (id) ops.push({ op: 'complete', appointmentId: id });
+    } else if (kind === 'cancel') {
+      const id = rev(ro.apt ?? ro.appointmentId);
+      const source = CANCELLATION_SOURCES.some(s => s.value === ro.source) ? ro.source : undefined;
+      if (id && source) {
+        // Shape/enum validation only — the reason code is resolved against the
+        // company's active codes later, in wishSolutionToDraft (which has settings).
+        const c: Extract<WishOp, { op: 'cancel' }> = {
+          op: 'cancel', appointmentId: id, source,
+          reason: ro.reason ? String(ro.reason) : '',
+          unplanned: ro.unplanned !== false, // default true, matching the cancel dialog
+        };
+        if (typeof ro.noticeMet === 'boolean') c.noticeMet = ro.noticeMet;
+        if (ro.notes) c.notes = String(ro.notes);
+        ops.push(c);
+      }
     }
   }
   return ops;
@@ -155,6 +179,17 @@ export function parseChatTurn(text: string, reverse: (token: string) => string |
   return { reply, ops: parseOps(json.ops, rev) };
 }
 
+// Tool-use variant of parseChatTurn. The `respond` tool hands us a structured
+// { reply, ops } object directly, so there's no JSON-from-prose extraction (and no
+// silent prose-degradation): just reverse the tokens in ops and pass the reply
+// through. `input` is the tool_use block's `input`; `reverse(token)` maps an
+// anonymized token back to its real id/name.
+export function parseToolTurn(input: any, reverse: (token: string) => string | undefined): ChatTurn {
+  const rev = makeRev(reverse);
+  const reply = typeof input?.reply === 'string' ? input.reply : '';
+  return { reply, ops: parseOps(input?.ops, rev) };
+}
+
 // Real-world safety net: a machine must NEVER suggest placing (add) or relocating
 // (move) a session into the past — the BCBA cannot perform an appointment that has
 // already happened. Removes and blackouts are time-agnostic and pass through.
@@ -188,15 +223,19 @@ export function wishSolutionToDraft(sol: WishSolution, base: ScheduleData): Wish
   const ops: DraftOp[] = [];
   const blackouts: Blackout[] = [];
   let unresolved = 0;
-  const apptById = new Map(base.appointments.map(a => [a.id, a]));
+  // A mutable working copy so several ops targeting the SAME appointment in one
+  // proposal accumulate (e.g. "move it and lock it") instead of each rebuilding
+  // from the pristine base and clobbering the other. applyOps is last-write-wins
+  // per id, so the final op for an id must carry the fully-accumulated state.
+  const working = new Map(base.appointments.map(a => [a.id, { ...a }]));
 
   for (const o of sol.ops) {
     if (o.op === 'move') {
-      const a = apptById.get(o.appointmentId);
-      if (a) ops.push(newMoveOp({ ...a, startTime: o.start, endTime: o.end }));
+      const a = working.get(o.appointmentId);
+      if (a) { const next: Appointment = { ...a, startTime: o.start, endTime: o.end }; working.set(next.id, next); ops.push(newMoveOp(next)); }
       else unresolved++;
     } else if (o.op === 'remove') {
-      if (apptById.has(o.appointmentId)) ops.push(newRemoveOp(o.appointmentId));
+      if (working.has(o.appointmentId)) { working.delete(o.appointmentId); ops.push(newRemoveOp(o.appointmentId)); }
       else unresolved++;
     } else if (o.op === 'add') {
       const appt: Appointment = {
@@ -212,6 +251,7 @@ export function wishSolutionToDraft(sol: WishSolution, base: ScheduleData): Wish
         status: 'scheduled',
       };
       if (o.recurring) { appt.isRecurring = true; appt.recurringPattern = o.pattern || 'weekly'; }
+      working.set(appt.id, appt);
       ops.push(newAddOp(appt));
     } else if (o.op === 'blackout') {
       const list = o.entityType === 'technician' ? base.technicians : base.clients;
@@ -221,6 +261,37 @@ export function wishSolutionToDraft(sol: WishSolution, base: ScheduleData): Wish
           id: uuidv4(), entityType: o.entityType, entityId: ent.id, entityName: ent.name,
           date: o.date, reason: o.reason, createdAt: new Date().toISOString(),
         });
+      } else unresolved++;
+    } else if (o.op === 'setFixed') {
+      const a = working.get(o.appointmentId);
+      if (a) { const next: Appointment = { ...a, isFixed: o.isFixed }; working.set(next.id, next); ops.push(newEditOp(next)); }
+      else unresolved++;
+    } else if (o.op === 'complete') {
+      const a = working.get(o.appointmentId);
+      // Clear any prior cancellation so a completed record isn't left internally
+      // inconsistent (mirrors the manual mark-complete path).
+      if (a) { const next: Appointment = { ...a, status: 'completed', cancellation: undefined }; working.set(next.id, next); ops.push(newEditOp(next)); }
+      else unresolved++;
+    } else if (o.op === 'cancel') {
+      const a = working.get(o.appointmentId);
+      if (a) {
+        // Build the Cancellation exactly as the dialog does: coerce an invalid
+        // source for this appointment type (e.g. BCBA on a client-session) and an
+        // unknown/retired reason back to a valid one, and stamp canceledAt now.
+        const sources = applicableSources(a.type);
+        const source = sources.some(s => s.value === o.source) ? o.source : sources[0].value;
+        const active = activeCancellationCodes(base.settings);
+        const reasons = active.length ? active : CANCELLATION_REASONS;
+        const reason = reasons.some(c => c.value === o.reason) ? o.reason : reasons[0].value;
+        const cancellation: Cancellation = {
+          source, reason, unplanned: o.unplanned,
+          noticeMet: o.noticeMet ?? false,
+          canceledAt: new Date().toISOString(),
+          ...(o.notes ? { notes: o.notes } : {}),
+        };
+        const next: Appointment = { ...a, status: 'canceled', cancellation };
+        working.set(next.id, next);
+        ops.push(newEditOp(next));
       } else unresolved++;
     }
   }

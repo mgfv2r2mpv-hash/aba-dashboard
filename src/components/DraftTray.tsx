@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScheduleData } from '../types';
+import { ScheduleData, cancellationReasonLabel } from '../types';
 import { DraftOp } from '../draft';
 import { DraftStatus, PrioritizationChoice } from '../draftSolver';
 
@@ -37,6 +37,20 @@ function opLabel(op: DraftOp, base: ScheduleData): string {
     case 'move': return `Move ${op.appt?.title || titleOf(op.targetId)} → ${fmt(op.appt?.startTime)}`;
     case 'shorten': return `Shorten ${op.appt?.title || titleOf(op.targetId)}`;
     case 'remove': return `Remove ${titleOf(op.targetId)}`;
+    case 'edit': {
+      // An edit carries a fully-patched appointment — name the change by diffing
+      // it against the base (pin/unpin, complete, cancel).
+      const title = op.appt?.title || titleOf(op.targetId);
+      const before = base.appointments.find(a => a.id === op.targetId);
+      const a = op.appt;
+      if (a?.status === 'canceled' && before?.status !== 'canceled') {
+        const reason = a.cancellation ? cancellationReasonLabel(a.cancellation.reason, base.settings) : '';
+        return `Cancel ${title}${reason ? ` (${reason})` : ''}`;
+      }
+      if (a?.status === 'completed' && before?.status !== 'completed') return `Complete ${title}`;
+      if (a && before && a.isFixed !== before.isFixed) return a.isFixed ? `Lock ${title}` : `Unlock ${title}`;
+      return `Edit ${title}`;
+    }
   }
 }
 

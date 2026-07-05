@@ -5,7 +5,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
-import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, WishOp, Cancellation, cancellationReasonLabel, DEFAULT_FIXIT_OPTIONS } from './types';
+import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, WishOp, Cancellation, Blackout, cancellationReasonLabel, DEFAULT_FIXIT_OPTIONS } from './types';
 import { solveMeetPace } from './localSolver';
 import Calendar, { HoursSummary } from './components/Calendar';
 import { conflictKey } from './components/ConflictPanel';
@@ -169,6 +169,10 @@ export default function App() {
   // Staged, uncommitted schedule edits (the draft sandbox). Nothing here touches
   // the live schedule until the user Accepts or overrides (Save anyway).
   const [draftOps, setDraftOps] = useState<DraftOp[]>([]);
+  // Day-offs sAssI proposed alongside the current draft. Buffered here (not
+  // committed) and merged into the schedule when the draft is accepted, so a
+  // proposal can't mutate the base mid-conversation and reset the chat session.
+  const [sassiBlackouts, setSassiBlackouts] = useState<Blackout[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [recoveryTarget, setRecoveryTarget] = useState<Appointment | null>(null);
@@ -309,20 +313,26 @@ export default function App() {
   // A sAssI proposal REPLACES the live draft preview (the chat owns the draft
   // while a conversation is open); accepting/discarding the draft ends it.
   const stageSassiOps = React.useCallback((ops: WishOp[]) => {
-    setDraftOps(prev => {
-      const base = scheduleData;
-      if (!base) return prev;
-      // Hard real-world guard: a suggestion can never place/move a session into
-      // the past — the BCBA can't perform an appointment that already happened.
-      const safe = dropPastOps(ops);
-      return wishSolutionToDraft({ id: 'sassi', summary: '', reasoning: '', ops: safe }, base).ops;
-    });
+    const base = scheduleData;
+    if (!base) return;
+    // Hard real-world guard: a suggestion can never place/move a session into
+    // the past — the BCBA can't perform an appointment that already happened.
+    const safe = dropPastOps(ops);
+    const { ops: draftOps, blackouts } = wishSolutionToDraft({ id: 'sassi', summary: '', reasoning: '', ops: safe }, base);
+    // Blackouts aren't part of the editable draft (DraftOps model appointments
+    // only), so buffer any proposed day-offs and commit them WITH the draft on
+    // Accept — committing mid-conversation would replace scheduleData and reset the
+    // sAssI session (fresh anonymization map + wiped history). sAssI re-emits the
+    // COMPLETE proposal each turn, so REPLACE the buffer (dedup happens at commit).
+    setSassiBlackouts(blackouts);
+    setDraftOps(draftOps);
   }, [scheduleData]);
   const sassi = useSassiSession({
     getSchedule: () => scheduleData,
     apiKey: aiSettings.apiKey,
     model: aiSettings.model,
     onProposal: stageSassiOps,
+    getFocusedAppointmentId: () => selectedAppointment?.id ?? null,
   });
   // Per-session cost lever: flip the chat between Sonnet (reasoning) and Haiku
   // (cheap iterating) without dropping the conversation.
@@ -783,21 +793,30 @@ export default function App() {
     commitFull(response.data.data);
   };
 
+  // Fold any sAssI-buffered day-offs into the schedule being committed, deduped by
+  // (entity, date) so a proposal that persisted across turns can't double-log them.
+  const withSassiBlackouts = (next: ScheduleData): ScheduleData => {
+    if (!sassiBlackouts.length) return next;
+    const existing = next.blackouts || [];
+    const fresh = sassiBlackouts.filter(b => !existing.some(e => e.entityType === b.entityType && e.entityId === b.entityId && e.date === b.date));
+    return fresh.length ? { ...next, blackouts: [...existing, ...fresh] } : next;
+  };
+
   const acceptDraft = async () => {
     if (!scheduleData || !draftStatus) return;
-    const next = draftStatus.resolved || applyOps(scheduleData, draftOps);
+    const next = withSassiBlackouts(draftStatus.resolved || applyOps(scheduleData, draftOps));
     await commitScheduleData(next);
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); sassi.reset();
+    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); sassi.reset();
   };
 
   const saveAnyway = async () => {
     if (!scheduleData) return;
     if (!confirm('Save this schedule as-is, with the flagged conflicts?')) return;
-    await commitScheduleData(applyOps(scheduleData, draftOps));
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); sassi.reset();
+    await commitScheduleData(withSassiBlackouts(applyOps(scheduleData, draftOps)));
+    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); sassi.reset();
   };
 
-  const cancelDraft = () => { setDraftOps([]); setSolutions([]); sassi.reset(); };
+  const cancelDraft = () => { setDraftOps([]); setSolutions([]); setSassiBlackouts([]); sassi.reset(); };
   const resetOp = (opId: string) => setDraftOps(ops => ops.filter(o => o.id !== opId));
 
   // Picking a yellow trade-off stages the corresponding op so the next solve
@@ -1002,6 +1021,7 @@ export default function App() {
     setConflicts([]);
     setSolutions([]);
     setDraftOps([]);
+    setSassiBlackouts([]);
     setSelectedAppointment(null);
     setView('schedule');
   };
@@ -1017,7 +1037,7 @@ export default function App() {
       ? { ...scheduleData, appointments: [...scheduleData.appointments, ...ghosts] }
       : scheduleData;
     await commitScheduleData(next);
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null);
+    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]);
   };
 
   // ---- Ghost lifecycle (committed) ------------------------------------------

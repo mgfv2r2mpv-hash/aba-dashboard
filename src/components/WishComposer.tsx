@@ -49,6 +49,9 @@ function opText(o: WishOp): string {
     case 'remove': return `Remove ${o.appointmentId.slice(0, 6)}`;
     case 'add': return `Add ${o.title || o.type}${o.client ? ` for ${o.client}` : ''} ${t(o.start)}${o.recurring ? ` (${o.pattern || 'weekly'})` : ''}`;
     case 'blackout': return `Block ${o.entity} on ${o.date}${o.reason ? ` — ${o.reason}` : ''}`;
+    case 'setFixed': return `${o.isFixed ? 'Lock' : 'Unlock'} ${o.appointmentId.slice(0, 6)}`;
+    case 'complete': return `Complete ${o.appointmentId.slice(0, 6)}`;
+    case 'cancel': return `Cancel ${o.appointmentId.slice(0, 6)}${o.reason ? ` (${o.reason})` : ''}`;
   }
 }
 

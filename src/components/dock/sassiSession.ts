@@ -13,6 +13,9 @@ import { useCallback, useRef, useState } from 'react';
 // initial bundle — matching how app.tsx escalates to Claude elsewhere.
 import type { ClaudeScheduler, SassiMessage, ClaudeModel, ClarifyOption } from '../../claudeScheduler';
 import type { WishOp, ScheduleData } from '../../types';
+// Pure scheduling logic (no Anthropic SDK), safe to import eagerly — used to
+// render a build's block/metrics readout locally in the transcript.
+import { formatBuildSummary } from '../../scheduleBuilder';
 
 export interface SassiUiMessage {
   role: 'user' | 'assistant';
@@ -125,6 +128,26 @@ export function useSassiSession({ getSchedule, apiKey, model, onProposal, getFoc
 
       const nextHistory: SassiMessage[] = [...historyRef.current, { role: 'user', content: userContent }];
       const res = await scheduler.chat(nextHistory);
+
+      // Build turn: Claude only routed the intent — the deterministic engine places
+      // locally. Stage its ops (same path as any proposal) and print its block/
+      // metrics readout in the transcript. The summary carries REAL client names, so
+      // it goes to the UI ONLY — history keeps res.raw (token space) so no name ever
+      // rides back to the API on the next turn.
+      if (res.build) {
+        const result = scheduler.runBuild(new Date());
+        const staged = result.solution.ops.length > 0;
+        // A build REPLACES the live preview even when it placed nothing — same as the
+        // deterministic button (handleBuildDirect) — so a 0-op build clears any stale
+        // proposal from an earlier turn instead of leaving it to be accepted by mistake.
+        onProposal(result.solution.ops);
+        historyRef.current = [...nextHistory, { role: 'assistant', content: res.raw }];
+        const summary = formatBuildSummary(result, staged);
+        setMessages(prev => [...prev, { role: 'assistant', text: res.reply ? `${res.reply}\n\n${summary}` : summary }]);
+        setStatus('idle');
+        return;
+      }
+
       historyRef.current = [...nextHistory, { role: 'assistant', content: res.raw }];
       setMessages(prev => [...prev, {
         role: 'assistant',

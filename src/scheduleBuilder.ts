@@ -20,6 +20,9 @@ import { ScheduleData, Client, WishOp, WishSolution } from './types';
 import { findAuthFor } from './authorization';
 import { DAYS, toMin, minToClock, Interval } from './intervals';
 import { Occupancy, LiveWindow, seedOccupancy, feasibleWindowsLive, reserve, dayOfWeekOf } from './builderOccupancy';
+import { monthPeriod } from './compliance';
+import { resolveUtilization } from './utilization';
+import { startOfWeek, startOfDay, addWeeks } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
 
 const MAX_DIRECT_SESSION_HRS = 4;   // realistic direct block; also forces day-spread
@@ -289,4 +292,60 @@ function monthSelfCheck(
     }
   }
   return out;
+}
+
+// A sensible default config for the one-tap "Build direct schedule" action: the
+// current week is the recurring template, the calendar month is the horizon, and
+// the BCBA weekly billable target comes from settings. Direct backbone only (the
+// builder's current capability — supervision/PT are later builder phases).
+export function defaultBuilderConfig(data: ScheduleData, now: Date): BuilderConfig {
+  const period = monthPeriod(now);
+  // Anchor the recurring template on a FULLY-FUTURE week boundary. buildSchedule
+  // places across the whole template week [weekStart, +7d) and does NOT itself
+  // guard against `now`, so any weekStart that isn't strictly ahead of today would
+  // land already-past slots that dropPastOps then silently drops — stranding cases
+  // whose only window is on a passed day AND overstating the placed-hours metric.
+  // The containing week always includes today (its Monday is <= today), so we take
+  // the NEXT Monday: the soonest week that is entirely in the future.
+  let weekStart = startOfWeek(now, { weekStartsOn: 1 });
+  if (weekStart <= startOfDay(now)) weekStart = addWeeks(weekStart, 1);
+  return {
+    weekStart: isoOf(weekStart),
+    monthHorizon: { start: isoOf(period.start), end: isoOf(period.end) },
+    bcbaWeeklyBillableTarget: resolveUtilization(data.settings.utilization).bcbaWeeklyBillableHours,
+    chaseDirect: true,
+  };
+}
+
+// Human label for why a case couldn't be fully filled. Shared by the dock panel
+// and the chat summary so the wording stays in one place.
+export function bindingConstraintLabel(c: ClientBlock['bindingConstraint']): string {
+  switch (c) {
+    case 'availability': return 'No open availability';
+    case 'tech-contention': return 'Assigned techs fully booked';
+    case 'auth-cap': return 'At authorization cap';
+    case 'none': return 'Fully placed';
+  }
+}
+
+const round1 = (n: number): number => Math.round(n * 10) / 10;
+
+// A plain-text readout of a build for the sAssI chat transcript. Contains real
+// client names, so it is DISPLAY-ONLY — the caller must keep it out of the token
+// history replayed to the API (the deterministic builder, not Claude, produced it).
+// `hasStaged` says whether the build actually put sessions in the draft tray, and
+// drives the next-step cue in lockstep with BuildResultPanel's three-way messaging.
+export function formatBuildSummary(result: BuildResult, hasStaged: boolean): string {
+  const { metrics, blocks } = result;
+  const blockLines = blocks.map(b => {
+    const short = b.directGapRemaining > 0 ? ` (${round1(b.directGapRemaining)}h short)` : '';
+    return `• ${b.clientName} — ${bindingConstraintLabel(b.bindingConstraint)}${short}`;
+  });
+  if (!hasStaged) {
+    return blocks.length === 0
+      ? 'Nothing to place — every case is already at its direct target.'
+      : `No sessions could be placed:\n${blockLines.join('\n')}`;
+  }
+  const head = `Placed ${round1(metrics.directHrsPlaced)}h of direct across ${metrics.totalCases} case${metrics.totalCases === 1 ? '' : 's'} (${metrics.casesFullyStaffed}/${metrics.totalCases} fully staffed). Review the proposal in the tray, then Accept.`;
+  return blockLines.length === 0 ? head : `${head}\nCouldn’t fully fill:\n${blockLines.join('\n')}`;
 }

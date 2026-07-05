@@ -14,7 +14,7 @@
  *   - Validity: the applied result introduces no new hard (error) conflicts.
  */
 import { ScheduleData, Client, Technician, Authorization, CompanySettings, Appointment } from '../src/types';
-import { buildSchedule, BuilderConfig } from '../src/scheduleBuilder';
+import { buildSchedule, BuilderConfig, defaultBuilderConfig, formatBuildSummary } from '../src/scheduleBuilder';
 import { wishSolutionToDraft } from '../src/wish';
 import { applyOps } from '../src/draft';
 import { solveDraft } from '../src/draftSolver';
@@ -144,6 +144,23 @@ console.log('infeasibility: impossible case flagged, others still placed (partia
   check('block reports a non-zero remaining gap', (block?.directGapRemaining ?? 0) >= 0.5);
   check('the feasible case is still fully placed', Math.abs(clientHours(result, 'Fine Case') - 4) < 0.01);
   check('metrics count one fully staffed of two', result.metrics.casesFullyStaffed === 1 && result.metrics.totalCases === 2);
+
+  // The chat-transcript readout: leads with metrics + a tray cue, then names the
+  // blocked case and its constraint. Contains real names by design — display-only
+  // (never sent back to the API; see sassiSession's build branch).
+  const summary = formatBuildSummary(result, true);
+  check('summary leads with placed hours + staffed count', /Placed [\d.]+h of direct across 2 cases \(1\/2 fully staffed\)\./.test(summary));
+  check('summary points the BCBA to the tray', summary.includes('Review the proposal in the tray'));
+  check('summary names the blocked client and its constraint', summary.includes('No Room') && summary.includes('No open availability'));
+  check('summary reports the remaining shortfall', /No Room — No open availability \([\d.]+h short\)/.test(summary));
+
+  // When the build staged nothing, the readout drops the "0h/tray" wording for a
+  // clear no-op message (all-blocked) or an all-at-target message (no blocks).
+  const allBlocked = formatBuildSummary(result, false);
+  check('unstaged build with blocks leads with "No sessions could be placed"', allBlocked.startsWith('No sessions could be placed:') && allBlocked.includes('No Room'));
+  check('unstaged build with blocks omits the misleading 0h/tray line', !allBlocked.includes('Placed') && !allBlocked.includes('tray'));
+  const nothing = formatBuildSummary({ ...result, blocks: [] }, false);
+  check('unstaged build with no blocks reads as already-at-target', nothing === 'Nothing to place — every case is already at its direct target.');
 }
 
 console.log('validity: applied build introduces no new hard (error) conflicts');
@@ -178,6 +195,28 @@ console.log('validity: applied build introduces no new hard (error) conflicts');
   // Sanity: the only new errors are the expected supervision shortfalls Phase 3 fills.
   const supShort = new ConstraintValidator(preview, NOW).validateSchedule().filter(c => c.type === 'supervision-violation').length;
   check('the expected supervision gaps appear (deferred to the supervision phase)', supShort > 0);
+}
+
+console.log('defaultBuilderConfig: one-tap defaults are sane and drive a real build');
+{
+  const c1 = client('c1', 'Solo', { Monday: [{ start: '09:00', end: '17:00' }] });
+  const t1 = tech('t1', 'BT', { Monday: [{ start: '09:00', end: '17:00' }] }, [{ clientId: 'c1', hoursPerWeek: 10, billable: true }]);
+  const data = schedule([c1], [t1], [auth('c1', 4)]);
+  // weekStart is always the NEXT Monday — the soonest week entirely in the future
+  // — because buildSchedule places across the whole template week and doesn't guard
+  // against `now`, so any partly-past week would drop already-passed slots. The
+  // containing week always includes today, so even a Monday run anchors next Monday.
+  const mon = new Date('2026-07-06T09:00:00');
+  const wed = new Date('2026-07-08T09:00:00');
+  check('Monday build still anchors the NEXT full week (this week includes today)', defaultBuilderConfig(data, mon).weekStart === '2026-07-13');
+  const cfg = defaultBuilderConfig(data, wed);
+  check('mid-week build anchors the NEXT Monday (fully future)', cfg.weekStart === '2026-07-13');
+  check('monthHorizon spans the calendar month', cfg.monthHorizon.start === '2026-07-01' && cfg.monthHorizon.end === '2026-08-01');
+  check('weekly billable target falls back to the utilization default', cfg.bcbaWeeklyBillableTarget > 0);
+  check('chaseDirect is on', cfg.chaseDirect === true);
+  // The default config actually drives a build that places the case's direct hours.
+  const result = buildSchedule(data, cfg, wed);
+  check('default config produces a placeable build', clientHours(result, 'Solo') >= 4 - 1e-9);
 }
 
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed`);

@@ -139,24 +139,113 @@ export function scrubText(text: string, data: ScheduleData, map: AnonymizationMa
     return `\x00${idx}\x00`;
   });
 
-  // Step 2: replace real names, longest first so "John Smith" beats "John".
+  // Step 2: replace real names, longest first so "John Smith" beats "John". Each
+  // significant name COMPONENT is registered too, so a bare first/last name
+  // ("Ethan") is tokenized, not only the exact full "Ethan Carter" — the chat's
+  // free-text path leans on this. Length-gated (≥3) and word-bounded; over-scrubbing
+  // is the safe direction for PHI (a human reviews the de-anonymized proposal).
   const replacements: { from: string; to: string }[] = [];
-  data.clients.forEach(c => {
-    if (c.name) replacements.push({ from: c.name, to: map.clients.get(c.name) || 'CLIENT_X' });
-  });
-  data.technicians.forEach(t => {
-    if (t.name) replacements.push({ from: t.name, to: map.technicians.get(t.name) || 'TECH_X' });
-  });
+  const pushEntity = (name: string | undefined, to: string) => {
+    if (!name) return;
+    replacements.push({ from: name, to });
+    for (const part of name.split(/\s+/)) {
+      if (part.length >= 3) replacements.push({ from: part, to });
+    }
+  };
+  data.clients.forEach(c => pushEntity(c.name, map.clients.get(c.name) || 'CLIENT_X'));
+  data.technicians.forEach(t => pushEntity(t.name, map.technicians.get(t.name) || 'TECH_X'));
   replacements.sort((a, b) => b.from.length - a.from.length);
   for (const { from, to } of replacements) {
     if (!from) continue;
     const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    result = result.replace(new RegExp(escaped, 'gi'), to);
+    // Word-bounded so a short component can't corrupt a longer word ("Sam" in "Samantha").
+    result = result.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), to);
   }
 
   // Step 3: restore saved tokens.
   result = result.replace(/\x00(\d+)\x00/g, (_, i) => saved[parseInt(i)] ?? '');
   return result;
+}
+
+// ── Local entity resolution (pre-scrub) ──────────────────────────────────────
+// Claude never sees names, so it cannot map a shorthand the user types ("SB",
+// "Sammy") to a token — that resolution has to happen locally, before the text is
+// scrubbed and sent. resolveClientReferences rewrites unambiguous shorthands to
+// the client's canonical name (which scrubText then tokenizes) and reports any
+// shorthand that matches more than one client so the caller can disambiguate.
+
+export interface EntityCandidate { id: string; name: string; }
+export interface EntityAmbiguity { ref: string; candidates: EntityCandidate[]; }
+export interface EntityResolution { text: string; ambiguities: EntityAmbiguity[]; }
+
+// First letter of each whitespace-delimited word, uppercased and letter-only:
+// "Sam Brown" -> "SB", "Mary Jane Watson" -> "MJW".
+function clientInitials(name: string): string {
+  return name.trim().split(/\s+/).map(w => w[0] || '').join('').toUpperCase().replace(/[^A-Z]/g, '');
+}
+
+// All-caps tokens that are overwhelmingly ABA/scheduling terms, not name references
+// — the AUTO-DERIVED initials path must never rewrite these (an explicit alias still
+// wins). e.g. "add PT" must stay parent-training, not become a client named "Pat T.".
+const RESERVED_INITIALS = new Set([
+  'PT', 'BT', 'OT', 'ST', 'SLP', 'RBT', 'BCBA', 'ABA', 'EI', 'CC', 'PTO', 'IEP',
+  'AM', 'PM', 'OK', 'ID', 'TV', 'NO', 'ASAP', 'FYI', 'ABC',
+]);
+
+// Resolve short client references a user typed to the client's full name, locally.
+// Aliases match case-insensitively; initials match only an ALL-CAPS token (SB,
+// S.B.) so a lowercase word can't false-fire. Unambiguous refs are rewritten to
+// the full name (scrubText tokenizes it next); a ref matching >1 client is
+// returned as an ambiguity (never rewritten). Full names are left untouched —
+// scrubText already handles those.
+export function resolveClientReferences(text: string, data: ScheduleData): EntityResolution {
+  const aliasIndex = new Map<string, EntityCandidate[]>();     // lowercased alias -> clients
+  const initialsIndex = new Map<string, EntityCandidate[]>();  // uppercased initials -> clients
+  const add = (idx: Map<string, EntityCandidate[]>, key: string, cand: EntityCandidate) => {
+    const arr = idx.get(key) || [];
+    if (!arr.some(c => c.id === cand.id)) arr.push(cand);
+    idx.set(key, arr);
+  };
+  for (const c of data.clients) {
+    if (!c.name) continue;
+    const cand: EntityCandidate = { id: c.id, name: c.name };
+    (c.aliases || []).forEach(a => { const k = (a || '').trim().toLowerCase(); if (k) add(aliasIndex, k, cand); });
+    const ini = clientInitials(c.name);
+    if (ini.length >= 2) add(initialsIndex, ini, cand);
+  }
+
+  const ambiguities: EntityAmbiguity[] = [];
+  const seen = new Set<string>();
+  // Word-ish tokens only; internal . ' - kept so "S.B." / "O'Neil" survive as one.
+  const out = text.replace(/[A-Za-z][A-Za-z.'-]*/g, (word) => {
+    let cands = aliasIndex.get(word.toLowerCase());
+    if (!cands) {
+      const stripped = word.replace(/[.-]/g, '');
+      if (stripped.length >= 2 && /^[A-Z]+$/.test(stripped) && !RESERVED_INITIALS.has(stripped)) cands = initialsIndex.get(stripped);
+    }
+    if (!cands || cands.length === 0) return word;
+    if (cands.length === 1) return cands[0].name;
+    const key = word.toLowerCase();
+    if (!seen.has(key)) { seen.add(key); ambiguities.push({ ref: word, candidates: cands.slice() }); }
+    return word;
+  });
+  return { text: out, ambiguities };
+}
+
+// True if any client/technician full name OR significant name component (≥3 chars)
+// survives in the text as a standalone word. The fail-closed backstop for the chat
+// path: no request is sent while a roster name token is still present after scrub.
+export function containsEntityName(text: string, data: ScheduleData): boolean {
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const names: string[] = [];
+  const collect = (name?: string) => {
+    if (!name) return;
+    if (name.length > 1) names.push(name);
+    for (const part of name.split(/\s+/)) if (part.length >= 3) names.push(part);
+  };
+  data.clients.forEach(c => collect(c.name));
+  data.technicians.forEach(t => collect(t.name));
+  return names.some(n => new RegExp(`\\b${esc(n)}\\b`, 'i').test(text));
 }
 
 // De-anonymize tokens in a string back to original values.

@@ -58,6 +58,10 @@ export interface Client {
   // Per-case ideal supervision percentage (%). Overrides the company-wide
   // supervisionPreferredMinPercent on the Compliance dashboard for this client.
   supervisionIdealPct?: number;
+  // Short handles the user might type for this client in the sAssI chat ("SB",
+  // "Sammy"). Resolved LOCALLY to a token before any prompt is built (Claude
+  // never sees names). Absent = fall back to name / auto-derived initials.
+  aliases?: string[];
 }
 
 export interface Technician {
@@ -304,6 +308,19 @@ export const CANCELLATION_SOURCES: { value: CancellationSource; label: string }[
   { value: 'admin', label: 'Cancel-Admin' },
   { value: 'family', label: 'Cancel-Family' },
 ];
+
+// Sources that apply to a given appointment type. For client-session /
+// internal-task the BCBA isn't a participant, so Cancel-BCBA doesn't apply; every
+// other type may be canceled by any of the four sources. The data model holds all
+// four either way — callers just hide the irrelevant option. Shared by the cancel
+// dialog (UI) and the sAssI `cancel` command op (wish.ts), so a spoken cancel and
+// a clicked one obey the same rule.
+export function applicableSources(apptType: Appointment['type']): { value: CancellationSource; label: string }[] {
+  if (apptType === 'client-session' || apptType === 'internal-task') {
+    return CANCELLATION_SOURCES.filter(s => s.value !== 'bcba');
+  }
+  return CANCELLATION_SOURCES;
+}
 
 // A cancellation reason code. `value` is the stable id stored on records;
 // `label` is what humans see; `retired` hides it from new cancellations while
@@ -720,7 +737,15 @@ export type WishOp =
   | { op: 'move'; appointmentId: string; start: string; end: string }
   | { op: 'remove'; appointmentId: string }
   | { op: 'add'; title?: string; type: Appointment['type']; client?: string; technician?: string; start: string; end: string; recurring?: boolean; pattern?: 'weekly' | 'biweekly' | 'monthly' }
-  | { op: 'blackout'; entityType: 'client' | 'technician'; entity: string; date: string; reason?: string };
+  | { op: 'blackout'; entityType: 'client' | 'technician'; entity: string; date: string; reason?: string }
+  // Agentic command ops (sAssI). Each references only an appointment token plus
+  // enums/booleans — no names — so anonymization guards never trip. They map to a
+  // single full-appointment-replace `edit` DraftOp (see wish.ts / draft.ts) and,
+  // carrying no start time, are never dropped by dropPastOps (a lock/complete/cancel
+  // on a past session is legitimate).
+  | { op: 'setFixed'; appointmentId: string; isFixed: boolean }
+  | { op: 'complete'; appointmentId: string }
+  | { op: 'cancel'; appointmentId: string; source: CancellationSource; reason: CancellationReason; unplanned: boolean; noticeMet?: boolean; notes?: string };
 
 export interface WishSolution {
   id: string;

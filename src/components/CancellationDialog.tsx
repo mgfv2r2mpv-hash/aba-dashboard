@@ -3,9 +3,9 @@ import {
   Appointment,
   Cancellation,
   CancellationSource,
-  CANCELLATION_SOURCES,
   CANCELLATION_REASONS,
   activeCancellationCodes,
+  applicableSources,
   CompanySettings,
   DEFAULT_CANCELLATION_NOTICE,
 } from '../types';
@@ -15,17 +15,6 @@ interface Props {
   settings: CompanySettings;
   onConfirm: (cancellation: Cancellation) => void;
   onCancel: () => void;
-}
-
-// For client-session/internal-task: BCBA isn't a participant, so don't offer
-// Cancel-BCBA. For everything else (supervision, parent-training, other) all
-// four sources are valid. The data model holds all four either way; the UI
-// just hides the irrelevant option.
-function applicableSources(apptType: Appointment['type']) {
-  if (apptType === 'client-session' || apptType === 'internal-task') {
-    return CANCELLATION_SOURCES.filter(s => s.value !== 'bcba');
-  }
-  return CANCELLATION_SOURCES;
 }
 
 export default function CancellationDialog({ appointment, settings, onConfirm, onCancel }: Props) {

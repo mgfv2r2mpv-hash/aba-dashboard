@@ -10,13 +10,13 @@
 import { Appointment, ScheduleData } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
-export type DraftOpKind = 'add' | 'move' | 'shorten' | 'remove';
+export type DraftOpKind = 'add' | 'move' | 'shorten' | 'remove' | 'edit';
 
 export interface DraftOp {
   id: string;               // unique op id (for per-op reset)
   kind: DraftOpKind;
-  targetId?: string;        // move / shorten / remove — the appointment affected
-  appt?: Appointment;       // add / move / shorten — the proposed full appointment state
+  targetId?: string;        // move / shorten / remove / edit — the appointment affected
+  appt?: Appointment;       // add / move / shorten / edit — the proposed full appointment state
 }
 
 // What kind of draft change touches a given appointment id, for calendar styling.
@@ -38,12 +38,20 @@ export function newRemoveOp(targetId: string): DraftOp {
   return { id: uuidv4(), kind: 'remove', targetId };
 }
 
+// A whole-appointment replacement that isn't a time change — pin/unpin, complete,
+// or cancel. Carries the fully-patched appointment (same id) and rides the same
+// full-appt-replace path `add`/`move` use in applyOps. Time-agnostic on purpose:
+// unlike `move`, an `edit` on a PAST session (e.g. lock a completed one) is valid.
+export function newEditOp(appt: Appointment): DraftOp {
+  return { id: uuidv4(), kind: 'edit', targetId: appt.id, appt };
+}
+
 // Apply staged ops over the base schedule, in order, producing the preview.
 // Later ops win (e.g. moving the same appointment twice keeps the last move).
 export function applyOps(base: ScheduleData, ops: DraftOp[]): ScheduleData {
   const byId = new Map<string, Appointment>(base.appointments.map(a => [a.id, { ...a }]));
   for (const op of ops) {
-    if ((op.kind === 'add' || op.kind === 'move' || op.kind === 'shorten') && op.appt) {
+    if ((op.kind === 'add' || op.kind === 'move' || op.kind === 'shorten' || op.kind === 'edit') && op.appt) {
       byId.set(op.appt.id, { ...op.appt });
     } else if (op.kind === 'remove' && op.targetId) {
       byId.delete(op.targetId);

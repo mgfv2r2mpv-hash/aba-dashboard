@@ -59,19 +59,40 @@ export function SassiChat({ session, model, onToggleModel }: SassiChatProps) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto', paddingRight: 2 }}>
         {session.messages.map((m, i) => (
-          <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
-            <div
-              style={{
-                fontSize: 12.5, lineHeight: 1.5, padding: '8px 11px', borderRadius: 12, whiteSpace: 'pre-wrap',
-                background: m.role === 'user' ? 'var(--sage-600)' : 'var(--sage-50)',
-                color: m.role === 'user' ? 'var(--white)' : 'var(--text-primary)',
-                border: m.role === 'user' ? 'none' : '1px solid var(--sage-100)',
-                borderBottomRightRadius: m.role === 'user' ? 4 : 12,
-                borderBottomLeftRadius: m.role === 'user' ? 12 : 4,
-              }}
-            >
-              {m.text}
-            </div>
+          <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '88%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {m.text && (
+              <div
+                style={{
+                  fontSize: 12.5, lineHeight: 1.5, padding: '8px 11px', borderRadius: 12, whiteSpace: 'pre-wrap',
+                  background: m.role === 'user' ? 'var(--sage-600)' : 'var(--sage-50)',
+                  color: m.role === 'user' ? 'var(--white)' : 'var(--text-primary)',
+                  border: m.role === 'user' ? 'none' : '1px solid var(--sage-100)',
+                  borderBottomRightRadius: m.role === 'user' ? 4 : 12,
+                  borderBottomLeftRadius: m.role === 'user' ? 12 : 4,
+                }}
+              >
+                {m.text}
+              </div>
+            )}
+            {m.questions && m.questions.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {m.questions.map((q, qi) => (
+                  <button
+                    key={qi}
+                    type="button"
+                    onClick={() => session.send(q.value)}
+                    disabled={session.status === 'thinking'}
+                    style={{
+                      border: '1px solid var(--sage-200)', background: 'var(--sage-50)', borderRadius: 'var(--radius-pill)',
+                      padding: '5px 11px', fontSize: 12, fontWeight: 700, color: 'var(--sage-700)',
+                      cursor: session.status === 'thinking' ? 'default' : 'pointer',
+                    }}
+                  >
+                    {q.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ))}
         {session.status === 'thinking' && (

@@ -11,12 +11,23 @@ import { useCallback, useRef, useState } from 'react';
 // Type-only: the runtime module (which pulls in the Anthropic SDK) is loaded
 // lazily inside `send`, so the always-mounted dock doesn't drag it into the
 // initial bundle — matching how app.tsx escalates to Claude elsewhere.
-import type { ClaudeScheduler, SassiMessage, ClaudeModel } from '../../claudeScheduler';
+import type { ClaudeScheduler, SassiMessage, ClaudeModel, ClarifyOption } from '../../claudeScheduler';
 import type { WishOp, ScheduleData } from '../../types';
 
 export interface SassiUiMessage {
   role: 'user' | 'assistant';
   text: string;
+  // Present on a clarify turn (from Claude) or a local disambiguation — render as
+  // tappable chips; tapping one calls send(option.value).
+  questions?: ClarifyOption[];
+}
+
+// Replace a resolved shorthand ("SB") with the chosen client's full name, matched
+// as a standalone token (letters on either side excluded) so it can't corrupt a
+// longer word. The full name is tokenized by scrub() on the resend.
+function substituteRef(text: string, ref: string, name: string): string {
+  const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(new RegExp(`(^|[^A-Za-z])${escaped}(?![A-Za-z])`, 'g'), (_m, pre) => `${pre}${name}`);
 }
 
 export type SassiStatus = 'idle' | 'thinking' | 'error';
@@ -37,9 +48,11 @@ export interface UseSassiSessionParams {
   model: ClaudeModel;
   /** Replace the live draft preview with the turn's complete proposal. */
   onProposal: (ops: WishOp[]) => void;
+  /** The selected appointment's id (or null), for deictic "this appointment". */
+  getFocusedAppointmentId: () => string | null;
 }
 
-export function useSassiSession({ getSchedule, apiKey, model, onProposal }: UseSassiSessionParams): SassiSession {
+export function useSassiSession({ getSchedule, apiKey, model, onProposal, getFocusedAppointmentId }: UseSassiSessionParams): SassiSession {
   const [messages, setMessages] = useState<SassiUiMessage[]>([]);
   const [status, setStatus] = useState<SassiStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -85,18 +98,47 @@ export function useSassiSession({ getSchedule, apiKey, model, onProposal }: UseS
       const scheduler = schedulerRef.current;
       scheduler.setModel(model);
 
-      const nextHistory: SassiMessage[] = [...historyRef.current, { role: 'user', content: scheduler.scrub(trimmed) }];
+      // Resolve short client references ("SB" → a client) LOCALLY, before scrub, so
+      // shorthands become tokens too. An ambiguous reference is answered with chips
+      // right here (no Claude call); the unambiguous case is normalized to the full
+      // name, which scrub() then tokenizes (scrub covers names + name components,
+      // and chat() re-asserts fail-closed before anything leaves the device).
+      const resolved = scheduler.resolveEntities(trimmed);
+      if (resolved.ambiguities.length > 0) {
+        const amb = resolved.ambiguities[0];
+        const options: ClarifyOption[] = amb.candidates.map(c => ({
+          label: c.name,
+          value: substituteRef(trimmed, amb.ref, c.name),
+        }));
+        setMessages(prev => [...prev, { role: 'assistant', text: `Which one is “${amb.ref}”?`, questions: options }]);
+        setStatus('idle');
+        return;
+      }
+
+      // Deictic "this appointment": attach the focused session's token to the
+      // UNCACHED tail (this outgoing user message), never the cached system block —
+      // otherwise a selection change would bust the prefix cache every turn.
+      const focusId = getFocusedAppointmentId();
+      const focusTok = focusId ? scheduler.aptToken(focusId) : null;
+      let userContent = scheduler.scrub(resolved.text);
+      if (focusTok) userContent += `\n[context: this appointment = ${focusTok}]`;
+
+      const nextHistory: SassiMessage[] = [...historyRef.current, { role: 'user', content: userContent }];
       const res = await scheduler.chat(nextHistory);
       historyRef.current = [...nextHistory, { role: 'assistant', content: res.raw }];
-      setMessages(prev => [...prev, { role: 'assistant', text: res.reply || '(no reply)' }]);
-      // Non-empty ops replace the preview; an explanation-only turn leaves it.
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        text: res.reply || (res.questions?.length ? '' : '(no reply)'),
+        questions: res.questions,
+      }]);
+      // Non-empty ops replace the preview; an explanation/clarify turn leaves it.
       if (res.ops.length > 0) onProposal(res.ops);
       setStatus('idle');
     } catch (e: any) {
       setError(e?.message || String(e));
       setStatus('error');
     }
-  }, [getSchedule, apiKey, model, onProposal]);
+  }, [getSchedule, apiKey, model, onProposal, getFocusedAppointmentId]);
 
   return {
     messages,

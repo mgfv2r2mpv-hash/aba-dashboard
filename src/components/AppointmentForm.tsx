@@ -92,6 +92,9 @@ export default function AppointmentForm({
   const [isBillable, setIsBillable] = useState(appointment?.isBillable ?? true);
   const [isMakeUp, setIsMakeUp] = useState(appointment?.isMakeUp ?? false);
   const [makeupForId, setMakeupForId] = useState(appointment?.makeupForId || '');
+  // Locked = the auto-scheduler and draft engine won't move this session. Defaults
+  // off; previously only preserved (no edit control), now directly togglable.
+  const [isFixed, setIsFixed] = useState(appointment?.isFixed ?? false);
 
   const isNew = !appointment?.id;
   // "Move end time with start time": preserve the current duration when the
@@ -295,7 +298,7 @@ export default function AppointmentForm({
       client: clientId,
       startTime,
       endTime,
-      isFixed: appointment?.isFixed ?? false,
+      isFixed,
       isBillable,
       isMakeUp: isMakeUp || undefined,
       makeupForId: isMakeUp && makeupForId ? makeupForId : undefined,
@@ -628,6 +631,10 @@ export default function AppointmentForm({
             <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }}>
               <input type="checkbox" checked={isMakeUp} onChange={(e) => { setIsMakeUp(e.target.checked); if (!e.target.checked) setMakeupForId(''); }} />
               <span>Make-up session</span>
+            </label>
+            <label style={{ display: 'flex', gap: '6px', alignItems: 'center', cursor: 'pointer' }} title="Lock this session so the scheduler and drafts won't move it.">
+              <input type="checkbox" checked={isFixed} onChange={(e) => setIsFixed(e.target.checked)} />
+              <span>Locked (don’t move)</span>
             </label>
           </div>
 

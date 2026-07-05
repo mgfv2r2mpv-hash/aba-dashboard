@@ -16,67 +16,10 @@
 //     Claude layer, and PT only WITHIN already-scheduled sessions.
 //   - Never double-books a BT or a client; respects blackouts.
 
-import { ScheduleData, Appointment, DayOfWeek, TimeWindow, Technician } from './types';
+import { ScheduleData, Appointment, DayOfWeek, TimeWindow } from './types';
 import { findAuthFor } from './authorization';
 import { computeClientCompliance, CompliancePeriod } from './compliance';
-
-const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const toMin = (t: string): number => { const [h, m] = t.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
-const minToClock = (n: number): string => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
-const MIN_SLOT_MINS = 60; // ignore feasible gaps shorter than this
-
-interface Interval { start: number; end: number; } // minutes since midnight
-
-// Merge + sort intervals, dropping zero/negative spans.
-function normalize(ints: Interval[]): Interval[] {
-  const sorted = ints.filter(i => i.end > i.start).sort((a, b) => a.start - b.start);
-  const out: Interval[] = [];
-  for (const i of sorted) {
-    const last = out[out.length - 1];
-    if (last && i.start <= last.end) last.end = Math.max(last.end, i.end);
-    else out.push({ ...i });
-  }
-  return out;
-}
-
-function intersect(a: Interval[], b: Interval[]): Interval[] {
-  const out: Interval[] = [];
-  for (const x of a) for (const y of b) {
-    const s = Math.max(x.start, y.start), e = Math.min(x.end, y.end);
-    if (e > s) out.push({ start: s, end: e });
-  }
-  return normalize(out);
-}
-
-// a minus b (remove busy intervals from free intervals).
-function subtract(a: Interval[], b: Interval[]): Interval[] {
-  let cur = normalize(a);
-  for (const cut of normalize(b)) {
-    const next: Interval[] = [];
-    for (const seg of cur) {
-      if (cut.end <= seg.start || cut.start >= seg.end) { next.push(seg); continue; }
-      if (cut.start > seg.start) next.push({ start: seg.start, end: cut.start });
-      if (cut.end < seg.end) next.push({ start: cut.end, end: seg.end });
-    }
-    cur = next;
-  }
-  return cur;
-}
-
-const windowsToIntervals = (ws?: TimeWindow[]): Interval[] =>
-  normalize((ws || []).map(w => ({ start: toMin(w.start), end: toMin(w.end) })));
-
-// A BT's effective availability for a given case on a day: general availability,
-// further restricted by any per-case availability on that assignment.
-function btCaseAvailability(tech: Technician, clientRef: string, day: DayOfWeek): Interval[] {
-  const general = windowsToIntervals(tech.availability?.[day]);
-  const asg = (tech.assignments || []).find(a => a.clientId === clientRef);
-  if (!asg) return [];
-  if (asg.availability && Object.keys(asg.availability).length > 0) {
-    return intersect(general, windowsToIntervals(asg.availability[day]));
-  }
-  return general; // no per-case restriction → general availability applies
-}
+import { DAYS, toMin, minToClock, MIN_SLOT_MINS, intersect, subtract, windowsToIntervals, btCaseAvailability } from './intervals';
 
 const isActive = (a: Appointment) => a.status !== 'canceled' && !a.isGhost;
 const dirHours = (a: Appointment) => (new Date(a.endTime).getTime() - new Date(a.startTime).getTime()) / 3_600_000;

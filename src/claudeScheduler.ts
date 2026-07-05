@@ -18,6 +18,7 @@ import { allowedStrategies } from './fixit';
 import { computeClientCompliance, computeTechCompliance, monthPeriod } from './compliance';
 import { resolveUtilization } from './utilization';
 import { buildFillContext, buildComplianceFillContext, buildBcbaWeekFillContext, buildSupervisableWindows, buildFeasibilityDiagnostics } from './fillSchedule';
+import { buildSchedule, defaultBuilderConfig, BuildResult } from './scheduleBuilder';
 import { startOfWeek } from 'date-fns';
 
 export type ClaudeModel = 'claude-opus-4-8' | 'claude-sonnet-4-6' | 'claude-haiku-4-5-20251001';
@@ -49,6 +50,10 @@ export interface SassiChatResult {
   reply: string;
   ops: WishOp[];
   questions?: ClarifyOption[];
+  // Present when Claude routed a "build my month" intent to the deterministic
+  // builder. The caller runs runBuild() locally and stages the result — Claude
+  // never places appointments, so ops stays empty on a build turn.
+  build?: boolean;
 }
 
 // sAssI answers through exactly one of these two tools every turn (tool_choice
@@ -99,6 +104,23 @@ const CLARIFY_TOOL = {
       options: { type: 'array', items: { type: 'string' }, description: 'Tappable answers — tapping one sends it back as the BCBA’s reply.' },
     },
     required: ['reply', 'options'],
+  },
+};
+
+// A whole-caseload build ("build my month", "fill everyone's direct hours") is
+// handed to the deterministic engine — NOT placed op-by-op by the model. Choose
+// this tool ONLY for that broad intent; use `respond` for targeted edits. The
+// engine runs locally, places the recurring direct backbone, and reports which
+// cases it couldn't fill; you only frame the outcome in `reply`.
+const BUILD_TOOL = {
+  name: 'build',
+  description: 'Run the deterministic scheduler to build the recurring direct backbone for the whole caseload this month. Use ONLY for broad "build/fill my schedule" requests — never for a single-appointment change (use respond for those). You do not place anything; the engine does and reports blocks.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      reply: { type: 'string', description: 'Short framing message to the BCBA — that you are building the recurring direct schedule and will report what couldn’t be filled.' },
+    },
+    required: ['reply'],
   },
 };
 
@@ -227,7 +249,7 @@ export class ClaudeScheduler {
       // Force exactly one structured tool call — no free-form prose can leak out.
       // (Tools render before the system block, so the system cache breakpoint
       // already covers them; no separate tool-level breakpoint is needed.)
-      tools: [RESPOND_TOOL, CLARIFY_TOOL] as any,
+      tools: [RESPOND_TOOL, CLARIFY_TOOL, BUILD_TOOL] as any,
       tool_choice: { type: 'any', disable_parallel_tool_use: true } as any,
       messages: messages as any,
     });
@@ -242,6 +264,12 @@ export class ClaudeScheduler {
       });
       const reply = deAnonymizeText(typeof input.reply === 'string' ? input.reply : '', this.anonMap);
       return { raw: JSON.stringify(input), reply, ops: [], questions };
+    }
+    if (toolUse && toolUse.name === 'build') {
+      const input = toolUse.input || {};
+      const reply = deAnonymizeText(typeof input.reply === 'string' ? input.reply : '', this.anonMap);
+      // ops stays empty — the caller runs runBuild() locally and stages those ops.
+      return { raw: JSON.stringify(input), reply, ops: [], build: true };
     }
     if (toolUse && toolUse.name === 'respond') {
       const turn = parseToolTurn(toolUse.input, reverse);
@@ -273,6 +301,14 @@ export class ClaudeScheduler {
   // Claude only ever sees tokens — never names.
   resolveEntities(text: string): EntityResolution {
     return resolveClientReferences(text, this.data);
+  }
+
+  // Run the deterministic month-builder over this session's schedule. Invoked when
+  // the model picks the `build` tool: placement is entirely local and deterministic
+  // (buildSchedule on the REAL schedule — never the anonymized one, never Claude),
+  // so its ops are staged straight into the draft, and its blocks report locally.
+  runBuild(now: Date): BuildResult {
+    return buildSchedule(this.data, defaultBuilderConfig(this.data, now), now);
   }
 
   // Let a live session switch models (Sonnet ⇄ Haiku) without rebuilding the
@@ -357,6 +393,7 @@ ${anon.timeOff.length ? `BCBA TIME OFF: ${JSON.stringify(anon.timeOff)}` : ''}
 HOW TO REPLY — call exactly ONE tool every turn:
 - respond({reply, ops}) — reply is a short, plain-language message (what changed and WHY, clinical-but-friendly, with a follow-up when useful). ops is the COMPLETE current proposal, not a delta — the calendar preview is replaced with your ops each turn. Use ops:[] when you're only answering/explaining (e.g. the BCBA asked "why?").
 - clarify({reply, options}) — when you need a decision before acting (which client, which time, which session), ask ONE question and offer the likely answers as options.
+- build({reply}) — ONLY for a broad "build/fill my whole schedule this month" request. The deterministic engine (not you) then places the recurring direct backbone across the caseload and reports which cases it couldn't fill; you just frame it in reply. Never use build for a single-appointment change — use respond with ops for those.
 - op shapes: add {op:"add",type,client:"CLIENT_n",tech:"TECH_n"|null,start,end}; move {op:"move",apt:"APT_n",start,end}; lock {op:"setFixed",apt:"APT_n",isFixed:true|false}; complete {op:"complete",apt:"APT_n"}; cancel {op:"cancel",apt:"APT_n",source:"bt|bcba|admin|family",reason,unplanned:true|false}. "add" ops must NOT include an id.
 - If nothing can be added compliantly, DON'T say "no options": explain the specific blocker per case (from BLOCKERS) and suggest what the BCBA could change (add availability, free a slot, relax the cap).
 - When the BCBA says "this appointment"/"that one", resolve it to the APT token given in a [context: this appointment = APT_n] note on the latest message.

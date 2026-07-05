@@ -22,8 +22,9 @@ import ImportPreview from './components/ImportPreview';
 import { Button } from './components/ui';
 import { Rail, CommandBar, ZenStrip, DockChip, DockOverlay, resolveDockMode } from './components/shell';
 import type { RailItem, RailKey } from './components/shell';
-import { SAssiDock, buildDockIssues, useSassiSession } from './components/dock';
+import { SAssiDock, buildDockIssues, useSassiSession, BuildResultPanel } from './components/dock';
 import type { DockIssue, MeetPaceSeed } from './components/dock';
+import { buildSchedule, defaultBuilderConfig, type BuildResult } from './scheduleBuilder';
 import { useHomeTodos } from './hooks/useHomeTodos';
 import type { HomeTodo } from './hooks/useHomeTodos';
 import type { RitualAction } from './components/HomeView';
@@ -173,6 +174,9 @@ export default function App() {
   // committed) and merged into the schedule when the draft is accepted, so a
   // proposal can't mutate the base mid-conversation and reset the chat session.
   const [sassiBlackouts, setSassiBlackouts] = useState<Blackout[]>([]);
+  // Metrics + unfillable-case blocks from the last deterministic "Build direct
+  // schedule" run, shown alongside the staged draft; cleared when the draft ends.
+  const [buildResult, setBuildResult] = useState<BuildResult | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [recoveryTarget, setRecoveryTarget] = useState<Appointment | null>(null);
@@ -327,6 +331,17 @@ export default function App() {
     setSassiBlackouts(blackouts);
     setDraftOps(draftOps);
   }, [scheduleData]);
+
+  // One-tap deterministic build: the engine (never Claude) places a recurring
+  // direct backbone for the month and stages it through the normal draft pipeline;
+  // the BuildResultPanel surfaces what it placed and which cases it couldn't fill.
+  const handleBuildDirect = () => {
+    if (!scheduleData) return;
+    const now = new Date();
+    const result = buildSchedule(scheduleData, defaultBuilderConfig(scheduleData, now), now);
+    stageSassiOps(result.solution.ops);
+    setBuildResult(result);
+  };
   const sassi = useSassiSession({
     getSchedule: () => scheduleData,
     apiKey: aiSettings.apiKey,
@@ -506,6 +521,11 @@ export default function App() {
   // the scheduleData/viewDate effect, so we don't set them here.)
   const commitFull = (next: ScheduleData) => {
     setScheduleData(next);
+    // Any real schedule change (accept/save/AI-accept, import, wizard) invalidates
+    // the last build snapshot — clear it here so the panel can never describe a
+    // schedule that no longer exists. No-commit discards (cancel, per-op reset)
+    // clear it at their own call sites.
+    setBuildResult(null);
     // Defer the compliance cache build to the next task so the schedule renders
     // first — buildCache can block the main thread for several seconds on large
     // appointment sets, which triggers iOS's "unresponsive WebContent" watchdog.
@@ -816,8 +836,13 @@ export default function App() {
     setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); sassi.reset();
   };
 
-  const cancelDraft = () => { setDraftOps([]); setSolutions([]); setSassiBlackouts([]); sassi.reset(); };
-  const resetOp = (opId: string) => setDraftOps(ops => ops.filter(o => o.id !== opId));
+  const cancelDraft = () => { setDraftOps([]); setSolutions([]); setSassiBlackouts([]); setBuildResult(null); sassi.reset(); };
+  const resetOp = (opId: string) => {
+    setDraftOps(ops => ops.filter(o => o.id !== opId));
+    // Removing the last staged op empties the draft (no commit fires), so the
+    // build snapshot is now stale — clear it alongside.
+    if (draftOps.length <= 1) setBuildResult(null);
+  };
 
   // Picking a yellow trade-off stages the corresponding op so the next solve
   // can clear the conflict. "Shorten" trims the session by 30 min (a starting
@@ -1022,6 +1047,7 @@ export default function App() {
     setSolutions([]);
     setDraftOps([]);
     setSassiBlackouts([]);
+    setBuildResult(null);
     setSelectedAppointment(null);
     setView('schedule');
   };
@@ -1677,6 +1703,20 @@ export default function App() {
       {!draftActive && calLens !== 'client' && (
         <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} timeOff={scheduleData.timeOff} currentDate={viewDate} />
       )}
+      {!draftActive && (
+        <button
+          type="button"
+          onClick={handleBuildDirect}
+          title="Let the engine place a compliant recurring direct schedule for the month"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            padding: '9px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--sage-200)',
+            background: 'var(--sage-50)', color: 'var(--sage-700)', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+          }}
+        >
+          ⚙︎ Build direct schedule
+        </button>
+      )}
       {draftActive && draftStatus && (
         <DraftTray
           base={scheduleData}
@@ -1693,6 +1733,9 @@ export default function App() {
           onPickChoice={pickChoice}
           onLogGhosts={logAddsAsGhosts}
         />
+      )}
+      {buildResult && (
+        <BuildResultPanel result={buildResult} hasStagedProposal={draftActive} onDismiss={() => setBuildResult(null)} />
       )}
       {solutions.length > 0 && (
         <SolutionPanel

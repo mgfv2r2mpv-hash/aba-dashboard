@@ -36,6 +36,9 @@ export function DockChip({ issueCount, onOpen, controlsId }: DockChipProps) {
         padding: 'calc(env(safe-area-inset-top) + 10px) 16px 10px',
         border: 'none',
         borderLeft: '1px solid var(--sage-200)',
+        // Continue the header divider across the collapsed chip so the horizontal
+        // line meets the CommandBar/ZenStrip border flush at the right edge.
+        borderBottom: '1px solid var(--sage-200)',
         background: 'var(--white)',
         cursor: 'pointer',
         fontFamily: 'var(--font-sans)',

@@ -1,8 +1,9 @@
 /**
  * Verification for the provider-attributed supervision model:
- * a supervision-counting session (supervision / parent-training / case-planning)
- * credits supervision only when it NAMES a BT and overlaps that BT's direct
- * session; partial overlap credits partially; the wrong BT / no BT credits 0.
+ * a supervision-counting session (supervision / parent-training / case-planning /
+ * reassessment) credits supervision only when it NAMES a BT and overlaps that
+ * BT's direct session; partial overlap credits partially; the wrong BT / no BT
+ * credits 0. (Supervision itself needs no named BT — credit is by overlap.)
  * Run: npx tsx scripts/verify-compliance.ts
  */
 import { ScheduleData, Appointment } from '../src/types';
@@ -77,10 +78,27 @@ console.log('parent-training needs an explicit BT');
   check('parent-training naming a BT not in the direct counts 0', near(supHours(wrong, 'C1'), 0));
 }
 
-console.log('other types never count');
+console.log('reassessment counts when the BT is present (BCBA-confirmed — like parent-training)');
 {
-  const d = data([direct(), appt({ type: 'reassessment', client: 'C1', technician: 'T1', date: '2026-06-15', start: '10:30', end: '11:30' })]);
-  check('reassessment overlapping a direct counts 0', near(supHours(d, 'C1'), 0));
+  // BT named + overlapping that BT's direct → the BT is assisting (e.g. data
+  // collection while the BCBA runs an assessment tool) → credit the overlap.
+  const withBt = data([direct(), appt({ type: 'reassessment', client: 'C1', technician: 'T1', date: '2026-06-15', start: '10:30', end: '11:30' })]);
+  check('reassessment (BT named) overlapping the direct credits the overlapping hour', near(supHours(withBt, 'C1'), 1));
+
+  // No BT named (BCBA-only reassessment) → not supervision credit.
+  const noBt = data([direct(), appt({ type: 'reassessment', client: 'C1', date: '2026-06-15', start: '10:30', end: '11:30' })]);
+  check('reassessment without a BT counts 0', near(supHours(noBt, 'C1'), 0));
+
+  // Names T2, but only T1 is in the direct → no credit.
+  const wrong = data([direct(), appt({ type: 'reassessment', client: 'C1', technician: 'T2', date: '2026-06-15', start: '10:30', end: '11:30' })]);
+  check('reassessment naming a BT not in the direct counts 0', near(supHours(wrong, 'C1'), 0));
+}
+
+console.log('genuinely non-counting types');
+{
+  // internal-task / other never earn supervision credit even overlapping a direct.
+  const it = data([direct(), appt({ type: 'internal-task', client: 'C1', technician: 'T1', date: '2026-06-15', start: '10:30', end: '11:30' })]);
+  check('internal-task overlapping a direct counts 0', near(supHours(it, 'C1'), 0));
 }
 
 console.log('touching sessions (end == next start) do not overlap');

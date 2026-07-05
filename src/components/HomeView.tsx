@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, CSSProperties } from 'react';
+import { useEffect, useId, useRef, useState, CSSProperties } from 'react';
 import type { ScheduleData } from '../types';
-import { computeHomeTrends, PersonTrend, TrendWindow, TrendStatus } from '../caseModel';
+import { computeHomeTrends, fmtSignedHours, PersonTrend, TrendWindow, TrendStatus } from '../caseModel';
 import { Avatar, Button, Input, SegmentedControl, StatusPill } from './ui';
 import type { HomeTodo, NewHomeTodo } from '../hooks/useHomeTodos';
 
@@ -41,31 +41,76 @@ const STATUS_BG: Record<TrendStatus, string> = {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-// ── Trend sparkline: dashed pace · dotted projection · solid actual + dot,
-//    over a dated x-axis with drop-dots from each delivered day to the axis ────
+// Small labelled chip used for the direct card's two rates (% of auth, % of plan).
+const chipStyle = (color: string, bg: string): CSSProperties => ({
+  fontSize: 10, fontWeight: 800, color, background: bg,
+  borderRadius: 'var(--radius-sm)', padding: '1px 6px', whiteSpace: 'nowrap',
+});
+
+// ── Trend sparkline: a translucent PLAN envelope (cumulative scheduled) with the
+//    solid DELIVERED line riding above (make-ups) or below (cancellations) its
+//    edge, plus a dotted PROJECTED tail to period end, over a dated x-axis. Any
+//    portion past the authorization line (plan, delivered, or the tail) renders
+//    amber — recurring overage burns the auth bucket faster than planned ───────
 function Trend({ w }: { w: TrendWindow }) {
+  const uid = useId();
   const W = 140, PLOT_H = 40, P = 3;
-  const { pace, actual, proj, labels } = w.series;
-  const n = Math.max(pace.length - 1, 1);
-  const max = Math.max(...pace, ...proj, ...actual, 0.001) * 1.08;
+  const { plan, delivered, projTail, labels } = w.series;
+  const n = Math.max(plan.length - 1, 1);
+  const max = Math.max(...plan, ...delivered, ...projTail, 0.001) * 1.08;
   const AXIS_Y = PLOT_H - P;
   const H = AXIS_Y + 12;              // room for the axis + a label band
   const x = (i: number) => P + (i / n) * (W - 2 * P);
   const y = (v: number) => AXIS_Y - (v / max) * (PLOT_H - 2 * P);
   const pts = (arr: number[]) => arr.map((v, i) => `${x(i)},${y(v)}`).join(' ');
   const col = STATUS_COLOR[w.status];
-  const lastX = x(actual.length - 1);
-  const lastY = y(actual[actual.length - 1] ?? 0);
+  // Filled area under the cumulative scheduled line = the plan envelope.
+  const planArea = `${x(0)},${AXIS_Y} ${pts(plan)} ${x(plan.length - 1)},${AXIS_Y}`;
+  const cur = Math.max(delivered.length - 1, 0);                 // last delivered bucket (today)
+  const tail = projTail.slice(cur).map((v, k) => `${x(cur + k)},${y(v)}`).join(' ');
+  const lastX = x(cur), lastY = y(delivered[cur] ?? 0);
+
+  // Authorization line: only draw/split when it actually falls within the plotted
+  // range — if the case is far under target, the line would sit off the top edge
+  // and there's nothing to flag yet.
+  const authYRaw = w.target > 0 ? y(w.target) : null;
+  const authY = authYRaw != null && authYRaw >= P - 0.5 ? Math.min(Math.max(authYRaw, P), AXIS_Y) : null;
+  const belowId = `trend-below-${uid}`;
+  const aboveId = `trend-above-${uid}`;
+  const belowClip = authY != null ? `url(#${belowId})` : undefined;
+  const aboveClip = authY != null ? `url(#${aboveId})` : undefined;
+  const overAuth = authY != null && lastY < authY;
+
   return (
     <svg width={W} height={H} aria-hidden="true" style={{ flexShrink: 0, overflow: 'visible' }}>
-      {/* drop-dots: faint tick from each delivered day down to the axis */}
-      {actual.map((v, i) => (
-        <line key={`drop-${i}`} x1={x(i)} y1={y(v)} x2={x(i)} y2={AXIS_Y} stroke={col} strokeWidth="1" strokeDasharray="1 2" opacity="0.35" />
-      ))}
-      <polyline points={pts(pace)} fill="none" stroke="var(--slate-300)" strokeWidth="1.5" strokeDasharray="4 3" />
-      <polyline points={pts(proj)} fill="none" stroke={col} strokeWidth="1.5" strokeDasharray="1.5 3" opacity="0.7" />
-      <polyline points={pts(actual)} fill="none" stroke={col} strokeWidth="2.5" strokeLinecap="round" />
-      {actual.length > 0 && <circle cx={lastX} cy={lastY} r="3" fill={col} />}
+      {authY != null && (
+        <defs>
+          <clipPath id={belowId}><rect x="0" y={authY} width={W} height={Math.max(AXIS_Y - authY, 0) + 1} /></clipPath>
+          <clipPath id={aboveId}><rect x="0" y="0" width={W} height={authY} /></clipPath>
+        </defs>
+      )}
+      {/* translucent plan envelope: status color below auth, amber above it */}
+      <polygon points={planArea} fill={col} opacity="0.14" clipPath={belowClip} />
+      {authY != null && <polygon points={planArea} fill="var(--amber-500)" opacity="0.28" clipPath={aboveClip} />}
+      <polyline points={pts(plan)} fill="none" stroke={col} strokeWidth="1" opacity="0.35" />
+      {authY != null && (
+        <line x1={P} y1={authY} x2={W - P} y2={authY} stroke="var(--amber-600)" strokeWidth="1" strokeDasharray="2 2" opacity="0.6" />
+      )}
+      {/* dotted projected tail, amber where it crosses above auth */}
+      {projTail.length - 1 > cur && (
+        <>
+          <polyline points={tail} fill="none" stroke={col} strokeWidth="1.5" strokeDasharray="1.5 3" opacity="0.75" clipPath={belowClip} />
+          {authY != null && <polyline points={tail} fill="none" stroke="var(--amber-700)" strokeWidth="1.5" strokeDasharray="1.5 3" opacity="0.9" clipPath={aboveClip} />}
+        </>
+      )}
+      {/* solid delivered line, amber where it climbs above auth */}
+      {delivered.length > 1 && (
+        <>
+          <polyline points={pts(delivered)} fill="none" stroke={col} strokeWidth="2.5" strokeLinecap="round" clipPath={belowClip} />
+          {authY != null && <polyline points={pts(delivered)} fill="none" stroke="var(--amber-700)" strokeWidth="2.5" strokeLinecap="round" clipPath={aboveClip} />}
+        </>
+      )}
+      {delivered.length > 0 && <circle cx={lastX} cy={lastY} r="3" fill={overAuth ? 'var(--amber-700)' : col} />}
       <line x1={P} y1={AXIS_Y} x2={W - P} y2={AXIS_Y} stroke="var(--slate-200)" strokeWidth="1" />
       {labels.map((lab, i) => (
         <text key={`lab-${i}`} x={x(i)} y={AXIS_Y + 9} textAnchor="middle" fontSize="6.5" fontWeight="700" fill="var(--text-faint)" fontFamily="var(--font-sans)">{lab}</text>
@@ -81,23 +126,29 @@ function PersonCard({ p, win, onFlag, onMeetPace }: {
   onMeetPace?: (clientId: string, intent: 'behind' | 'over') => void;
 }) {
   const w = win === 'week' ? p.week : p.month;
+  // Badge + CTA are graded on the MONTH's pace toward auth (so a light or holiday
+  // week doesn't over-alarm); the chart/line color still reflects this window.
+  const badge = p.month.status;
   // Client cards can hand a case-scoped rearrange straight to SAssi; tech cards
   // (BT direct) fall back to opening the assistant. `p.id` is `${clientId}-direct`
   // or `${clientId}-supervision`.
   const clientId = p.role === 'client' ? p.id.replace(/-(direct|supervision)$/, '') : null;
   const fixPace = () => {
-    if (clientId && onMeetPace) onMeetPace(clientId, w.status === 'over' ? 'over' : 'behind');
+    if (clientId && onMeetPace) onMeetPace(clientId, badge === 'over' ? 'over' : 'behind');
     else onFlag();
   };
-  const delta = w.proj - w.target;
-  const projColor = w.status === 'behind' ? 'var(--status-behind)'
+  const lineColor = w.status === 'behind' ? 'var(--status-behind)'
     : w.status === 'over' ? 'var(--status-over)'
       : 'var(--sage-700)';
-  // Supervision cards carry targetPct and headline the supervised %; direct/BT
-  // cards headline delivered hours with a utilization chip. directH is recovered
-  // from the window target (= directH × targetPct / 100).
+  // Supervision cards headline the supervised %; direct/BT cards headline PLANNED
+  // hours with delivered progress + two rate chips. directH is recovered from the
+  // window target (= directH × targetPct / 100).
   const isSup = w.targetPct != null;
   const directH = w.targetPct ? (w.target * 100) / w.targetPct : 0;
+  // vs-plan caption: delivered − scheduled-to-date (below plan = cancellations).
+  const v = w.varianceH ?? 0;
+  const caption = v === 0 ? 'on plan' : `${fmtSignedHours(v)} ${v < 0 ? 'behind' : 'ahead of'} plan`;
+  const showCaption = win === 'week' && w.planned > 0.05;
   return (
     <div style={{ background: 'var(--white)', border: '1px solid var(--sage-200)', borderRadius: 'var(--radius-xl)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -106,7 +157,7 @@ function PersonCard({ p, win, onFlag, onMeetPace }: {
           <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.who}</div>
           <div style={{ fontSize: 10.5, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '.05em', fontWeight: 700 }}>{p.subtitle}</div>
         </div>
-        <StatusPill intent={w.status}>{w.status}</StatusPill>
+        <StatusPill intent={badge}>{badge}</StatusPill>
       </div>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12 }}>
         {isSup ? (
@@ -116,34 +167,35 @@ function PersonCard({ p, win, onFlag, onMeetPace }: {
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>supervised</div>
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>target {w.targetPct}% of direct</div>
-            <div style={{ fontSize: 11, fontWeight: 700, marginTop: 3, color: projColor }}>
-              {w.proj.toFixed(1)}h sup · {directH.toFixed(1)}h direct
+            <div style={{ fontSize: 11, fontWeight: 700, marginTop: 3, color: lineColor }}>
+              {w.planned.toFixed(1)}h sup · {directH.toFixed(1)}h direct
             </div>
           </div>
         ) : (
           <div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
-              <div style={{ fontSize: 21, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1 }}>{w.actual.toFixed(1)}h</div>
-              <span style={{ fontSize: 10.5, fontWeight: 800, color: STATUS_COLOR[w.status], background: STATUS_BG[w.status], borderRadius: 'var(--radius-sm)', padding: '1px 6px' }}>{w.util ?? 0}% util</span>
+              <div style={{ fontSize: 21, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1 }}>{w.planned.toFixed(1)}h</div>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>planned</span>
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>of {w.target.toFixed(1)}h this {win}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, marginTop: 3, color: projColor }}>
-              → {w.proj.toFixed(1)}h projected
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 700, color: 'var(--text-secondary)' }}>{w.delivered.toFixed(1)}h done</span>
+              <span style={chipStyle('var(--sage-700)', 'var(--sage-50)')}>{w.pctOfAuth ?? 0}% of auth</span>
+              <span style={chipStyle(STATUS_COLOR[w.status], STATUS_BG[w.status])}>{w.pctOfPlan ?? 0}% of plan</span>
             </div>
           </div>
         )}
         <div style={{ marginLeft: 'auto' }}><Trend w={w} /></div>
       </div>
-      {win === 'week' && w.impact && (
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: w.status === 'over' ? 'var(--status-over)' : 'var(--amber-700)', background: w.status === 'over' ? 'var(--status-over-bg)' : 'var(--amber-50)', borderRadius: 'var(--radius-md)', padding: '6px 10px' }}>{w.impact}</div>
+      {showCaption && (
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: v < 0 ? 'var(--amber-700)' : 'var(--sage-700)', background: v < 0 ? 'var(--amber-50)' : 'var(--sage-50)', borderRadius: 'var(--radius-md)', padding: '6px 10px' }}>{caption}</div>
       )}
-      {(w.status === 'behind' || w.status === 'over') && (
+      {(badge === 'behind' || badge === 'over') && (
         <button
           type="button"
           onClick={fixPace}
-          style={{ border: 'none', borderRadius: 'var(--radius-md)', padding: '7px 10px', minHeight: 'var(--tap-target)', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: w.status === 'behind' ? 'var(--status-behind-bg)' : 'var(--status-over-bg)', color: w.status === 'behind' ? 'var(--status-behind)' : 'var(--status-over)', fontFamily: 'var(--font-sans)' }}
+          style={{ border: 'none', borderRadius: 'var(--radius-md)', padding: '7px 10px', minHeight: 'var(--tap-target)', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: badge === 'behind' ? 'var(--status-behind-bg)' : 'var(--status-over-bg)', color: badge === 'behind' ? 'var(--status-behind)' : 'var(--status-over)', fontFamily: 'var(--font-sans)' }}
         >
-          {w.status === 'behind' ? 'Fix pace with SAssi →' : 'Review overage with SAssi →'}
+          {badge === 'behind' ? 'Fix pace with SAssi →' : 'Review overage with SAssi →'}
         </button>
       )}
     </div>
@@ -325,7 +377,7 @@ export function HomeView({ data, now, conflictCount, complianceFlagCount, todos,
 
         {/* Trends */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '26px 0 10px' }}>
-          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>This {win} — actual · projected · pace</div>
+          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>This {win} — planned · delivered · pace</div>
           <div style={{ flex: 1 }} />
           <SegmentedControl
             size="sm"

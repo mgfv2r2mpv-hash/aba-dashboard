@@ -66,15 +66,15 @@ describe('computeHomeTrends — direct card', () => {
     expect(card!.role).toBe('client');
   });
 
-  it('builds a pace series with one point per week, strictly increasing', () => {
-    const { pace } = card!.month.series;
-    expect(pace).toHaveLength(NUM_WEEKS);
-    for (let i = 1; i < pace.length; i++) expect(pace[i]).toBeGreaterThan(pace[i - 1]);
+  it('builds a plan envelope with one point per week, non-decreasing (cumulative)', () => {
+    const { plan } = card!.month.series;
+    expect(plan).toHaveLength(NUM_WEEKS);
+    for (let i = 1; i < plan.length; i++) expect(plan[i]).toBeGreaterThanOrEqual(plan[i - 1]);
   });
 
-  it('accumulates the actual series (non-decreasing booked hours)', () => {
-    const { actual } = card!.month.series;
-    for (let i = 1; i < actual.length; i++) expect(actual[i]).toBeGreaterThanOrEqual(actual[i - 1]);
+  it('accumulates the delivered series (non-decreasing delivered hours)', () => {
+    const { delivered } = card!.month.series;
+    for (let i = 1; i < delivered.length; i++) expect(delivered[i]).toBeGreaterThanOrEqual(delivered[i - 1]);
   });
 });
 
@@ -192,5 +192,83 @@ describe('computeHomeTrends — sparkline labels & holiday adjustment', () => {
     const plain = computeHomeTrends(base, NOW).find(t => t.id === 'c1-direct');
     const adj = computeHomeTrends(withHol, NOW).find(t => t.id === 'c1-direct');
     expect(adj!.month.target).toBeLessThan(plain!.month.target);
+  });
+});
+
+describe('computeHomeTrends — planned vs delivered (redesign)', () => {
+  // Coming-week: 16h scheduled AFTER "now" (Thu+Fri Jun 18/19), nothing delivered yet.
+  it('week card: planned = scheduled, delivered = 0, chips = coverage + execution', () => {
+    const data = makeData({
+      clients: [client()], authorizations: [auth({ weekly: { direct: 20 } })],
+      appointments: [direct('2026-06-18', 8), direct('2026-06-19', 8)],
+    });
+    const wk = computeHomeTrends(data, NOW).find(t => t.id === 'c1-direct')!.week;
+    expect(wk.planned).toBe(16);     // scheduled, not the 20h auth
+    expect(wk.delivered).toBe(0);    // nothing occurred before "now"
+    expect(wk.pctOfAuth).toBe(80);   // 16 planned ÷ 20 auth
+    expect(wk.pctOfPlan).toBe(0);    // 0 delivered ÷ 16 planned
+  });
+
+  it('empty week reads 0 planned and 0% of auth (the AA case)', () => {
+    const data = makeData({
+      clients: [client()], authorizations: [auth({ weekly: { direct: 10 } })],
+      appointments: [],
+    });
+    const wk = computeHomeTrends(data, NOW).find(t => t.id === 'c1-direct')!.week;
+    expect(wk.planned).toBe(0);
+    expect(wk.pctOfAuth).toBe(0);
+  });
+
+  it('cancellation: plan INCLUDES canceled hours, delivered excludes → below plan', () => {
+    const data = makeData({
+      clients: [client()], authorizations: [auth({ weekly: { direct: 20 } })],
+      appointments: [
+        direct('2026-06-15', 6),                           // Mon — past & delivered
+        direct('2026-06-16', 6, { status: 'canceled' }),   // Tue — past & CANCELED
+        direct('2026-06-18', 6),                           // Thu — future scheduled
+      ],
+    });
+    const wk = computeHomeTrends(data, NOW).find(t => t.id === 'c1-direct')!.week;
+    expect(wk.planned).toBe(18);              // 6 + 6(canceled) + 6
+    expect(wk.delivered).toBe(6);             // only Mon (Tue canceled, Thu future)
+    expect(wk.varianceH!).toBeLessThan(0);    // 6 delivered vs 12 planned-to-date
+    expect(wk.pctOfPlan).toBeLessThan(100);   // 6 ÷ 18
+  });
+
+  it('catch-up week crosses its own weekly auth, but the month stays under the full-period auth', () => {
+    // Week of 6/8 was short (4h, cancellations elsewhere took the rest). Week of
+    // 6/15 (the "now" week) makes up with 5×3h sessions Mon–Fri (15h) — the amber
+    // threshold for THIS week (10h/wk) is crossed, but the month total (4+15=19h)
+    // stays well under the 5-week auth budget (50h), so the month card shows no
+    // overage: a legitimate catch-up week shouldn't read as blowing the auth bucket.
+    const data = makeData({
+      clients: [client()], authorizations: [auth({ weekly: { direct: 10 } })],
+      appointments: [
+        direct('2026-06-08', 4),                              // week of 6/8 — short week
+        direct('2026-06-15', 3), direct('2026-06-16', 3), direct('2026-06-17', 3),
+        direct('2026-06-18', 3), direct('2026-06-19', 3),     // week of 6/15 — 5×3h catch-up
+      ],
+    });
+    const card = computeHomeTrends(data, NOW).find(t => t.id === 'c1-direct')!;
+    // The catch-up week itself exceeds its own weekly auth share.
+    expect(card.week.planned).toBe(15);
+    expect(card.week.target).toBe(10);
+    expect(card.week.planned).toBeGreaterThan(card.week.target);
+    // The month's cumulative total is nowhere near its full-period auth budget —
+    // this is the "self-correction" the amber threshold relies on (a single heavy
+    // week only shows as overage on the month card if it pushes the RUNNING TOTAL
+    // past the whole period's authorized hours, not a per-week slice).
+    expect(card.month.planned).toBe(19);           // 4 + 15
+    expect(card.month.target).toBe(10 * NUM_WEEKS); // 50h — the full-period budget
+    expect(card.month.planned).toBeLessThan(card.month.target);
+  });
+
+  it('badge is graded on the month pace toward auth (drives the week card badge)', () => {
+    const data = makeData({
+      clients: [client()], authorizations: [auth({ weekly: { direct: 10 } })],
+      appointments: [direct('2026-06-16', 3)], // barely booked → month behind
+    });
+    const card = computeHomeTrends(data, NOW).find(t => t.id === 'c1-direct')!;
+    expect(card.month.status).toBe('behind');
   });
 });

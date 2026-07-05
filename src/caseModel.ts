@@ -365,16 +365,23 @@ export function computeBtState(
 // real appointment feed. Persons with no target are omitted — no invented data.
 
 export type TrendStatus = 'met' | 'pace' | 'behind' | 'over';
-export interface TrendSeries { pace: number[]; actual: number[]; proj: number[]; labels: string[]; }
+// The card reads THIS WEEK vs what was PLANNED: `plan` is the cumulative scheduled
+// envelope (includes later-canceled sessions, so cancellations read as the gap);
+// `delivered` is the solid line through today (non-canceled, occurred); `projTail`
+// is the dotted continuation to period end (toward the non-canceled deliverable).
+export interface TrendSeries { plan: number[]; delivered: number[]; projTail: number[]; labels: string[]; }
 export interface TrendWindow {
-  target: number;          // hours the window aims for
-  actual: number;          // booked (delivered + still-scheduled) to date
-  proj: number;            // whole-window booked+scheduled trajectory
-  util?: number;           // projection utilization % headline (proj÷target, or sup÷direct)
-  targetPct?: number;      // target % the util is measured against (supervision card)
+  target: number;          // authorized hours for the window (chips + holiday adjust)
+  planned: number;         // scheduled hours incl later-canceled — the hero + envelope end
+  delivered: number;       // delivered-to-date (non-canceled, occurred)
+  deliverable: number;     // non-canceled scheduled total — drives status + projTail end
+  util?: number;           // supervision headline % (sup÷direct); for direct = pctOfAuth
+  pctOfAuth?: number;      // planned ÷ authorized (coverage chip)
+  pctOfPlan?: number;      // delivered ÷ planned (execution chip)
+  targetPct?: number;      // target % the sup util is measured against (supervision card)
+  varianceH?: number;      // delivered − planned-to-date (the vs-plan caption)
   status: TrendStatus;
   metric: 'hours';
-  impact?: string;         // off-track note (week window only)
   series: TrendSeries;
 }
 export interface PersonTrend {
@@ -391,9 +398,13 @@ const round1 = (x: number): number => Math.round(x * 10) / 10;
 const sumHours = (appts: Appointment[]): number =>
   appts.reduce((s, a) => s + durationHours(a), 0);
 
-// Attach a projection-utilization % (proj ÷ target) to a freshly built window.
-const withUtil = (w: TrendWindow): TrendWindow =>
-  ({ ...w, util: w.target > 0 ? Math.round((w.proj / w.target) * 100) : 0 });
+// Attach the direct-card chips: coverage (planned ÷ auth) and execution
+// (delivered ÷ planned). `util` keeps the coverage value for back-compat.
+const withUtil = (w: TrendWindow): TrendWindow => {
+  const pctOfAuth = w.target > 0 ? Math.round((w.planned / w.target) * 100) : 0;
+  const pctOfPlan = w.planned > 0 ? Math.round((w.delivered / w.planned) * 100) : 0;
+  return { ...w, pctOfAuth, pctOfPlan, util: pctOfAuth };
+};
 
 // Short axis label for a bucket end: weekday for daily buckets, M/D (week-ending)
 // for weekly buckets. The representative day is the last day the bucket includes.
@@ -405,7 +416,7 @@ function axisLabel(boundEnd: Date, mode: 'day' | 'week'): string {
 }
 
 // Signed hours with the regulated glyphs: −6.5h / +2.0h.
-function fmtSignedHours(h: number): string {
+export function fmtSignedHours(h: number): string {
   return `${h < 0 ? '−' : '+'}${round1(Math.abs(h)).toFixed(1)}h`;
 }
 
@@ -434,60 +445,67 @@ function dayBoundsFrom(start: Date, count: number): Date[] {
   return bounds;
 }
 
-// Build a window from appts already constrained to the window's period.
-// `behindPct` is the fraction of target below which the person is "behind";
-// `overAt` (optional, hours) flags an overage as "over".
+// Build a window from two appt sets already constrained to the window's period:
+// `plannedAppts` (everything booked, INCLUDING later-canceled — the plan envelope)
+// and `deliveredAppts` (non-canceled — the solid delivered line and the deliverable
+// trajectory that drives status). `behindPct` is the fraction of the authorized
+// `target` below which the deliverable trajectory reads "behind"; `overAt` flags an
+// overage as "over".
 function buildTrendWindow(params: {
-  appts: Appointment[];
+  plannedAppts: Appointment[];
+  deliveredAppts: Appointment[];
   bounds: Date[];
   now: Date;
   target: number;
   behindPct: number;
   labelMode: 'day' | 'week';
   overAt?: number;
-  withImpact?: boolean;
 }): TrendWindow {
-  const { appts, bounds, now, target, behindPct, labelMode, overAt, withImpact } = params;
+  const { plannedAppts, deliveredAppts, bounds, now, target, behindPct, labelMode, overAt } = params;
   const n = bounds.length;
-  const hoursBefore = (t: Date): number =>
+  const cumBefore = (appts: Appointment[], t: Date): number =>
     appts
       .filter(a => new Date(a.startTime).getTime() < t.getTime())
       .reduce((s, a) => s + durationHours(a), 0);
 
-  const pace = bounds.map((_, i) => round1((target * (i + 1)) / n));
   let cur = bounds.findIndex(b => b.getTime() > now.getTime());
   if (cur < 0) cur = n - 1;
-  const actualSeries = bounds.slice(0, cur + 1).map(b => round1(hoursBefore(b)));
-  const projFinal = round1(hoursBefore(bounds[n - 1]));
-  const actualToDate = actualSeries[actualSeries.length - 1] ?? 0;
-  const proj = bounds.map((b, i) => {
-    if (i <= cur) return round1(hoursBefore(b));
+
+  // Cumulative scheduled envelope (full window) and delivered line (through today).
+  const planSeries = bounds.map(b => round1(cumBefore(plannedAppts, b)));
+  const deliveredSeries = bounds.slice(0, cur + 1).map(b => round1(cumBefore(deliveredAppts, b)));
+
+  const planned = round1(cumBefore(plannedAppts, bounds[n - 1]));      // envelope end → hero
+  const deliverable = round1(cumBefore(deliveredAppts, bounds[n - 1])); // non-canceled total → status + tail end
+  const deliveredToDate = round1(cumBefore(deliveredAppts, now));
+  const plannedToDate = round1(cumBefore(plannedAppts, now));
+  const varianceH = round1(deliveredToDate - plannedToDate);           // <0 when cancellations/incomplete
+
+  // Dotted projection: delivered so far, then ramp to the deliverable total.
+  const projTail = bounds.map((b, i) => {
+    if (i <= cur) return round1(cumBefore(deliveredAppts, b));
     const remain = n - 1 - cur;
-    const step = remain > 0 ? (projFinal - actualToDate) / remain : 0;
-    return round1(actualToDate + step * (i - cur));
+    const step = remain > 0 ? (deliverable - deliveredToDate) / remain : 0;
+    return round1(deliveredToDate + step * (i - cur));
   });
 
+  // Status = pace toward the authorization, on the deliverable (non-canceled) trajectory.
   const status: TrendStatus =
-    overAt != null && projFinal > overAt + 0.01 ? 'over'
+    overAt != null && deliverable > overAt + 0.01 ? 'over'
       : target <= 0 ? 'met'
-        : projFinal >= target * 0.98 ? 'met'
-          : projFinal >= target * (behindPct / 100) ? 'pace'
+        : deliverable >= target * 0.98 ? 'met'
+          : deliverable >= target * (behindPct / 100) ? 'pace'
             : 'behind';
-
-  let impact: string | undefined;
-  if (withImpact && status !== 'met') {
-    const delta = projFinal - target;
-    impact = `${delta < 0 ? '↘' : '↗'} ${fmtSignedHours(delta)} vs plan this week`;
-  }
 
   return {
     target: round1(target),
-    actual: actualToDate,
-    proj: projFinal,
+    planned,
+    delivered: deliveredToDate,
+    deliverable,
+    varianceH,
     status,
     metric: 'hours',
-    impact,
-    series: { pace, actual: actualSeries, proj, labels: bounds.map(b => axisLabel(b, labelMode)) },
+    series: { plan: planSeries, delivered: deliveredSeries, projTail, labels: bounds.map(b => axisLabel(b, labelMode)) },
   };
 }
 
@@ -515,13 +533,14 @@ export function computeHomeTrends(data: ScheduleData, now: Date = new Date()): P
   for (const client of data.clients) {
     const cs = computeCaseState(data, client, now);
 
-    // This case's non-canceled direct sessions — shared by the direct card and
-    // the supervision card's %-of-direct denominator.
-    const directAll = data.appointments.filter(a =>
-      a.type === 'client-session' && a.status !== 'canceled' && matchesClient(a, client));
+    // Plan envelope = everything booked for this case INCLUDING later-canceled
+    // (excluding wish ghosts) so cancellations read as the delivered gap. Delivered
+    // / deliverable and the supervision %-of-direct denominator use the non-canceled subset.
+    const directPlanned = data.appointments.filter(a =>
+      a.type === 'client-session' && !a.isGhost && matchesClient(a, client));
+    const directAll = directPlanned.filter(a => a.status !== 'canceled');
 
     // Direct hours card (weekly authorized × weeks-in-month), holiday-adjusted.
-    // util % = projection ÷ authorized (100% when the booked week fills the auth).
     if (cs.direct.authPerWk > 0) {
       const utilPct = client.directUtilizationTarget ?? 75;
       trends.push({
@@ -530,14 +549,16 @@ export function computeHomeTrends(data: ScheduleData, now: Date = new Date()): P
         role: 'client',
         subtitle: 'Client · direct hours',
         month: withUtil(buildTrendWindow({
-          appts: directAll.filter(withinMonth), bounds: monthBounds, now,
+          plannedAppts: directPlanned.filter(withinMonth), deliveredAppts: directAll.filter(withinMonth),
+          bounds: monthBounds, now,
           target: adjustHours(cs.direct.authPerWk * numWeeks, monthHolidays, 5 * numWeeks),
           behindPct: utilPct, labelMode: 'week',
         })),
         week: withUtil(buildTrendWindow({
-          appts: directAll.filter(withinWeek), bounds: weekBounds, now,
+          plannedAppts: directPlanned.filter(withinWeek), deliveredAppts: directAll.filter(withinWeek),
+          bounds: weekBounds, now,
           target: adjustHours(cs.direct.authPerWk, weekHolidays, 5),
-          behindPct: utilPct, withImpact: true, labelMode: 'day',
+          behindPct: utilPct, labelMode: 'day',
         })),
       });
     }
@@ -548,28 +569,31 @@ export function computeHomeTrends(data: ScheduleData, now: Date = new Date()): P
     const directMonthH = sumHours(directAll.filter(withinMonth));
     const directWeekH = sumHours(directAll.filter(withinWeek));
     if (directMonthH > 0) {
-      const supAll = data.appointments.filter(a =>
-        countsAsSupervision(a) && a.status !== 'canceled' && matchesClient(a, client));
+      const supPlanned = data.appointments.filter(a =>
+        countsAsSupervision(a) && !a.isGhost && matchesClient(a, client));
+      const supAll = supPlanned.filter(a => a.status !== 'canceled');
       const targetPct = client.supervisionIdealPct
         ?? data.settings.supervisionDirectHoursPercent ?? 15;
       const behindPct = 67; // below ~two-thirds of target reads as behind
       const capPct = data.settings.supervisionMaxHoursPercent; // insurer cap → over-flag
-      // supervised % = this window's projected sup hours ÷ its projected direct hours.
+      // supervised % = this window's planned sup hours ÷ its projected direct hours.
       const withSupUtil = (w: TrendWindow, directH: number): TrendWindow =>
-        ({ ...w, targetPct, util: directH > 0 ? Math.round((w.proj / directH) * 100) : 0 });
+        ({ ...w, targetPct, util: directH > 0 ? Math.round((w.planned / directH) * 100) : 0 });
       trends.push({
         id: `${client.id}-supervision`,
         who: `${client.name} · supervision`,
         role: 'client',
         subtitle: 'Client · supervision',
         month: withSupUtil(buildTrendWindow({
-          appts: supAll.filter(withinMonth), bounds: monthBounds, now,
+          plannedAppts: supPlanned.filter(withinMonth), deliveredAppts: supAll.filter(withinMonth),
+          bounds: monthBounds, now,
           target: (directMonthH * targetPct) / 100, behindPct, labelMode: 'week',
           overAt: capPct ? (directMonthH * capPct) / 100 : undefined,
         }), directMonthH),
         week: withSupUtil(buildTrendWindow({
-          appts: supAll.filter(withinWeek), bounds: weekBounds, now,
-          target: (directWeekH * targetPct) / 100, behindPct, withImpact: true, labelMode: 'day',
+          plannedAppts: supPlanned.filter(withinWeek), deliveredAppts: supAll.filter(withinWeek),
+          bounds: weekBounds, now,
+          target: (directWeekH * targetPct) / 100, behindPct, labelMode: 'day',
           overAt: capPct ? (directWeekH * capPct) / 100 : undefined,
         }), directWeekH),
       });
@@ -579,9 +603,10 @@ export function computeHomeTrends(data: ScheduleData, now: Date = new Date()): P
   for (const tech of data.technicians) {
     const weeklyAssigned = (tech.assignments || []).reduce((s, x) => s + (x.hoursPerWeek || 0), 0);
     if (weeklyAssigned <= 0) continue;
-    const directAll = data.appointments.filter(a =>
-      a.type === 'client-session' && a.status !== 'canceled' &&
+    const techPlanned = data.appointments.filter(a =>
+      a.type === 'client-session' && !a.isGhost &&
       (a.technician === tech.id || a.technician === tech.name));
+    const directAll = techPlanned.filter(a => a.status !== 'canceled');
     const BT_BEHIND_PCT = 80;
     trends.push({
       id: `${tech.id}-direct`,
@@ -589,14 +614,16 @@ export function computeHomeTrends(data: ScheduleData, now: Date = new Date()): P
       role: 'tech',
       subtitle: tech.isRBT ? 'Credentialed BT' : 'Behavior technician',
       month: withUtil(buildTrendWindow({
-        appts: directAll.filter(withinMonth), bounds: monthBounds, now,
+        plannedAppts: techPlanned.filter(withinMonth), deliveredAppts: directAll.filter(withinMonth),
+        bounds: monthBounds, now,
         target: adjustHours(weeklyAssigned * numWeeks, monthHolidays, 5 * numWeeks),
         behindPct: BT_BEHIND_PCT, labelMode: 'week',
       })),
       week: withUtil(buildTrendWindow({
-        appts: directAll.filter(withinWeek), bounds: weekBounds, now,
+        plannedAppts: techPlanned.filter(withinWeek), deliveredAppts: directAll.filter(withinWeek),
+        bounds: weekBounds, now,
         target: adjustHours(weeklyAssigned, weekHolidays, 5),
-        behindPct: BT_BEHIND_PCT, withImpact: true, labelMode: 'day',
+        behindPct: BT_BEHIND_PCT, labelMode: 'day',
       })),
     });
   }

@@ -1,9 +1,26 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { AssistantDock } from '../shell';
-import type { WishSolution } from '../../types';
+import type { WishSolution, ScheduleData, CompanySettings } from '../../types';
+import { wishSolutionToDraft, computeSolutionImpact } from '../../wish';
+import { solveDraft } from '../../draftSolver';
 import { IssueCard } from './IssueCard';
 import { SolutionCard } from './SolutionCard';
 import { useIssueQueue, type DockIssue } from './dockIssues';
+
+/** Context needed to badge solution cards with a feasibility grade + impact. */
+export interface DockGraderCtx {
+  data: ScheduleData;
+  settings: CompanySettings;
+  now: Date;
+}
+
+/** A pre-seeded, case-scoped "Fix pace with SAssi" request. Bump `token` to
+ *  (re)trigger the solve — the dock resolves it and shows the solution cards. */
+export interface MeetPaceSeed {
+  clientId: string;
+  label: string;
+  token: number;
+}
 
 /**
  * SAssiDock — the unified assistant surface. It folds the old Fix It (issue
@@ -22,6 +39,13 @@ export interface SAssiDockProps {
   onGenerateWish: (note: string) => Promise<WishSolution[]>;
   onAcceptWish: (sol: WishSolution) => void;
   onCustomizeWish: (sol: WishSolution) => void;
+  /** Case-scoped meet-pace request seeded from a Home card / issue CTA. */
+  seedRequest?: MeetPaceSeed | null;
+  /** Resolves a seeded meet-pace request into solution cards (deterministic +
+   *  optional Claude variants). Required for `seedRequest` to do anything. */
+  onSeedResolve?: (clientId: string) => Promise<WishSolution[]>;
+  /** When present, solution cards show a green/yellow/red grade + impact. */
+  graderCtx?: DockGraderCtx;
   /** `column` = wide always-on rail; `sheet` = narrow slide-up. */
   variant?: 'column' | 'sheet';
   /**
@@ -52,6 +76,9 @@ export function SAssiDock({
   onGenerateWish,
   onAcceptWish,
   onCustomizeWish,
+  seedRequest,
+  onSeedResolve,
+  graderCtx,
   variant = 'column',
   contextTop,
   selected,
@@ -69,6 +96,21 @@ export function SAssiDock({
     }
   };
 
+  // A seeded "Fix pace with SAssi" request (token bumped on each tap) resolves
+  // through the same WishThread surface as a freeform ask.
+  const seedToken = seedRequest?.token;
+  useEffect(() => {
+    if (!seedRequest || !onSeedResolve) return;
+    let cancelled = false;
+    setWish({ status: 'loading', note: seedRequest.label });
+    onSeedResolve(seedRequest.clientId)
+      .then(solutions => { if (!cancelled) setWish({ status: 'done', note: seedRequest.label, solutions }); })
+      .catch((e: any) => { if (!cancelled) setWish({ status: 'error', note: seedRequest.label, message: e?.message || String(e) }); });
+    return () => { cancelled = true; };
+    // Re-run only when a new request token arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedToken]);
+
   const hasWish = wish.status !== 'idle';
   const body =
     contextTop || hasWish || queue.current ? (
@@ -77,6 +119,7 @@ export function SAssiDock({
         {wish.status !== 'idle' && (
           <WishThread
             wish={wish}
+            graderCtx={graderCtx}
             onAccept={onAcceptWish}
             onCustomize={onCustomizeWish}
             onClear={() => setWish({ status: 'idle' })}
@@ -111,15 +154,30 @@ export function SAssiDock({
 
 function WishThread({
   wish,
+  graderCtx,
   onAccept,
   onCustomize,
   onClear,
 }: {
   wish: Exclude<WishState, { status: 'idle' }>;
+  graderCtx?: DockGraderCtx;
   onAccept: (sol: WishSolution) => void;
   onCustomize: (sol: WishSolution) => void;
   onClear: () => void;
 }) {
+  // Grade + impact are best-effort: a solver hiccup on one card must not blank
+  // the whole thread, so each computation is guarded.
+  const gradeImpact = (sol: WishSolution) => {
+    if (!graderCtx) return {};
+    try {
+      const { ops } = wishSolutionToDraft(sol, graderCtx.data);
+      const grade = solveDraft(graderCtx.data, ops, graderCtx.now, graderCtx.settings).grade;
+      const impact = computeSolutionImpact(graderCtx.data, sol);
+      return { grade, impact };
+    } catch {
+      return {};
+    }
+  };
   return (
     <section aria-label="Ask SAssi results" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <header style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -158,9 +216,12 @@ function WishThread({
         </div>
       )}
       {wish.status === 'done' &&
-        wish.solutions.map((s, i) => (
-          <SolutionCard key={s.id} solution={s} index={i} onAccept={onAccept} onCustomize={onCustomize} />
-        ))}
+        wish.solutions.map((s, i) => {
+          const { grade, impact } = gradeImpact(s);
+          return (
+            <SolutionCard key={s.id} solution={s} index={i} grade={grade} impact={impact} onAccept={onAccept} onCustomize={onCustomize} />
+          );
+        })}
     </section>
   );
 }

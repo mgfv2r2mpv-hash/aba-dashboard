@@ -422,8 +422,10 @@ export interface Appointment {
 //     room), so they count only when they NAME the observed BT (technician field)
 //     and overlap that BT's direct.
 // Either way these stay BCBA billable (the technician on a parent-training /
-// case-planning session is the observee, not a provider — see bucketOf).
-export const SUPERVISION_COUNTING_TYPES: readonly Appointment['type'][] = ['supervision', 'parent-training', 'case-planning'];
+// case-planning / reassessment session is the observee, not a provider — see
+// bucketOf). Reassessment counts when the BT is present and assisting (e.g. data
+// collection while the BCBA runs an assessment tool) — BCBA-confirmed.
+export const SUPERVISION_COUNTING_TYPES: readonly Appointment['type'][] = ['supervision', 'parent-training', 'case-planning', 'reassessment'];
 
 // True for a session eligible for supervision credit. Supervision always
 // qualifies (credit is decided by overlap); parent-training / case-planning / reassessment

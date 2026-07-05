@@ -5,7 +5,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
-import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, Cancellation, cancellationReasonLabel, DEFAULT_FIXIT_OPTIONS } from './types';
+import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, WishOp, Cancellation, cancellationReasonLabel, DEFAULT_FIXIT_OPTIONS } from './types';
 import { solveMeetPace } from './localSolver';
 import Calendar, { HoursSummary } from './components/Calendar';
 import { conflictKey } from './components/ConflictPanel';
@@ -22,7 +22,7 @@ import ImportPreview from './components/ImportPreview';
 import { Button } from './components/ui';
 import { Rail, CommandBar, ZenStrip, DockChip, DockOverlay, resolveDockMode } from './components/shell';
 import type { RailItem, RailKey } from './components/shell';
-import { SAssiDock, buildDockIssues } from './components/dock';
+import { SAssiDock, buildDockIssues, useSassiSession } from './components/dock';
 import type { DockIssue, MeetPaceSeed } from './components/dock';
 import { useHomeTodos } from './hooks/useHomeTodos';
 import type { HomeTodo } from './hooks/useHomeTodos';
@@ -62,7 +62,7 @@ import {
 import { solveDraft, DraftStatus, PrioritizationChoice } from './draftSolver';
 import DraftTray from './components/DraftTray';
 import FindTimeModal from './components/FindTimeModal';
-import { wishSolutionToDraft } from './wish';
+import { wishSolutionToDraft, dropPastOps } from './wish';
 import { computeSessionFlags, SessionFlags, streakEmoji } from './sessionFlags';
 
 // Route axios /api/* calls through an in-memory store on iOS/Android,
@@ -303,6 +303,35 @@ export default function App() {
   );
   const calendarAppointments = draftRender ? draftRender.appointments : (scheduleData?.appointments || []);
   const calendarMarks = draftRender ? draftRender.marks : undefined;
+
+  // ── sAssI conversation ─────────────────────────────────────────────────────
+  // A sAssI proposal REPLACES the live draft preview (the chat owns the draft
+  // while a conversation is open); accepting/discarding the draft ends it.
+  const stageSassiOps = React.useCallback((ops: WishOp[]) => {
+    setDraftOps(prev => {
+      const base = scheduleData;
+      if (!base) return prev;
+      // Hard real-world guard: a suggestion can never place/move a session into
+      // the past — the BCBA can't perform an appointment that already happened.
+      const safe = dropPastOps(ops);
+      return wishSolutionToDraft({ id: 'sassi', summary: '', reasoning: '', ops: safe }, base).ops;
+    });
+  }, [scheduleData]);
+  const sassi = useSassiSession({
+    getSchedule: () => scheduleData,
+    apiKey: aiSettings.apiKey,
+    model: aiSettings.model,
+    onProposal: stageSassiOps,
+  });
+  // Per-session cost lever: flip the chat between Sonnet (reasoning) and Haiku
+  // (cheap iterating) without dropping the conversation.
+  const toggleSassiModel = () => {
+    setAiSettings(prev => ({
+      ...prev,
+      model: prev.model === 'claude-haiku-4-5-20251001' ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001',
+    }));
+  };
+  const sassiChat = { session: sassi, model: aiSettings.model, onToggleModel: toggleSassiModel };
   const detailFlags = React.useMemo<Map<string, SessionFlags>>(
     () => scheduleData
       ? computeSessionFlags(scheduleData.appointments, scheduleData.companyHolidays ?? [])
@@ -754,17 +783,17 @@ export default function App() {
     if (!scheduleData || !draftStatus) return;
     const next = draftStatus.resolved || applyOps(scheduleData, draftOps);
     await commitScheduleData(next);
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null);
+    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); sassi.reset();
   };
 
   const saveAnyway = async () => {
     if (!scheduleData) return;
     if (!confirm('Save this schedule as-is, with the flagged conflicts?')) return;
     await commitScheduleData(applyOps(scheduleData, draftOps));
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null);
+    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); sassi.reset();
   };
 
-  const cancelDraft = () => { setDraftOps([]); setSolutions([]); };
+  const cancelDraft = () => { setDraftOps([]); setSolutions([]); sassi.reset(); };
   const resetOp = (opId: string) => setDraftOps(ops => ops.filter(o => o.id !== opId));
 
   // Picking a yellow trade-off stages the corresponding op so the next solve
@@ -834,9 +863,15 @@ export default function App() {
   // conflict remains — stage it into the draft tray instead so the BCBA sees it
   // and must resolve or explicitly "Save Anyway", rather than silently landing
   // an overlapping appointment on the calendar.
+  // Every AI solution (Wish It / Fix It) converts to draft ops through here; strip
+  // any past-dated add/move first so a suggestion can never land a session before
+  // now — the same real-world guard the sAssI chat uses (dropPastOps).
+  const draftFromSolution = (sol: WishSolution, base: ScheduleData) =>
+    wishSolutionToDraft({ ...sol, ops: dropPastOps(sol.ops) }, base);
+
   const commitWishLikeSolution = async (sol: WishSolution): Promise<boolean> => {
     if (!scheduleData) return false;
-    const { ops, blackouts } = wishSolutionToDraft(sol, scheduleData);
+    const { ops, blackouts } = draftFromSolution(sol, scheduleData);
     const status = solveDraft(scheduleData, ops, new Date(), scheduleData.settings);
     if (status.grade === 'red') {
       if (blackouts.length) await commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] });
@@ -860,7 +895,7 @@ export default function App() {
 
   const customizeWish = (sol: WishSolution) => {
     if (!scheduleData) return;
-    const { ops, blackouts } = wishSolutionToDraft(sol, scheduleData);
+    const { ops, blackouts } = draftFromSolution(sol, scheduleData);
     if (blackouts.length) commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] });
     stageOps(ops);
     setView('schedule');
@@ -878,7 +913,7 @@ export default function App() {
 
   const customizeFix = (sol: WishSolution) => {
     if (!scheduleData) return;
-    const { ops, blackouts } = wishSolutionToDraft(sol, scheduleData);
+    const { ops, blackouts } = draftFromSolution(sol, scheduleData);
     if (blackouts.length) commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] });
     stageOps(ops);
     setView('schedule');
@@ -1540,14 +1575,6 @@ export default function App() {
     if (issue.conflictKey) muteConflict(issue.conflictKey);
   };
 
-  // "Ask SAssi…" freeform → the existing Wish engine, surfaced as dock cards.
-  const generateDockWish = async (note: string): Promise<WishSolution[]> => {
-    if (!scheduleData || !aiSettings.apiKey) return [];
-    const { ClaudeScheduler } = await import('./claudeScheduler');
-    const scheduler = new ClaudeScheduler(aiSettings.apiKey, scheduleData, aiSettings.model);
-    return scheduler.generateWishSolutions({ kind: 'freeform', note });
-  };
-
   // "Fix pace with SAssi" (Phase 2): resolve a case-scoped meet-pace request into
   // solution cards. The deterministic solveMeetPace always yields an instant,
   // offline proposal; when a Claude key is present we append up to 2 case-scoped
@@ -1923,7 +1950,8 @@ export default function App() {
           seedRequest={meetPaceSeed}
           onSeedResolve={resolveMeetPace}
           graderCtx={meetPaceGraderCtx}
-          onGenerateWish={generateDockWish}
+          onAsk={sassi.send}
+          chat={sassiChat}
           onAcceptWish={acceptWish}
           onCustomizeWish={customizeWish}
         />
@@ -2001,7 +2029,8 @@ export default function App() {
               seedRequest={meetPaceSeed}
               onSeedResolve={resolveMeetPace}
               graderCtx={meetPaceGraderCtx}
-              onGenerateWish={generateDockWish}
+              onAsk={sassi.send}
+              chat={sassiChat}
               onAcceptWish={acceptWish}
               onCustomizeWish={customizeWish}
             />
@@ -2025,7 +2054,8 @@ export default function App() {
             seedRequest={meetPaceSeed}
             onSeedResolve={resolveMeetPace}
             graderCtx={meetPaceGraderCtx}
-            onGenerateWish={generateDockWish}
+            onAsk={sassi.send}
+            chat={sassiChat}
             onAcceptWish={acceptWish}
             onCustomizeWish={customizeWish}
           />

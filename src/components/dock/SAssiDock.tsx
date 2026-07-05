@@ -5,7 +5,17 @@ import { wishSolutionToDraft, computeSolutionImpact } from '../../wish';
 import { solveDraft } from '../../draftSolver';
 import { IssueCard } from './IssueCard';
 import { SolutionCard } from './SolutionCard';
+import { SassiChat } from './SassiChat';
+import type { SassiSession } from './sassiSession';
+import type { ClaudeModel } from '../../claudeScheduler';
 import { useIssueQueue, type DockIssue } from './dockIssues';
+
+/** Multi-turn chat wiring folded into the dock (the "sAssI" conversational mode). */
+export interface SassiChatBits {
+  session: SassiSession;
+  model: ClaudeModel;
+  onToggleModel: () => void;
+}
 
 /** Context needed to badge solution cards with a feasibility grade + impact. */
 export interface DockGraderCtx {
@@ -36,7 +46,10 @@ export interface SAssiDockProps {
   onReviewConflict: (issue: DockIssue) => void;
   onMuteConflict: (issue: DockIssue) => void;
   onFixCompliance: () => void;
-  onGenerateWish: (note: string) => Promise<WishSolution[]>;
+  /** Route the dock's freeform input into the sAssI conversation. */
+  onAsk?: (text: string) => void;
+  /** Multi-turn chat state; when active, the chat surface replaces the freeform thread. */
+  chat?: SassiChatBits;
   onAcceptWish: (sol: WishSolution) => void;
   onCustomizeWish: (sol: WishSolution) => void;
   /** Case-scoped meet-pace request seeded from a Home card / issue CTA. */
@@ -73,7 +86,8 @@ export function SAssiDock({
   onReviewConflict,
   onMuteConflict,
   onFixCompliance,
-  onGenerateWish,
+  onAsk,
+  chat,
   onAcceptWish,
   onCustomizeWish,
   seedRequest,
@@ -84,20 +98,12 @@ export function SAssiDock({
   selected,
 }: SAssiDockProps) {
   const queue = useIssueQueue(issues);
+  // `wish` now backs only the seeded "Fix pace" quick-solve; the freeform input
+  // opens the multi-turn sAssI conversation instead (see `chat`).
   const [wish, setWish] = useState<WishState>({ status: 'idle' });
 
-  const handleWish = async (note: string) => {
-    setWish({ status: 'loading', note });
-    try {
-      const solutions = await onGenerateWish(note);
-      setWish({ status: 'done', note, solutions });
-    } catch (e: any) {
-      setWish({ status: 'error', note, message: e?.message || String(e) });
-    }
-  };
-
   // A seeded "Fix pace with SAssi" request (token bumped on each tap) resolves
-  // through the same WishThread surface as a freeform ask.
+  // through the single-shot WishThread surface.
   const seedToken = seedRequest?.token;
   useEffect(() => {
     if (!seedRequest || !onSeedResolve) return;
@@ -112,10 +118,14 @@ export function SAssiDock({
   }, [seedToken]);
 
   const hasWish = wish.status !== 'idle';
+  const chatActive = !!chat && chat.session.active;
   const body =
-    contextTop || hasWish || queue.current ? (
+    contextTop || chatActive || hasWish || queue.current ? (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {contextTop}
+        {chatActive && (
+          <SassiChat session={chat!.session} model={chat!.model} onToggleModel={chat!.onToggleModel} />
+        )}
         {wish.status !== 'idle' && (
           <WishThread
             wish={wish}
@@ -143,9 +153,9 @@ export function SAssiDock({
       issueCount={issueCount}
       variant={variant}
       selected={selected}
-      onWish={handleWish}
+      onWish={(text) => onAsk?.(text)}
       wishDisabled={!aiEnabled}
-      wishPlaceholder={aiEnabled ? undefined : 'Add a Claude API key in Settings to ask SAssi'}
+      wishPlaceholder={aiEnabled ? 'Ask sAssI… e.g. “fill my week to 25 hours”' : 'Add a Claude API key in Settings to ask sAssI'}
     >
       {body}
     </AssistantDock>

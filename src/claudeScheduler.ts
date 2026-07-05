@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ScheduleData, ScheduleSolution, Appointment, WishRequest, WishSolution, FixItOptions } from './types';
+import { ScheduleData, ScheduleSolution, Appointment, WishRequest, WishSolution, WishOp, FixItOptions } from './types';
 import { v4 as uuidv4 } from 'uuid';
 import {
   buildAnonymizationMap,
@@ -10,16 +10,34 @@ import {
   AnonymizationMap,
 } from './anonymizer';
 import { summarizeWish } from './wish';
-import { parseWishSolutions } from './wish';
+import { parseWishSolutions, parseChatTurn } from './wish';
 import { allowedStrategies } from './fixit';
 import { computeClientCompliance, computeTechCompliance, monthPeriod } from './compliance';
 import { resolveUtilization } from './utilization';
-import { buildFillContext, buildComplianceFillContext, buildSupervisableWindows, buildFeasibilityDiagnostics } from './fillSchedule';
+import { buildFillContext, buildComplianceFillContext, buildBcbaWeekFillContext, buildSupervisableWindows, buildFeasibilityDiagnostics } from './fillSchedule';
 import { startOfWeek } from 'date-fns';
 
 export type ClaudeModel = 'claude-opus-4-8' | 'claude-sonnet-4-6' | 'claude-haiku-4-5-20251001';
 
 export const DEFAULT_MODEL: ClaudeModel = 'claude-sonnet-4-6';
+
+// ── sAssI conversation ───────────────────────────────────────────────────────
+// One message of the multi-turn scheduling chat, kept in TOKEN space (client/tech
+// names already scrubbed to CLIENT_n/TECH_n) so PII never rides in the history we
+// replay to the API. The UI keeps its own de-anonymized copy for display.
+export interface SassiMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+// The result of one chat turn: `raw` is the model's token-space reply (stored
+// back into history), `reply` is de-anonymized for display, `ops` is the complete
+// current proposal (empty on a pure explanation turn).
+export interface SassiChatResult {
+  raw: string;
+  reply: string;
+  ops: WishOp[];
+}
 
 export class ClaudeScheduler {
   private client: Anthropic;
@@ -107,6 +125,130 @@ export class ClaudeScheduler {
     const content = response.content[0];
     if (!content || content.type !== 'text') return [];
     return parseWishSolutions(content.text, token => this.anonMap.reverse.get(token));
+  }
+
+  // ── sAssI: multi-turn conversational scheduling ────────────────────────────
+  // One turn of the back-and-forth "fill my week" assistant. The big, stable
+  // context (instructions + anonymized schedule + compliance/availability) lives
+  // in a `system` block tagged for ephemeral prompt caching; only the growing
+  // message tail is uncached, so follow-up turns in a session pay ~10% cache-read
+  // on the prefix instead of re-billing it. History is replayed in token space;
+  // the model's reply is de-anonymized before it reaches the UI.
+  async chat(history: SassiMessage[]): Promise<SassiChatResult> {
+    const system = this.buildSassiSystem();
+    if (this.containsRawNames(system)) {
+      throw new Error('Anonymization check failed: system prompt would leak PII. Aborting Claude call.');
+    }
+    const lastIdx = history.length - 1;
+    const messages = history.map((m, i) =>
+      i === lastIdx
+        ? { role: m.role, content: [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }] }
+        : { role: m.role, content: m.content },
+    );
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: 3000,
+      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] as any,
+      messages: messages as any,
+    });
+    const content = response.content[0];
+    const raw = content && content.type === 'text' ? content.text : '';
+    const turn = parseChatTurn(raw, token => this.anonMap.reverse.get(token));
+    return { raw, reply: deAnonymizeText(turn.reply, this.anonMap), ops: turn.ops };
+  }
+
+  // Scrub a user's typed message to token space before it enters the history —
+  // the anonymizer guarantees no client/tech names ride to the API.
+  scrub(text: string): string {
+    return scrubText(text, this.data, this.anonMap);
+  }
+
+  // Let a live session switch models (Sonnet ⇄ Haiku) without rebuilding the
+  // anonymization map, so the token history stays valid across the switch.
+  setModel(model: ClaudeModel): void {
+    this.model = model;
+  }
+
+  // The cached system prefix for the sAssI chat: instructions + guardrails +
+  // anonymized schedule + the "fill my week" compliance/availability context.
+  buildSassiSystem(): string {
+    const now = new Date();
+    const period = monthPeriod(now);
+    const ctx = buildBcbaWeekFillContext(this.data, period, now);
+    const anon = anonymizeSchedule(this.data, this.anonMap);
+    const s = this.data.settings;
+
+    const tok = (m: Map<string, string>, id: string, name: string) => m.get(id) || m.get(name) || name;
+    const aptTok = (id: string) => this.anonMap.appointments.get(id) || id;
+
+    const inScope = anon.appointments
+      .filter((a: any) => {
+        const t = new Date(a.startTime).getTime();
+        return t >= now.getTime() && t <= period.end.getTime();
+      })
+      .map((a: any) => ({
+        id: a.id, tech: a.technician || undefined, client: a.client || undefined,
+        start: a.startTime, end: a.endTime, type: a.type,
+        fixed: a.isFixed || undefined,
+        recur: a.isRecurring ? (a.recurringPattern || true) : undefined,
+      }));
+
+    const clinicianAvail = s.clinicianAvailability
+      ? Object.entries(s.clinicianAvailability).map(([d, ws]) => `${d}: ${(ws as any[]).map(w => `${w.start}-${w.end}`).join(', ')}`).join('; ')
+      : 'not specified';
+
+    const caseLines = ctx.cases.map(c => {
+      const clientTok = tok(this.anonMap.clients, c.clientId, c.clientName);
+      return `  ${clientTok}: ${c.supPct}% supervision (${c.supHrs}h / ${c.directHrs}h direct), +${c.gapToIdealHrs}h to ${ctx.idealMinPct}% ideal (soft cap ${c.idealMaxHrs}h)`;
+    });
+    const windowLines = ctx.directWindows.map(w => {
+      const clientTok = tok(this.anonMap.clients, w.clientId, w.clientName);
+      const techPart  = w.techName ? ` [${tok(this.anonMap.technicians, w.techId || '', w.techName)}]` : '';
+      return `  ${clientTok} ${aptTok(w.appointmentId)} ${w.start.slice(0, 16).replace('T', ' ')}–${w.end.slice(11, 16)}${techPart}`;
+    });
+    const blockerLines = ctx.blockers.map(b => `  ${tok(this.anonMap.clients, b.clientId, b.clientName)}: ${b.blocker}`);
+
+    return `You are sAssI — a scheduling assistant helping a BCBA fill out and refine their OWN calendar through conversation. All people are opaque tokens (CLIENT_n, TECH_n, APT_n); use exact tokens, never invent names.
+
+NOW: ${now.toISOString()}
+PERIOD: ${ctx.periodLabel} (through ${period.end.toISOString().slice(0, 10)})
+BCBA availability: ${clinicianAvail}
+
+YOUR JOB — fill the BCBA's OWN week toward their weekly-hours target, COMPLIANCE-FIRST.
+- The BCBA already has ~${ctx.bcbaScheduledHrs}h of their own billable work (supervision / parent-training / case-planning / reassessment) scheduled this period. The user tells you their target in chat (e.g. "fill my week to 25 hours") — work toward it.
+- Every session you add must move a case toward its ideal supervision range (${ctx.idealMinPct}%–${ctx.idealMaxPct}% of direct hours) or otherwise advance compliance. Prioritize the cases most behind.
+- This is a back-and-forth. Propose a plan, then adjust it as the BCBA reacts ("I have parent training Tuesday", "move that earlier", "why did you pick that slot?"). Explain your moves plainly so they can fine-tune with you.
+
+HARD RULES — verify every op:
+1. Only ADD sessions. Do NOT move or remove existing sessions unless the BCBA explicitly asks.
+2. Every op's start must be ≥ NOW. Never propose, add, or move a session into the past — the BCBA cannot perform an appointment that already happened.
+3. The BCBA runs EVERY supervision/parent-training/case-planning/reassessment item and can be in only one at a time. No two such items (your new ops AND existing schedule rows) may overlap in time.
+4. Supervision earns credit only when placed INSIDE an existing direct (client-session) window for the same client — name that BT in the tech field.
+5. Parent Training must fall WITHIN an existing direct session's time span for the same client — never a standalone window.
+6. Stay within BCBA availability. Respect fixed sessions, blackout days, and time off.
+7. "add" ops must NOT include an "id" — the app assigns them.
+8. A 15–20% overage above the ideal cap is fine as a cancellation buffer; don't refuse to add sessions just to stay under it — flag overages in your reply.
+
+UNDERSERVED CASES (token: sup%, gap to ideal, soft cap):
+${caseLines.length ? caseLines.join('\n') : '  (none — every case is already at or above its ideal supervision range)'}
+
+FUTURE DIRECT SESSIONS — valid windows to place supervision/PT (token apt date start–end [BT]):
+${windowLines.length ? windowLines.join('\n') : '  (none remaining this period)'}
+${blockerLines.length ? `\nBLOCKERS (why some cases can't be supervised — use these to explain, never dead-end):\n${blockerLines.join('\n')}` : ''}
+
+SCHEDULE IN PERIOD (compact JSON): ${JSON.stringify(inScope)}
+CLIENTS: ${JSON.stringify(anon.clients)}
+TECHNICIANS: ${JSON.stringify(anon.technicians)}
+${anon.blackouts.length ? `BLACKOUT DAYS (each blocks only the named entity): ${JSON.stringify(anon.blackouts)}` : ''}
+${anon.timeOff.length ? `BCBA TIME OFF: ${JSON.stringify(anon.timeOff)}` : ''}
+
+HOW TO REPLY — every message, output STRICT JSON only (no prose outside it, no markdown fences):
+{"reply":"a short, plain-language message to the BCBA — say what you changed and WHY in clinical-but-friendly terms, and ask a follow-up when useful","ops":[ ...the COMPLETE current set of proposed sessions... ]}
+- ops item shape: {"op":"add","title":"...","type":"supervision|parent-training|case-planning","client":"CLIENT_n","tech":"TECH_n or null","start":"YYYY-MM-DDTHH:mm:ss","end":"YYYY-MM-DDTHH:mm:ss"}
+- Return the COMPLETE proposal every time you CHANGE it (not just the delta) — the calendar preview is replaced with your ops each turn.
+- Return "ops":[] ONLY when you are just answering/explaining and the proposal is unchanged (e.g. the BCBA asked "why?").
+- If nothing can be added compliantly, DON'T say "no options": explain the specific blocker per case (from BLOCKERS) and suggest what the BCBA could change (add availability, free a slot, relax the cap).
+ISO times are local (no timezone suffix). Verify: every op start ≥ NOW; no two BCBA items overlap; tokens exist in CLIENTS/TECHNICIANS; skip malformed tokens.`;
   }
 
   buildFixItPrompt(options: FixItOptions, conflicts: string[]): string {

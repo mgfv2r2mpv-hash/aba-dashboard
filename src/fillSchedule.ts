@@ -431,3 +431,48 @@ export function buildComplianceFillContext(
 
   return { periodLabel: period.label, floorPct, idealMinPct, idealMaxPct, cases, directWindows };
 }
+
+// ── "Fill MY week" context (sAssI conversational assistant) ───────────────────
+// The BCBA-centric objective: fill the clinician's OWN calendar toward a weekly-
+// hours target, compliance-first. It layers three facts on top of the compliance-
+// fill context so the assistant can both propose sessions AND explain blockers
+// plainly (instead of dead-ending on "no options"):
+//   - bcbaScheduledHrs: BCBA billable hours already on the calendar this period
+//     (the "15h so far" baseline; the user states the target in chat).
+//   - directWindows: future direct sessions supervision/PT can overlap for credit.
+//   - blockers: per-case reasons the BCBA can't supervise (no windows / outside
+//     availability / fully booked), so an empty-ops turn still has something to say.
+
+// BCBA billable hours (supervision / PT / case-planning / reassessment) already
+// scheduled within the period — the baseline the fill works up from.
+export function computeBcbaScheduledHours(data: ScheduleData, period: CompliancePeriod): number {
+  return data.appointments
+    .filter(a =>
+      isActive(a) && BCBA_TYPES.has(a.type) &&
+      new Date(a.startTime) >= period.start && new Date(a.startTime) < period.end)
+    .reduce((sum, a) => sum + dirHours(a), 0);
+}
+
+export interface BcbaWeekBlocker {
+  clientId: string;
+  clientName: string;
+  blocker: string;
+}
+
+export interface BcbaWeekFillContext extends ComplianceFillContext {
+  bcbaScheduledHrs: number;
+  blockers: BcbaWeekBlocker[];
+}
+
+export function buildBcbaWeekFillContext(
+  data: ScheduleData,
+  period: CompliancePeriod,
+  now: Date,
+): BcbaWeekFillContext {
+  const base = buildComplianceFillContext(data, period, now);
+  const blockers = buildFeasibilityDiagnostics(data, now, period.end)
+    .filter(d => d.blocker !== null)
+    .map(d => ({ clientId: d.clientId, clientName: d.clientName, blocker: d.blocker! }));
+  const bcbaScheduledHrs = +computeBcbaScheduledHours(data, period).toFixed(1);
+  return { ...base, bcbaScheduledHrs, blockers };
+}

@@ -3,8 +3,8 @@
  * and converting a chosen solution into draft ops + blackouts.
  * Run: npx tsx scripts/verify-wish.ts
  */
-import { ScheduleData, WishSolution } from '../src/types';
-import { parseWishSolutions, wishSolutionToDraft, applyWishSolution, summarizeWish } from '../src/wish';
+import { ScheduleData, WishSolution, WishOp } from '../src/types';
+import { parseWishSolutions, parseOps, parseChatTurn, dropPastOps, wishSolutionToDraft, applyWishSolution, summarizeWish } from '../src/wish';
 
 let passed = 0, failed = 0;
 function check(name: string, cond: boolean, extra?: string) {
@@ -93,6 +93,64 @@ console.log('wishSolutionToDraft');
     && !applied.appointments.some(a => a.id === 'a2')
     && applied.appointments.length === 2 // a1 (moved) + the new add; a2 removed
     && (applied.blackouts || []).length === 1);
+}
+
+console.log('parseOps (shared op parser)');
+{
+  const rev = (v: any) => { if (v === undefined || v === null || v === '') return undefined; const s = String(v); return reverseMap[s] ?? s; };
+  const raw = [
+    { op: 'move', apt: 'APT_1', start: '2026-06-19T17:00:00', end: '2026-06-19T18:00:00' },
+    { op: 'add', title: 'Sup', type: 'supervision', client: 'CLIENT_1', tech: 'TECH_1', start: '2026-06-19T13:00:00', end: '2026-06-19T14:00:00' },
+    { op: 'nonsense' },
+    { op: 'move', apt: 'APT_1' /* missing times */ },
+  ];
+  const ops = parseOps(raw, rev);
+  check('keeps valid move + add, drops junk/incomplete', ops.length === 2);
+  check('reverses client + tech tokens on add', ops[1].op === 'add' && (ops[1] as any).client === 'Client One' && (ops[1] as any).technician === 'Tech One');
+  check('non-array input → []', parseOps(undefined as any, rev).length === 0);
+}
+
+console.log('parseChatTurn');
+{
+  const proposal = JSON.stringify({
+    reply: 'Added supervision inside Tech One’s Friday session.',
+    ops: [{ op: 'add', type: 'supervision', client: 'CLIENT_1', tech: 'TECH_1', start: '2026-06-19T13:00:00', end: '2026-06-19T14:00:00' }],
+  });
+  const t1 = parseChatTurn(proposal, reverse);
+  check('proposal: reply captured', t1.reply.startsWith('Added supervision'));
+  check('proposal: ops parsed + de-anonymized', t1.ops.length === 1 && (t1.ops[0] as any).client === 'Client One');
+
+  // An explanation turn returns empty ops — this is VALID, not a failure.
+  const explain = JSON.stringify({ reply: 'I placed it there — it is the only slot inside a running direct session.', ops: [] });
+  const t2 = parseChatTurn(explain, reverse);
+  check('explanation: reply captured', t2.reply.includes('running direct'));
+  check('explanation: empty ops is valid', Array.isArray(t2.ops) && t2.ops.length === 0);
+
+  // Prose with no JSON envelope → treat the whole thing as the reply.
+  const t3 = parseChatTurn('All your cases are already at their ideal supervision range.', reverse);
+  check('prose without JSON → reply is the text, ops empty', t3.reply.startsWith('All your cases') && t3.ops.length === 0);
+
+  // Fenced JSON is tolerated (mirrors parseWishSolutions).
+  check('fenced chat JSON parsed', parseChatTurn('```json\n' + proposal + '\n```', reverse).ops.length === 1);
+}
+
+console.log('dropPastOps (real-world safety net)');
+{
+  const now = new Date('2026-07-05T12:00:00');
+  const ops: WishOp[] = [
+    { op: 'add', type: 'supervision', start: '2026-07-01T10:00:00', end: '2026-07-01T11:00:00' }, // past → drop
+    { op: 'add', type: 'supervision', start: '2026-07-10T10:00:00', end: '2026-07-10T11:00:00' }, // future → keep
+    { op: 'move', appointmentId: 'a1', start: '2026-07-02T09:00:00', end: '2026-07-02T10:00:00' }, // past → drop
+    { op: 'move', appointmentId: 'a2', start: '2026-07-09T09:00:00', end: '2026-07-09T10:00:00' }, // future → keep
+    { op: 'remove', appointmentId: 'a3' },                                                          // time-agnostic → keep
+    { op: 'add', type: 'supervision', start: 'not-a-date', end: 'x' },                              // unparseable → drop
+  ];
+  const kept = dropPastOps(ops, now);
+  check('past add dropped, future add kept', kept.filter(o => o.op === 'add').length === 1 && (kept.find(o => o.op === 'add') as any).start === '2026-07-10T10:00:00');
+  check('past move dropped, future move kept', kept.filter(o => o.op === 'move').length === 1 && (kept.find(o => o.op === 'move') as any).appointmentId === 'a2');
+  check('remove passes through', kept.some(o => o.op === 'remove'));
+  check('unparseable start dropped', !kept.some(o => o.op === 'add' && (o as any).start === 'not-a-date'));
+  check('total kept = 3', kept.length === 3);
 }
 
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed\n`);

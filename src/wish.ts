@@ -62,6 +62,54 @@ function extractJson(text: string): any {
   catch { return null; }
 }
 
+// Build the token-reverser used across op parsing: maps an anonymized token
+// (APT_n/CLIENT_n/TECH_n) back to its real id/name; unknown/empty pass through.
+function makeRev(reverse: (token: string) => string | undefined): (v: any) => string | undefined {
+  return (v: any): string | undefined => {
+    if (v === undefined || v === null || v === '') return undefined;
+    const s = String(v);
+    return reverse(s) ?? s;
+  };
+}
+
+// Turn a raw `ops` array from the model into validated WishOps. `rev` maps a raw
+// value (token or already-real ref) to a real id/name. Shared by the single-shot
+// wish parser and the multi-turn chat parser. Defensive: malformed ops are
+// dropped, not thrown.
+export function parseOps(rawOps: any, rev: (v: any) => string | undefined): WishOp[] {
+  const ops: WishOp[] = [];
+  for (const ro of Array.isArray(rawOps) ? rawOps : []) {
+    const kind = String(ro?.op || '').toLowerCase();
+    if (kind === 'move') {
+      const id = rev(ro.apt ?? ro.appointmentId);
+      if (id && ro.start && ro.end) ops.push({ op: 'move', appointmentId: id, start: String(ro.start), end: String(ro.end) });
+    } else if (kind === 'remove') {
+      const id = rev(ro.apt ?? ro.appointmentId);
+      if (id) ops.push({ op: 'remove', appointmentId: id });
+    } else if (kind === 'add') {
+      const type = APPT_TYPES.includes(ro.type) ? ro.type : 'other';
+      if (ro.start && ro.end) {
+        const add: Extract<WishOp, { op: 'add' }> = { op: 'add', type, start: String(ro.start), end: String(ro.end) };
+        const title = ro.title ? String(ro.title) : undefined;
+        if (title) add.title = title;
+        const client = rev(ro.client); if (client) add.client = client;
+        const tech = rev(ro.tech ?? ro.technician); if (tech) add.technician = tech;
+        if (ro.recurring) { add.recurring = true; add.pattern = ['weekly', 'biweekly', 'monthly'].includes(ro.pattern) ? ro.pattern : 'weekly'; }
+        ops.push(add);
+      }
+    } else if (kind === 'blackout') {
+      const entity = rev(ro.entity);
+      const entityType = ro.entityType === 'technician' ? 'technician' : 'client';
+      if (entity && ro.date) {
+        const b: Extract<WishOp, { op: 'blackout' }> = { op: 'blackout', entityType, entity, date: String(ro.date) };
+        if (ro.reason) b.reason = String(ro.reason);
+        ops.push(b);
+      }
+    }
+  }
+  return ops;
+}
+
 // Parse the model's reply into WishSolutions. `reverse(token)` maps an anonymized
 // token (APT_n/CLIENT_n/TECH_n) back to its real id/name; unknown tokens pass
 // through unchanged. Defensive throughout — malformed ops are dropped, not thrown.
@@ -69,44 +117,11 @@ export function parseWishSolutions(text: string, reverse: (token: string) => str
   const json = extractJson(text);
   const rawSolutions: any[] = Array.isArray(json?.solutions) ? json.solutions
     : Array.isArray(json) ? json : [];
-  const rev = (v: any): string | undefined => {
-    if (v === undefined || v === null || v === '') return undefined;
-    const s = String(v);
-    return reverse(s) ?? s;
-  };
+  const rev = makeRev(reverse);
 
   const out: WishSolution[] = [];
   for (const rs of rawSolutions) {
-    const ops: WishOp[] = [];
-    for (const ro of Array.isArray(rs?.ops) ? rs.ops : []) {
-      const kind = String(ro?.op || '').toLowerCase();
-      if (kind === 'move') {
-        const id = rev(ro.apt ?? ro.appointmentId);
-        if (id && ro.start && ro.end) ops.push({ op: 'move', appointmentId: id, start: String(ro.start), end: String(ro.end) });
-      } else if (kind === 'remove') {
-        const id = rev(ro.apt ?? ro.appointmentId);
-        if (id) ops.push({ op: 'remove', appointmentId: id });
-      } else if (kind === 'add') {
-        const type = APPT_TYPES.includes(ro.type) ? ro.type : 'other';
-        if (ro.start && ro.end) {
-          const add: Extract<WishOp, { op: 'add' }> = { op: 'add', type, start: String(ro.start), end: String(ro.end) };
-          const title = ro.title ? String(ro.title) : undefined;
-          if (title) add.title = title;
-          const client = rev(ro.client); if (client) add.client = client;
-          const tech = rev(ro.tech ?? ro.technician); if (tech) add.technician = tech;
-          if (ro.recurring) { add.recurring = true; add.pattern = ['weekly', 'biweekly', 'monthly'].includes(ro.pattern) ? ro.pattern : 'weekly'; }
-          ops.push(add);
-        }
-      } else if (kind === 'blackout') {
-        const entity = rev(ro.entity);
-        const entityType = ro.entityType === 'technician' ? 'technician' : 'client';
-        if (entity && ro.date) {
-          const b: Extract<WishOp, { op: 'blackout' }> = { op: 'blackout', entityType, entity, date: String(ro.date) };
-          if (ro.reason) b.reason = String(ro.reason);
-          ops.push(b);
-        }
-      }
-    }
+    const ops = parseOps(rs?.ops, rev);
     if (ops.length === 0) continue;
     out.push({
       id: uuidv4(),
@@ -116,6 +131,45 @@ export function parseWishSolutions(text: string, reverse: (token: string) => str
     });
   }
   return out.slice(0, 3);
+}
+
+// One turn of the sAssI conversation: the model's plain-language reply plus the
+// COMPLETE current set of proposed ops (empty when it is only explaining and the
+// proposal is unchanged). Tokens in ops are reversed to real ids/names here; the
+// `reply` is left token-space (the caller de-anonymizes it for display).
+export interface ChatTurn {
+  reply: string;
+  ops: WishOp[];
+}
+
+export function parseChatTurn(text: string, reverse: (token: string) => string | undefined): ChatTurn {
+  const json = extractJson(text);
+  if (!json) {
+    // Model answered in prose without a JSON envelope — treat it all as the reply.
+    return { reply: (text || '').trim(), ops: [] };
+  }
+  const rev = makeRev(reverse);
+  const reply = typeof json.reply === 'string' ? json.reply
+    : typeof json.message === 'string' ? json.message
+    : '';
+  return { reply, ops: parseOps(json.ops, rev) };
+}
+
+// Real-world safety net: a machine must NEVER suggest placing (add) or relocating
+// (move) a session into the past — the BCBA cannot perform an appointment that has
+// already happened. Removes and blackouts are time-agnostic and pass through.
+// Unparseable start times are treated as invalid and dropped. This is a hard,
+// testable backstop behind the prompt (which is already told "start ≥ NOW"), so a
+// misbehaving model can never land a past-dated session on the calendar.
+export function dropPastOps(ops: WishOp[], now: Date = new Date()): WishOp[] {
+  const nowMs = now.getTime();
+  return ops.filter(o => {
+    if (o.op === 'add' || o.op === 'move') {
+      const t = new Date(o.start).getTime();
+      return !Number.isNaN(t) && t >= nowMs;
+    }
+    return true;
+  });
 }
 
 // Resolve a client/tech reference (real name or id) to the entity's id.

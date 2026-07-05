@@ -46,6 +46,7 @@ import {
   isFaceIdEnabled, enableFaceId, disableFaceId, recoverPinViaBiometric,
   clearStaleAtRest,
 } from './appLock';
+import { migrateScheduleData } from './scheduleMigrations';
 import { resolveAtRestAIConfig } from './aiConfigPolicy';
 import { isBiometricAvailable, checkBiometryFull, biometricAuthenticate, getBiometryLabel, BiometryLabel, getCachedBiometryAvailable, getCachedBiometryLabel } from './biometric';
 import { pastIncompleteAppointments } from './compliance';
@@ -672,8 +673,11 @@ export default function App() {
   // plain) bytes so the Express server's store is the source of truth.
   const applyImported = async (bytes: Uint8Array, data: ScheduleData, embeddedConfig?: string) => {
     if (Capacitor.isNativePlatform()) {
-      setNativeStore(data);
-      commitFull(data);
+      // Migrate/backfill an imported schedule to the current schema so new
+      // fields are present even when the source predates them.
+      const migrated = migrateScheduleData(data);
+      setNativeStore(migrated);
+      commitFull(migrated);
       setSolutions([]);
       if (embeddedConfig) await loadEmbeddedKey(embeddedConfig);
       return;
@@ -681,7 +685,7 @@ export default function App() {
     const response = await axios.post(`${API_BASE}/upload`, new Blob([bytes as any]), {
       headers: { 'Content-Type': 'application/octet-stream' },
     });
-    commitFull(response.data.data);
+    commitFull(migrateScheduleData(response.data.data));
     setSolutions([]);
     if (response.data.embeddedConfig) await loadEmbeddedKey(response.data.embeddedConfig);
   };

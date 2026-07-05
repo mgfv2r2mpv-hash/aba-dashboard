@@ -18,6 +18,7 @@
 import { encryptString, decryptString, obfuscateKey, deobfuscateKey } from './clientCrypto';
 import { readBlob, writeBlob, deleteBlob } from './secureStore';
 import { ScheduleData } from './types';
+import { wrapEnvelope, unwrapEnvelope } from './scheduleMigrations';
 
 const VERIFIER_KEY = 'pin.verifier';
 const SCHEDULE_KEY = 'schedule.enc';
@@ -90,14 +91,18 @@ export async function clearStaleAtRest(): Promise<void> {
 // ---- At-rest schedule -----------------------------------------------------
 
 export async function saveSchedule(data: ScheduleData, pin: string): Promise<void> {
-  await writeBlob(SCHEDULE_KEY, await encryptString(JSON.stringify(data), pin));
+  // Persist inside a versioned envelope so the schema can evolve independently
+  // of the Excel workbook (see scheduleMigrations.ts).
+  await writeBlob(SCHEDULE_KEY, await encryptString(wrapEnvelope(data), pin));
 }
 
 export async function loadSchedule(pin: string): Promise<ScheduleData | null> {
   const blob = await readBlob(SCHEDULE_KEY);
   if (!blob) return null;
   try {
-    return JSON.parse(await decryptString(blob, pin)) as ScheduleData;
+    // Accepts both the versioned envelope and pre-envelope legacy JSON, and
+    // migrates/backfills to the current schema on read.
+    return unwrapEnvelope(await decryptString(blob, pin));
   } catch {
     // Wrong PIN or corrupt blob — caller already validated the PIN via the
     // verifier, so this would only happen on corruption. Fail soft to empty.

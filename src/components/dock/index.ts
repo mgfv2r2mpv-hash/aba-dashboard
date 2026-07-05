@@ -1,7 +1,7 @@
 /* No Outcome ABA / SAssi — the unified assistant dock (issue queue + Ask SAssi). */
 
 export { SAssiDock } from './SAssiDock';
-export type { SAssiDockProps } from './SAssiDock';
+export type { SAssiDockProps, MeetPaceSeed, DockGraderCtx } from './SAssiDock';
 
 export { IssueCard } from './IssueCard';
 export type { IssueCardProps } from './IssueCard';

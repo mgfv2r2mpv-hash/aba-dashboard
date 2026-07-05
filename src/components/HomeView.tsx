@@ -21,6 +21,8 @@ export interface HomeViewProps {
   onAddTodo: (todo: NewHomeTodo) => void;
   onStartSession: (todo: HomeTodo) => void;
   onGo: (action: RitualAction) => void;
+  /** Hand a case-scoped "Fix pace with SAssi" request to the dock. */
+  onMeetPace?: (clientId: string, intent: 'behind' | 'over') => void;
 }
 
 const STATUS_COLOR: Record<TrendStatus, string> = {
@@ -72,8 +74,21 @@ function Trend({ w }: { w: TrendWindow }) {
   );
 }
 
-function PersonCard({ p, win, onFlag }: { p: PersonTrend; win: 'week' | 'month'; onFlag: () => void }) {
+function PersonCard({ p, win, onFlag, onMeetPace }: {
+  p: PersonTrend;
+  win: 'week' | 'month';
+  onFlag: () => void;
+  onMeetPace?: (clientId: string, intent: 'behind' | 'over') => void;
+}) {
   const w = win === 'week' ? p.week : p.month;
+  // Client cards can hand a case-scoped rearrange straight to SAssi; tech cards
+  // (BT direct) fall back to opening the assistant. `p.id` is `${clientId}-direct`
+  // or `${clientId}-supervision`.
+  const clientId = p.role === 'client' ? p.id.replace(/-(direct|supervision)$/, '') : null;
+  const fixPace = () => {
+    if (clientId && onMeetPace) onMeetPace(clientId, w.status === 'over' ? 'over' : 'behind');
+    else onFlag();
+  };
   const delta = w.proj - w.target;
   const projColor = w.status === 'behind' ? 'var(--status-behind)'
     : w.status === 'over' ? 'var(--status-over)'
@@ -125,7 +140,7 @@ function PersonCard({ p, win, onFlag }: { p: PersonTrend; win: 'week' | 'month';
       {(w.status === 'behind' || w.status === 'over') && (
         <button
           type="button"
-          onClick={onFlag}
+          onClick={fixPace}
           style={{ border: 'none', borderRadius: 'var(--radius-md)', padding: '7px 10px', minHeight: 'var(--tap-target)', fontSize: 12, fontWeight: 700, cursor: 'pointer', background: w.status === 'behind' ? 'var(--status-behind-bg)' : 'var(--status-over-bg)', color: w.status === 'behind' ? 'var(--status-behind)' : 'var(--status-over)', fontFamily: 'var(--font-sans)' }}
         >
           {w.status === 'behind' ? 'Fix pace with SAssi →' : 'Review overage with SAssi →'}
@@ -255,7 +270,7 @@ function TodosCard({ data, todos, onAddTodo, onStartSession }: {
   );
 }
 
-export function HomeView({ data, now, conflictCount, complianceFlagCount, todos, onAddTodo, onStartSession, onGo }: HomeViewProps) {
+export function HomeView({ data, now, conflictCount, complianceFlagCount, todos, onAddTodo, onStartSession, onGo, onMeetPace }: HomeViewProps) {
   const [ritual, setRitual] = useState<RitualKey>('sunday');
   const [win, setWin] = useState<'week' | 'month'>('week');
   const todosRef = useRef<HTMLDivElement>(null);
@@ -325,7 +340,7 @@ export function HomeView({ data, now, conflictCount, complianceFlagCount, todos,
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 12 }}>
-            {trends.map(p => <PersonCard key={p.id} p={p} win={win} onFlag={() => onGo('assistant')} />)}
+            {trends.map(p => <PersonCard key={p.id} p={p} win={win} onFlag={() => onGo('assistant')} onMeetPace={onMeetPace} />)}
           </div>
         )}
 

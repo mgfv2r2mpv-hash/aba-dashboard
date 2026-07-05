@@ -5,7 +5,8 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
-import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, Cancellation, cancellationReasonLabel } from './types';
+import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, Cancellation, cancellationReasonLabel, DEFAULT_FIXIT_OPTIONS } from './types';
+import { solveMeetPace } from './localSolver';
 import Calendar, { HoursSummary } from './components/Calendar';
 import { conflictKey } from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
@@ -22,7 +23,7 @@ import { Button } from './components/ui';
 import { Rail, CommandBar, ZenStrip, DockChip, DockOverlay, resolveDockMode } from './components/shell';
 import type { RailItem, RailKey } from './components/shell';
 import { SAssiDock, buildDockIssues } from './components/dock';
-import type { DockIssue } from './components/dock';
+import type { DockIssue, MeetPaceSeed } from './components/dock';
 import { useHomeTodos } from './hooks/useHomeTodos';
 import type { HomeTodo } from './hooks/useHomeTodos';
 import type { RitualAction } from './components/HomeView';
@@ -149,6 +150,10 @@ export default function App() {
   // Tablet-portrait: the dock collapses to a top-right chip; this tracks whether
   // it's currently rolled open over the right side.
   const [dockOpen, setDockOpen] = useState(false);
+  // "Fix pace with SAssi" (Phase 2): a case-scoped meet-pace request seeded into
+  // the dock. Bumping the token re-triggers the solve for the same or a new case.
+  const [meetPaceSeed, setMeetPaceSeed] = useState<MeetPaceSeed | null>(null);
+  const meetPaceTokenRef = React.useRef(0);
   // Which Caseload sub-tab to open — the dock's "fix compliance" routes to Issues
   // (where FixItPanel does remediation), now that the per-case Fix It is gone.
   const [ccInitialTab, setCcInitialTab] = useState<HubTab>('cases');
@@ -1543,6 +1548,46 @@ export default function App() {
     return scheduler.generateWishSolutions({ kind: 'freeform', note });
   };
 
+  // "Fix pace with SAssi" (Phase 2): resolve a case-scoped meet-pace request into
+  // solution cards. The deterministic solveMeetPace always yields an instant,
+  // offline proposal; when a Claude key is present we append up to 2 case-scoped
+  // Fix It variants for distribution alternatives. Claude failures degrade to the
+  // local proposal so the CTA is never a dead end.
+  const resolveMeetPace = async (clientId: string): Promise<WishSolution[]> => {
+    if (!scheduleData) return [];
+    const local = solveMeetPace(scheduleData, clientId, viewDate);
+    const solutions: WishSolution[] = [local.solution];
+    // Claude adds distribution alternatives only for the fill ("behind") case;
+    // the over-served trim is handled deterministically above.
+    if (aiSettings.apiKey && local.intent === 'behind' && local.solution.ops.length > 0) {
+      try {
+        const { ClaudeScheduler } = await import('./claudeScheduler');
+        const scheduler = new ClaudeScheduler(aiSettings.apiKey, scheduleData, aiSettings.model);
+        const variants = await scheduler.generateFixSolutions(
+          { ...DEFAULT_FIXIT_OPTIONS, focusClientId: clientId },
+          [],
+        );
+        solutions.push(...variants);
+      } catch { /* keep the local proposal */ }
+    }
+    return solutions.slice(0, 3);
+  };
+
+  const openMeetPace = (clientId: string, _intent: 'behind' | 'over') => {
+    if (!scheduleData) return;
+    meetPaceTokenRef.current += 1;
+    const client = scheduleData.clients.find(c => c.id === clientId || c.name === clientId);
+    setMeetPaceSeed({ clientId, label: `Fix ${client?.name ?? 'this case'}'s pace`, token: meetPaceTokenRef.current });
+    // Surface the dock on whichever presentation this width uses (the column is
+    // already on screen on the Home view at ≥1024).
+    if (dockMode === 'sheet') setDockSheetOpen(true);
+    else if (dockMode === 'chip') setDockOpen(true);
+  };
+
+  const meetPaceGraderCtx = scheduleData
+    ? { data: scheduleData, settings: scheduleData.settings, now: viewDate }
+    : undefined;
+
   // ── Home wiring (M4) ───────────────────────────────────────────────────
   // Ritual/flag routing: the SAssi dock is wide-only (>=1024) and already on
   // screen there, so 'assistant' only needs a fallback on narrow widths.
@@ -1826,6 +1871,7 @@ export default function App() {
                   onAddTodo={homeTodos.add}
                   onStartSession={startSessionFromTodo}
                   onGo={homeGo}
+                  onMeetPace={openMeetPace}
                 />
               </React.Suspense>
             )}
@@ -1874,6 +1920,9 @@ export default function App() {
           onReviewConflict={reviewConflictIssue}
           onMuteConflict={muteConflictIssue}
           onFixCompliance={() => { setCcInitialTab('issues'); setView('compliance'); }}
+          seedRequest={meetPaceSeed}
+          onSeedResolve={resolveMeetPace}
+          graderCtx={meetPaceGraderCtx}
           onGenerateWish={generateDockWish}
           onAcceptWish={acceptWish}
           onCustomizeWish={customizeWish}
@@ -1949,6 +1998,9 @@ export default function App() {
               onReviewConflict={(i) => { setDockSheetOpen(false); reviewConflictIssue(i); }}
               onMuteConflict={muteConflictIssue}
               onFixCompliance={() => { setDockSheetOpen(false); setCcInitialTab('issues'); setView('compliance'); }}
+              seedRequest={meetPaceSeed}
+              onSeedResolve={resolveMeetPace}
+              graderCtx={meetPaceGraderCtx}
               onGenerateWish={generateDockWish}
               onAcceptWish={acceptWish}
               onCustomizeWish={customizeWish}
@@ -1970,6 +2022,9 @@ export default function App() {
             onReviewConflict={reviewConflictIssue}
             onMuteConflict={muteConflictIssue}
             onFixCompliance={() => { setDockOpen(false); setCcInitialTab('issues'); setView('compliance'); }}
+            seedRequest={meetPaceSeed}
+            onSeedResolve={resolveMeetPace}
+            graderCtx={meetPaceGraderCtx}
             onGenerateWish={generateDockWish}
             onAcceptWish={acceptWish}
             onCustomizeWish={customizeWish}

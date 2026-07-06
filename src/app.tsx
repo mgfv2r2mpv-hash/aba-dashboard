@@ -67,9 +67,12 @@ import FindTimeModal from './components/FindTimeModal';
 import { wishSolutionToDraft, dropPastOps } from './wish';
 import { computeSessionFlags, SessionFlags, streakEmoji } from './sessionFlags';
 
-// Route axios /api/* calls through an in-memory store on iOS/Android,
-// since the Express server isn't reachable from inside the WebView.
-if (Capacitor.isNativePlatform()) installNativeAdapter();
+// Route axios /api/* calls through an in-memory store on EVERY platform. Native
+// (WebView at capacitor://localhost) has no Express server; the web build is served
+// statically (Cloudflare Pages) with no Node backend either. The same in-memory
+// adapter backs both, so the deterministic builder + all edits work serverlessly.
+// src/server.ts remains only for legacy/self-hosted runs.
+installNativeAdapter();
 
 // Build stamp surfaced in the empty-state diagnostics banner so you can
 // confirm the device is running this bundle and not a stale ios/App/App/public.
@@ -718,26 +721,16 @@ export default function App() {
     return () => clearTimeout(t);
   }, [scheduleData, locked, isNative]);
 
-  // Apply an already-parsed import as the working schedule. On native we prime
-  // the in-memory store nativeApi serves from; on web we POST the (decrypted,
-  // plain) bytes so the Express server's store is the source of truth.
-  const applyImported = async (bytes: Uint8Array, data: ScheduleData, embeddedConfig?: string) => {
-    if (Capacitor.isNativePlatform()) {
-      // Migrate/backfill an imported schedule to the current schema so new
-      // fields are present even when the source predates them.
-      const migrated = migrateScheduleData(data);
-      setNativeStore(migrated);
-      commitFull(migrated);
-      setSolutions([]);
-      if (embeddedConfig) await loadEmbeddedKey(embeddedConfig);
-      return;
-    }
-    const response = await axios.post(`${API_BASE}/upload`, new Blob([bytes as any]), {
-      headers: { 'Content-Type': 'application/octet-stream' },
-    });
-    commitFull(migrateScheduleData(response.data.data));
+  // Apply an already-parsed import as the working schedule. The in-memory adapter
+  // is the store on every platform, so prime it directly rather than round-tripping
+  // the decrypted bytes through /api/upload. Migrate/backfill to the current schema
+  // so new fields are present even when the source predates them.
+  const applyImported = async (_bytes: Uint8Array, data: ScheduleData, embeddedConfig?: string) => {
+    const migrated = migrateScheduleData(data);
+    setNativeStore(migrated);
+    commitFull(migrated);
     setSolutions([]);
-    if (response.data.embeddedConfig) await loadEmbeddedKey(response.data.embeddedConfig);
+    if (embeddedConfig) await loadEmbeddedKey(embeddedConfig);
   };
 
   const handleFileUpload = async (file: File) => {
@@ -821,16 +814,11 @@ export default function App() {
     stageOps([newMoveOp(appointment)]);
   };
 
-  // Sync the live store (native in-memory / Express) to a full replacement, then
-  // commit to React state + rebuild the compliance cache.
+  // Sync the in-memory store to a full replacement, then commit to React state +
+  // rebuild the compliance cache. The adapter serves this store on every platform.
   const commitScheduleData = async (next: ScheduleData) => {
-    if (Capacitor.isNativePlatform()) {
-      setNativeStore(next);
-      commitFull(next);
-      return;
-    }
-    const response = await axios.post(`${API_BASE}/schedule`, next);
-    commitFull(response.data.data);
+    setNativeStore(next);
+    commitFull(next);
   };
 
   // Fold any sAssI-buffered day-offs into the schedule being committed, deduped by

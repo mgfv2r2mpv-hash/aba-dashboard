@@ -241,17 +241,30 @@ export function buildDirectCalendar(
   const availCache = new Map<string, Interval[]>();
   const availableOn = (cid: string, tid: string | undefined, occ: Occ): boolean => {
     const client = clientById.get(cid);
-    const tech = tid ? data.technicians.find(t => t.id === tid) : undefined;
-    if (!client || !tech) return true; // can't evaluate → defer to the other guards
+    if (!client) return true; // can't evaluate the client → defer to other guards
+    // Match the tech by id OR name — a session may store a short ref ("Sidiatu")
+    // while the roster record is "Sidiatu K", in which case resolveTech hands back
+    // the raw string and this find misses. That's fine: the CLIENT gate below still
+    // applies, so an unresolved tech never bypasses availability (the bug that let a
+    // completed Saturday session clone forward onto a day the client isn't open).
+    const tech = tid ? data.technicians.find(t => t.id === tid || t.name === tid) : undefined;
     const jsDay = new Date(occ.startMs).getDay();
     const day = (jsDay === 0 ? DAYS[6] : DAYS[jsDay - 1]) as DayOfWeek; // Monday-first
-    const key = `${cid}|${tech.id}|${day}`;
+    const key = `${cid}|${tech?.id ?? tid ?? '?'}|${day}`;
     let feasible = availCache.get(key);
     if (!feasible) {
       const clientAvail = windowsToIntervals(client.availabilityWindows?.[day]);
-      let techAvail = btCaseAvailability(tech, cid, day);
-      if (techAvail.length === 0) techAvail = btCaseAvailability(tech, client.name, day);
-      feasible = intersect(clientAvail, techAvail);
+      const clientHasAvail = DAYS.some(d => (client.availabilityWindows?.[d]?.length ?? 0) > 0);
+      if (tech) {
+        let techAvail = btCaseAvailability(tech, cid, day);
+        if (techAvail.length === 0) techAvail = btCaseAvailability(tech, client.name, day);
+        feasible = intersect(clientAvail, techAvail);
+      } else {
+        // Tech unresolved: honor the client's windows alone. A client with defined
+        // availability but none this weekday is closed (drops the stray Saturday /
+        // early-start clones); a client with no windows at all is open all day.
+        feasible = clientHasAvail ? clientAvail : [{ start: 0, end: 24 * 60 }];
+      }
       availCache.set(key, feasible);
     }
     if (feasible.length === 0) return false;

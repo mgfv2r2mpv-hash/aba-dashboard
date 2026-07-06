@@ -281,6 +281,34 @@ console.log('availability guard: an existing recurring session is never cloned o
   check('no direct falls outside the BT availability', outsideWanda.length === 0, JSON.stringify(outsideWanda.slice(0, 3)));
 }
 
+console.log('availability guard: an UNRESOLVED tech ref still honors the client\'s closed days');
+{
+  // The real-world failure: a session stores a short tech ref ("Sidiatu") while the
+  // roster record is "Sidiatu K", so resolveTech hands back the raw string and the
+  // guard can't find the tech. It must NOT bypass — the CLIENT's availability still
+  // governs, so a completed Saturday session (client closed Sat) never clones forward.
+  const c1 = client('c1', 'Client Xray', daysWindows(['Tuesday', 'Wednesday', 'Thursday', 'Friday'], '10:00', '14:00'), 'W');
+  const t1 = tech('t1', 'Sidiatu K', daysWindows(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], '09:00', '17:00') as Technician['availability'], [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
+  const mkAppt = (id: string, start: string, end: string, status: string): Appointment => ({
+    id, type: 'client-session', client: 'Client Xray', technician: 'Sidiatu', startTime: start, endTime: end, status, isRecurring: true,
+  } as Appointment);
+  const satCompleted = mkAppt('a-sat', '2026-06-27T09:04:00', '2026-06-27T13:05:00', 'completed'); // Saturday — client is closed
+  const tueReal = mkAppt('a-tue', '2026-06-30T10:00:00', '2026-06-30T14:00:00', 'scheduled');       // Tuesday — legit
+  const base = schedule([c1], [t1], [auth('c1', 12)], baseSettings(WIDE_CLIN), [satCompleted, tueReal]);
+  const { staged } = run(base, defaultBuilderConfig(base, NOW));
+  const directs = staged.filter(o => o.op === 'add' && o.type === 'client-session') as Array<{ start: string; end: string }>;
+  const satOps = directs.filter(o => new Date(o.start).getDay() === 6);
+  const outOfWindow = directs.filter(o => {
+    const d = new Date(o.start), e = new Date(o.end), day = d.getDay();
+    if (day === 0 || day === 6) return true;
+    const sMin = d.getHours() * 60 + d.getMinutes(), eMin = e.getHours() * 60 + e.getMinutes();
+    return !(sMin >= 10 * 60 && eMin <= 14 * 60);
+  });
+  check('directs materialized despite the unresolved tech ref', directs.length > 0, `n=${directs.length}`);
+  check('completed Saturday session (unresolved tech) is NOT cloned forward', satOps.length === 0, `sat=${satOps.length}`);
+  check('no direct falls outside the client 10:00-14:00 window', outOfWindow.length === 0, JSON.stringify(outOfWindow.slice(0, 3)));
+}
+
 console.log('cadence EOW: exactly two contacts');
 {
   const c1 = client('c1', 'Client Echo', daysWindows(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], '08:00', '16:00'), 'EOW');

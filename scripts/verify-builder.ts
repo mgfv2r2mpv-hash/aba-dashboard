@@ -8,7 +8,8 @@
  *     real solveDraft grader (movedIds === 0 → no reshuffle was needed).
  *   - MRV ordering: a constrained case isn't stranded by an easy one taking its
  *     only shared-tech window.
- *   - Recurring representation: direct ops are recurring weekly.
+ *   - Materialized representation: direct ops are dated per-week rows (the backbone
+ *     extends to the auth end); weekly-target checks read the template week only.
  *   - Infeasibility: an impossible case is FLAGGED with the right binding
  *     constraint, and everyone else is still placed (partial success).
  *   - Validity: the applied result introduces no new hard (error) conflicts.
@@ -88,6 +89,17 @@ const clientHours = (result: ReturnType<typeof buildSchedule>, name: string) =>
     .filter((o): o is Extract<typeof o, { op: 'add' }> => o.op === 'add' && o.client === name)
     .reduce((s, o) => s + hrsOf({ startTime: o.start, endTime: o.end }), 0);
 
+// Directs now materialize to dated per-week rows out to the auth end, so summing
+// EVERY op returns the whole backbone. These tests pin the WEEKLY template logic,
+// so scope the tally to the first template week.
+const WEEK0_START = new Date(`${WEEK_START}T00:00:00`).getTime();
+const WEEK0_END = WEEK0_START + 7 * 24 * HR;
+const clientWeekHours = (result: ReturnType<typeof buildSchedule>, name: string) =>
+  result.solution.ops
+    .filter((o): o is Extract<typeof o, { op: 'add' }> => o.op === 'add' && o.client === name)
+    .filter(o => { const s = new Date(o.start).getTime(); return s >= WEEK0_START && s < WEEK0_END; })
+    .reduce((s, o) => s + hrsOf({ startTime: o.start, endTime: o.end }), 0);
+
 console.log('anti-double-book: two clients share one BT, non-overlapping windows');
 {
   const mon = (s: string, e: string) => ({ Monday: [{ start: s, end: e }] });
@@ -100,9 +112,11 @@ console.log('anti-double-book: two clients share one BT, non-overlapping windows
   const base = schedule([c1, c2], [t1], [auth('c1', 4), auth('c2', 4)]);
   const result = buildSchedule(base, config(), NOW);
 
-  check('both cases hit their 4h target', Math.abs(clientHours(result, 'Client One') - 4) < 0.01 && Math.abs(clientHours(result, 'Client Two') - 4) < 0.01);
+  check('both cases hit their 4h weekly target', Math.abs(clientWeekHours(result, 'Client One') - 4) < 0.01 && Math.abs(clientWeekHours(result, 'Client Two') - 4) < 0.01);
   check('no case blocked', result.blocks.length === 0, JSON.stringify(result.blocks));
-  check('all direct ops are recurring weekly', result.solution.ops.every(o => o.op === 'add' && o.recurring === true && o.pattern === 'weekly'));
+  check('direct ops are dated (non-recurring) and materialized across multiple weeks',
+    result.solution.ops.every(o => o.op === 'add' && o.type === 'client-session' && !o.recurring)
+    && new Set(result.solution.ops.map(o => o.op === 'add' ? o.start.slice(0, 10) : '')).size > 1);
 
   const preview = applyOps(base, wishSolutionToDraft(result.solution, base).ops);
   check('applied schedule has no tech double-book', !techDoubleBooked(preview));
@@ -122,8 +136,8 @@ console.log('MRV: a scarce shared tech must not strand the constrained case');
   const base = schedule([c2, c1], [t1], [auth('c1', 2), auth('c2', 2)]);
   const result = buildSchedule(base, config(), NOW);
 
-  check('constrained case is fully staffed', Math.abs(clientHours(result, 'Tight Case') - 2) < 0.01, JSON.stringify(result.blocks));
-  check('roomy case is fully staffed', Math.abs(clientHours(result, 'Roomy Case') - 2) < 0.01);
+  check('constrained case is fully staffed', Math.abs(clientWeekHours(result, 'Tight Case') - 2) < 0.01, JSON.stringify(result.blocks));
+  check('roomy case is fully staffed', Math.abs(clientWeekHours(result, 'Roomy Case') - 2) < 0.01);
   check('constrained case took its only 09:00 window', result.solution.ops.some(o => o.op === 'add' && o.client === 'Tight Case' && o.start.endsWith('09:00:00')));
 }
 
@@ -142,7 +156,7 @@ console.log('infeasibility: impossible case flagged, others still placed (partia
   check('impossible case is blocked', !!block);
   check('block names availability as the binding constraint', block?.bindingConstraint === 'availability', block?.bindingConstraint);
   check('block reports a non-zero remaining gap', (block?.directGapRemaining ?? 0) >= 0.5);
-  check('the feasible case is still fully placed', Math.abs(clientHours(result, 'Fine Case') - 4) < 0.01);
+  check('the feasible case is still fully placed', Math.abs(clientWeekHours(result, 'Fine Case') - 4) < 0.01);
   check('metrics count one fully staffed of two', result.metrics.casesFullyStaffed === 1 && result.metrics.totalCases === 2);
 
   // The chat-transcript readout: leads with metrics + a tray cue, then names the

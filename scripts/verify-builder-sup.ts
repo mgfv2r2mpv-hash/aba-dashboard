@@ -180,19 +180,78 @@ console.log('cadence W: floor met, credit is REAL (re-run compliance)');
   check('summary reports a supervision line', /supervision/.test(formatBuildSummary(result, true)));
 }
 
-console.log('materialization: chaseSupervision expands the floor denominator ~4×');
+console.log('materialization: directs fill the month AND the backbone runs to auth end');
 {
   const c1 = client('c1', 'Client Beta', daysWindows(['Monday', 'Tuesday', 'Wednesday'], '08:00', '16:00'), 'W');
   const t1 = tech('t1', 'Ray Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
   const base = schedule([c1], [t1], [auth('c1', 10)], baseSettings(WIDE_CLIN));
 
-  const phase2 = run(base, defaultBuilderConfig(base, NOW));        // recurring, unexpanded
-  const combined = run(base, combinedBuilderConfig(base, NOW));     // materialized
+  const cfg = defaultBuilderConfig(base, NOW);
+  const phase2 = run(base, cfg);                                   // direct-only — now materialized
+  const combined = run(base, combinedBuilderConfig(base, NOW));    // directs + BCBA passes
   const d2 = clientDirectH(phase2.committed, 'Client Beta');
   const d4 = clientDirectH(combined.committed, 'Client Beta');
-  check('recurring build counts ~1 week of direct', d2 >= 9 && d2 <= 11, `d2=${d2}`);
-  check('materialized build counts ~4 weeks of direct', d4 >= 38, `d4=${d4}`);
-  check('materialized denominator ≈ 4× the naive value', d4 / d2 >= 3.5 && d4 / d2 <= 4.5, `ratio=${(d4 / d2).toFixed(2)}`);
+  // Both builds materialize the month into concrete weekly rows, so the monthly
+  // floor denominator is the real ~4-week figure in either case (no 1-week
+  // understatement) and they agree.
+  check('direct-only build materializes the month (~4 weeks)', d2 >= 38, `d2=${d2}`);
+  check('combined build materializes the month (~4 weeks)', d4 >= 38, `d4=${d4}`);
+  check('both builds agree on the monthly denominator', Math.abs(d2 - d4) < 1e-6, `d2=${d2} d4=${d4}`);
+  // NEW: the direct backbone extends past the month out to the auth end (2026-12-31),
+  // not just the current calendar month.
+  const monthEndMs = new Date(`${cfg.monthHorizon.end}T00:00:00`).getTime();
+  const beyondMonth = phase2.staged.filter(o => o.op === 'add' && o.type === 'client-session' && new Date(o.start).getTime() >= monthEndMs);
+  check('direct backbone extends past the month toward the auth end', beyondMonth.length > 0, `beyond=${beyondMonth.length}`);
+}
+
+console.log('combined horizon split: directs run to auth end, the BCBA passes stay monthly');
+{
+  const c1 = client('c1', 'Client Sierra', daysWindows(['Monday', 'Tuesday', 'Wednesday'], '08:00', '16:00'), 'W');
+  const t1 = tech('t1', 'Sia Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
+  const base = schedule([c1], [t1], [auth('c1', 10)], baseSettings(WIDE_CLIN));
+  const cfg = combinedBuilderConfig(base, NOW);
+  const monthEndMs = new Date(`${cfg.monthHorizon.end}T00:00:00`).getTime();
+  const { staged } = run(base, cfg);
+  const beyond = (type: string) => staged.filter(o => o.op === 'add' && o.type === type && new Date(o.start).getTime() >= monthEndMs).length;
+  const within = (type: string) => staged.filter(o => o.op === 'add' && o.type === type && new Date(o.start).getTime() < monthEndMs).length;
+  // The direct backbone runs to the auth end; supervision (and PT) are monthly
+  // targets, so the chase only ever places inside the current month.
+  check('combined: direct backbone extends past the month', beyond('client-session') > 0, `directsBeyond=${beyond('client-session')}`);
+  check('combined: supervision IS placed within the month', within('supervision') > 0, `supWithin=${within('supervision')}`);
+  check('combined: no supervision placed past the month', beyond('supervision') === 0, `supBeyond=${beyond('supervision')}`);
+  check('combined: no parent training placed past the month', beyond('parent-training') === 0, `ptBeyond=${beyond('parent-training')}`);
+}
+
+console.log('auth boundary: the backbone never materializes a direct past a mid-month auth end');
+{
+  const c1 = client('c1', 'Client Tango', daysWindows(['Monday', 'Tuesday'], '08:00', '16:00'), 'W');
+  const t1 = tech('t1', 'Tia Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
+  // Auth covers the weekStart (2026-07-13) but ends mid-month with no renewal.
+  const midAuth: Authorization = { id: 'au-c1', clientId: 'c1', startDate: '2026-01-01', endDate: '2026-07-24', buckets: { direct: 10_000 }, weekly: { direct: 6 } };
+  const base = schedule([c1], [t1], [midAuth], baseSettings(WIDE_CLIN));
+  const { staged } = run(base, defaultBuilderConfig(base, NOW));
+  const directs = staged.filter(o => o.op === 'add' && o.type === 'client-session');
+  const authEndMs = new Date('2026-07-24T23:59:59').getTime();
+  const pastAuth = directs.filter(o => new Date((o as { start: string }).start).getTime() > authEndMs).map(o => (o as { start: string }).start);
+  check('some directs were placed inside the auth span', directs.length > 0, `n=${directs.length}`);
+  check('NO direct is dated after the auth end (auth caps never bypass)', pastAuth.length === 0, JSON.stringify(pastAuth));
+}
+
+console.log('auth renewal: the backbone spans a contiguous renewal and skips the coverage gap');
+{
+  const c1 = client('c1', 'Client Uniform', daysWindows(['Monday', 'Tuesday'], '08:00', '16:00'), 'W');
+  const t1 = tech('t1', 'Uma Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
+  const auth1: Authorization = { id: 'au1', clientId: 'c1', startDate: '2026-01-01', endDate: '2026-07-24', buckets: { direct: 10_000 }, weekly: { direct: 6 } };
+  const auth2: Authorization = { id: 'au2', clientId: 'c1', startDate: '2026-08-10', endDate: '2026-12-31', buckets: { direct: 10_000 }, weekly: { direct: 6 } };
+  const base = schedule([c1], [t1], [auth1, auth2], baseSettings(WIDE_CLIN));
+  const { staged } = run(base, defaultBuilderConfig(base, NOW));
+  const dates = staged.filter(o => o.op === 'add' && o.type === 'client-session').map(o => (o as { start: string }).start.slice(0, 10));
+  const inAuth1 = dates.filter(d => d >= '2026-01-01' && d <= '2026-07-24').length;
+  const gapDates = dates.filter(d => d > '2026-07-24' && d < '2026-08-10');
+  const inAuth2 = dates.filter(d => d >= '2026-08-10' && d <= '2026-12-31').length;
+  check('directs placed in the first auth span', inAuth1 > 0, `n1=${inAuth1}`);
+  check('NO directs placed in the coverage gap between auths', gapDates.length === 0, JSON.stringify(gapDates));
+  check('directs placed in the renewal auth span', inAuth2 > 0, `n2=${inAuth2}`);
 }
 
 console.log('cadence EOW: exactly two contacts');
@@ -291,25 +350,26 @@ console.log('per-RBT (D4): the BT furthest behind their own floor is preferred')
   check('a Client Kilo supervision names the behind RBT despite its later day', kiloSups.some(s => s.technician === 'Bea Behind'), JSON.stringify(kiloSups.map(s => s.technician)));
 }
 
-console.log('standalone: Build supervision over EXISTING recurring directs');
+console.log('standalone: Build supervision over EXISTING materialized directs');
 {
   const c1 = client('c1', 'Client Mike', daysWindows(['Monday', 'Tuesday', 'Wednesday'], '08:00', '16:00'), 'W');
   const t1 = tech('t1', 'Mae Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
   const fresh = schedule([c1], [t1], [auth('c1', 10)], baseSettings(WIDE_CLIN));
-  // First accept a Phase-2 direct build → the schedule now holds recurring directs.
+  // First accept a direct build → the schedule now holds DATED (materialized) directs.
   const withDirects = run(fresh, defaultBuilderConfig(fresh, NOW)).committed;
-  check('a phase-2 direct build leaves recurring direct rows', withDirects.appointments.some(a => a.type === 'client-session' && a.isRecurring));
+  const directRows = withDirects.appointments.filter(a => a.type === 'client-session');
+  check('a direct build leaves dated (materialized) direct rows, not recurring', directRows.length > 1 && directRows.every(a => !a.isRecurring));
 
   const { result, committed } = run(withDirects, supervisionBuilderConfig(withDirects, NOW));
   check('standalone build ran supervision only (not direct)', result.metrics.supervisionBuilt && !result.metrics.directBuilt);
   check('supervision hours were placed over existing directs', result.metrics.supervisionHrsPlaced > 0, String(result.metrics.supervisionHrsPlaced));
   const dH = clientDirectH(committed, 'Client Mike');
   const sH = clientSupH(committed, 'Client Mike');
-  check('existing recurring directs were materialized to ~4 weeks (no double-count)', dH >= 38 && dH <= 42, `directH=${dH}`);
+  check('the month slice of existing directs reads ~4 weeks (no double-count)', dH >= 38 && dH <= 42, `directH=${dH}`);
   check('committed supervision reaches the corrected floor', sH >= dH * 0.10 - 0.01, `supH=${sH.toFixed(2)} floorH=${(dH * 0.10).toFixed(2)}`);
 }
 
-console.log('off switch: chaseSupervision:false is byte-identical to Phase 2');
+console.log('off switch: chaseSupervision:false === a plain (materialized) direct build');
 {
   const c1 = client('c1', 'Client November', daysWindows(['Monday', 'Tuesday'], '08:00', '16:00'), 'W');
   const t1 = tech('t1', 'Ned Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
@@ -319,7 +379,7 @@ console.log('off switch: chaseSupervision:false is byte-identical to Phase 2');
   const plain = buildSchedule(base, cfg, NOW);
   check('ops identical with chaseSupervision:false vs unset', JSON.stringify(off.solution.ops) === JSON.stringify(plain.solution.ops));
   check('no supervision ops emitted when off', off.solution.ops.every(o => !(o.op === 'add' && o.type === 'supervision')));
-  check('all direct ops stay recurring weekly when off', off.solution.ops.every(o => o.op === 'add' && o.recurring === true));
+  check('direct ops are dated (materialized), not recurring, when supervision is off', off.solution.ops.every(o => o.op === 'add' && o.type === 'client-session' && !o.recurring));
 }
 
 console.log('dropPastOps guard: a mid-horizon build emits no past-dated supervision');

@@ -260,24 +260,24 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
     }
   }
 
-  // ── BCBA passes (Phase 3 supervision + Phase 4 parent training) OR cross-week
-  //    self-check (Phase 2) ────────────────────────────────────────────────────
-  // With either chase flag on, MATERIALIZE the direct backbone into dated weekly
-  // rows ONCE (so every BCBA overlap is a real post-commit session and the monthly
-  // floor denominator is correct); supervision then parent-training place against
-  // that single calendar, threading ONE growing BCBA-busy plane so they never
-  // double-book the one BCBA. Supervision runs first (the hard BACB floor gets
-  // first claim on scarce BCBA time); PT fills the remaining free sub-slots. The
-  // materialization is collision-aware, so it subsumes the recurring-only
-  // monthSelfCheck. With both off we keep the Phase 2 path byte-for-byte: recurring
-  // ops guarded by monthSelfCheck (which catches a recurring slot colliding with an
-  // existing dated session in a later horizon week that solveDraft would miss).
+  // ── Materialize the direct backbone + run the BCBA passes ────────────────────
+  // Every build MATERIALIZES the direct backbone into dated rows ONCE (the app
+  // never expands a `recurring` flag, so an unmaterialized direct is invisible past
+  // week 1 and understates monthly compliance). When building directs the backbone
+  // extends per-client out to the AUTHORIZATION END (buildDirectCalendar), while
+  // the chase target slice stays monthly. Supervision then parent-training place
+  // against that single calendar, threading ONE growing BCBA-busy plane so they
+  // never double-book the one BCBA. Supervision runs first (the hard BACB floor
+  // gets first claim on scarce BCBA time); PT fills the remaining free sub-slots.
+  // Materialization is collision-aware, subsuming the recurring-only monthSelfCheck
+  // (kept only for the degenerate no-flags-set case).
+  const buildingDirects = config.chaseDirect !== false;
   const chaseSupervision = config.chaseSupervision === true;
   const chasePT = config.chasePT === true;
   let finalOps: WishOp[] = ops;
   let supMetrics: SupervisionMetrics = EMPTY_SUPERVISION_METRICS;
   let ptMetrics: ParentTrainingMetrics = EMPTY_PARENT_TRAINING_METRICS;
-  if (chaseSupervision || chasePT) {
+  if (buildingDirects || chaseSupervision || chasePT) {
     const cal = buildDirectCalendar(data, ops, config, now);
     let bcbaBusy = seedBcbaBusy(data);
     blocks.push(...cal.blocks);

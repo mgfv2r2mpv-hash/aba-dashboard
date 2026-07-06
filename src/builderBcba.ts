@@ -14,10 +14,11 @@
 // would emit duplicate dated direct rows and double-book the one BCBA).
 
 import {
-  ScheduleData, Client, WishOp, Appointment,
+  ScheduleData, Client, WishOp, Appointment, Authorization,
   SupervisionCadence, SUPERVISION_CADENCES, TimeWindow, DayOfWeek,
 } from './types';
 import { toMin, DAYS } from './intervals';
+import { inAuthSpan } from './authorization';
 import type { BuilderConfig, ClientBlock } from './scheduleBuilder';
 
 export const HR_MS = 3_600_000;
@@ -182,12 +183,54 @@ export function buildDirectCalendar(
   now: Date,
 ): DirectCalendar {
   const horizonStartMs = parseLocalDate(config.monthHorizon.start).getTime();
-  const horizonEndMs = parseLocalDate(config.monthHorizon.end).getTime();
+  const monthEndMs = parseLocalDate(config.monthHorizon.end).getTime();
   const weekStartMs = parseLocalDate(config.weekStart).getTime();
   const lowerMs = Math.max(now.getTime(), horizonStartMs); // never materialize a past week
   const resolveTech = makeResolver(data.technicians);
   const resolveClient = makeResolver(data.clients);
   const clientById = new Map(data.clients.map(c => [c.id, c]));
+
+  // The DIRECT backbone extends per-client out to the client's authorization
+  // coverage (the direct schedule is a long-lived commitment), while the CHASE
+  // target slice (byClient, consumed by the supervision/PT passes) stays limited to
+  // the current month (monthEndMs) — those are monthly targets. When we are NOT
+  // building directs (a standalone supervision/PT run, chaseDirect:false), directs
+  // stay month-scoped so a chase never lays down a full backbone.
+  //
+  // directEndFor is the loop's UPPER bound only — it reaches the furthest authorized
+  // date (so back-to-back renewals are covered). The precise boundary is enforced
+  // per-occurrence by the auth guard in emitDated (auth caps never bypass): a week
+  // is materialized only if some authorization actually spans that date, so a
+  // mid-month auth end, a gap between auths, or an unauthorized tail is never placed.
+  // No authorization at all → the current month (owner decision; legacy/manual
+  // recurring directs). expandDirectOccurrences' own loop guard caps the far horizon.
+  const buildingDirects = config.chaseDirect !== false;
+  const clientAuths = new Map<string, Authorization[]>();
+  for (const a of (data.authorizations ?? [])) {
+    const cid = resolveClient(a.clientId);
+    if (!cid || !a.endDate) continue;
+    const arr = clientAuths.get(cid) ?? [];
+    arr.push(a);
+    clientAuths.set(cid, arr);
+  }
+  const directEndCache = new Map<string, number>();
+  const directEndFor = (cid: string): number => {
+    if (!buildingDirects) return monthEndMs;
+    const cached = directEndCache.get(cid);
+    if (cached !== undefined) return cached;
+    const auths = clientAuths.get(cid);
+    const end = auths && auths.length
+      ? Math.max(...auths.map(a => parseLocalDate(a.endDate).getTime() + DAY_MS)) // whole last authorized day
+      : monthEndMs;
+    directEndCache.set(cid, end);
+    return end;
+  };
+  // Skip an occurrence whose date lies outside every one of the client's auth spans.
+  // Clients with no authorization at all fall through (month-scoped legacy case).
+  const authorizedOn = (cid: string, ymd: string): boolean => {
+    const auths = clientAuths.get(cid);
+    return !auths || auths.length === 0 || auths.some(a => inAuthSpan(ymd, a));
+  };
 
   const byClient = new Map<string, DatedDirect[]>();
   const directOps: WishOp[] = [];
@@ -215,6 +258,9 @@ export function buildDirectCalendar(
     const cid = resolveClient(clientRef);
     const tid = resolveTech(techRef);
     if (!cid) return;
+    // Auth caps never bypass: never materialize a direct on a date the client isn't
+    // authorized for (mid-month auth end, gap between renewals, or an out-of-span tail).
+    if (!authorizedOn(cid, occ.startIso.slice(0, 10))) return;
     if (collides(existing, occ.startMs, occ.endMs, tid, cid)) {
       const cname = clientById.get(cid)?.name ?? clientRef ?? '';
       blocks.push({
@@ -233,10 +279,14 @@ export function buildDirectCalendar(
     const hours = (occ.endMs - occ.startMs) / HR_MS;
     directOpsHrs += hours;
     existing.push({ s: occ.startMs, e: occ.endMs, tech: tid, client: cid });
-    pushTarget({
-      clientId: cid, clientName: client?.name ?? clientRef ?? '', techId: tid, techName: tech?.name ?? techRef,
-      startMs: occ.startMs, endMs: occ.endMs, hours, weekIndex: occ.weekIndex, materialized: true,
-    });
+    // Only current-month occurrences are chase targets (supervision/PT are monthly);
+    // the backbone itself can run past the month to the auth end.
+    if (occ.startMs < monthEndMs) {
+      pushTarget({
+        clientId: cid, clientName: client?.name ?? clientRef ?? '', techId: tid, techName: tech?.name ?? techRef,
+        startMs: occ.startMs, endMs: occ.endMs, hours, weekIndex: occ.weekIndex, materialized: true,
+      });
+    }
   };
 
   const weekIndexOf = (startMs: number): number => weekIndexFor(startMs, weekStartMs);
@@ -251,29 +301,32 @@ export function buildDirectCalendar(
     const client = clientById.get(cid);
     const tech = data.technicians.find(t => t.id === resolveTech(a.technician) || t.name === a.technician);
 
-    // The concrete row itself is a target when it falls in the reachable horizon.
-    if (startMs >= lowerMs && startMs < horizonEndMs) {
+    // The concrete row itself is a target when it falls in the current month.
+    if (startMs >= lowerMs && startMs < monthEndMs) {
       pushTarget({
         clientId: cid, clientName: client?.name ?? a.client ?? '', techId: resolveTech(a.technician), techName: tech?.name ?? a.technician,
         startMs, endMs, hours: (endMs - startMs) / HR_MS, weekIndex: weekIndexOf(startMs), materialized: false,
       });
     }
-    // Source B: a recurring existing direct — materialize its OTHER horizon weeks
-    // (its own week is already the concrete row above; skip it to avoid double-count).
+    // Source B: a recurring existing direct — materialize its OTHER weeks out to the
+    // client's direct-end (its own week is already the concrete row above; skip it).
     if (a.isRecurring) {
       const ownWeek = weekIndexOf(startMs);
-      for (const occ of expandDirectOccurrences(new Date(a.startTime), endMs - startMs, weekStartMs, lowerMs, horizonEndMs)) {
+      for (const occ of expandDirectOccurrences(new Date(a.startTime), endMs - startMs, weekStartMs, lowerMs, directEndFor(cid))) {
         if (occ.weekIndex === ownWeek) continue;
         emitDated(a.client, a.technician, a.title, occ);
       }
     }
   }
 
-  // Source C: the NEW recurring direct ops from this build → dated every horizon week.
+  // Source C: the NEW recurring direct ops from this build → dated every week out to
+  // the client's direct-end (auth end when building directs, else the month).
   for (const op of recurringDirectOps) {
     if (op.op !== 'add' || op.type !== 'client-session' || !op.recurring) continue;
+    const cid = resolveClient(op.client);
+    if (!cid) continue;
     const durMs = new Date(op.end).getTime() - new Date(op.start).getTime();
-    for (const occ of expandDirectOccurrences(new Date(op.start), durMs, weekStartMs, lowerMs, horizonEndMs)) {
+    for (const occ of expandDirectOccurrences(new Date(op.start), durMs, weekStartMs, lowerMs, directEndFor(cid))) {
       emitDated(op.client, op.technician, op.title, occ);
     }
   }

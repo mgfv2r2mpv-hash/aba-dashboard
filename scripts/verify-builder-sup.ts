@@ -215,8 +215,10 @@ console.log('named-BT credit: mutate the tech → credit collapses to 0');
   const { committed } = run(base, combinedBuilderConfig(base, NOW));
   const before = clientSupH(committed, 'Client Foxtrot');
   check('supervision earns credit with the correct named BT', before > 0.01, `supH=${before}`);
-  // Re-name every supervision to a tech that serves nobody → overlap credit must vanish.
-  const mutated: ScheduleData = { ...committed, appointments: committed.appointments.map(a => a.type === 'supervision' ? { ...a, technician: 'Ghost Tech' } : a) };
+  // Re-name every counting session (supervision AND parent-training — a combined
+  // build now places both, and both earn credit only via their named BT) to a tech
+  // that serves nobody → overlap credit must vanish.
+  const mutated: ScheduleData = { ...committed, appointments: committed.appointments.map(a => (a.type === 'supervision' || a.type === 'parent-training') ? { ...a, technician: 'Ghost Tech' } : a) };
   const after = clientSupH(mutated, 'Client Foxtrot');
   check('mutating the named BT drops per-client credit to 0', after < 0.01, `supH=${after}`);
 }

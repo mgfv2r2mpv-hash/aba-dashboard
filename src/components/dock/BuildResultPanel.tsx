@@ -59,6 +59,12 @@ export function BuildResultPanel({ result, hasStagedProposal, onDismiss }: Build
             )}.
           </div>
         )}
+        {metrics.ptBuilt && (
+          <div>
+            Placed <strong style={{ color: 'var(--text-primary)' }}>{round1(metrics.ptHrsPlaced)}h</strong> of parent training ·{' '}
+            <strong style={{ color: 'var(--text-primary)' }}>{metrics.casesMeetingPtGoal}/{metrics.ptTargetCases}</strong> cases at goal.
+          </div>
+        )}
         <div style={{ marginTop: 2 }}>{nextStep}</div>
       </div>
 
@@ -69,8 +75,11 @@ export function BuildResultPanel({ result, hasStagedProposal, onDismiss }: Build
           </div>
           {blocks.map(b => {
             const isSup = b.bindingConstraint === 'bcba-availability';
-            const gap = isSup ? b.supervisionGapRemaining ?? 0 : b.directGapRemaining;
-            const shortLabel = isSup ? 'supervision short' : 'short';
+            const isPt = b.bindingConstraint === 'pt-availability';
+            const gap = isSup ? b.supervisionGapRemaining ?? 0
+              : isPt ? b.ptGapRemaining ?? 0
+              : b.directGapRemaining;
+            const shortLabel = isSup ? 'supervision short' : isPt ? 'parent training short' : 'short';
             return (
               <div
                 key={`${b.clientId}:${b.bindingConstraint}`}

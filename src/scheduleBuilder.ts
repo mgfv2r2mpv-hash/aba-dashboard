@@ -22,6 +22,7 @@ import { DAYS, toMin, minToClock, Interval } from './intervals';
 import { Occupancy, LiveWindow, seedOccupancy, feasibleWindowsLive, reserve, dayOfWeekOf } from './builderOccupancy';
 import { monthPeriod } from './compliance';
 import { resolveUtilization } from './utilization';
+import { chaseSupervisionPass, SupervisionMetrics, EMPTY_SUPERVISION_METRICS } from './builderSupervision';
 import { startOfWeek, startOfDay, addWeeks } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -43,14 +44,26 @@ export interface ClientBlock {
   clientId: string;
   clientName: string;
   directGapRemaining: number;
-  bindingConstraint: 'availability' | 'tech-contention' | 'auth-cap' | 'none';
+  // `bcba-availability` is a SUPERVISION shortfall (the BCBA couldn't reach the
+  // case's floor / cadence), tracked separately from the direct-staffing gap via
+  // supervisionGapRemaining so casesFullyStaffed keys only off direct blocks.
+  bindingConstraint: 'availability' | 'tech-contention' | 'auth-cap' | 'bcba-availability' | 'none';
   detail: string;
+  supervisionGapRemaining?: number;
 }
 
 export interface BuildResult {
   solution: WishSolution;               // ops → wishSolutionToDraft
   blocks: ClientBlock[];
-  metrics: { directHrsPlaced: number; casesFullyStaffed: number; totalCases: number };
+  metrics: {
+    directHrsPlaced: number;
+    casesFullyStaffed: number;
+    totalCases: number;
+    // Which passes actually ran (drive the display; a supervision-only build
+    // legitimately places 0h of direct, a direct-only build places 0 supervision).
+    directBuilt: boolean;
+    supervisionBuilt: boolean;
+  } & SupervisionMetrics;
 }
 
 // ── date helpers (local, no TZ suffix — matches appointment format) ────────────
@@ -60,6 +73,26 @@ const isoOf = (d: Date): string => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-
 const addDays = (d: Date, n: number): Date => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const hoursBetween = (startIso: string, endIso: string): number =>
   Math.max(0, new Date(endIso).getTime() - new Date(startIso).getTime()) / HR_MS;
+
+// Compact title for a builder-placed session: the first two letters of the
+// client's FIRST name and the first letter of each part of the technician's name
+// — e.g. client "Archie Client" + tech "Mike Technician" → "AR / MT". Gives the
+// BCBA an at-a-glance who/who on each placed block without spelling out names.
+// Safe: the anonymizer already drops every title from prompts (anonymizer.ts), so
+// these initials never leave the device.
+export function sessionTitle(clientName: string, techName?: string): string {
+  // First name only (first whitespace-delimited token), first two letters — no spaces.
+  const firstName = (clientName || '').trim().split(/\s+/)[0] ?? '';
+  const cl = firstName.slice(0, 2).toUpperCase();
+  const bt = (techName || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => w[0])
+    .join('')
+    .toUpperCase();
+  return bt ? `${cl} / ${bt}` : cl;
+}
 
 interface CasePlan {
   client: Client;
@@ -146,7 +179,9 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
   const blocks: ClientBlock[] = [];
   let directHrsPlaced = 0;
 
-  for (const plan of toFill) {
+  // Skip direct placement entirely for a standalone supervision build
+  // (chaseDirect:false), which supervises over the existing/materialized directs.
+  if (config.chaseDirect !== false) for (const plan of toFill) {
     const { client } = plan;
     const maxSessionHrs = config.clientOverrides?.[client.id]?.maxSessionHrs ?? MAX_DIRECT_SESSION_HRS;
     let gap = plan.gap;
@@ -179,7 +214,7 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
           const startMin = toMin(w.start);
           const endMin = startMin + Math.round(sessHrs * 60);
           ops.push({
-            op: 'add', type: 'client-session', title: 'Session',
+            op: 'add', type: 'client-session', title: sessionTitle(client.name, tech.name),
             client: client.name, technician: tech.name,
             start: `${date}T${w.start}:00`, end: `${date}T${minToClock(endMin)}:00`,
             recurring: true, pattern: 'weekly',
@@ -219,27 +254,56 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
     }
   }
 
-  // ── Cross-week self-check (the recurring-badge gap mitigation) ───────────────
-  // Live occupancy prevents template-week double-books; this catches a recurring
-  // slot colliding with an EXISTING dated session in a later horizon week, which
-  // solveDraft (single-week-scoped) would miss. Flag, don't silently ship.
-  const selfCheckBlocks = monthSelfCheck(data, ops, config, weekStart);
-  blocks.push(...selfCheckBlocks);
+  // ── Supervision pass (Phase 3) OR cross-week self-check (Phase 2) ────────────
+  // With chaseSupervision on, the supervision pass MATERIALIZES the direct
+  // backbone into dated weekly rows (so every supervision overlap is a real
+  // post-commit session and the monthly floor denominator is correct); its
+  // materialization is collision-aware, so it subsumes the recurring-only
+  // monthSelfCheck. With it off we keep the Phase 2 path byte-for-byte: recurring
+  // ops guarded by monthSelfCheck (which catches a recurring slot colliding with
+  // an existing dated session in a later horizon week that solveDraft would miss).
+  const chaseSupervision = config.chaseSupervision === true;
+  let finalOps: WishOp[] = ops;
+  let supMetrics: SupervisionMetrics = EMPTY_SUPERVISION_METRICS;
+  if (chaseSupervision) {
+    const sup = chaseSupervisionPass(data, ops, config, now);
+    finalOps = [...sup.directOps, ...sup.supOps];
+    blocks.push(...sup.blocks);
+    supMetrics = sup.metrics;
+    directHrsPlaced = sup.directOpsHrs; // dated rows the pass emitted (replaces the template-only count)
+  } else {
+    const selfCheckBlocks = monthSelfCheck(data, ops, config, weekStart);
+    blocks.push(...selfCheckBlocks);
+  }
 
   const totalCases = plans.length;
-  const casesFullyStaffed = totalCases - blocks.filter(b => b.directGapRemaining >= MIN_SESSION_HRS).length;
+  // Only a DIRECT staffing gap un-staffs a case; a bcba-availability (supervision)
+  // block is a separate shortfall tracked via supervisionGapRemaining.
+  const directBlocked = blocks.filter(b =>
+    b.bindingConstraint !== 'bcba-availability' && b.directGapRemaining >= MIN_SESSION_HRS).length;
+  const casesFullyStaffed = totalCases - directBlocked;
+  const supPlaced = supMetrics.supervisionHrsPlaced;
 
-  const summary = ops.length === 0
-    ? (blocks.length ? `No direct sessions could be placed — ${blocks.length} case(s) blocked` : 'Nothing to build — all cases already at target')
-    : `Built ${directHrsPlaced.toFixed(1)}h of direct backbone across ${casesFullyStaffed}/${totalCases} case(s)`;
+  const summary = finalOps.length === 0
+    ? (blocks.length ? `Nothing placed — ${blocks.length} case(s) blocked` : 'Nothing to build — all cases already at target')
+    : chaseSupervision
+      ? `Built ${directHrsPlaced.toFixed(1)}h direct + ${supPlaced.toFixed(1)}h supervision across ${casesFullyStaffed}/${totalCases} case(s)`
+      : `Built ${directHrsPlaced.toFixed(1)}h of direct backbone across ${casesFullyStaffed}/${totalCases} case(s)`;
   const reasoning = blocks.length
-    ? `Placed ${directHrsPlaced.toFixed(1)}h. Could not fully staff: ${blocks.map(b => `${b.clientName} (${b.detail})`).join('; ')}.`
-    : `Placed ${directHrsPlaced.toFixed(1)}h of recurring weekly direct sessions across ${casesFullyStaffed} case(s), most-constrained first, with no double-booking.`;
+    ? `Placed ${directHrsPlaced.toFixed(1)}h direct${chaseSupervision ? ` / ${supPlaced.toFixed(1)}h supervision` : ''}. Residual: ${blocks.map(b => `${b.clientName} (${b.detail})`).join('; ')}.`
+    : `Placed ${directHrsPlaced.toFixed(1)}h of direct${chaseSupervision ? ` and ${supPlaced.toFixed(1)}h of supervision` : ' backbone'} across ${casesFullyStaffed} case(s), most-constrained first, with no double-booking.`;
 
   return {
-    solution: { id: uuidv4(), summary, reasoning, ops },
+    solution: { id: uuidv4(), summary, reasoning, ops: finalOps },
     blocks,
-    metrics: { directHrsPlaced: +directHrsPlaced.toFixed(2), casesFullyStaffed, totalCases },
+    metrics: {
+      directHrsPlaced: +directHrsPlaced.toFixed(2),
+      casesFullyStaffed,
+      totalCases,
+      directBuilt: config.chaseDirect !== false,
+      supervisionBuilt: chaseSupervision,
+      ...supMetrics,
+    },
   };
 }
 
@@ -317,6 +381,22 @@ export function defaultBuilderConfig(data: ScheduleData, now: Date): BuilderConf
   };
 }
 
+// Standalone "Build supervision": chase the supervision floors/cadence over the
+// existing (and materialized) directs WITHOUT placing new direct sessions.
+// chaseDirect:false skips the fill loop; the supervision pass materializes any
+// existing recurring directs into dated rows so later weeks are supervisable.
+export function supervisionBuilderConfig(data: ScheduleData, now: Date): BuilderConfig {
+  return { ...defaultBuilderConfig(data, now), chaseDirect: false, chaseSupervision: true };
+}
+
+// Combined "build my month": place the direct backbone AND chase supervision to
+// the floors in one pass — the default chat workflow. Directs are materialized to
+// dated weekly rows so supervision overlaps real sessions and the floor
+// denominator reflects the whole month.
+export function combinedBuilderConfig(data: ScheduleData, now: Date): BuilderConfig {
+  return { ...defaultBuilderConfig(data, now), chaseDirect: true, chaseSupervision: true };
+}
+
 // Human label for why a case couldn't be fully filled. Shared by the dock panel
 // and the chat summary so the wording stays in one place.
 export function bindingConstraintLabel(c: ClientBlock['bindingConstraint']): string {
@@ -324,6 +404,7 @@ export function bindingConstraintLabel(c: ClientBlock['bindingConstraint']): str
     case 'availability': return 'No open availability';
     case 'tech-contention': return 'Assigned techs fully booked';
     case 'auth-cap': return 'At authorization cap';
+    case 'bcba-availability': return 'BCBA unavailable to supervise';
     case 'none': return 'Fully placed';
   }
 }
@@ -338,7 +419,11 @@ const round1 = (n: number): number => Math.round(n * 10) / 10;
 export function formatBuildSummary(result: BuildResult, hasStaged: boolean): string {
   const { metrics, blocks } = result;
   const blockLines = blocks.map(b => {
-    const short = b.directGapRemaining > 0 ? ` (${round1(b.directGapRemaining)}h short)` : '';
+    // A supervision (bcba-availability) block reports its supervision shortfall;
+    // every other block reports the direct-staffing gap.
+    const short = b.bindingConstraint === 'bcba-availability'
+      ? (b.supervisionGapRemaining && b.supervisionGapRemaining > 0 ? ` (${round1(b.supervisionGapRemaining)}h supervision short)` : '')
+      : (b.directGapRemaining > 0 ? ` (${round1(b.directGapRemaining)}h short)` : '');
     return `• ${b.clientName} — ${bindingConstraintLabel(b.bindingConstraint)}${short}`;
   });
   if (!hasStaged) {
@@ -346,6 +431,10 @@ export function formatBuildSummary(result: BuildResult, hasStaged: boolean): str
       ? 'Nothing to place — every case is already at its direct target.'
       : `No sessions could be placed:\n${blockLines.join('\n')}`;
   }
-  const head = `Placed ${round1(metrics.directHrsPlaced)}h of direct across ${metrics.totalCases} case${metrics.totalCases === 1 ? '' : 's'} (${metrics.casesFullyStaffed}/${metrics.totalCases} fully staffed). Review the proposal in the tray, then Accept.`;
+  let head = `Placed ${round1(metrics.directHrsPlaced)}h of direct across ${metrics.totalCases} case${metrics.totalCases === 1 ? '' : 's'} (${metrics.casesFullyStaffed}/${metrics.totalCases} fully staffed).`;
+  if (metrics.supervisionBuilt) {
+    head += ` Placed ${round1(metrics.supervisionHrsPlaced)}h of supervision (${metrics.casesMeetingFloor}/${metrics.floorTargetCases} case${metrics.floorTargetCases === 1 ? '' : 's'} at floor).`;
+  }
+  head += ' Review the proposal in the tray, then Accept.';
   return blockLines.length === 0 ? head : `${head}\nCouldn’t fully fill:\n${blockLines.join('\n')}`;
 }

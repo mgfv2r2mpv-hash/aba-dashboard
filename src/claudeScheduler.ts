@@ -18,7 +18,7 @@ import { allowedStrategies } from './fixit';
 import { computeClientCompliance, computeTechCompliance, monthPeriod } from './compliance';
 import { resolveUtilization } from './utilization';
 import { buildFillContext, buildComplianceFillContext, buildBcbaWeekFillContext, buildSupervisableWindows, buildFeasibilityDiagnostics } from './fillSchedule';
-import { buildSchedule, combinedBuilderConfig, supervisionBuilderConfig, BuildResult } from './scheduleBuilder';
+import { buildSchedule, combinedBuilderConfig, supervisionBuilderConfig, parentTrainingBuilderConfig, BuildResult } from './scheduleBuilder';
 import { startOfWeek } from 'date-fns';
 
 export type ClaudeModel = 'claude-opus-4-8' | 'claude-sonnet-4-6' | 'claude-haiku-4-5-20251001';
@@ -53,10 +53,11 @@ export interface SassiChatResult {
   // Present when Claude routed a "build my month" intent to the deterministic
   // builder. The caller runs runBuild() locally and stages the result — Claude
   // never places appointments, so ops stays empty on a build turn. `buildScope`
-  // decomposes the workflow: 'all' = directs + supervision (default "build my
-  // month"); 'supervision' = supervision-only over the existing directs.
+  // decomposes the workflow: 'all' = directs + supervision + parent training
+  // (default "build my month"); 'supervision' = supervision-only over the existing
+  // directs; 'parent-training' = PT-only over the existing directs.
   build?: boolean;
-  buildScope?: 'all' | 'supervision';
+  buildScope?: 'all' | 'supervision' | 'parent-training';
 }
 
 // sAssI answers through exactly one of these two tools every turn (tool_choice
@@ -117,12 +118,12 @@ const CLARIFY_TOOL = {
 // cases it couldn't fill; you only frame the outcome in `reply`.
 const BUILD_TOOL = {
   name: 'build',
-  description: 'Run the deterministic scheduler for a WHOLE-caseload build this month. Use ONLY for broad "build/fill my schedule" requests — never for a single-appointment change (use respond for those). You do not place anything; the engine does and reports blocks. Set scope:"all" to build directs AND chase supervision to the floors ("build my month"); scope:"supervision" to chase supervision over the EXISTING directs ("add my supervision", "hit everyone\'s supervision floor").',
+  description: 'Run the deterministic scheduler for a WHOLE-caseload build this month. Use ONLY for broad "build/fill my schedule" requests — never for a single-appointment change (use respond for those). You do not place anything; the engine does and reports blocks. Set scope:"all" to build directs AND chase supervision AND parent training to their targets ("build my month"); scope:"supervision" to chase supervision over the EXISTING directs ("hit everyone\'s supervision floor"); scope:"parent-training" to chase parent-training hours over the EXISTING directs ("add everyone\'s parent training").',
   input_schema: {
     type: 'object' as const,
     properties: {
       reply: { type: 'string', description: 'Short framing message to the BCBA — that you are building and will report what couldn’t be filled.' },
-      scope: { type: 'string', enum: ['all', 'supervision'], description: 'all = directs + supervision (default); supervision = supervision only, over the existing directs.' },
+      scope: { type: 'string', enum: ['all', 'supervision', 'parent-training'], description: 'all = directs + supervision + parent training (default); supervision = supervision only; parent-training = parent training only. Each single scope runs over the existing directs.' },
     },
     required: ['reply'],
   },
@@ -272,7 +273,10 @@ export class ClaudeScheduler {
     if (toolUse && toolUse.name === 'build') {
       const input = toolUse.input || {};
       const reply = deAnonymizeText(typeof input.reply === 'string' ? input.reply : '', this.anonMap);
-      const buildScope: 'all' | 'supervision' = input.scope === 'supervision' ? 'supervision' : 'all';
+      const buildScope: 'all' | 'supervision' | 'parent-training' =
+        input.scope === 'supervision' ? 'supervision'
+        : input.scope === 'parent-training' ? 'parent-training'
+        : 'all';
       // ops stays empty — the caller runs runBuild() locally and stages those ops.
       return { raw: JSON.stringify(input), reply, ops: [], build: true, buildScope };
     }
@@ -312,9 +316,10 @@ export class ClaudeScheduler {
   // the model picks the `build` tool: placement is entirely local and deterministic
   // (buildSchedule on the REAL schedule — never the anonymized one, never Claude),
   // so its ops are staged straight into the draft, and its blocks report locally.
-  runBuild(now: Date, scope: 'all' | 'supervision' = 'all'): BuildResult {
-    const config = scope === 'supervision'
-      ? supervisionBuilderConfig(this.data, now)
+  runBuild(now: Date, scope: 'all' | 'supervision' | 'parent-training' = 'all'): BuildResult {
+    const config =
+      scope === 'supervision' ? supervisionBuilderConfig(this.data, now)
+      : scope === 'parent-training' ? parentTrainingBuilderConfig(this.data, now)
       : combinedBuilderConfig(this.data, now);
     return buildSchedule(this.data, config, now);
   }

@@ -24,7 +24,7 @@ import { Rail, CommandBar, ZenStrip, DockChip, DockOverlay, resolveDockMode } fr
 import type { RailItem, RailKey } from './components/shell';
 import { SAssiDock, buildDockIssues, useSassiSession, BuildResultPanel } from './components/dock';
 import type { DockIssue, MeetPaceSeed } from './components/dock';
-import { buildSchedule, defaultBuilderConfig, supervisionBuilderConfig, type BuildResult } from './scheduleBuilder';
+import { buildSchedule, defaultBuilderConfig, supervisionBuilderConfig, parentTrainingBuilderConfig, type BuildResult } from './scheduleBuilder';
 import { useHomeTodos } from './hooks/useHomeTodos';
 import type { HomeTodo } from './hooks/useHomeTodos';
 import type { RitualAction } from './components/HomeView';
@@ -349,6 +349,16 @@ export default function App() {
     if (!scheduleData) return;
     const now = new Date();
     const result = buildSchedule(scheduleData, supervisionBuilderConfig(scheduleData, now), now);
+    stageSassiOps(result.solution.ops);
+    setBuildResult(result);
+  };
+  // Standalone parent-training pass: chase every case to its monthly PT hours goal
+  // over the existing/materialized directs (each PT session overlaps a real direct
+  // and names its BT), through the same draft pipeline. Run it after a direct build.
+  const handleBuildParentTraining = () => {
+    if (!scheduleData) return;
+    const now = new Date();
+    const result = buildSchedule(scheduleData, parentTrainingBuilderConfig(scheduleData, now), now);
     stageSassiOps(result.solution.ops);
     setBuildResult(result);
   };
@@ -1738,6 +1748,18 @@ export default function App() {
             }}
           >
             ⚙︎ Build supervision
+          </button>
+          <button
+            type="button"
+            onClick={handleBuildParentTraining}
+            title="Chase every case to its monthly parent-training hours goal over the existing directs"
+            style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              padding: '9px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--sage-200)',
+              background: 'var(--sage-50)', color: 'var(--sage-700)', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            }}
+          >
+            ⚙︎ Build parent training
           </button>
         </div>
       )}

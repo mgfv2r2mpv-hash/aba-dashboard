@@ -22,7 +22,9 @@ import { DAYS, toMin, minToClock, Interval } from './intervals';
 import { Occupancy, LiveWindow, seedOccupancy, feasibleWindowsLive, reserve, dayOfWeekOf } from './builderOccupancy';
 import { monthPeriod } from './compliance';
 import { resolveUtilization } from './utilization';
-import { chaseSupervisionPass, SupervisionMetrics, EMPTY_SUPERVISION_METRICS } from './builderSupervision';
+import { placeSupervision, SupervisionMetrics, EMPTY_SUPERVISION_METRICS } from './builderSupervision';
+import { placeParentTraining, ParentTrainingMetrics, EMPTY_PARENT_TRAINING_METRICS } from './builderPT';
+import { buildDirectCalendar, seedBcbaBusy } from './builderBcba';
 import { startOfWeek, startOfDay, addWeeks } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -44,12 +46,15 @@ export interface ClientBlock {
   clientId: string;
   clientName: string;
   directGapRemaining: number;
-  // `bcba-availability` is a SUPERVISION shortfall (the BCBA couldn't reach the
-  // case's floor / cadence), tracked separately from the direct-staffing gap via
-  // supervisionGapRemaining so casesFullyStaffed keys only off direct blocks.
-  bindingConstraint: 'availability' | 'tech-contention' | 'auth-cap' | 'bcba-availability' | 'none';
+  // `bcba-availability` (supervision) and `pt-availability` (parent training) are
+  // BCBA-time shortfalls — the BCBA couldn't reach the case's supervision floor /
+  // cadence or its PT hours goal. Both are tracked separately from the direct-
+  // staffing gap (via supervisionGapRemaining / ptGapRemaining) so casesFullyStaffed
+  // keys only off direct blocks.
+  bindingConstraint: 'availability' | 'tech-contention' | 'auth-cap' | 'bcba-availability' | 'pt-availability' | 'none';
   detail: string;
   supervisionGapRemaining?: number;
+  ptGapRemaining?: number;
 }
 
 export interface BuildResult {
@@ -63,7 +68,8 @@ export interface BuildResult {
     // legitimately places 0h of direct, a direct-only build places 0 supervision).
     directBuilt: boolean;
     supervisionBuilt: boolean;
-  } & SupervisionMetrics;
+    ptBuilt: boolean;
+  } & SupervisionMetrics & ParentTrainingMetrics;
 }
 
 // ── date helpers (local, no TZ suffix — matches appointment format) ────────────
@@ -254,44 +260,81 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
     }
   }
 
-  // ── Supervision pass (Phase 3) OR cross-week self-check (Phase 2) ────────────
-  // With chaseSupervision on, the supervision pass MATERIALIZES the direct
-  // backbone into dated weekly rows (so every supervision overlap is a real
-  // post-commit session and the monthly floor denominator is correct); its
+  // ── BCBA passes (Phase 3 supervision + Phase 4 parent training) OR cross-week
+  //    self-check (Phase 2) ────────────────────────────────────────────────────
+  // With either chase flag on, MATERIALIZE the direct backbone into dated weekly
+  // rows ONCE (so every BCBA overlap is a real post-commit session and the monthly
+  // floor denominator is correct); supervision then parent-training place against
+  // that single calendar, threading ONE growing BCBA-busy plane so they never
+  // double-book the one BCBA. Supervision runs first (the hard BACB floor gets
+  // first claim on scarce BCBA time); PT fills the remaining free sub-slots. The
   // materialization is collision-aware, so it subsumes the recurring-only
-  // monthSelfCheck. With it off we keep the Phase 2 path byte-for-byte: recurring
-  // ops guarded by monthSelfCheck (which catches a recurring slot colliding with
-  // an existing dated session in a later horizon week that solveDraft would miss).
+  // monthSelfCheck. With both off we keep the Phase 2 path byte-for-byte: recurring
+  // ops guarded by monthSelfCheck (which catches a recurring slot colliding with an
+  // existing dated session in a later horizon week that solveDraft would miss).
   const chaseSupervision = config.chaseSupervision === true;
+  const chasePT = config.chasePT === true;
   let finalOps: WishOp[] = ops;
   let supMetrics: SupervisionMetrics = EMPTY_SUPERVISION_METRICS;
-  if (chaseSupervision) {
-    const sup = chaseSupervisionPass(data, ops, config, now);
-    finalOps = [...sup.directOps, ...sup.supOps];
-    blocks.push(...sup.blocks);
-    supMetrics = sup.metrics;
-    directHrsPlaced = sup.directOpsHrs; // dated rows the pass emitted (replaces the template-only count)
+  let ptMetrics: ParentTrainingMetrics = EMPTY_PARENT_TRAINING_METRICS;
+  if (chaseSupervision || chasePT) {
+    const cal = buildDirectCalendar(data, ops, config, now);
+    let bcbaBusy = seedBcbaBusy(data);
+    blocks.push(...cal.blocks);
+    const bcbaOps: WishOp[] = [];
+    if (chaseSupervision) {
+      const sup = placeSupervision(data, cal, bcbaBusy, now);
+      bcbaBusy = sup.busyOut;
+      bcbaOps.push(...sup.supOps);
+      blocks.push(...sup.blocks);
+      supMetrics = sup.metrics;
+    }
+    if (chasePT) {
+      // Known limitation (accepted for v1 — the cross-pass reconciliation is
+      // deferred): a PT session placed here overlaps a direct and names the BT, so
+      // post-commit it ALSO earns supervision credit. In a combined build that can
+      // lift a case the supervision pass reported floor-short (above) to/over its
+      // floor — yet that bcba-availability block and casesMeetingFloor are NOT
+      // walked back. The residual is therefore CONSERVATIVE (it can over-warn a
+      // supervision shortfall PT actually covered, never a silent miss) and the
+      // staged schedule is correct; the compliance dashboard is the source of truth.
+      const pt = placeParentTraining(data, cal, bcbaBusy, now);
+      bcbaBusy = pt.busyOut;
+      bcbaOps.push(...pt.ptOps);
+      blocks.push(...pt.blocks);
+      ptMetrics = pt.metrics;
+    }
+    finalOps = [...cal.directOps, ...bcbaOps]; // dated backbone emitted ONCE
+    directHrsPlaced = cal.directOpsHrs;        // replaces the template-only count
   } else {
     const selfCheckBlocks = monthSelfCheck(data, ops, config, weekStart);
     blocks.push(...selfCheckBlocks);
   }
 
   const totalCases = plans.length;
-  // Only a DIRECT staffing gap un-staffs a case; a bcba-availability (supervision)
-  // block is a separate shortfall tracked via supervisionGapRemaining.
+  // Only a DIRECT staffing gap un-staffs a case; the BCBA-time shortfalls
+  // (bcba-availability / pt-availability) are separate, tracked via
+  // supervisionGapRemaining / ptGapRemaining.
   const directBlocked = blocks.filter(b =>
-    b.bindingConstraint !== 'bcba-availability' && b.directGapRemaining >= MIN_SESSION_HRS).length;
+    b.bindingConstraint !== 'bcba-availability' && b.bindingConstraint !== 'pt-availability'
+    && b.directGapRemaining >= MIN_SESSION_HRS).length;
   const casesFullyStaffed = totalCases - directBlocked;
   const supPlaced = supMetrics.supervisionHrsPlaced;
+  const ptPlaced = ptMetrics.ptHrsPlaced;
 
+  // Composable BCBA tail so a directs-only, +supervision, +PT, or all-three build
+  // each reads correctly.
+  const bcbaTail =
+    (chaseSupervision ? ` + ${supPlaced.toFixed(1)}h supervision` : '') +
+    (chasePT ? ` + ${ptPlaced.toFixed(1)}h parent training` : '');
   const summary = finalOps.length === 0
     ? (blocks.length ? `Nothing placed — ${blocks.length} case(s) blocked` : 'Nothing to build — all cases already at target')
-    : chaseSupervision
-      ? `Built ${directHrsPlaced.toFixed(1)}h direct + ${supPlaced.toFixed(1)}h supervision across ${casesFullyStaffed}/${totalCases} case(s)`
+    : bcbaTail
+      ? `Built ${directHrsPlaced.toFixed(1)}h direct${bcbaTail} across ${casesFullyStaffed}/${totalCases} case(s)`
       : `Built ${directHrsPlaced.toFixed(1)}h of direct backbone across ${casesFullyStaffed}/${totalCases} case(s)`;
   const reasoning = blocks.length
-    ? `Placed ${directHrsPlaced.toFixed(1)}h direct${chaseSupervision ? ` / ${supPlaced.toFixed(1)}h supervision` : ''}. Residual: ${blocks.map(b => `${b.clientName} (${b.detail})`).join('; ')}.`
-    : `Placed ${directHrsPlaced.toFixed(1)}h of direct${chaseSupervision ? ` and ${supPlaced.toFixed(1)}h of supervision` : ' backbone'} across ${casesFullyStaffed} case(s), most-constrained first, with no double-booking.`;
+    ? `Placed ${directHrsPlaced.toFixed(1)}h direct${bcbaTail}. Residual: ${blocks.map(b => `${b.clientName} (${b.detail})`).join('; ')}.`
+    : `Placed ${directHrsPlaced.toFixed(1)}h of direct${bcbaTail || ' backbone'} across ${casesFullyStaffed} case(s), most-constrained first, with no double-booking.`;
 
   return {
     solution: { id: uuidv4(), summary, reasoning, ops: finalOps },
@@ -302,7 +345,9 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
       totalCases,
       directBuilt: config.chaseDirect !== false,
       supervisionBuilt: chaseSupervision,
+      ptBuilt: chasePT,
       ...supMetrics,
+      ...ptMetrics,
     },
   };
 }
@@ -389,12 +434,19 @@ export function supervisionBuilderConfig(data: ScheduleData, now: Date): Builder
   return { ...defaultBuilderConfig(data, now), chaseDirect: false, chaseSupervision: true };
 }
 
-// Combined "build my month": place the direct backbone AND chase supervision to
-// the floors in one pass — the default chat workflow. Directs are materialized to
-// dated weekly rows so supervision overlaps real sessions and the floor
-// denominator reflects the whole month.
+// Standalone "Build parent training": chase every case to its monthly PT hours
+// goal over the existing (and materialized) directs WITHOUT placing new directs or
+// supervision. Same materialization path as the supervision standalone.
+export function parentTrainingBuilderConfig(data: ScheduleData, now: Date): BuilderConfig {
+  return { ...defaultBuilderConfig(data, now), chaseDirect: false, chasePT: true };
+}
+
+// Combined "build my month": place the direct backbone AND chase supervision AND
+// parent training to their targets in one pass — the default chat workflow.
+// Directs are materialized to dated weekly rows so both BCBA passes overlap real
+// sessions and the monthly denominators reflect the whole month.
 export function combinedBuilderConfig(data: ScheduleData, now: Date): BuilderConfig {
-  return { ...defaultBuilderConfig(data, now), chaseDirect: true, chaseSupervision: true };
+  return { ...defaultBuilderConfig(data, now), chaseDirect: true, chaseSupervision: true, chasePT: true };
 }
 
 // Human label for why a case couldn't be fully filled. Shared by the dock panel
@@ -405,6 +457,7 @@ export function bindingConstraintLabel(c: ClientBlock['bindingConstraint']): str
     case 'tech-contention': return 'Assigned techs fully booked';
     case 'auth-cap': return 'At authorization cap';
     case 'bcba-availability': return 'BCBA unavailable to supervise';
+    case 'pt-availability': return 'BCBA unavailable for parent training';
     case 'none': return 'Fully placed';
   }
 }
@@ -419,11 +472,16 @@ const round1 = (n: number): number => Math.round(n * 10) / 10;
 export function formatBuildSummary(result: BuildResult, hasStaged: boolean): string {
   const { metrics, blocks } = result;
   const blockLines = blocks.map(b => {
-    // A supervision (bcba-availability) block reports its supervision shortfall;
-    // every other block reports the direct-staffing gap.
-    const short = b.bindingConstraint === 'bcba-availability'
-      ? (b.supervisionGapRemaining && b.supervisionGapRemaining > 0 ? ` (${round1(b.supervisionGapRemaining)}h supervision short)` : '')
-      : (b.directGapRemaining > 0 ? ` (${round1(b.directGapRemaining)}h short)` : '');
+    // The BCBA-time blocks report their own shortfall; every other block reports
+    // the direct-staffing gap.
+    let short = '';
+    if (b.bindingConstraint === 'bcba-availability') {
+      short = b.supervisionGapRemaining && b.supervisionGapRemaining > 0 ? ` (${round1(b.supervisionGapRemaining)}h supervision short)` : '';
+    } else if (b.bindingConstraint === 'pt-availability') {
+      short = b.ptGapRemaining && b.ptGapRemaining > 0 ? ` (${round1(b.ptGapRemaining)}h parent training short)` : '';
+    } else {
+      short = b.directGapRemaining > 0 ? ` (${round1(b.directGapRemaining)}h short)` : '';
+    }
     return `• ${b.clientName} — ${bindingConstraintLabel(b.bindingConstraint)}${short}`;
   });
   if (!hasStaged) {
@@ -434,6 +492,9 @@ export function formatBuildSummary(result: BuildResult, hasStaged: boolean): str
   let head = `Placed ${round1(metrics.directHrsPlaced)}h of direct across ${metrics.totalCases} case${metrics.totalCases === 1 ? '' : 's'} (${metrics.casesFullyStaffed}/${metrics.totalCases} fully staffed).`;
   if (metrics.supervisionBuilt) {
     head += ` Placed ${round1(metrics.supervisionHrsPlaced)}h of supervision (${metrics.casesMeetingFloor}/${metrics.floorTargetCases} case${metrics.floorTargetCases === 1 ? '' : 's'} at floor).`;
+  }
+  if (metrics.ptBuilt) {
+    head += ` Placed ${round1(metrics.ptHrsPlaced)}h of parent training (${metrics.casesMeetingPtGoal}/${metrics.ptTargetCases} case${metrics.ptTargetCases === 1 ? '' : 's'} at goal).`;
   }
   head += ' Review the proposal in the tray, then Accept.';
   return blockLines.length === 0 ? head : `${head}\nCouldn’t fully fill:\n${blockLines.join('\n')}`;

@@ -62,6 +62,11 @@ export interface Client {
   // "Sammy"). Resolved LOCALLY to a token before any prompt is built (Claude
   // never sees names). Absent = fall back to name / auto-derived initials.
   aliases?: string[];
+  // Coarse service locality — a CITY NAME ONLY (e.g. "Springfield"), never a
+  // street or exact address. This is the HIPAA guardrail: a city centroid is a
+  // public point shared by thousands, so it (and only it) may be geocoded and
+  // used to estimate BCBA travel time between sessions. See CompanySettings.travel.
+  city?: string;
 }
 
 export interface Technician {
@@ -213,9 +218,77 @@ export interface CompanySettings {
   // Absent = DEFAULT_BCBA_SESSION_DEFAULTS. Drives the auto-filled end time of a
   // new appointment in AppointmentForm. See BcbaSessionDefaults.
   bcbaSessionDefaults?: BcbaSessionDefaults;
+  // --- Travel-time grounding (the single BCBA physically travels between sites) ---
+  // The BCBA's home base — the day's travel origin/terminus and the ONLY exact
+  // address in the model (the user's own home, not PHI). Clients are city-level only.
+  homeBase?: HomeBase;
+  // Travel-model tunables. Absent = DEFAULT_TRAVEL_SETTINGS.
+  travel?: TravelSettings;
+  // Geocode cache: each distinct city → its public centroid. Filled once at
+  // data-entry / "Refresh travel times"; read synchronously by the deterministic
+  // builder so scheduling never hits the network.
+  cityCenters?: CityCenter[];
+  // Traffic-aware routed-duration cache keyed by (from, to, dow, hour). Filled by
+  // the async pre-warm; read synchronously by the builder. Absent/miss → offline fallback.
+  travelCache?: TravelCacheEntry[];
 }
 
 export const DEFAULT_PTO_DEDUCTION_RATIO = 1;
+
+// A geographic point (WGS84). Coordinates are the ONLY geo data that ever leaves
+// the device (to the maps provider): always a public city centroid or the user's
+// own home — never a client's real address.
+export interface LatLng {
+  lat: number;
+  lng: number;
+}
+
+// The BCBA's home base — the day's travel origin/terminus. The one place an exact
+// street address is allowed (the user's own home). Clients stay city-level only.
+export interface HomeBase {
+  label?: string;
+  address?: string; // exact street address permitted here (user's own home)
+  city?: string;
+  lat?: number;
+  lng?: number;
+}
+
+// Cached geocode of a city name → its public centroid.
+export interface CityCenter {
+  city: string;
+  lat: number;
+  lng: number;
+}
+
+// One cached, traffic-aware routed duration between two localities for a given
+// departure day-of-week + hour bucket. `from`/`to` are a city name or literal
+// 'HOME'. `minutes` is the raw routed duration_in_traffic BEFORE the pad.
+export interface TravelCacheEntry {
+  from: string; // city name | 'HOME'
+  to: string;   // city name | 'HOME'
+  dow: number;  // 0=Sun … 6=Sat (local)
+  hour: number; // hour-bucket start, 0–23 (local)
+  minutes: number;
+}
+
+// Tunables for the travel-time model (Admin → Settings). See src/travel.ts.
+export interface TravelSettings {
+  enabled: boolean;          // master on/off for travel-gap enforcement
+  withinCityMin: number;     // flat minutes for a same-city, different-site trip
+  padPercent: number;        // % added to a routed duration (last-mile slack)
+  avgSpeedMph: number;       // offline-fallback speed when no cached routed time
+  defaultUnknownMin: number; // fallback minutes when a city has no centroid at all
+  hourBucketSize: number;    // hours per traffic bucket (1 = hourly)
+}
+
+export const DEFAULT_TRAVEL_SETTINGS: TravelSettings = {
+  enabled: true,
+  withinCityMin: 15,
+  padPercent: 5,
+  avgSpeedMph: 30,
+  defaultUnknownMin: 45,
+  hourBucketSize: 1,
+};
 
 // Default session lengths for BCBA (non-direct) appointment types, used to
 // auto-fill a NEW appointment's end time the moment its type is chosen. Supervision

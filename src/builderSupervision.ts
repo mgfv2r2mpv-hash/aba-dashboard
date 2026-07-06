@@ -16,6 +16,7 @@ import {
   DatedDirect, DirectCalendar, BcbaBusy,
   reserveBcba, placeBcbaSubinterval, contactsForCadence, cancellationRiskWeight, weeksForCadence, HR_MS,
 } from './builderBcba';
+import { buildTravelContext } from './travel';
 import type { ClientBlock } from './scheduleBuilder';
 
 // Re-export the primitives the verify harness imports from here, so
@@ -53,6 +54,9 @@ export function placeSupervision(
   now: Date,
 ): SupervisionPlacement {
   const floorPct = data.settings.supervisionFloorPercent ?? 10;
+  // Travel context (city centroids + routed cache) — enforces drive time between
+  // the single BCBA's differently-located sessions. Self-disables when travel is off.
+  const travelCtx = buildTravelContext(data);
 
   // Per-RBT floor state for D4 double-duty selection. computeBtState supplies the
   // required % and the existing supervision credit, but its direct-hours
@@ -150,10 +154,10 @@ export function placeSupervision(
       // Prefer the direct whose BT is furthest behind their own floor (D4).
       const cands = (byWeek.get(selectedWeeks[k]) ?? []).slice().sort((x, y) => btBehind(y) - btBehind(x));
       for (const d of cands) {
-        const slot = placeBcbaSubinterval(data, d, targetH, bcbaBusy);
+        const slot = placeBcbaSubinterval(data, d, targetH, bcbaBusy, travelCtx);
         if (!slot) continue;
         supOps.push({ op: 'add', type: 'supervision', client: client.name, technician: d.techName, start: slot.startIso, end: slot.endIso });
-        bcbaBusy = reserveBcba(bcbaBusy, slot.startMs, slot.endMs);
+        bcbaBusy = reserveBcba(bcbaBusy, slot.startMs, slot.endMs, d.clientId);
         const hrs = (slot.endMs - slot.startMs) / HR_MS;
         placedForClient += hrs;
         supervisionHrsPlaced += hrs;

@@ -30,7 +30,8 @@
             "end": "19:00"
           }
         ]
-      }
+      },
+      "city": "Springfield, IL"
     },
     {
       "id": "6069e893-806c-4f62-aaff-baf2af751813",
@@ -72,7 +73,8 @@
             "end": "15:00"
           }
         ]
-      }
+      },
+      "city": "Springfield, IL"
     },
     {
       "id": "0be8b1c8-93f8-4241-80b1-040cff827d56",
@@ -108,7 +110,8 @@
             "end": "19:30"
           }
         ]
-      }
+      },
+      "city": "Springfield, IL"
     },
     {
       "id": "eec7d8cf-af78-4b7b-8500-6f629dc522dd",
@@ -160,7 +163,8 @@
             "end": "17:00"
           }
         ]
-      }
+      },
+      "city": "Shelbyville, IL"
     },
     {
       "id": "b213db1a-1ffd-4a15-9ce2-e03ea5278dac",
@@ -190,7 +194,8 @@
             "end": "12:15"
           }
         ]
-      }
+      },
+      "city": "Springfield, IL"
     },
     {
       "id": "2bc45c0c-f40e-4873-970c-2481933c6878",
@@ -226,7 +231,8 @@
             "end": "12:15"
           }
         ]
-      }
+      },
+      "city": "Springfield, IL"
     },
     {
       "id": "e5b62e37-2db5-456c-babe-038a7e56647f",
@@ -282,7 +288,8 @@
             "end": "20:00"
           }
         ]
-      }
+      },
+      "city": "Springfield, IL"
     },
     {
       "id": "e974f1b4-1d24-4fe4-a182-1dc27a87e359",
@@ -318,7 +325,8 @@
             "end": "17:00"
           }
         ]
-      }
+      },
+      "city": "Shelbyville, IL"
     },
     {
       "id": "fde03985-4e38-4875-b854-bce009d7f63c",
@@ -360,7 +368,8 @@
             "end": "14:00"
           }
         ]
-      }
+      },
+      "city": "Springfield, IL"
     },
     {
       "id": "8c046cf6-18e4-43a4-9804-c78f7e798661",
@@ -396,7 +405,8 @@
             "end": "12:00"
           }
         ]
-      }
+      },
+      "city": "Springfield, IL"
     },
     {
       "id": "458834bf-669f-4baa-b306-1cb87b139eb3",
@@ -432,7 +442,8 @@
             "end": "19:00"
           }
         ]
-      }
+      },
+      "city": "Springfield, IL"
     },
     {
       "id": "e3e494e9-cc01-48a1-a08a-5e3df265123e",
@@ -468,7 +479,8 @@
             "end": "19:00"
           }
         ]
-      }
+      },
+      "city": "Shelbyville, IL"
     }
   ],
   "technicians": [
@@ -884,7 +896,372 @@
           "end": "14:00"
         }
       ]
-    }
+    },
+    "homeBase": {
+      "label": "Home",
+      "address": "100 Center St, Springfield, IL",
+      "city": "Springfield, IL",
+      "lat": 39.7817,
+      "lng": -89.6501
+    },
+    "travel": {
+      "enabled": false,
+      "withinCityMin": 15,
+      "padPercent": 5,
+      "avgSpeedMph": 30,
+      "defaultUnknownMin": 45,
+      "hourBucketSize": 1
+    },
+    "cityCenters": [
+      {
+        "city": "springfield, il",
+        "lat": 39.7817,
+        "lng": -89.6501
+      },
+      {
+        "city": "shelbyville, il",
+        "lat": 39.4067,
+        "lng": -88.79
+      }
+    ],
+    "travelCache": [
+      {
+        "from": "springfield, il",
+        "to": "shelbyville, il",
+        "dow": 1,
+        "hour": 16,
+        "minutes": 38
+      },
+      {
+        "from": "shelbyville, il",
+        "to": "springfield, il",
+        "dow": 1,
+        "hour": 16,
+        "minutes": 38
+      },
+      {
+        "from": "HOME",
+        "to": "shelbyville, il",
+        "dow": 1,
+        "hour": 16,
+        "minutes": 34
+      },
+      {
+        "from": "HOME",
+        "to": "springfield, il",
+        "dow": 1,
+        "hour": 16,
+        "minutes": 8
+      },
+      {
+        "from": "springfield, il",
+        "to": "shelbyville, il",
+        "dow": 1,
+        "hour": 17,
+        "minutes": 38
+      },
+      {
+        "from": "shelbyville, il",
+        "to": "springfield, il",
+        "dow": 1,
+        "hour": 17,
+        "minutes": 38
+      },
+      {
+        "from": "HOME",
+        "to": "shelbyville, il",
+        "dow": 1,
+        "hour": 17,
+        "minutes": 34
+      },
+      {
+        "from": "HOME",
+        "to": "springfield, il",
+        "dow": 1,
+        "hour": 17,
+        "minutes": 8
+      },
+      {
+        "from": "springfield, il",
+        "to": "shelbyville, il",
+        "dow": 1,
+        "hour": 18,
+        "minutes": 38
+      },
+      {
+        "from": "shelbyville, il",
+        "to": "springfield, il",
+        "dow": 1,
+        "hour": 18,
+        "minutes": 38
+      },
+      {
+        "from": "HOME",
+        "to": "shelbyville, il",
+        "dow": 1,
+        "hour": 18,
+        "minutes": 34
+      },
+      {
+        "from": "HOME",
+        "to": "springfield, il",
+        "dow": 1,
+        "hour": 18,
+        "minutes": 8
+      },
+      {
+        "from": "springfield, il",
+        "to": "shelbyville, il",
+        "dow": 2,
+        "hour": 16,
+        "minutes": 38
+      },
+      {
+        "from": "shelbyville, il",
+        "to": "springfield, il",
+        "dow": 2,
+        "hour": 16,
+        "minutes": 38
+      },
+      {
+        "from": "HOME",
+        "to": "shelbyville, il",
+        "dow": 2,
+        "hour": 16,
+        "minutes": 34
+      },
+      {
+        "from": "HOME",
+        "to": "springfield, il",
+        "dow": 2,
+        "hour": 16,
+        "minutes": 8
+      },
+      {
+        "from": "springfield, il",
+        "to": "shelbyville, il",
+        "dow": 2,
+        "hour": 17,
+        "minutes": 38
+      },
+      {
+        "from": "shelbyville, il",
+        "to": "springfield, il",
+        "dow": 2,
+        "hour": 17,
+        "minutes": 38
+      },
+      {
+        "from": "HOME",
+        "to": "shelbyville, il",
+        "dow": 2,
+        "hour": 17,
+        "minutes": 34
+      },
+      {
+        "from": "HOME",
+        "to": "springfield, il",
+        "dow": 2,
+        "hour": 17,
+        "minutes": 8
+      },
+      {
+        "from": "springfield, il",
+        "to": "shelbyville, il",
+        "dow": 2,
+        "hour": 18,
+        "minutes": 38
+      },
+      {
+        "from": "shelbyville, il",
+        "to": "springfield, il",
+        "dow": 2,
+        "hour": 18,
+        "minutes": 38
+      },
+      {
+        "from": "HOME",
+        "to": "shelbyville, il",
+        "dow": 2,
+        "hour": 18,
+        "minutes": 34
+      },
+      {
+        "from": "HOME",
+        "to": "springfield, il",
+        "dow": 2,
+        "hour": 18,
+        "minutes": 8
+      },
+      {
+        "from": "springfield, il",
+        "to": "shelbyville, il",
+        "dow": 3,
+        "hour": 16,
+        "minutes": 38
+      },
+      {
+        "from": "shelbyville, il",
+        "to": "springfield, il",
+        "dow": 3,
+        "hour": 16,
+        "minutes": 38
+      },
+      {
+        "from": "HOME",
+        "to": "shelbyville, il",
+        "dow": 3,
+        "hour": 16,
+        "minutes": 34
+      },
+      {
+        "from": "HOME",
+        "to": "springfield, il",
+        "dow": 3,
+        "hour": 16,
+        "minutes": 8
+      },
+      {
+        "from": "springfield, il",
+        "to": "shelbyville, il",
+        "dow": 3,
+        "hour": 17,
+        "minutes": 38
+      },
+      {
+        "from": "shelbyville, il",
+        "to": "springfield, il",
+        "dow": 3,
+        "hour": 17,
+        "minutes": 38
+      },
+      {
+        "from": "HOME",
+        "to": "shelbyville, il",
+        "dow": 3,
+        "hour": 17,
+        "minutes": 34
+      },
+      {
+        "from": "HOME",
+        "to": "springfield, il",
+        "dow": 3,
+        "hour": 17,
+        "minutes": 8
+      },
+      {
+        "from": "springfield, il",
+        "to": "shelbyville, il",
+        "dow": 3,
+        "hour": 18,
+        "minutes": 38
+      },
+      {
+        "from": "shelbyville, il",
+        "to": "springfield, il",
+        "dow": 3,
+        "hour": 18,
+        "minutes": 38
+      },
+      {
+        "from": "HOME",
+        "to": "shelbyville, il",
+        "dow": 3,
+        "hour": 18,
+        "minutes": 34
+      },
+      {
+        "from": "HOME",
+        "to": "springfield, il",
+        "dow": 3,
+        "hour": 18,
+        "minutes": 8
+      },
+      {
+        "from": "springfield, il",
+        "to": "shelbyville, il",
+        "dow": 4,
+        "hour": 16,
+        "minutes": 38
+      },
+      {
+        "from": "shelbyville, il",
+        "to": "springfield, il",
+        "dow": 4,
+        "hour": 16,
+        "minutes": 38
+      },
+      {
+        "from": "HOME",
+        "to": "shelbyville, il",
+        "dow": 4,
+        "hour": 16,
+        "minutes": 34
+      },
+      {
+        "from": "HOME",
+        "to": "springfield, il",
+        "dow": 4,
+        "hour": 16,
+        "minutes": 8
+      },
+      {
+        "from": "springfield, il",
+        "to": "shelbyville, il",
+        "dow": 4,
+        "hour": 17,
+        "minutes": 38
+      },
+      {
+        "from": "shelbyville, il",
+        "to": "springfield, il",
+        "dow": 4,
+        "hour": 17,
+        "minutes": 38
+      },
+      {
+        "from": "HOME",
+        "to": "shelbyville, il",
+        "dow": 4,
+        "hour": 17,
+        "minutes": 34
+      },
+      {
+        "from": "HOME",
+        "to": "springfield, il",
+        "dow": 4,
+        "hour": 17,
+        "minutes": 8
+      },
+      {
+        "from": "springfield, il",
+        "to": "shelbyville, il",
+        "dow": 4,
+        "hour": 18,
+        "minutes": 38
+      },
+      {
+        "from": "shelbyville, il",
+        "to": "springfield, il",
+        "dow": 4,
+        "hour": 18,
+        "minutes": 38
+      },
+      {
+        "from": "HOME",
+        "to": "shelbyville, il",
+        "dow": 4,
+        "hour": 18,
+        "minutes": 34
+      },
+      {
+        "from": "HOME",
+        "to": "springfield, il",
+        "dow": 4,
+        "hour": 18,
+        "minutes": 8
+      }
+    ]
   },
   "appointments": [
     {

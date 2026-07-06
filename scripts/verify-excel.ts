@@ -16,6 +16,7 @@ const data: ScheduleData = {
     cadenceGoal: 'EOW', isEI: true, eiDate: '2026-09-01',
     partialStaffAllowed: false, parentAvailableOutsideSessions: true,
     anticipatedDischarge: 'EI transition ~age 3', notes: 'note',
+    city: 'Springfield',
   }],
   technicians: [{
     id: 'T1', name: 'Tech One', isRBT: true,
@@ -41,6 +42,11 @@ const data: ScheduleData = {
       ],
       openingBalances: [{ bucket: 'vacation', hours: 10, asOf: '2026-01-01' }],
     },
+    // Travel grounding: home base (exact address ok), tunables, geocode cache, routed cache.
+    homeBase: { label: 'Home', address: '1 Main St', city: 'Hometown', lat: 40.0, lng: -75.0 },
+    travel: { enabled: true, withinCityMin: 15, padPercent: 5, avgSpeedMph: 30, defaultUnknownMin: 45, hourBucketSize: 1 },
+    cityCenters: [{ city: 'springfield', lat: 40.1, lng: -75.1 }, { city: 'hometown', lat: 40.0, lng: -75.0 }],
+    travelCache: [{ from: 'HOME', to: 'springfield', dow: 2, hour: 10, minutes: 22 }],
   },
   appointments: [
     { id: 'A1', title: 'Direct', technician: 'T1', client: 'C1', startTime: '2026-06-01T09:00:00', endTime: '2026-06-01T11:00:00', isFixed: false, isBillable: true, type: 'client-session', isRecurring: true, recurringPattern: 'weekly', seriesId: 'S1' },
@@ -81,6 +87,12 @@ check('settings clinicianAvailability multi-window', st.clinicianAvailability?.M
 check('settings utilization columns', st.utilization?.bcbaWeeklyBillableMin === 22 && st.utilization?.btWeeklyDirectHours === 165);
 check('settings cancellationNotice columns', st.cancellationNotice?.unplannedHoursThreshold === 24);
 check('settings report leads', st.reportDraftLead?.value === 4 && st.reportFinalLead?.unit === 'weeks');
+
+check('client.city round-trips', c.city === 'Springfield');
+check('settings.homeBase (address + coords)', st.homeBase?.address === '1 Main St' && st.homeBase?.city === 'Hometown' && st.homeBase?.lat === 40.0 && st.homeBase?.lng === -75.0);
+check('settings.travel tunables', st.travel?.enabled === true && st.travel?.withinCityMin === 15 && st.travel?.padPercent === 5 && st.travel?.hourBucketSize === 1);
+check('settings.cityCenters child sheet', st.cityCenters?.length === 2 && st.cityCenters?.[0].city === 'springfield' && st.cityCenters?.[0].lat === 40.1);
+check('settings.travelCache child sheet', st.travelCache?.length === 1 && st.travelCache?.[0].from === 'HOME' && st.travelCache?.[0].to === 'springfield' && st.travelCache?.[0].minutes === 22 && st.travelCache?.[0].dow === 2);
 
 const cx = rt.appointments.find(x => x.id === 'A2')!;
 check('appointment cancellation (separate sheet)', cx.status === 'canceled' && cx.cancellation?.source === 'family' && cx.cancellation?.noticeMet === false && cx.cancellation?.notes === 'called out');

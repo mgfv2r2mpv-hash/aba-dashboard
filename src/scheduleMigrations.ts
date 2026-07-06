@@ -16,7 +16,7 @@ import { ScheduleData } from './types';
 export const BLOB_FORMAT = 'aba-schedule';
 
 // Bump when a migration step is added to STEPS below.
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 // The on-disk (pre-encryption) shape. `data` is a ScheduleData at `schemaVersion`.
 export interface ScheduleEnvelope {
@@ -30,7 +30,23 @@ export interface ScheduleEnvelope {
 // (return a new object). Add entries here as the schema grows; version 0→1 is the
 // envelope baseline (no data change), so it is intentionally absent.
 const STEPS: Record<number, (data: any) => any> = {
-  // 1: (data) => ({ ...data, someNewField: deriveIt(data) }),
+  // 1→2: a make-up recovers ONE specific canceled session, so it is inherently a
+  // one-off and can never recur. Older blobs (and workbooks built by the pre-guard
+  // app — e.g. a single-instance edit of a recurring session turned into a make-up)
+  // may carry make-ups mis-flagged isRecurring:true. That mis-flag made the direct-
+  // backbone materializer clone the session across the whole auth span. Strip the
+  // recurring flags so every downstream reader treats make-ups as the one-offs they
+  // are. Bare imported workbooks arrive as version 0, so this also normalizes them.
+  1: (data) => ({
+    ...data,
+    appointments: Array.isArray(data.appointments)
+      ? data.appointments.map((a: any) =>
+          a && a.isMakeUp && a.isRecurring
+            ? { ...a, isRecurring: false, recurringPattern: undefined }
+            : a,
+        )
+      : data.appointments,
+  }),
 };
 
 function isEnvelope(v: any): v is ScheduleEnvelope {

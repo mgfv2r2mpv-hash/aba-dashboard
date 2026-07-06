@@ -9,6 +9,10 @@ export interface AISettings {
   // with it (opaque in a file browser) and re-import prompts for it. Held in
   // session only — never written into the file.
   schedulePassword?: string;
+  // Google Maps API key powering travel-time routing. Same at-rest secrecy as the
+  // Claude key (sealed under the PIN; obfuscated in the workbook embed). Only
+  // public city centroids + the home address + times are ever sent to Google.
+  mapsApiKey?: string;
 }
 
 // App-lock controls, passed only on native platforms.

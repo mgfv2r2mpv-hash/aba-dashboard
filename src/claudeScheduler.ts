@@ -14,6 +14,7 @@ import {
 } from './anonymizer';
 import { summarizeWish } from './wish';
 import { parseWishSolutions, parseChatTurn, parseToolTurn } from './wish';
+import { buildTravelContext, travelMatrixByClientId } from './travel';
 import { allowedStrategies } from './fixit';
 import { computeClientCompliance, computeTechCompliance, monthPeriod } from './compliance';
 import { resolveUtilization } from './utilization';
@@ -532,7 +533,7 @@ ${scrubbedGuidance ? `\nBCBA GUIDANCE (honor within the HARD RULES; if it confli
 
 HARD RULES — verify every op against ALL before outputting:
 1. Never touch any appointment whose start < NOW.
-2. Never double-book a person. The BCBA is the implicit actor on EVERY supervision/parent-training/case-planning/reassessment item — new or already in SCHEDULE. No two such items may overlap in time. Diff new ops against (a) other ops in this solution and (b) every existing supervision/PT/case-planning/reassessment row.
+2. Never double-book a person. The BCBA is the implicit actor on EVERY supervision/parent-training/case-planning/reassessment item — new or already in SCHEDULE. No two such items may overlap in time. Diff new ops against (a) other ops in this solution and (b) every existing supervision/PT/case-planning/reassessment row. Also leave the TRAVEL minutes (below) between two such items at DIFFERENT client sites — the BCBA drives between them.
 3. BCBA BILLABLE (soft target): Aim for ~${billableMin ?? 'goal'}h/week. Solutions MAY exceed this when needed to meet compliance — flag the overage in reasoning so the BCBA can decide what to trim. Do not voluntarily go below target without a clinical reason.
 4. MAXIMIZE compliance gaps aggressively. Add as many compliant sessions as needed across the horizon — the BCBA will manually trim overages. Prefer the SUPERVISABLE WINDOWS above; only look outside them if needed.
 5. "add" ops must NOT include an "id" field — the app assigns IDs.
@@ -545,9 +546,9 @@ ${JSON.stringify(inScope)}
 CLIENTS: ${JSON.stringify(anon.clients)}
 TECHNICIANS: ${JSON.stringify(anon.technicians)}
 ${anon.blackouts.length ? `BLACKOUT DAYS (each entry blocks only the named entity): ${JSON.stringify(anon.blackouts)}` : ''}
-${anon.timeOff.length ? `BCBA TIME OFF: ${JSON.stringify(anon.timeOff)}` : ''}
+${anon.timeOff.length ? `BCBA TIME OFF: ${JSON.stringify(anon.timeOff)}` : ''}${this.travelHint()}
 
-VALIDATION (do mentally before answering): For every op verify — (a) start ≥ NOW; (b) no double-book; (b2) no two BCBA items overlap; (c) tokens exist in CLIENTS/TECHNICIANS; (d) apt tokens exist in SCHEDULE; (e) entity not in BLACKOUT; (f) BCBA not in TIME OFF; (g) ignore malformed tokens like "CLIENT_nIENT_m".
+VALIDATION (do mentally before answering): For every op verify — (a) start ≥ NOW; (b) no double-book; (b2) no two BCBA items overlap; (b3) enough TRAVEL time between BCBA items at different client sites; (c) tokens exist in CLIENTS/TECHNICIANS; (d) apt tokens exist in SCHEDULE; (e) entity not in BLACKOUT; (f) BCBA not in TIME OFF; (g) ignore malformed tokens like "CLIENT_nIENT_m".
 
 OUTPUT: Strict JSON only — no prose, no markdown. Schema:
 {"solutions":[{"summary":"short title","reasoning":"1-2 sentences","ops":[
@@ -558,6 +559,29 @@ OUTPUT: Strict JSON only — no prose, no markdown. Schema:
 ISO times are local (no timezone suffix).
 
 NO-SOLUTION RULE: If no compliant option exists within ALLOWED STRATEGIES, return EXACTLY ONE solution with empty ops [] and a detailed "reasoning" that for EACH case in GAPS TO CLOSE specifies: (1) does it have supervisable windows? (2) is the BCBA available during those windows? (3) would a new supervision session create a double-book? (4) is the case already at or above target? Format as "CLIENT_n: [specific reason]" per case so the BCBA knows exactly what to fix.`;
+  }
+
+  // A compact, anonymized drive-time hint: minutes between CLIENT tokens at a
+  // representative weekday mid-morning. City NAMES and coordinates never leave the
+  // device — only derived minutes keyed by CLIENT_n. This is a HINT; the code
+  // backstop (dropInfeasibleTravelOps) is the source of truth. Empty when travel
+  // is off or no client cities are set.
+  private travelHint(): string {
+    const ctx = buildTravelContext(this.data);
+    if (!ctx.settings.enabled) return '';
+    const rep = new Date(); rep.setHours(10, 0, 0, 0);
+    const matrix = travelMatrixByClientId(this.data, ctx, rep.getTime());
+    if (matrix.size === 0) return '';
+    const lines: string[] = [];
+    for (const [pair, mins] of matrix) {
+      const [a, b] = pair.split('|');
+      const ta = this.anonMap.clients.get(a);
+      const tb = this.anonMap.clients.get(b);
+      if (ta && tb) lines.push(`${ta}→${tb}:${mins}m`);
+    }
+    return lines.length
+      ? `\nTRAVEL (approx one-way drive minutes between client sites; the BCBA needs at least this long between two non-overlapping BCBA sessions at different clients): ${lines.join(' ')}`
+      : '';
   }
 
   buildWishPrompt(wish: WishRequest): string {
@@ -672,11 +696,12 @@ HARD RULES:
 3. Keep BCBA weekly billable ≥ required; supervision ${s.supervisionDirectHoursPercent}% of direct + ${s.supervisionRBTHoursPercent}% of RBT hours; parent training ≥ ${s.parentTraining.minimumHours}h per ${s.parentTraining.periodUnit}.
 4. Prefer minimal change: move as few sessions as possible, keep recurring slots stable.
 5. Never double-book a person. The BCBA is not listed in CLIENTS/TECHNICIANS but is the implicit actor on EVERY supervision/parent-training/case-planning/reassessment item — new or already in SCHEDULE IN HORIZON. Two such items (any client/tech combination) must never overlap in time. Diff every new add/move against (a) the other ops in the same solution and (b) every existing supervision/parent-training/case-planning/reassessment row in the schedule.
+5b. TRAVEL: the BCBA physically drives between sites. Between two non-overlapping BCBA sessions at DIFFERENT clients, leave at least the minutes listed in TRAVEL (below) — the same body cannot teleport. When a pair isn't listed, assume ~15 min within a metro.
 6. "add" ops must NOT include an "id" field — the app assigns IDs.
 7. Each of the ≤3 solutions must be genuinely distinct.
 ${wish.shaveDown ? `8. SHAVE DOWN: where a case or RBT is OVER-served, you may shorten supervision toward the binding minimum — LARGEST of preferred-min ${s.supervisionPreferredMinPercent ?? 15}%, floor ${s.supervisionFloorPercent ?? 10}%, and BACB 5%. Never trim below that minimum.` : ''}
 
-BCBA availability: ${clinicianAvail}
+BCBA availability: ${clinicianAvail}${this.travelHint()}
 ${fillBlock}
 SCHEDULE IN HORIZON (compact JSON):
 ${JSON.stringify(inScope)}

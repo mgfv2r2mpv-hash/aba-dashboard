@@ -64,7 +64,7 @@ import {
 import { solveDraft, DraftStatus, PrioritizationChoice } from './draftSolver';
 import DraftTray from './components/DraftTray';
 import FindTimeModal from './components/FindTimeModal';
-import { wishSolutionToDraft, dropPastOps } from './wish';
+import { wishSolutionToDraft, dropPastOps, dropInfeasibleTravelOps } from './wish';
 import { computeSessionFlags, SessionFlags, streakEmoji } from './sessionFlags';
 
 // Route axios /api/* calls through an in-memory store on EVERY platform. Native
@@ -333,9 +333,9 @@ export default function App() {
   const stageSassiOps = React.useCallback((ops: WishOp[]) => {
     const base = scheduleData;
     if (!base) return;
-    // Hard real-world guard: a suggestion can never place/move a session into
-    // the past — the BCBA can't perform an appointment that already happened.
-    const safe = dropPastOps(ops);
+    // Hard real-world guards: a suggestion can never place/move a session into
+    // the past, nor land two BCBA sessions with no time to drive between them.
+    const safe = dropInfeasibleTravelOps(dropPastOps(ops), base);
     const { ops: draftOps, blackouts } = wishSolutionToDraft({ id: 'sassi', summary: '', reasoning: '', ops: safe }, base);
     // Blackouts aren't part of the editable draft (DraftOps model appointments
     // only), so buffer any proposed day-offs and commit them WITH the draft on
@@ -534,11 +534,12 @@ export default function App() {
     if (aiSettings.apiKey) return;
     try {
       const decrypted = await deobfuscateKey(embeddedConfig);
-      const parsed = JSON.parse(decrypted) as { apiKey: string; model: ClaudeModel };
+      const parsed = JSON.parse(decrypted) as { apiKey: string; model: ClaudeModel; mapsApiKey?: string };
       const restored: AISettings = {
         ...aiSettings,
         apiKey: parsed.apiKey,
         model: parsed.model || aiSettings.model || 'claude-sonnet-4-6',
+        mapsApiKey: parsed.mapsApiKey ?? aiSettings.mapsApiKey,
       };
       // Route through the saver so the imported key is also sealed under the PIN
       // at rest (native) — otherwise it would survive this session but not a
@@ -636,12 +637,13 @@ export default function App() {
     // Recover the API key + model that were sealed under this same PIN, so the
     // key is "maintained" across cold launches without ever sitting in plaintext.
     const aiConfig = await loadAIConfig(pin);
-    if (aiConfig?.apiKey) {
+    if (aiConfig?.apiKey || aiConfig?.mapsApiKey || aiConfig?.schedulePassword) {
       const restoredSettings: AISettings = {
         ...aiSettings,
-        apiKey: aiConfig.apiKey,
+        apiKey: aiConfig.apiKey || aiSettings.apiKey,
         model: (aiConfig.model as ClaudeModel) || aiSettings.model || 'claude-sonnet-4-6',
         schedulePassword: aiConfig.schedulePassword,
+        mapsApiKey: aiConfig.mapsApiKey,
       };
       setAiSettings(restoredSettings);
       saveSessionSettings(restoredSettings);
@@ -684,8 +686,9 @@ export default function App() {
   const handleChangePin = async (pin: string) => {
     await changePin(pin, scheduleData);
     // Re-seal the AI config under the new PIN so it stays recoverable on unlock.
-    if (aiSettings.apiKey) await saveAIConfig({ apiKey: aiSettings.apiKey, model: aiSettings.model, schedulePassword: aiSettings.schedulePassword }, pin);
-    else await clearAIConfig();
+    if (aiSettings.apiKey || aiSettings.mapsApiKey || aiSettings.schedulePassword) {
+      await saveAIConfig({ apiKey: aiSettings.apiKey, model: aiSettings.model, schedulePassword: aiSettings.schedulePassword, mapsApiKey: aiSettings.mapsApiKey }, pin);
+    } else await clearAIConfig();
     unlockedPinRef.current = pin;
     setChangingPin(false);
   };
@@ -947,7 +950,7 @@ export default function App() {
   // any past-dated add/move first so a suggestion can never land a session before
   // now — the same real-world guard the sAssI chat uses (dropPastOps).
   const draftFromSolution = (sol: WishSolution, base: ScheduleData) =>
-    wishSolutionToDraft({ ...sol, ops: dropPastOps(sol.ops) }, base);
+    wishSolutionToDraft({ ...sol, ops: dropInfeasibleTravelOps(dropPastOps(sol.ops), base) }, base);
 
   const commitWishLikeSolution = async (sol: WishSolution): Promise<boolean> => {
     if (!scheduleData) return false;
@@ -1215,10 +1218,10 @@ export default function App() {
 
   const handleDownload = async () => {
     try {
-      // Layer 1: the API key (if any) rides inside the workbook, app-obfuscated
-      // (no user password) so it loads automatically on re-import.
-      const embeddedConfig = aiSettings.apiKey
-        ? await obfuscateKey(JSON.stringify({ apiKey: aiSettings.apiKey, model: aiSettings.model }))
+      // Layer 1: the API + maps keys (if any) ride inside the workbook, app-obfuscated
+      // (no user password) so they load automatically on re-import.
+      const embeddedConfig = (aiSettings.apiKey || aiSettings.mapsApiKey)
+        ? await obfuscateKey(JSON.stringify({ apiKey: aiSettings.apiKey, model: aiSettings.model, mapsApiKey: aiSettings.mapsApiKey }))
         : undefined;
 
       const response = await axios.post(

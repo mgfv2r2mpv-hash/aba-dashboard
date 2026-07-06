@@ -12,24 +12,27 @@ export interface AIConfigInput {
   apiKey: string;
   model: string;
   schedulePassword?: string;
+  mapsApiKey?: string;
 }
 
 export type AtRestAIAction =
   | { kind: 'save'; config: StoredAIConfig }
   | { kind: 'clear' };
 
-// Save whenever there is anything worth persisting (key OR schedule password);
-// only clear when both are absent.
+// Save whenever there is anything worth persisting (key OR schedule password OR
+// maps key); only clear when all are absent.
 export function resolveAtRestAIConfig(settings: AIConfigInput): AtRestAIAction {
   const hasKey = !!settings.apiKey;
   const hasPassword = !!settings.schedulePassword;
-  if (!hasKey && !hasPassword) return { kind: 'clear' };
+  const hasMapsKey = !!settings.mapsApiKey;
+  if (!hasKey && !hasPassword && !hasMapsKey) return { kind: 'clear' };
   return {
     kind: 'save',
     config: {
       apiKey: settings.apiKey || '',
       model: settings.model,
       schedulePassword: settings.schedulePassword,
+      mapsApiKey: settings.mapsApiKey,
     },
   };
 }

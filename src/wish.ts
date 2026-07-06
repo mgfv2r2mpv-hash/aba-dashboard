@@ -12,6 +12,7 @@ import {
 } from './types';
 import { computeClientCompliance, computeTechCompliance, monthPeriod, CompliancePeriod } from './compliance';
 import { DraftOp, newAddOp, newMoveOp, newRemoveOp, newEditOp, applyOps } from './draft';
+import { buildTravelContext, travelMinutes } from './travel';
 import { v4 as uuidv4 } from 'uuid';
 
 const APPT_TYPES: Appointment['type'][] = [
@@ -205,6 +206,66 @@ export function dropPastOps(ops: WishOp[], now: Date = new Date()): WishOp[] {
     }
     return true;
   });
+}
+
+// Real-world safety net #2 (the "same human body" can't teleport): the model may
+// propose placing two BCBA sessions at different cities with no time to drive
+// between them. This is the CODE source of truth for travel feasibility — the
+// prompt's TRAVEL matrix is only a hint. Each add/move that lands a BCBA session
+// is checked against the fixed context (existing untouched BCBA sessions) and the
+// already-accepted ops; one that leaves too little drive time (or overlaps a
+// session at a different location) is dropped. travelMinutes self-zeroes when
+// travel is off, a location is unknown, or it's the same site, so a schedule with
+// no cities passes everything through unchanged. Non-BCBA ops always pass.
+const BCBA_TRAVEL_TYPES = new Set<Appointment['type']>(['supervision', 'parent-training', 'case-planning', 'reassessment']);
+
+export function dropInfeasibleTravelOps(ops: WishOp[], data: ScheduleData): WishOp[] {
+  const ctx = buildTravelContext(data);
+  if (!ctx.settings.enabled) return ops;
+
+  const idOf = (ref?: string): string | undefined =>
+    ref ? data.clients.find(c => c.id === ref || c.name === ref)?.id : undefined;
+
+  interface Session { s: number; e: number; loc?: string }
+  const touched = new Set(
+    ops.filter((o): o is Extract<WishOp, { appointmentId: string }> => 'appointmentId' in o && (o.op === 'move' || o.op === 'remove'))
+      .map(o => o.appointmentId),
+  );
+  const context: Session[] = data.appointments
+    .filter(a => a.status !== 'canceled' && !a.isGhost && BCBA_TRAVEL_TYPES.has(a.type) && !touched.has(a.id))
+    .map(a => ({ s: new Date(a.startTime).getTime(), e: new Date(a.endTime).getTime(), loc: idOf(a.client) }));
+
+  const sessionOf = (o: WishOp): Session | null => {
+    if (o.op !== 'add' && o.op !== 'move') return null;
+    const s = new Date(o.start).getTime(), e = new Date(o.end).getTime();
+    if (Number.isNaN(s) || Number.isNaN(e)) return null;
+    let type: Appointment['type'] | undefined; let client: string | undefined;
+    if (o.op === 'add') { type = o.type; client = o.client; }
+    else { const a = data.appointments.find(x => x.id === o.appointmentId); type = a?.type; client = a?.client; }
+    if (!type || !BCBA_TRAVEL_TYPES.has(type)) return null;
+    return { s, e, loc: idOf(client) };
+  };
+
+  const feasible = (cand: Session, others: Session[]): boolean => {
+    for (const b of others) {
+      if (b.s < cand.e && b.e > cand.s) { // overlap
+        if ((b.loc || '') !== (cand.loc || '')) return false; // two places at once
+        continue;
+      }
+      if (b.e <= cand.s && (cand.s - b.e) < travelMinutes(b.loc, cand.loc, b.e, ctx) * 60_000) return false;
+      if (cand.e <= b.s && (b.s - cand.e) < travelMinutes(cand.loc, b.loc, cand.e, ctx) * 60_000) return false;
+    }
+    return true;
+  };
+
+  const accepted: Session[] = [...context];
+  const kept: WishOp[] = [];
+  for (const o of ops) {
+    const cand = sessionOf(o);
+    if (!cand) { kept.push(o); continue; }
+    if (feasible(cand, accepted)) { kept.push(o); accepted.push(cand); }
+  }
+  return kept;
 }
 
 // Resolve a client/tech reference (real name or id) to the entity's id.

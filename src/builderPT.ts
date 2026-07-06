@@ -27,6 +27,7 @@ import {
   DatedDirect, DirectCalendar, BcbaBusy,
   reserveBcba, placeBcbaSubinterval, HR_MS, MIN_SUP_HRS,
 } from './builderBcba';
+import { buildTravelContext } from './travel';
 import type { ClientBlock } from './scheduleBuilder';
 
 // ── metrics ─────────────────────────────────────────────────────────────────────
@@ -56,6 +57,8 @@ export function placeParentTraining(
   busyIn: BcbaBusy,
   now: Date,
 ): ParentTrainingPlacement {
+  // Travel context — enforce BCBA drive time between differently-located sessions.
+  const travelCtx = buildTravelContext(data);
   // Non-exempt cases that carry a PT target AND have directs to overlap, ordered
   // service-end cliff first then biggest gap (mirrors the supervision ordering so
   // scarce BCBA time serves the tightest case first). The `directs.length > 0` gate
@@ -114,10 +117,10 @@ export function placeParentTraining(
       // Directs within a week are in start-time order (buildDirectCalendar sorts);
       // take the first that has a BCBA-free sub-slot. PT names that direct's BT.
       for (const d of (byWeek.get(wi) ?? [])) {
-        const slot = placeBcbaSubinterval(data, d, remaining, bcbaBusy);
+        const slot = placeBcbaSubinterval(data, d, remaining, bcbaBusy, travelCtx);
         if (!slot) continue;
         ptOps.push({ op: 'add', type: 'parent-training', client: client.name, technician: d.techName, start: slot.startIso, end: slot.endIso });
-        bcbaBusy = reserveBcba(bcbaBusy, slot.startMs, slot.endMs);
+        bcbaBusy = reserveBcba(bcbaBusy, slot.startMs, slot.endMs, d.clientId);
         const hrs = (slot.endMs - slot.startMs) / HR_MS;
         remaining -= hrs;
         ptHrsPlaced += hrs;

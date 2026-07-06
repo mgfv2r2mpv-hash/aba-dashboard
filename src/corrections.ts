@@ -14,6 +14,7 @@ import {
   computeBtState,
   weekRange,
 } from './caseModel';
+import { buildTravelContext, travelMinutes, TravelContext } from './travel';
 
 // ---------------------------------------------------------------------------
 // Diagnosis: a prioritized list of what needs fixing this period.
@@ -369,6 +370,9 @@ export function findOpenSlots(data: ScheduleData, q: SlotQuery, limit = 8): Slot
   const client = q.clientId ? data.clients.find(c => c.id === q.clientId) : undefined;
   const tech = q.techId ? data.technicians.find(t => t.id === q.techId) : undefined;
   const anchorTech = q.anchorTechId ? data.technicians.find(t => t.id === q.anchorTechId) : undefined;
+  // BCBA travel context — only used when the query treats the clinician as busy
+  // (a BCBA-session search); self-disables when travel is off.
+  const travelCtx = q.clinicianBusy ? buildTravelContext(data) : undefined;
   const out: SlotCandidate[] = [];
 
   // Corrections operate on now-and-future only. Never propose a slot that has
@@ -393,7 +397,7 @@ export function findOpenSlots(data: ScheduleData, q: SlotQuery, limit = 8): Slot
       // When PT must coincide with a direct session, the client's own directs
       // are NOT treated as busy — parent-training is allowed to run alongside
       // them (the parent is present). Other appointments still block.
-      const busy = busyIntervals(data, dateStr, client, tech, q.mustOverlapDirect === true, q.clinicianBusy === true);
+      const busy = busyIntervals(data, dateStr, client, tech, q.mustOverlapDirect === true, q.clinicianBusy === true, travelCtx);
       const directIntervals = q.mustOverlapDirect ? directIntervalsFor(data, dateStr, client, anchorTech) : null;
       for (const w of windows) {
         // PT-coincides mode: anchor candidates to the direct sessions so the
@@ -446,8 +450,11 @@ const CLINICIAN_TYPES: readonly Appointment['type'][] = ['supervision', 'parent-
 
 function busyIntervals(
   data: ScheduleData, dateStr: string, client: Client | undefined, tech: Technician | undefined,
-  allowOverlapClientDirect = false, includeClinician = false,
+  allowOverlapClientDirect = false, includeClinician = false, travelCtx?: TravelContext,
 ): Interval[] {
+  const dayMs = new Date(`${dateStr}T00:00:00`).getTime();
+  const idOf = (ref?: string): string | undefined =>
+    ref ? data.clients.find(c => c.id === ref || c.name === ref)?.id : undefined;
   return data.appointments
     .filter(a => a.status !== 'canceled' && !a.isGhost && a.startTime.slice(0, 10) === dateStr && (
       (client && (a.client === client.id || a.client === client.name)) ||
@@ -458,7 +465,20 @@ function busyIntervals(
     // block the slot (they are the slots we want to land on).
     .filter(a => !(allowOverlapClientDirect && a.type === 'client-session' &&
       client && (a.client === client.id || a.client === client.name)))
-    .map(a => ({ start: minutesOfDay(a.startTime), end: minutesOfDay(a.endTime) }))
+    .map(a => {
+      let start = minutesOfDay(a.startTime);
+      let end = minutesOfDay(a.endTime);
+      // Travel buffer: only BCBA (clinician-type) sessions represent the single
+      // body's prior/next location. Inflate each by drive time to/from the
+      // candidate client's city so a proposed slot leaves realistic travel room.
+      // travelMinutes self-zeroes for same-site, unknown city, or travel-off.
+      if (travelCtx && client && CLINICIAN_TYPES.includes(a.type)) {
+        const loc = idOf(a.client);
+        start -= travelMinutes(client.id, loc, dayMs + start * 60_000, travelCtx);
+        end += travelMinutes(loc, client.id, dayMs + end * 60_000, travelCtx);
+      }
+      return { start, end };
+    })
     .sort((x, y) => x.start - y.start);
 }
 

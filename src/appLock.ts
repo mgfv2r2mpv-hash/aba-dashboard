@@ -27,11 +27,14 @@ const FACEID_KEY = 'faceid.enabled';
 const PIN_STASH_KEY = 'pin.stash';
 
 // The AI config we persist at rest. The API key is the sensitive part;
-// model and schedulePassword ride along so they survive upgrades/reinstalls.
+// model, schedulePassword, and the maps key ride along so they survive
+// upgrades/reinstalls. The Google Maps key powers travel-time routing and is
+// treated with the same at-rest secrecy as the Claude key.
 export interface StoredAIConfig {
   apiKey: string;
   model: string;
   schedulePassword?: string;
+  mapsApiKey?: string;
 }
 
 // Constant sealed under the PIN. Decrypting back to this exact string proves the

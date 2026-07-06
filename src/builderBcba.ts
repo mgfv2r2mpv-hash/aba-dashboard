@@ -19,6 +19,7 @@ import {
 } from './types';
 import { toMin, DAYS, Interval, windowsToIntervals, intersect, btCaseAvailability } from './intervals';
 import { inAuthSpan } from './authorization';
+import { travelMinutes, TravelContext, LocKey } from './travel';
 import type { BuilderConfig, ClientBlock } from './scheduleBuilder';
 
 export const HR_MS = 3_600_000;
@@ -51,14 +52,19 @@ export interface DatedDirect {
   materialized: boolean;  // true = this occurrence is a NEW dated add this pass emitted
 }
 
-export type BcbaBusy = { s: number; e: number }[];
+// A reserved slice of the single BCBA's day. `loc` tags WHERE the BCBA is during
+// it (a client id, the literal 'HOME', or undefined for a location-neutral
+// session like case-planning) so travel time between differently-located blocks
+// can be enforced. Absent loc = no travel constraint (legacy-safe).
+export type BcbaBusy = { s: number; e: number; loc?: LocKey }[];
 
 // ── single-BCBA occupancy primitive (immutable) ────────────────────────────────
+// Raw overlap test (no travel notion) — the BCBA can't be in two sessions at once.
 export function isBcbaFree(busy: BcbaBusy, sMs: number, eMs: number): boolean {
   return !busy.some(b => b.s < eMs && b.e > sMs);
 }
-export function reserveBcba(busy: BcbaBusy, sMs: number, eMs: number): BcbaBusy {
-  return [...busy, { s: sMs, e: eMs }];
+export function reserveBcba(busy: BcbaBusy, sMs: number, eMs: number, loc?: LocKey): BcbaBusy {
+  return [...busy, { s: sMs, e: eMs, loc }];
 }
 
 // ── cadence policy ─────────────────────────────────────────────────────────────
@@ -391,15 +397,28 @@ function clinicianWindowsForDate(data: ScheduleData, date: Date): { s: number; e
   return ws.map(w => ({ s: day0.getTime() + toMin(w.start) * 60_000, e: day0.getTime() + toMin(w.end) * 60_000 }));
 }
 
-// Free sub-gaps of [s,e) after removing the BCBA-busy intervals.
-function freeGaps(s: number, e: number, busy: BcbaBusy): { s: number; e: number }[] {
+// Free sub-gaps of [s,e) after removing the BCBA-busy intervals. When a travel
+// context is supplied AND a candidate location `thisLoc` is given, each busy
+// block is INFLATED by the drive time between its location and the candidate's —
+// a block at a different city reserves not just its own time but the minutes the
+// BCBA needs to reach it (before) and leave it (after). travelMinutes self-guards
+// (returns 0 when travel is disabled, same-site, or a location is unknown), so
+// with no ctx this is the plain overlap subtraction it always was.
+function freeGaps(
+  s: number, e: number, busy: BcbaBusy, thisLoc?: LocKey, ctx?: TravelContext,
+): { s: number; e: number }[] {
   let cur = [{ s, e }];
   for (const b of busy) {
+    let bs = b.s, be = b.e;
+    if (ctx) {
+      bs -= travelMinutes(thisLoc, b.loc, b.s, ctx) * 60_000; // time to ARRIVE at b before it starts
+      be += travelMinutes(b.loc, thisLoc, b.e, ctx) * 60_000; // time to LEAVE b after it ends
+    }
     const next: { s: number; e: number }[] = [];
     for (const seg of cur) {
-      if (b.e <= seg.s || b.s >= seg.e) { next.push(seg); continue; }
-      if (b.s > seg.s) next.push({ s: seg.s, e: b.s });
-      if (b.e < seg.e) next.push({ s: b.e, e: seg.e });
+      if (be <= seg.s || bs >= seg.e) { next.push(seg); continue; }
+      if (bs > seg.s) next.push({ s: seg.s, e: bs });
+      if (be < seg.e) next.push({ s: be, e: seg.e });
     }
     cur = next;
   }
@@ -410,8 +429,10 @@ function freeGaps(s: number, e: number, busy: BcbaBusy): { s: number; e: number 
 // availability AND BCBA-free. Returns null when no ≥ MIN_SUP_HRS slot fits. Used by
 // both the supervision and parent-training passes (the placed session overlaps the
 // direct `d` and, when it names the direct's BT, earns supervision credit).
+// When `ctx` is supplied, the slot must also leave enough drive time to/from any
+// differently-located BCBA block (the "same human body" can't teleport).
 export function placeBcbaSubinterval(
-  data: ScheduleData, d: DatedDirect, desiredH: number, bcbaBusy: BcbaBusy,
+  data: ScheduleData, d: DatedDirect, desiredH: number, bcbaBusy: BcbaBusy, ctx?: TravelContext,
 ): { startMs: number; endMs: number; startIso: string; endIso: string } | null {
   const desMs = Math.max(MIN_SUP_HRS, Math.min(desiredH, MAX_SUP_HRS)) * HR_MS;
   const minMs = MIN_SUP_HRS * HR_MS;
@@ -419,7 +440,7 @@ export function placeBcbaSubinterval(
     const segS = Math.max(d.startMs, w.s);
     const segE = Math.min(d.endMs, w.e);
     if (segE - segS < minMs) continue;
-    for (const g of freeGaps(segS, segE, bcbaBusy)) {
+    for (const g of freeGaps(segS, segE, bcbaBusy, d.clientId, ctx)) {
       if (g.e - g.s < minMs) continue;
       const startMs = g.s;
       const endMs = Math.min(g.e, startMs + desMs);
@@ -430,8 +451,13 @@ export function placeBcbaSubinterval(
   return null;
 }
 
+// Seed the plane with existing BCBA sessions, each tagged with the client whose
+// site it happens at (so travel is enforced against them). Client-less BCBA work
+// (case-planning, internal) is location-neutral → loc undefined.
 export function seedBcbaBusy(data: ScheduleData): BcbaBusy {
+  const idOf = (ref?: string): string | undefined =>
+    ref ? data.clients.find(c => c.id === ref || c.name === ref)?.id : undefined;
   return data.appointments
     .filter(a => isActive(a) && BCBA_TYPES.has(a.type))
-    .map(a => ({ s: new Date(a.startTime).getTime(), e: new Date(a.endTime).getTime() }));
+    .map(a => ({ s: new Date(a.startTime).getTime(), e: new Date(a.endTime).getTime(), loc: idOf(a.client) }));
 }

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, Appointment, CompanyHoliday } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, Appointment, CompanyHoliday, TravelSettings, DEFAULT_TRAVEL_SETTINGS, HomeBase } from '../types';
 import { AISettings, ClaudeModel } from './Settings';
+import { GoogleRoutingProvider, refreshTravelTimes } from '../routing';
 import { resolvePtoConfig, activeBuckets, ptoBucketLabel, computePtoBalances } from '../pto';
 import { computeAuthUsage, computeReportDates } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
@@ -522,6 +523,17 @@ export default function AdminPanel({ data, onDataChange, tabs, initialTab, persi
             settings={data.settings}
             saving={savingId === 'settings'}
             onSave={persistSettings}
+          />
+        )}
+
+        {activeTab === 'settings' && (
+          <TravelSettingsEditor
+            data={data}
+            saving={savingId === 'settings'}
+            onSave={persistSettings}
+            aiSettings={aiSettings}
+            onSaveAISettings={onSaveAISettings}
+            onRequestUnlock={onRequestUnlock}
           />
         )}
 
@@ -1059,6 +1071,7 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
   const [utilStr, setUtilStr] = useState(client.directUtilizationTarget !== undefined ? String(client.directUtilizationTarget) : '');
   const [supIdealStr, setSupIdealStr] = useState(client.supervisionIdealPct !== undefined ? String(client.supervisionIdealPct) : '');
   const [dischargeStr, setDischargeStr] = useState(client.anticipatedDischarge || '');
+  const [cityStr, setCityStr] = useState(client.city || '');
   const [editing, setEditing] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
 
@@ -1197,6 +1210,14 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
             onChange={e => setDischargeStr(e.target.value)}
             onBlur={() => { const v = dischargeStr.trim() || undefined; if (v !== client.anticipatedDischarge) onChange({ anticipatedDischarge: v }); }}
             placeholder="date / note" style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 160px' }}
+          title="Coarse locality — a CITY only, never a street address. Used to estimate the BCBA's drive time between sessions. Run 'Refresh travel times' in Settings after adding cities.">
+          <span style={{ whiteSpace: 'nowrap' }}>City:</span>
+          <input value={cityStr}
+            onChange={e => setCityStr(e.target.value)}
+            onBlur={() => { const v = cityStr.trim() || undefined; if (v !== client.city) onChange({ city: v }); }}
+            placeholder="e.g. Springfield, IL" style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
         </label>
       </div>
 
@@ -2364,6 +2385,164 @@ function CandcEditor({ settings, saving, onSave }: {
       <div style={{ marginTop: '8px', paddingTop: '12px', borderTop: 'var(--border-hairline)' }}>
         {saveBar}
       </div>
+    </div>
+  );
+}
+
+// ── Travel-time grounding (Settings tab) ──────────────────────────────────────
+// Home base, the travel-model tunables, the Google Maps key, and a "Refresh
+// travel times" action that geocodes cities + warms the routed-duration cache.
+// Only public city centroids + the home address + times are ever sent to Google.
+function TravelSettingsEditor({ data, saving, onSave, aiSettings, onSaveAISettings, onRequestUnlock }: {
+  data: ScheduleData;
+  saving: boolean;
+  onSave: (next: CompanySettings) => Promise<boolean>;
+  aiSettings?: AISettings;
+  onSaveAISettings?: (s: AISettings) => void | Promise<void>;
+  onRequestUnlock?: () => Promise<boolean>;
+}) {
+  const settings = data.settings;
+  const tv = { ...DEFAULT_TRAVEL_SETTINGS, ...(settings.travel || {}) };
+  const home = settings.homeBase || {};
+  const str = (n?: number) => (n === undefined ? '' : String(n));
+
+  const [enabled, setEnabled] = useState(tv.enabled);
+  const [withinCity, setWithinCity] = useState(String(tv.withinCityMin));
+  const [pad, setPad] = useState(String(tv.padPercent));
+  const [speed, setSpeed] = useState(String(tv.avgSpeedMph));
+  const [unknownMin, setUnknownMin] = useState(String(tv.defaultUnknownMin));
+  const [hbLabel, setHbLabel] = useState(home.label || '');
+  const [hbAddress, setHbAddress] = useState(home.address || '');
+  const [hbCity, setHbCity] = useState(home.city || '');
+  const [hbLat, setHbLat] = useState(str(home.lat));
+  const [hbLng, setHbLng] = useState(str(home.lng));
+
+  const hasMapsKey = !!aiSettings?.mapsApiKey;
+  const [replacingKey, setReplacingKey] = useState(!hasMapsKey);
+  const [mapsKeyInput, setMapsKeyInput] = useState('');
+
+  const [busy, setBusy] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+  const [log, setLog] = useState<string[]>([]);
+
+  const num = (s: string, fb: number) => { const n = parseFloat(s); return Number.isFinite(n) ? n : fb; };
+
+  const draftSettings = (): CompanySettings => {
+    const homeBase: HomeBase = {};
+    if (hbLabel.trim()) homeBase.label = hbLabel.trim();
+    if (hbAddress.trim()) homeBase.address = hbAddress.trim();
+    if (hbCity.trim()) homeBase.city = hbCity.trim();
+    if (hbLat.trim() !== '' && Number.isFinite(parseFloat(hbLat))) homeBase.lat = parseFloat(hbLat);
+    if (hbLng.trim() !== '' && Number.isFinite(parseFloat(hbLng))) homeBase.lng = parseFloat(hbLng);
+    const travel: TravelSettings = {
+      enabled,
+      withinCityMin: num(withinCity, DEFAULT_TRAVEL_SETTINGS.withinCityMin),
+      padPercent: num(pad, DEFAULT_TRAVEL_SETTINGS.padPercent),
+      avgSpeedMph: num(speed, DEFAULT_TRAVEL_SETTINGS.avgSpeedMph),
+      defaultUnknownMin: num(unknownMin, DEFAULT_TRAVEL_SETTINGS.defaultUnknownMin),
+      hourBucketSize: tv.hourBucketSize,
+    };
+    return { ...settings, homeBase: Object.keys(homeBase).length ? homeBase : undefined, travel };
+  };
+
+  // Persist the maps key (replace-gated) and return the effective key. Blank on
+  // replace keeps the existing key.
+  const persistMapsKey = async (): Promise<string | undefined> => {
+    if (!replacingKey) return aiSettings?.mapsApiKey;
+    const key = mapsKeyInput.trim();
+    if (!key) return aiSettings?.mapsApiKey;
+    if (onSaveAISettings && aiSettings) await onSaveAISettings({ ...aiSettings, mapsApiKey: key });
+    return key;
+  };
+
+  const saveAll = async () => {
+    setJustSaved(false);
+    await persistMapsKey();
+    const ok = await onSave(draftSettings());
+    if (ok !== false) { setJustSaved(true); setReplacingKey(false); setMapsKeyInput(''); window.setTimeout(() => setJustSaved(false), 2500); }
+  };
+
+  const doRefresh = async () => {
+    const key = await persistMapsKey();
+    if (!key) { setLog(['Set a Google Maps API key first, then Refresh.']); return; }
+    setBusy(true); setLog(['Refreshing travel times…']);
+    try {
+      const draft = draftSettings();
+      const provider = new GoogleRoutingProvider(key);
+      const res = await refreshTravelTimes({ ...data, settings: draft }, provider, new Date());
+      await onSave({ ...draft, cityCenters: res.cityCenters, travelCache: res.travelCache });
+      setReplacingKey(false); setMapsKeyInput('');
+      setLog([...res.log, `Now caching ${res.cityCenters.length} city centroids and ${res.travelCache.length} routed times.`]);
+    } catch {
+      setLog(['Travel refresh failed — check the Maps key and connection. Sessions without a routed time use an offline estimate.']);
+    } finally { setBusy(false); }
+  };
+
+  const revealReplace = async () => {
+    if (onRequestUnlock && !(await onRequestUnlock())) return;
+    setReplacingKey(true);
+  };
+
+  const cityCount = (settings.cityCenters || []).length;
+  const cacheCount = (settings.travelCache || []).length;
+  const clientCities = new Set((data.clients || []).map(c => (c.city || '').trim().toLowerCase()).filter(Boolean)).size;
+  const fieldRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-body)' };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <SettingsSection title="Travel Time — BCBA drive between sessions">
+        <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 8px' }}>
+          Grounds the schedule so the single BCBA has realistic drive time between sessions at different clients.
+          Each client carries a <strong>city only</strong> (set per client under Caseload → Clients); your home base is the one exact address.
+          Only public city centroids + your home address + times are ever sent to Google.
+        </p>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8 }}>
+          <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
+          Enforce travel time when building &amp; suggesting schedules
+        </label>
+        <NumField label="Same-city trip (flat)" value={withinCity} onChange={setWithinCity} suffix="min" defaultValue={15} hint="Two clients in one city share a centroid, so same-city hops use this flat floor." />
+        <NumField label="Pad on routed times" value={pad} onChange={setPad} suffix="%" defaultValue={5} hint="Added to each Google drive time for the last mile from the city centroid to the real site." />
+        <NumField label="Offline fallback speed" value={speed} onChange={setSpeed} suffix="mph" defaultValue={30} hint="Estimates a cross-city drive when no routed time is cached." />
+        <NumField label="Fallback when a city can't be located" value={unknownMin} onChange={setUnknownMin} suffix="min" defaultValue={45} />
+      </SettingsSection>
+
+      <SettingsSection title="Home Base">
+        <p style={{ fontSize: 12, color: '#6b7280', margin: '0 0 8px' }}>Your day's start/end point — an exact address is fine here (it's yours, not a client's). Lat/Lng auto-fill on Refresh.</p>
+        <div style={fieldRow}><span style={{ width: 64 }}>Label</span><input value={hbLabel} onChange={e => setHbLabel(e.target.value)} placeholder="Home" style={{ ...inputStyle, flex: 1, minWidth: 120 }} /></div>
+        <div style={fieldRow}><span style={{ width: 64 }}>Address</span><input value={hbAddress} onChange={e => setHbAddress(e.target.value)} placeholder="123 Main St, City, ST" style={{ ...inputStyle, flex: 1, minWidth: 160 }} /></div>
+        <div style={fieldRow}>
+          <span style={{ width: 64 }}>City</span><input value={hbCity} onChange={e => setHbCity(e.target.value)} placeholder="City, ST" style={{ ...inputStyle, flex: 1, minWidth: 120 }} />
+          <span>Lat</span><input value={hbLat} onChange={e => setHbLat(e.target.value)} placeholder="auto" style={{ ...inputStyle, width: 90 }} />
+          <span>Lng</span><input value={hbLng} onChange={e => setHbLng(e.target.value)} placeholder="auto" style={{ ...inputStyle, width: 90 }} />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Google Maps API Key &amp; Refresh">
+        {hasMapsKey && !replacingKey ? (
+          <div style={{ ...fieldRow, gap: 10 }}>
+            <span style={{ color: 'var(--status-met)', fontWeight: 600 }}>🔒 Maps key is set</span>
+            <button onClick={revealReplace} style={chipBtn}>Replace</button>
+          </div>
+        ) : (
+          <div style={fieldRow}>
+            <span style={{ width: 64 }}>Maps key</span>
+            <input type="password" value={mapsKeyInput} onChange={e => setMapsKeyInput(e.target.value)} placeholder={hasMapsKey ? 'blank = keep existing' : 'AIza…'} autoComplete="off" style={{ ...inputStyle, flex: 1, minWidth: 160 }} />
+          </div>
+        )}
+        <p style={{ fontSize: 11, color: '#6b7280', margin: '4px 0 8px' }}>
+          Predictive traffic uses Google's Routes API. Restrict the key (API + referrer) in Google Cloud. Caching {cityCount} city centroids / {cacheCount} routed times for {clientCities} client {clientCities === 1 ? 'city' : 'cities'}.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <button onClick={saveAll} style={primaryBtn} disabled={saving || busy}>{saving ? 'Saving…' : 'Save travel settings'}</button>
+          <button onClick={doRefresh} style={chipBtn} disabled={busy || saving}>{busy ? 'Refreshing…' : '↻ Refresh travel times'}</button>
+          {justSaved && <span style={{ color: 'var(--status-met)', fontWeight: 600, fontSize: 13 }}>✓ Saved</span>}
+        </div>
+        {log.length > 0 && (
+          <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none', fontSize: 11, color: 'var(--text-body)' }}>
+            {log.map((l, i) => <li key={i}>• {l}</li>)}
+          </ul>
+        )}
+      </SettingsSection>
     </div>
   );
 }

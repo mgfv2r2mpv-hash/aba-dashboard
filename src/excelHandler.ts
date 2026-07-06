@@ -4,6 +4,7 @@ import {
   Blackout, Authorization, ManualUsage, Cancellation, CancellationCode, AUTH_BUCKETS, TimeOff, CompanyHoliday,
   PtoConfig, AccrualRule, AccrualKind, PtoBucket, PtoOpeningBalance,
   BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS,
+  TravelSettings, DEFAULT_TRAVEL_SETTINGS, CityCenter, TravelCacheEntry,
 } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -140,6 +141,8 @@ function parseClients(workbook: XLSX.WorkBook): Client[] {
     if (notes) client.notes = notes;
     const supIdeal = num(row.supervisionIdealPct);
     if (supIdeal !== undefined) client.supervisionIdealPct = supIdeal;
+    const city = text(row.city);
+    if (city) client.city = city;
     return client;
   });
 }
@@ -349,6 +352,47 @@ function parseSettings(
     });
   }
 
+  // Home base (own columns). The one exact address in the model; attach only
+  // when something is set so an older file round-trips as homeBase: undefined.
+  const homeBase: NonNullable<CompanySettings['homeBase']> = {};
+  const hbLabel = text(row.homeBaseLabel); if (hbLabel) homeBase.label = hbLabel;
+  const hbAddr = text(row.homeBaseAddress); if (hbAddr) homeBase.address = hbAddr;
+  const hbCity = text(row.homeBaseCity); if (hbCity) homeBase.city = hbCity;
+  const hbLat = num(row.homeBaseLat); if (hbLat !== undefined) homeBase.lat = hbLat;
+  const hbLng = num(row.homeBaseLng); if (hbLng !== undefined) homeBase.lng = hbLng;
+  if (Object.keys(homeBase).length) settings.homeBase = homeBase;
+
+  // Travel-model tunables (own columns). Attach only when any are present,
+  // backfilling from DEFAULT_TRAVEL_SETTINGS so a partial file still round-trips.
+  const tv: Partial<TravelSettings> = {};
+  const travelEnabled = bool3(row.travelEnabled); if (travelEnabled !== undefined) tv.enabled = travelEnabled;
+  for (const [col, key] of [
+    ['travelWithinCityMin', 'withinCityMin'],
+    ['travelPadPercent', 'padPercent'],
+    ['travelAvgSpeedMph', 'avgSpeedMph'],
+    ['travelDefaultUnknownMin', 'defaultUnknownMin'],
+    ['travelHourBucketSize', 'hourBucketSize'],
+  ] as [string, keyof TravelSettings][]) {
+    const v = num(row[col]); if (v !== undefined) (tv as any)[key] = v;
+  }
+  if (Object.keys(tv).length) settings.travel = { ...DEFAULT_TRAVEL_SETTINGS, ...tv };
+
+  // City centroids (own child sheet) — geocode cache keyed by city name.
+  const centerRows = rowsOf(workbook, 'CityCenters').filter(r => r && !isBlank(r.city));
+  if (centerRows.length) {
+    settings.cityCenters = centerRows.map((r: any): CityCenter => ({
+      city: String(r.city), lat: num(r.lat) ?? 0, lng: num(r.lng) ?? 0,
+    }));
+  }
+
+  // Routed-duration cache (own child sheet) — traffic-aware minutes by bucket.
+  const travelRows = rowsOf(workbook, 'TravelTimes').filter(r => r && !isBlank(r.from) && !isBlank(r.to));
+  if (travelRows.length) {
+    settings.travelCache = travelRows.map((r: any): TravelCacheEntry => ({
+      from: String(r.from), to: String(r.to), dow: num(r.dow) ?? 0, hour: num(r.hour) ?? 0, minutes: num(r.minutes) ?? 0,
+    }));
+  }
+
   return settings;
 }
 
@@ -521,11 +565,11 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
   add('Clients',
     ['id', 'name', 'parentTrainingMaxHours', 'cadenceGoal', 'isEI', 'eiDate',
       'partialStaffAllowed', 'parentAvailableOutsideSessions', 'anticipatedDischarge', 'notes',
-      'supervisionIdealPct'],
+      'supervisionIdealPct', 'city'],
     data.clients.map(c => [
       c.id, c.name, W(c.parentTrainingMaxHours), W(c.cadenceGoal), WT(c.isEI), W(c.eiDate),
       WB(c.partialStaffAllowed), WT(c.parentAvailableOutsideSessions), W(c.anticipatedDischarge), W(c.notes),
-      W(c.supervisionIdealPct),
+      W(c.supervisionIdealPct), W(c.city),
     ]));
 
   // Technicians (scalars only).
@@ -566,7 +610,10 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
       'reportDraftLeadValue', 'reportDraftLeadUnit', 'reportFinalLeadValue', 'reportFinalLeadUnit',
       'ptoBillableDeductionRatio', 'ptoMode', 'ptoBuckets', 'ptoUnpaidEnabled',
       'bcbaSupervisionPctOfDirect', 'bcbaReassessmentHours', 'bcbaCasePlanningHours',
-      'bcbaParentTrainingHours', 'bcbaOtherHours'],
+      'bcbaParentTrainingHours', 'bcbaOtherHours',
+      'homeBaseLabel', 'homeBaseAddress', 'homeBaseCity', 'homeBaseLat', 'homeBaseLng',
+      'travelEnabled', 'travelWithinCityMin', 'travelPadPercent', 'travelAvgSpeedMph',
+      'travelDefaultUnknownMin', 'travelHourBucketSize'],
     [[
       s.supervisionDirectHoursPercent, s.supervisionRBTHoursPercent, W(s.supervisionTechHoursPercent),
       W(s.supervisionMaxHoursPercent), W(s.supervisionFloorPercent), W(s.supervisionPreferredMinPercent),
@@ -581,7 +628,18 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
       W(s.bcbaSessionDefaults?.supervisionPercentOfWeeklyDirect), W(s.bcbaSessionDefaults?.reassessmentHours),
       W(s.bcbaSessionDefaults?.casePlanningHours), W(s.bcbaSessionDefaults?.parentTrainingHours),
       W(s.bcbaSessionDefaults?.otherHours),
+      W(s.homeBase?.label), W(s.homeBase?.address), W(s.homeBase?.city), W(s.homeBase?.lat), W(s.homeBase?.lng),
+      WB(s.travel?.enabled), W(s.travel?.withinCityMin), W(s.travel?.padPercent), W(s.travel?.avgSpeedMph),
+      W(s.travel?.defaultUnknownMin), W(s.travel?.hourBucketSize),
     ]]);
+
+  // City centroids (geocode cache) + routed-duration cache. Both are normalized
+  // list sheets, populated by "Refresh travel times"; the deterministic builder
+  // reads them synchronously. Only public city centroids ever live here.
+  add('CityCenters', ['city', 'lat', 'lng'],
+    (s.cityCenters || []).map(c => [c.city, c.lat, c.lng]));
+  add('TravelTimes', ['from', 'to', 'dow', 'hour', 'minutes'],
+    (s.travelCache || []).map(e => [e.from, e.to, e.dow, e.hour, e.minutes]));
 
   // Appointments (cancellation columns split out).
   add('Appointments',

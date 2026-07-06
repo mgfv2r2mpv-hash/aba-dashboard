@@ -1,4 +1,4 @@
-import { bindingConstraintLabel, type BuildResult } from '../../scheduleBuilder';
+import { bindingConstraintLabel, type BuildResult, type ClientBlock } from '../../scheduleBuilder';
 
 /**
  * BuildResultPanel — the readout after a one-tap build: what the deterministic
@@ -68,39 +68,80 @@ export function BuildResultPanel({ result, hasStagedProposal, onDismiss }: Build
         <div style={{ marginTop: 2 }}>{nextStep}</div>
       </div>
 
-      {blocks.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--amber-700, #b45309)' }}>
-            Couldn’t fully resolve {blocks.length} case{blocks.length === 1 ? '' : 's'}:
-          </div>
-          {blocks.map(b => {
-            const isSup = b.bindingConstraint === 'bcba-availability';
-            const isPt = b.bindingConstraint === 'pt-availability';
-            const gap = isSup ? b.supervisionGapRemaining ?? 0
-              : isPt ? b.ptGapRemaining ?? 0
-              : b.directGapRemaining;
-            const shortLabel = isSup ? 'supervision short' : isPt ? 'parent training short' : 'short';
-            return (
-              <div
-                key={`${b.clientId}:${b.bindingConstraint}`}
-                style={{
-                  fontSize: 12, color: 'var(--text-body)', background: 'var(--sage-50)',
-                  border: '1px solid var(--sage-100)', borderRadius: 8, padding: '6px 9px',
-                }}
-              >
-                <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                  <strong style={{ color: 'var(--text-primary)' }}>{b.clientName}</strong>
-                  <span style={{ fontSize: 11, color: 'var(--sage-700)' }}>{bindingConstraintLabel(b.bindingConstraint)}</span>
-                  {gap > 0 && (
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>· {round1(gap)}h {shortLabel}</span>
-                  )}
+      {blocks.length > 0 && (() => {
+        // A recurring session that can't be materialized emits ONE block per failed
+        // week, so a single case can spawn dozens of identical cards. Collapse those
+        // dated per-occurrence blocks into one summary per (case, reason); case-level
+        // blocks (no occurrenceDate) still render individually.
+        const perOcc = blocks.filter(b => b.occurrenceDate);
+        const caseLevel = blocks.filter(b => !b.occurrenceDate);
+
+        const groups = new Map<string, { clientName: string; constraint: ClientBlock['bindingConstraint']; dates: string[] }>();
+        for (const b of perOcc) {
+          const key = `${b.clientId}:${b.bindingConstraint}`;
+          const g = groups.get(key) ?? { clientName: b.clientName, constraint: b.bindingConstraint, dates: [] };
+          g.dates.push(b.occurrenceDate!);
+          groups.set(key, g);
+        }
+        const groupCount = caseLevel.length + groups.size;
+        const fmtDate = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        const cardStyle = {
+          fontSize: 12, color: 'var(--text-body)', background: 'var(--sage-50)',
+          border: '1px solid var(--sage-100)', borderRadius: 8, padding: '6px 9px',
+        } as const;
+        const MAX_DATES = 12;
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--amber-700, #b45309)' }}>
+              Couldn’t fully resolve {groupCount} case{groupCount === 1 ? '' : 's'}:
+            </div>
+
+            {caseLevel.map(b => {
+              const isSup = b.bindingConstraint === 'bcba-availability';
+              const isPt = b.bindingConstraint === 'pt-availability';
+              const gap = isSup ? b.supervisionGapRemaining ?? 0
+                : isPt ? b.ptGapRemaining ?? 0
+                : b.directGapRemaining;
+              const shortLabel = isSup ? 'supervision short' : isPt ? 'parent training short' : 'short';
+              return (
+                <div key={`${b.clientId}:${b.bindingConstraint}`} style={cardStyle}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    <strong style={{ color: 'var(--text-primary)' }}>{b.clientName}</strong>
+                    <span style={{ fontSize: 11, color: 'var(--sage-700)' }}>{bindingConstraintLabel(b.bindingConstraint)}</span>
+                    {gap > 0 && (
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>· {round1(gap)}h {shortLabel}</span>
+                    )}
+                  </div>
+                  {b.detail && <div style={{ marginTop: 2, fontSize: 11.5, color: 'var(--text-secondary)' }}>{b.detail}</div>}
                 </div>
-                {b.detail && <div style={{ marginTop: 2, fontSize: 11.5, color: 'var(--text-secondary)' }}>{b.detail}</div>}
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+
+            {[...groups.values()].map(g => {
+              const total = g.dates.length;
+              const uniqueDates = [...new Set(g.dates)].sort();
+              const shown = uniqueDates.slice(0, MAX_DATES).map(fmtDate).join(', ');
+              const extra = uniqueDates.length - MAX_DATES;
+              const spread = uniqueDates.length < total ? ` across ${uniqueDates.length} date${uniqueDates.length === 1 ? '' : 's'}` : '';
+              return (
+                <div key={`${g.clientName}:${g.constraint}:occ`} style={cardStyle}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    <strong style={{ color: 'var(--text-primary)' }}>{g.clientName}</strong>
+                    <span style={{ fontSize: 11, color: 'var(--sage-700)' }}>{bindingConstraintLabel(g.constraint)}</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      · {total} session{total === 1 ? '' : 's'}{spread} couldn’t be placed (overlaps an existing session)
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 2, fontSize: 11.5, color: 'var(--text-secondary)' }}>
+                    {shown}{extra > 0 ? `, +${extra} more` : ''}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
     </section>
   );
 }

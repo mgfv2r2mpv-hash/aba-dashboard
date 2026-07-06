@@ -118,4 +118,45 @@ describe('useIssueQueue', () => {
     expect(result.current.current).toBeNull();
     expect(result.current.remaining).toBe(0);
   });
+
+  it('browses forward and back without reordering the queue', () => {
+    const issues = [mk('a'), mk('b'), mk('c')];
+    const { result } = renderHook(() => useIssueQueue(issues));
+    expect(result.current.position).toBe(1);
+    expect(result.current.hasPrev).toBe(false);
+    act(() => result.current.next());
+    expect(result.current.current?.id).toBe('b');
+    expect(result.current.position).toBe(2);
+    expect(result.current.hasPrev).toBe(true);
+    expect(result.current.hasNext).toBe(true);
+    act(() => result.current.next());
+    expect(result.current.current?.id).toBe('c');
+    expect(result.current.hasNext).toBe(false);
+    // Paging back reaches 'a' again — the order was never touched.
+    act(() => result.current.prev());
+    act(() => result.current.prev());
+    expect(result.current.current?.id).toBe('a');
+    expect(result.current.position).toBe(1);
+  });
+
+  it('clamps browsing at both ends', () => {
+    const { result } = renderHook(() => useIssueQueue([mk('a'), mk('b')]));
+    act(() => result.current.prev()); // already at the first card
+    expect(result.current.current?.id).toBe('a');
+    act(() => result.current.next());
+    act(() => result.current.next()); // past the last card
+    expect(result.current.current?.id).toBe('b');
+    expect(result.current.hasNext).toBe(false);
+  });
+
+  it('defers the browsed-to card, not just the head', () => {
+    const issues = [mk('a'), mk('b'), mk('c')];
+    const { result } = renderHook(() => useIssueQueue(issues));
+    act(() => result.current.next()); // now showing 'b'
+    act(() => result.current.notNow()); // defer 'b', not 'a'
+    expect(result.current.current?.id).toBe('c');
+    expect(result.current.remaining).toBe(3);
+    act(() => result.current.next()); // the deferred 'b' sits at the back
+    expect(result.current.current?.id).toBe('b');
+  });
 });

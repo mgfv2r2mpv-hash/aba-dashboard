@@ -283,8 +283,9 @@ export default function AppointmentForm({
   const buildAppointments = (): Appointment[] => {
     const editing = !!appointment?.id;
 
-    // Scope-aware edit branches before the build-from-scratch logic.
-    if (editing && hasSeries && editScope !== 'instance') {
+    // Scope-aware edit branches before the build-from-scratch logic. A make-up is
+    // never part of a series (see base below), so series-scope edits don't apply.
+    if (editing && hasSeries && editScope !== 'instance' && !isMakeUp) {
       const updates = buildSeriesEdit();
       return updates.length > 0 ? updates : [];
     }
@@ -302,12 +303,19 @@ export default function AppointmentForm({
       isBillable,
       isMakeUp: isMakeUp || undefined,
       makeupForId: isMakeUp && makeupForId ? makeupForId : undefined,
-      isRecurring: recurrence !== 'none',
-      recurringPattern: recurrence === 'none' ? undefined : (recurrence as any),
+      // A make-up recovers ONE specific canceled session, so it is inherently a
+      // one-off — never a recurring series. This guards every path: a fresh add,
+      // and (critically) editing a single instance of a recurring session into a
+      // make-up, where `recurrence` was seeded from the original's pattern.
+      isRecurring: !isMakeUp && recurrence !== 'none',
+      recurringPattern: isMakeUp || recurrence === 'none' ? undefined : (recurrence as any),
       // Preserve series membership on single-instance edit so the slider
       // stays meaningful for future opens.
       seriesId: appointment?.seriesId,
     };
+
+    // A make-up is a single dated session; skip all series expansion below.
+    if (isMakeUp) return [base];
 
     if (recurrence === 'none') return [base];
 
@@ -608,7 +616,15 @@ export default function AppointmentForm({
             </div>
             <div>
               <label style={labelStyle}>Recurrence</label>
-              <select value={recurrence} onChange={(e) => setRecurrence(e.target.value as RecurrencePattern)} style={inputStyle}>
+              {/* A make-up is one-off by definition — force and lock it to One-time
+                  so a recurring series of make-ups can't be created. */}
+              <select
+                value={isMakeUp ? 'none' : recurrence}
+                onChange={(e) => setRecurrence(e.target.value as RecurrencePattern)}
+                disabled={isMakeUp}
+                style={{ ...inputStyle, ...(isMakeUp ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
+                title={isMakeUp ? 'Make-up sessions are always one-time.' : undefined}
+              >
                 <option value="none">One-time</option>
                 <option value="weekly">Weekly</option>
                 <option value="biweekly">Every 2 weeks</option>

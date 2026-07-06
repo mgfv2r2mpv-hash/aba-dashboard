@@ -12,6 +12,12 @@ export interface IssueCardProps {
   issue: DockIssue;
   /** Total items in the rotation, including this one. */
   remaining: number;
+  /** 1-based position of this card in the rotation, for the pager. */
+  position: number;
+  hasPrev: boolean;
+  hasNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
   onReviewConflict: (issue: DockIssue) => void;
   onMuteConflict: (issue: DockIssue) => void;
   onFixCompliance: () => void;
@@ -27,12 +33,16 @@ const SEVERITY_INTENT: Record<DockIssue['severity'], PillIntent> = {
 export function IssueCard({
   issue,
   remaining,
+  position,
+  hasPrev,
+  hasNext,
+  onPrev,
+  onNext,
   onReviewConflict,
   onMuteConflict,
   onFixCompliance,
   onNotNow,
 }: IssueCardProps) {
-  const behind = remaining - 1;
   const isConflict = issue.kind === 'conflict';
 
   return (
@@ -83,11 +93,28 @@ export function IssueCard({
         )}
       </div>
 
-      {behind > 0 && (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>
-          {behind} more after this
+      {remaining > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>
+          <button type="button" onClick={onPrev} disabled={!hasPrev} aria-label="Previous item" style={pagerBtnStyle(hasPrev)}>‹</button>
+          <span>{position} of {remaining}</span>
+          <button type="button" onClick={onNext} disabled={!hasNext} aria-label="Next item" style={pagerBtnStyle(hasNext)}>›</button>
+          <span style={{ flex: 1 }} />
+          <span style={{ fontWeight: 600 }}>browse — no change</span>
         </div>
       )}
     </div>
   );
+}
+
+// Chevron pager button — subtle, disabled at the ends. Browsing never mutates the
+// queue, so these are visually quieter than the action buttons above.
+function pagerBtnStyle(enabled: boolean) {
+  return {
+    border: '1px solid var(--sage-200)',
+    background: enabled ? 'var(--white)' : 'transparent',
+    color: enabled ? 'var(--text-secondary)' : 'var(--text-muted)',
+    borderRadius: 6, width: 26, height: 26, padding: 0, lineHeight: 1, fontSize: 15, fontWeight: 800,
+    cursor: enabled ? 'pointer' : 'default', opacity: enabled ? 1 : 0.4,
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  } as const;
 }

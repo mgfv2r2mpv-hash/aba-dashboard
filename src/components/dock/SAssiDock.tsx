@@ -139,6 +139,11 @@ export function SAssiDock({
           <IssueCard
             issue={queue.current}
             remaining={queue.remaining}
+            position={queue.position}
+            hasPrev={queue.hasPrev}
+            hasNext={queue.hasNext}
+            onPrev={queue.prev}
+            onNext={queue.next}
             onReviewConflict={onReviewConflict}
             onMuteConflict={onMuteConflict}
             onFixCompliance={onFixCompliance}

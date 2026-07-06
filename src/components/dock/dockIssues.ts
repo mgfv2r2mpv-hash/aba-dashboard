@@ -80,29 +80,58 @@ export interface IssueQueueState {
   current: DockIssue | null;
   /** Total items in the active rotation, including the current one. */
   remaining: number;
-  /** Defer the current item to the back of the rotation. */
+  /** 1-based position of the shown card in the rotation (0 when empty). */
+  position: number;
+  /** Whether a previous / next card exists to browse to. */
+  hasPrev: boolean;
+  hasNext: boolean;
+  /** Browse back / forward WITHOUT acting on or reordering the queue. */
+  prev: () => void;
+  next: () => void;
+  /** Defer the shown item to the back of the rotation. */
   notNow: () => void;
 }
 
 /**
- * One-at-a-time cycling. "Not now" rotates the current item to the back so the
- * BCBA can pass on it without dismissing it; new issues slot in ahead of any
- * deferred ones, and deferred items that get resolved elsewhere fall out.
+ * One-at-a-time cycling with a browse cursor. `prev`/`next` step through the
+ * rotation without touching it — a read-only page through the queue. "Not now"
+ * rotates the shown item to the back so the BCBA can pass on it without
+ * dismissing it; new issues slot in ahead of any deferred ones, and deferred
+ * items that get resolved elsewhere fall out.
  */
 export function useIssueQueue(issues: DockIssue[]): IssueQueueState {
   const [deferred, setDeferred] = useState<string[]>([]);
+  const [cursor, setCursor] = useState(0);
   const ids = issues.map((i) => i.id);
   const liveDeferred = deferred.filter((id) => ids.includes(id));
   const active = ids.filter((id) => !liveDeferred.includes(id));
   const order = [...active, ...liveDeferred];
-  const currentId = order[0] ?? null;
+  // The queue changes size as issues resolve/appear — clamp the browse cursor so
+  // it always lands on a real card.
+  const idx = order.length ? Math.min(cursor, order.length - 1) : 0;
+  const currentId = order[idx] ?? null;
   const current = issues.find((i) => i.id === currentId) ?? null;
+
+  const prev = () => setCursor(() => Math.max(idx - 1, 0));
+  const next = () => setCursor(() => Math.min(idx + 1, order.length - 1));
 
   const notNow = () => {
     // Nothing to rotate to when it's the last card standing.
     if (!currentId || order.length < 2) return;
     setDeferred((d) => [...d.filter((x) => x !== currentId), currentId]);
+    // The deferred card leaves this slot; keep the cursor on the slot (now the
+    // next card), clamped to the shrunken active head.
+    setCursor(() => Math.min(idx, order.length - 2));
   };
 
-  return { current, remaining: order.length, notNow };
+  return {
+    current,
+    remaining: order.length,
+    position: order.length ? idx + 1 : 0,
+    hasPrev: idx > 0,
+    hasNext: idx < order.length - 1,
+    prev,
+    next,
+    notNow,
+  };
 }

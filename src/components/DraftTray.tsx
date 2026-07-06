@@ -29,7 +29,11 @@ function opLabel(op: DraftOp, base: ScheduleData): string {
   const fmt = (iso?: string) => {
     if (!iso) return '';
     const d = new Date(iso);
-    return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+    // Include the calendar date, not just the weekday — a build materializes the
+    // same weekly session across many weeks, so "Thu 10:00" alone reads identical
+    // on every row. "Thu, Jul 9, 10:00" tells them apart.
+    const date = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    return `${date}, ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
   const titleOf = (id?: string) => base.appointments.find(a => a.id === id)?.title || op.appt?.title || 'session';
   switch (op.kind) {

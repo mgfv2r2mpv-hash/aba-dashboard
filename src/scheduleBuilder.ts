@@ -55,6 +55,10 @@ export interface ClientBlock {
   detail: string;
   supervisionGapRemaining?: number;
   ptGapRemaining?: number;
+  // Set on PER-OCCURRENCE blocks (one failed weekly materialization), so the
+  // readout can collapse a case's many identical week-failures into a single
+  // dated summary instead of one card per week. Absent on case-level blocks.
+  occurrenceDate?: string; // 'YYYY-MM-DD'
 }
 
 export interface BuildResult {
@@ -395,6 +399,7 @@ function monthSelfCheck(
           clientId: op.client ?? '', clientName: op.client ?? '',
           directGapRemaining: 0, bindingConstraint: 'tech-contention',
           detail: `Recurring ${op.client ?? 'session'} on ${isoOf(occStart)} ${op.start.slice(11, 16)} overlaps an existing session that week — will need a per-week adjustment.`,
+          occurrenceDate: isoOf(occStart),
         });
         break; // one flag per op is enough
       }

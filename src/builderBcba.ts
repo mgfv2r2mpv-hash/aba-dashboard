@@ -298,6 +298,7 @@ export function buildDirectCalendar(
       blocks.push({
         clientId: cid, clientName: cname, directGapRemaining: 0, bindingConstraint: 'tech-contention',
         detail: `A ${cname} session on ${occ.startIso.slice(0, 10)} couldn't be materialized — it overlaps an existing session that week.`,
+        occurrenceDate: occ.startIso.slice(0, 10),
       });
       return;
     }

@@ -56,6 +56,8 @@ interface AdminPanelProps {
   onRerunWizard?: () => void;
   // Download the current schedule (moved here from the top bar).
   onDownload?: () => void;
+  // Encrypted-JSON backup (lossless, migration-aware) of the current schedule.
+  onBackup?: () => void;
   // Clear the loaded schedule from the app (confirmed before wiping).
   onClearData?: () => void;
   // AI settings and security/auth handlers.
@@ -72,7 +74,7 @@ interface AdminPanelProps {
 }
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-export default function AdminPanel({ data, onDataChange, tabs, initialTab, persist, onImportFile, onRerunWizard, onDownload, onClearData, onOpenAISettings, aiSettings, onSaveAISettings, onClearKey, onRequestUnlock, faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin }: AdminPanelProps) {
+export default function AdminPanel({ data, onDataChange, tabs, initialTab, persist, onImportFile, onRerunWizard, onDownload, onBackup, onClearData, onOpenAISettings, aiSettings, onSaveAISettings, onClearKey, onRequestUnlock, faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin }: AdminPanelProps) {
   const visibleTabs = (tabs && tabs.length > 0 ? tabs : ALL_ADMIN_TABS);
   const showTabBar = visibleTabs.length > 1;
   const [activeTab, setActiveTab] = useState<AdminTab>(
@@ -531,6 +533,7 @@ export default function AdminPanel({ data, onDataChange, tabs, initialTab, persi
             onImportFile={onImportFile}
             onRerunWizard={onRerunWizard}
             onDownload={onDownload}
+            onBackup={onBackup}
             onClearData={onClearData}
             aiSettings={aiSettings}
             onSaveAISettings={onSaveAISettings}
@@ -2552,7 +2555,7 @@ function ClinicianAvailEditor({ settings, saving, onSave }: {
 
 // ── Settings editor (residual: Data, AI, Lock, Report dates, Session defaults) ─
 
-function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard, onDownload, onClearData,
+function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard, onDownload, onBackup, onClearData,
   aiSettings, onSaveAISettings, onClearKey, onRequestUnlock,
   faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin
 }: {
@@ -2562,6 +2565,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   onImportFile?: () => void;
   onRerunWizard?: () => void;
   onDownload?: () => void;
+  onBackup?: () => void;
   onClearData?: () => void;
   aiSettings?: AISettings;
   onSaveAISettings?: (settings: AISettings) => void | Promise<void>;
@@ -2807,12 +2811,13 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
       </div>
 
       {/* ── TOP: Data always first ── */}
-      {(onImportFile || onRerunWizard || onDownload || onClearData) && (
+      {(onImportFile || onRerunWizard || onDownload || onBackup || onClearData) && (
         <SettingsSection title="Data">
           <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
             Re-run the wizard to edit company settings, clients, and technicians
             (your appointments are kept), or load a different schedule file.
-            Neither replaces your current data until you confirm.
+            Neither replaces your current data until you confirm. Upload restores
+            either an <strong>.xlsx</strong> or an encrypted <strong>.json backup</strong>.
           </p>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {onRerunWizard && (
@@ -2841,6 +2846,16 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
                   border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
                 }}
               >↓ Download schedule</button>
+            )}
+            {onBackup && (
+              <button
+                onClick={onBackup}
+                title="Save a lossless, password-encrypted .json backup of the full schedule."
+                style={{
+                  padding: '8px 14px', backgroundColor: 'var(--surface-raised)', color: 'var(--text-body)',
+                  border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                }}
+              >⤓ Backup (encrypted)</button>
             )}
           </div>
           {onClearData && (

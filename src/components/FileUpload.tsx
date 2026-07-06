@@ -24,7 +24,7 @@ export default function FileUpload({ onUpload, loading }: FileUploadProps) {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".xlsx"
+        accept=".xlsx,.json"
         onChange={handleChange}
         style={{ display: 'none' }}
       />

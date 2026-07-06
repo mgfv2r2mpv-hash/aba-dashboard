@@ -47,7 +47,7 @@ import {
   isFaceIdEnabled, enableFaceId, disableFaceId, recoverPinViaBiometric,
   clearStaleAtRest,
 } from './appLock';
-import { migrateScheduleData } from './scheduleMigrations';
+import { migrateScheduleData, wrapEnvelope, unwrapEnvelope } from './scheduleMigrations';
 import { resolveAtRestAIConfig } from './aiConfigPolicy';
 import { isBiometricAvailable, checkBiometryFull, biometricAuthenticate, getBiometryLabel, BiometryLabel, getCachedBiometryAvailable, getCachedBiometryLabel } from './biometric';
 import { pastIncompleteAppointments } from './compliance';
@@ -125,6 +125,17 @@ function blobToBase64(blob: Blob): Promise<string> {
     };
     reader.readAsDataURL(blob);
   });
+}
+
+// A JSON backup envelope begins with '{' (after optional whitespace); an .xlsx is a
+// PK zip (0x50 0x4B). Sniff the leading bytes to tell them apart on import.
+function looksLikeJsonEnvelope(bytes: Uint8Array): boolean {
+  for (let i = 0; i < Math.min(bytes.length, 64); i++) {
+    const b = bytes[i];
+    if (b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d) continue; // skip whitespace
+    return b === 0x7b; // '{'
+  }
+  return false;
 }
 
 export default function App() {
@@ -760,6 +771,19 @@ export default function App() {
         }
       }
 
+      // After any decryption the bytes are either an .xlsx workbook (a PK zip) or
+      // a JSON backup envelope ('{'). Route an envelope through the lossless
+      // migration path; everything else stays on the xlsx parser.
+      if (looksLikeJsonEnvelope(bytes)) {
+        const data = unwrapEnvelope(new TextDecoder().decode(bytes));
+        if (scheduleData) {
+          setPendingImport({ bytes, fileName: file.name, data, embeddedConfig: undefined });
+          return;
+        }
+        await applyImported(bytes, data, undefined);
+        return;
+      }
+
       // Parse client-side (cheap, pure) — same parser the server/native use.
       // Dynamic import keeps SheetJS (~800 KB) out of the critical startup bundle.
       const { parseBytes } = await import('./excelHandler');
@@ -1209,40 +1233,57 @@ export default function App() {
       const password = aiSettings.schedulePassword;
       if (password) bytes = await encryptBytes(bytes, password);
       const filename = password ? 'schedule.enc.xlsx' : 'schedule.xlsx';
-      const blob = new Blob([bytes as any]);
-
-      if (Capacitor.isNativePlatform()) {
-        // iOS WKWebView ignores <a download>. Write the file to the app's
-        // Cache directory and pop the iOS share sheet so the user can
-        // Save to Files / AirDrop / email.
-        const base64 = await blobToBase64(blob);
-        const written = await Filesystem.writeFile({
-          path: filename,
-          data: base64,
-          directory: Directory.Cache,
-        });
-        try {
-          await Share.share({
-            title: 'ABA Schedule',
-            url: written.uri,
-            dialogTitle: 'Save your schedule',
-          });
-        } catch (shareErr: any) {
-          // User canceled the share sheet — not an error worth alerting on.
-          if (!/cancel/i.test(shareErr?.message || '')) throw shareErr;
-        }
-      } else {
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', filename);
-        document.body.appendChild(link);
-        link.click();
-        link.parentElement?.removeChild(link);
-        window.URL.revokeObjectURL(url);
-      }
+      await saveBytesToDevice(bytes, filename);
     } catch (error: any) {
       alert('Error downloading file: ' + (error.message || error));
+    }
+  };
+
+  // Save raw bytes to the device. iOS WKWebView ignores <a download>, so on native
+  // we write to the Cache dir and pop the share sheet; on web we click a blob link.
+  const saveBytesToDevice = async (bytes: Uint8Array, filename: string) => {
+    const blob = new Blob([bytes as any]);
+    if (Capacitor.isNativePlatform()) {
+      const base64 = await blobToBase64(blob);
+      const written = await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Cache });
+      try {
+        await Share.share({ title: 'ABA Schedule', url: written.uri, dialogTitle: 'Save your schedule' });
+      } catch (shareErr: any) {
+        // User canceled the share sheet — not an error worth alerting on.
+        if (!/cancel/i.test(shareErr?.message || '')) throw shareErr;
+      }
+    } else {
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.parentElement?.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    }
+  };
+
+  // Encrypted-JSON backup. Unlike the normalized v2 .xlsx (which is lossy), this is
+  // the full versioned envelope — lossless and migration-aware — so it's the safe
+  // archival copy. It carries client data, so it is ALWAYS password-encrypted; a
+  // plaintext backup must never hit disk (CLAUDE.md §2). Restored through the normal
+  // upload picker, which sniffs the decrypted bytes and routes an envelope through
+  // unwrapEnvelope. The .xlsx up/download path is untouched — both file types work.
+  const handleBackupDownload = async () => {
+    if (!scheduleData) return;
+    try {
+      const password = aiSettings.schedulePassword
+        || (await askPassword(
+          'Backup password',
+          'This backup contains client data. Choose a password to encrypt it — you\'ll need the same password to restore.',
+          { placeholder: 'Backup password', submitLabel: 'Encrypt & save' }));
+      if (!password) return; // never emit an unencrypted backup
+      const json = wrapEnvelope(scheduleData);
+      const bytes = await encryptBytes(new TextEncoder().encode(json), password);
+      await saveBytesToDevice(bytes, 'schedule-backup.enc.json');
+    } catch (error: any) {
+      alert('Error creating backup: ' + (error.message || error));
     }
   };
 
@@ -1934,6 +1975,7 @@ export default function App() {
                   onImportFile={triggerImportPicker}
                   onRerunWizard={() => setShowWizard(true)}
                   onDownload={handleDownload}
+                  onBackup={handleBackupDownload}
                   onClearData={handleClearData}
                   aiSettings={aiSettings}
                   onSaveAISettings={handleAISettingsSave}
@@ -2183,7 +2225,7 @@ export default function App() {
       <input
         ref={importInputRef}
         type="file"
-        accept=".xlsx,.xls"
+        accept=".xlsx,.xls,.json"
         style={{ display: 'none' }}
         onChange={e => {
           const file = e.target.files?.[0];

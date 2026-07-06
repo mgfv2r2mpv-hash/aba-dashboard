@@ -17,7 +17,7 @@ import {
   ScheduleData, Client, WishOp, Appointment, Authorization,
   SupervisionCadence, SUPERVISION_CADENCES, TimeWindow, DayOfWeek,
 } from './types';
-import { toMin, DAYS } from './intervals';
+import { toMin, DAYS, Interval, windowsToIntervals, intersect, btCaseAvailability } from './intervals';
 import { inAuthSpan } from './authorization';
 import type { BuilderConfig, ClientBlock } from './scheduleBuilder';
 
@@ -232,6 +232,35 @@ export function buildDirectCalendar(
     return !auths || auths.length === 0 || auths.some(a => inAuthSpan(ymd, a));
   };
 
+  // Availability guard: a materialized occurrence must fall inside a real feasible
+  // window (client availability ∩ the assigned BT's case availability) for its
+  // weekday. This stops an existing recurring session — e.g. a one-off Saturday
+  // makeup mis-flagged recurring, or an early pre-window session — from being cloned
+  // forward onto days/times the BT does not actually work. Mirrors the fill loop's
+  // feasibleWindowsLive geometry (same intersect), just checked per occurrence.
+  const availCache = new Map<string, Interval[]>();
+  const availableOn = (cid: string, tid: string | undefined, occ: Occ): boolean => {
+    const client = clientById.get(cid);
+    const tech = tid ? data.technicians.find(t => t.id === tid) : undefined;
+    if (!client || !tech) return true; // can't evaluate → defer to the other guards
+    const jsDay = new Date(occ.startMs).getDay();
+    const day = (jsDay === 0 ? DAYS[6] : DAYS[jsDay - 1]) as DayOfWeek; // Monday-first
+    const key = `${cid}|${tech.id}|${day}`;
+    let feasible = availCache.get(key);
+    if (!feasible) {
+      const clientAvail = windowsToIntervals(client.availabilityWindows?.[day]);
+      let techAvail = btCaseAvailability(tech, cid, day);
+      if (techAvail.length === 0) techAvail = btCaseAvailability(tech, client.name, day);
+      feasible = intersect(clientAvail, techAvail);
+      availCache.set(key, feasible);
+    }
+    if (feasible.length === 0) return false;
+    const s = new Date(occ.startMs), e = new Date(occ.endMs);
+    const sMin = s.getHours() * 60 + s.getMinutes();
+    const eMin = e.getHours() * 60 + e.getMinutes();
+    return feasible.some(iv => sMin >= iv.start && eMin <= iv.end);
+  };
+
   const byClient = new Map<string, DatedDirect[]>();
   const directOps: WishOp[] = [];
   const blocks: ClientBlock[] = [];
@@ -261,6 +290,9 @@ export function buildDirectCalendar(
     // Auth caps never bypass: never materialize a direct on a date the client isn't
     // authorized for (mid-month auth end, gap between renewals, or an out-of-span tail).
     if (!authorizedOn(cid, occ.startIso.slice(0, 10))) return;
+    // Availability never bypass: never clone a session onto a day/time the client or
+    // the assigned BT isn't actually available (drops mis-flagged makeups, early rows).
+    if (!availableOn(cid, tid, occ)) return;
     if (collides(existing, occ.startMs, occ.endMs, tid, cid)) {
       const cname = clientById.get(cid)?.name ?? clientRef ?? '';
       blocks.push({

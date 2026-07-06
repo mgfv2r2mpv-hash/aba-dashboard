@@ -254,6 +254,33 @@ console.log('auth renewal: the backbone spans a contiguous renewal and skips the
   check('directs placed in the renewal auth span', inAuth2 > 0, `n2=${inAuth2}`);
 }
 
+console.log('availability guard: an existing recurring session is never cloned onto a day/time the BT cannot work');
+{
+  // Client is free Mon-Sat; the BT works Mon-Fri only. An existing recurring
+  // Saturday makeup (mis-flagged recurring) plus a legit recurring Tuesday session.
+  const c1 = client('c1', 'Client Whiskey', daysWindows(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'], '09:00', '15:00'), 'W');
+  const t1 = tech('t1', 'Wanda Aide', daysWindows(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], '09:00', '17:00') as Technician['availability'], [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
+  const mkAppt = (id: string, start: string, end: string): Appointment => ({
+    id, type: 'client-session', client: 'Client Whiskey', technician: 'Wanda Aide', startTime: start, endTime: end, status: 'scheduled', isRecurring: true,
+  } as Appointment);
+  const satMakeup = mkAppt('a-sat', '2026-06-27T09:00:00', '2026-06-27T11:00:00'); // Saturday — BT never works Sat
+  const tueReal = mkAppt('a-tue', '2026-06-30T10:00:00', '2026-06-30T14:00:00');    // Tuesday — legit
+  const base = schedule([c1], [t1], [auth('c1', 12)], baseSettings(WIDE_CLIN), [satMakeup, tueReal]);
+  const { staged } = run(base, defaultBuilderConfig(base, NOW));
+  const directs = staged.filter(o => o.op === 'add' && o.type === 'client-session') as Array<{ start: string; end: string }>;
+  const satOps = directs.filter(o => new Date(o.start).getDay() === 6);
+  const outsideWanda = directs.filter(o => {
+    const d = new Date(o.start), day = d.getDay();
+    if (day === 0 || day === 6) return true;                 // weekend — Wanda is off
+    const e = new Date(o.end);
+    const sMin = d.getHours() * 60 + d.getMinutes(), eMin = e.getHours() * 60 + e.getMinutes();
+    return !(sMin >= 9 * 60 && eMin <= 17 * 60);             // Wanda 09:00-17:00
+  });
+  check('directs were materialized forward at all', directs.length > 0, `n=${directs.length}`);
+  check('the mis-flagged Saturday makeup is NOT cloned forward', satOps.length === 0, `sat=${satOps.length}`);
+  check('no direct falls outside the BT availability', outsideWanda.length === 0, JSON.stringify(outsideWanda.slice(0, 3)));
+}
+
 console.log('cadence EOW: exactly two contacts');
 {
   const c1 = client('c1', 'Client Echo', daysWindows(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], '08:00', '16:00'), 'EOW');

@@ -233,5 +233,28 @@ console.log('defaultBuilderConfig: one-tap defaults are sane and drive a real bu
   check('default config produces a placeable build', clientHours(result, 'Solo') >= 4 - 1e-9);
 }
 
+console.log('extend-vs-add: an adjacent existing session GROWS instead of a fragment being bolted on');
+{
+  // The reported case: a client scheduled 16:00-18:00 with room to 19:00 and a 1h gap
+  // should have the 2h session GROWN to 16:00-19:00 (a resize), not a 1h 18:00-19:00
+  // fragment placed beside it.
+  const c1 = client('cx', 'Client Extend', { Monday: [{ start: '15:30', end: '19:00' }] });
+  const t1 = tech('tx', 'Tammy Extend', { Monday: [{ start: '09:00', end: '20:00' }] }, [{ clientId: 'cx', hoursPerWeek: 40, billable: true }]);
+  const existing = {
+    id: 'e1', type: 'client-session', client: 'Client Extend', technician: 'Tammy Extend',
+    startTime: `${WEEK_START}T16:00:00`, endTime: `${WEEK_START}T18:00:00`, isRecurring: true,
+  } as Appointment;
+  const base = schedule([c1], [t1], [auth('cx', 3)], [existing]); // 3h target, 2h scheduled → 1h gap
+  const result = buildSchedule(base, config(), NOW);
+  const moves = result.solution.ops.filter(o => o.op === 'move');
+  const grew = moves.some(o => o.op === 'move' && o.start.endsWith('16:00:00') && o.end.endsWith('19:00:00'));
+  const fragments = result.solution.ops.filter(o => o.op === 'add' && o.client === 'Client Extend' && o.start.endsWith('18:00:00'));
+  check('the existing 2h session is RESIZED (a move op is emitted)', moves.length > 0, `moves=${moves.length}`);
+  check('the resize grows it to 16:00-19:00', grew, JSON.stringify(moves.slice(0, 3).map(o => (o.op === 'move' ? `${o.start.slice(11, 16)}-${o.end.slice(11, 16)}` : ''))));
+  check('NO 18:00-19:00 fragment is bolted on beside it', fragments.length === 0, `frags=${fragments.length}`);
+  const preview = applyOps(base, wishSolutionToDraft(result.solution, base).ops);
+  check('the applied schedule has no tech double-book', !techDoubleBooked(preview));
+}
+
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

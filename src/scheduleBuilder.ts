@@ -16,9 +16,9 @@
 //     never silently missed. Everyone who CAN be placed is placed (partial
 //     success, never total failure).
 
-import { ScheduleData, Client, WishOp, WishSolution } from './types';
+import { ScheduleData, Client, WishOp, WishSolution, DayOfWeek } from './types';
 import { findAuthFor } from './authorization';
-import { DAYS, toMin, minToClock, Interval } from './intervals';
+import { DAYS, toMin, minToClock, Interval, intersect, subtract, normalize, windowsToIntervals, btCaseAvailability } from './intervals';
 import { Occupancy, LiveWindow, seedOccupancy, feasibleWindowsLive, reserve, dayOfWeekOf } from './builderOccupancy';
 import { monthPeriod } from './compliance';
 import { resolveUtilization } from './utilization';
@@ -112,10 +112,197 @@ interface CasePlan {
   authClamped: boolean;   // an override.directTarget below auth was the binding cap
 }
 
+interface ExtendResult {
+  gap: number;            // weekly gap left after extensions
+  ops: WishOp[];          // per-instance resize (move) ops across the horizon
+  weeklyHrsAdded: number; // hours added per week (for the template-week accounting)
+  horizonHrsAdded: number;// hours added across all resized future instances
+  days: Set<string>;      // template-week dates an extension grew into
+}
+
+const isResizable = (a: { status?: string; isGhost?: boolean }): boolean =>
+  // Active and not a past fact — status is often UNDEFINED for a plain scheduled
+  // row (the codebase treats unset as active); completed/canceled is history.
+  a.status !== 'canceled' && a.status !== 'completed' && !a.isGhost;
+
+// The STEADY-STATE weekly occupancy: every recurring direct contributes its
+// time-of-day to its weekday (it materializes into every week), and every future
+// one-off contributes its own weekday. Keyed by client id and by tech ref. Because
+// a resize moves EVERY instance of a series uniformly, checking a grown span
+// against this union-over-all-weeks footprint guarantees the span is free in EVERY
+// week — the template-week-only `occ` misses recurring rows anchored in other weeks
+// (which still materialize into the template week), and move ops bypass the
+// materializer's own collision guard, so this is what keeps resizes double-book-safe.
+//
+// NB: this must mirror what buildDirectCalendar actually MATERIALIZES, which clones
+// forward every non-canceled recurring row — INCLUDING completed ones (a completed
+// recurring session still occupies its weekday in future weeks). That's a broader
+// set than `isResizable` (which excludes completed, since we must never MOVE a
+// completed fact). BUT the materializer's collision guard DROPS a completed clone
+// where it overlaps the solid backbone (a scheduled row that ran longer leaves a
+// completed 15:30–18:00 over a scheduled 15:30–17:30 — the clone collides and is
+// dropped). Counting such a clone would wrongly block a resize into space that is
+// actually free. So: solid backbone (scheduled + future one-offs) always counts; a
+// completed-recurring clone counts ONLY where it is disjoint from the same client's
+// solid backbone (like a separate standing session at a different time, which DOES
+// materialize forward).
+function buildWeeklyFootprint(data: ScheduleData, now: Date): Occupancy {
+  const fp: Occupancy = { tech: new Map(), client: new Map() };
+  const nowMs = now.getTime();
+  const add = (map: Map<string, Partial<Record<DayOfWeek, Interval[]>>>, key: string, day: DayOfWeek, iv: Interval) => {
+    const rec = map.get(key) ?? {};
+    rec[day] = normalize([...(rec[day] ?? []), iv]);
+    map.set(key, rec);
+  };
+  const clientIdOf = (a: { client?: string }) => data.clients.find(c => c.id === a.client || c.name === a.client)?.id ?? a.client;
+  const dayIv = (a: { startTime: string; endTime: string }): { day: DayOfWeek; iv: Interval } => {
+    const s = new Date(a.startTime), e = new Date(a.endTime);
+    return { day: dayOfWeekOf(s), iv: { start: s.getHours() * 60 + s.getMinutes(), end: e.getHours() * 60 + e.getMinutes() } };
+  };
+
+  // Pass 1: solid backbone = scheduled recurring + future one-offs, per client/weekday.
+  const solidClient = new Map<string, Partial<Record<DayOfWeek, Interval[]>>>();
+  for (const a of data.appointments) {
+    if (a.type !== 'client-session' || a.status === 'canceled' || a.status === 'completed' || a.isGhost) continue;
+    if (!a.isRecurring && new Date(a.endTime).getTime() < nowMs) continue; // past one-off — won't recur
+    const { day, iv } = dayIv(a);
+    const cid = clientIdOf(a);
+    if (cid) add(solidClient, cid, day, iv);
+    if (cid) add(fp.client, cid, day, iv);
+    if (a.technician) add(fp.tech, a.technician, day, iv);
+  }
+
+  // Pass 2: completed-recurring clones — count only where disjoint from the client's
+  // solid backbone (an overlapping clone is dropped by the materializer, so it's free).
+  for (const a of data.appointments) {
+    if (a.type !== 'client-session' || !a.isRecurring || a.status !== 'completed' || a.isGhost) continue;
+    const { day, iv } = dayIv(a);
+    const cid = clientIdOf(a);
+    const overlapsSolid = cid && (solidClient.get(cid)?.[day] ?? []).some(s => s.start < iv.end && iv.start < s.end);
+    if (overlapsSolid) continue;
+    if (cid) add(fp.client, cid, day, iv);
+    if (a.technician) add(fp.tech, a.technician, day, iv);
+  }
+  return fp;
+}
+
+// Prefer GROWING an existing adjacent session over adding a fragment. For each of
+// this case's scheduled directs in the template week, find the contiguous free
+// window around it — client ∩ tech availability minus the steady-state weekly
+// footprint (every other recurring/one-off booking, the seed itself excluded) — and
+// lengthen it, later end first then earlier start ("a move with an earlier start and
+// later end"), just enough to close the weekly gap, capped at the block max and that
+// window. The resize is applied to EVERY future instance of the series (a move op
+// each); the grown span is reserved into both the footprint (so later seeds see it)
+// and `occ` (so the fill loop won't reuse it). Completed/past rows never move.
+function extendAdjacentDirects(
+  data: ScheduleData,
+  client: Client,
+  gap: number,
+  maxSessionHrs: number,
+  occ: Occupancy,
+  footprint: Occupancy,
+  weekStart: Date,
+  now: Date,
+): ExtendResult {
+  const ops: WishOp[] = [];
+  const days = new Set<string>();
+  let weeklyHrsAdded = 0;
+  let horizonHrsAdded = 0;
+  if (gap < MIN_SESSION_HRS) return { gap, ops, weeklyHrsAdded, horizonHrsAdded, days };
+
+  const startMs = weekStart.getTime();
+  const endMs = startMs + 7 * 86_400_000;
+  const nowMs = now.getTime();
+  const forClient = (a: { client?: string }) => a.client === client.id || a.client === client.name;
+
+  // Seeds = this case's scheduled directs sitting in the template week.
+  const seeds = data.appointments.filter(a =>
+    a.type === 'client-session' && isResizable(a) && forClient(a)
+    && new Date(a.startTime).getTime() >= startMs && new Date(a.startTime).getTime() < endMs);
+  // Longest block first — consolidating into the biggest session keeps the week tidy.
+  seeds.sort((a, b) => hoursBetween(b.startTime, b.endTime) - hoursBetween(a.startTime, a.endTime));
+
+  for (const seed of seeds) {
+    if (gap < MIN_SESSION_HRS) break;
+    const s = new Date(seed.startTime), e = new Date(seed.endTime);
+    const day = dayOfWeekOf(s);
+    const sMin = s.getHours() * 60 + s.getMinutes();
+    const eMin = e.getHours() * 60 + e.getMinutes();
+    if ((eMin - sMin) / 60 >= maxSessionHrs) continue; // already at the block cap
+    const techName = seed.technician;
+    if (!techName) continue;
+    const tech = data.technicians.find(t => t.id === techName || t.name === techName);
+
+    // Contiguous free window around the seed. The seed's own interval is excluded
+    // (it's what we grow); every OTHER booking on client/tech that weekday blocks —
+    // read from the steady-state footprint so a recurring row anchored elsewhere
+    // still counts.
+    const clientAvail = windowsToIntervals(client.availabilityWindows?.[day]);
+    if (clientAvail.length === 0) continue; // client isn't open this weekday
+    let techAvail: Interval[] = [{ start: 0, end: 1440 }];
+    if (tech) {
+      let ta = btCaseAvailability(tech, client.id, day);
+      if (ta.length === 0) ta = btCaseAvailability(tech, client.name, day);
+      techAvail = ta.length ? ta : [{ start: 0, end: 1440 }];
+    }
+    const seedIv: Interval = { start: sMin, end: eMin };
+    const clientBusy = subtract(footprint.client.get(client.id)?.[day] ?? [], [seedIv]);
+    const techBusy = subtract(footprint.tech.get(techName)?.[day] ?? [], [seedIv]);
+    const free = subtract(intersect(clientAvail, techAvail), [...clientBusy, ...techBusy]);
+    const seg = free.find(iv => iv.start <= sMin && iv.end >= eMin);
+    if (!seg) continue;
+
+    // Grow just enough to close the gap, capped at the block max and the segment.
+    const capMin = Math.min(maxSessionHrs * 60, seg.end - seg.start);
+    const wantMin = Math.min(Math.round((eMin - sMin) + gap * 60), capMin);
+    if (wantMin - (eMin - sMin) < MIN_SESSION_HRS * 60) continue; // <30 min gain — skip
+    // Later end first; if the tail runs out, take the rest from an earlier start.
+    let newEnd = Math.min(seg.end, sMin + wantMin);
+    let newStart = newEnd - wantMin;
+    if (newStart < seg.start) { newStart = seg.start; newEnd = newStart + wantMin; }
+    const addedHrs = ((newEnd - newStart) - (eMin - sMin)) / 60;
+    if (addedHrs < MIN_SESSION_HRS) continue;
+
+    // Resize every future instance of this series (same client, tech, weekday, and
+    // original start/end time-of-day) to the grown span.
+    let moved = 0;
+    for (const inst of data.appointments) {
+      if (inst.type !== 'client-session' || !isResizable(inst)) continue;
+      if (!forClient(inst) || inst.technician !== techName) continue;
+      const is = new Date(inst.startTime), ie = new Date(inst.endTime);
+      if (is.getTime() < nowMs || dayOfWeekOf(is) !== day) continue; // never touch the past
+      if (is.getHours() * 60 + is.getMinutes() !== sMin) continue;
+      if (ie.getHours() * 60 + ie.getMinutes() !== eMin) continue;
+      const d = inst.startTime.slice(0, 10);
+      ops.push({ op: 'move', appointmentId: inst.id, start: `${d}T${minToClock(newStart)}:00`, end: `${d}T${minToClock(newEnd)}:00` });
+      moved++;
+    }
+    if (moved === 0) continue;
+
+    // Reserve the grown span in BOTH planes: the footprint (later seeds this run) and
+    // occ (the fill loop). Reserve under the resolved tech name too when it differs
+    // from the stored ref, so a case that looks the tech up by record name still sees it.
+    const grown: Interval = { start: newStart, end: newEnd };
+    reserve(occ, techName, client.id, day, grown);
+    reserve(footprint, techName, client.id, day, grown);
+    if (tech && tech.name !== techName) {
+      reserve(occ, tech.name, client.id, day, grown);
+      reserve(footprint, tech.name, client.id, day, grown);
+    }
+    gap = Math.max(0, gap - addedHrs);
+    weeklyHrsAdded += addedHrs;
+    horizonHrsAdded += addedHrs * moved;
+    days.add(seed.startTime.slice(0, 10));
+  }
+  return { gap, ops, weeklyHrsAdded, horizonHrsAdded, days };
+}
+
 export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Date): BuildResult {
   const weekStart = parseLocalDate(config.weekStart);
   const weekDates = DAYS.map((day, d) => ({ day, date: isoOf(addDays(weekStart, d)) }));
   const occ = seedOccupancy(data, weekStart);
+  const footprint = buildWeeklyFootprint(data, now); // steady-state weekly busy for safe resizes
 
   const startMs = weekStart.getTime();
   const endMs = startMs + 7 * 86_400_000;
@@ -186,8 +373,10 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
 
   // ── Fill loop ────────────────────────────────────────────────────────────────
   const ops: WishOp[] = [];
+  const extendOps: WishOp[] = []; // per-instance resizes of existing sessions (not materialized)
   const blocks: ClientBlock[] = [];
   let directHrsPlaced = 0;
+  let extendedHorizonHrs = 0;     // hours the extension pass added across the horizon
 
   // Skip direct placement entirely for a standalone supervision build
   // (chaseDirect:false), which supervises over the existing/materialized directs.
@@ -196,6 +385,15 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
     const maxSessionHrs = config.clientOverrides?.[client.id]?.maxSessionHrs ?? MAX_DIRECT_SESSION_HRS;
     let gap = plan.gap;
     const daysUsed = new Set<string>();
+
+    // Prefer growing an adjacent existing session over placing a new fragment.
+    const ext = extendAdjacentDirects(data, client, gap, maxSessionHrs, occ, footprint, weekStart, now);
+    if (ext.ops.length) {
+      extendOps.push(...ext.ops);
+      gap = ext.gap;
+      extendedHorizonHrs += ext.horizonHrsAdded;
+      for (const d of ext.days) daysUsed.add(d);
+    }
 
     let progress = true;
     while (gap >= MIN_SESSION_HRS && progress) {
@@ -278,7 +476,7 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
   const buildingDirects = config.chaseDirect !== false;
   const chaseSupervision = config.chaseSupervision === true;
   const chasePT = config.chasePT === true;
-  let finalOps: WishOp[] = ops;
+  let finalOps: WishOp[] = [...ops, ...extendOps];
   let supMetrics: SupervisionMetrics = EMPTY_SUPERVISION_METRICS;
   let ptMetrics: ParentTrainingMetrics = EMPTY_PARENT_TRAINING_METRICS;
   if (buildingDirects || chaseSupervision || chasePT) {
@@ -308,8 +506,10 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
       blocks.push(...pt.blocks);
       ptMetrics = pt.metrics;
     }
-    finalOps = [...cal.directOps, ...bcbaOps]; // dated backbone emitted ONCE
-    directHrsPlaced = cal.directOpsHrs;        // replaces the template-only count
+    // Dated backbone emitted ONCE, plus the resizes of existing sessions (which
+    // buildDirectCalendar doesn't materialize — they edit rows already on the board).
+    finalOps = [...cal.directOps, ...bcbaOps, ...extendOps];
+    directHrsPlaced = cal.directOpsHrs + extendedHorizonHrs; // materialized + grown
   } else {
     const selfCheckBlocks = monthSelfCheck(data, ops, config, weekStart);
     blocks.push(...selfCheckBlocks);

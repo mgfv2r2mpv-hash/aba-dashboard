@@ -24,7 +24,7 @@ import { Rail, CommandBar, ZenStrip, DockChip, DockOverlay, resolveDockMode } fr
 import type { RailItem, RailKey } from './components/shell';
 import { SAssiDock, buildDockIssues, useSassiSession, BuildResultPanel } from './components/dock';
 import type { DockIssue, MeetPaceSeed } from './components/dock';
-import { buildSchedule, defaultBuilderConfig, type BuildResult } from './scheduleBuilder';
+import { buildSchedule, defaultBuilderConfig, supervisionBuilderConfig, type BuildResult } from './scheduleBuilder';
 import { useHomeTodos } from './hooks/useHomeTodos';
 import type { HomeTodo } from './hooks/useHomeTodos';
 import type { RitualAction } from './components/HomeView';
@@ -339,6 +339,16 @@ export default function App() {
     if (!scheduleData) return;
     const now = new Date();
     const result = buildSchedule(scheduleData, defaultBuilderConfig(scheduleData, now), now);
+    stageSassiOps(result.solution.ops);
+    setBuildResult(result);
+  };
+  // Standalone supervision pass: chase every case to its supervision floor/cadence
+  // over the existing directs (materializing them to dated rows so later weeks are
+  // supervisable), through the same draft pipeline. Run it after a direct build.
+  const handleBuildSupervision = () => {
+    if (!scheduleData) return;
+    const now = new Date();
+    const result = buildSchedule(scheduleData, supervisionBuilderConfig(scheduleData, now), now);
     stageSassiOps(result.solution.ops);
     setBuildResult(result);
   };
@@ -1704,18 +1714,32 @@ export default function App() {
         <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} timeOff={scheduleData.timeOff} currentDate={viewDate} />
       )}
       {!draftActive && (
-        <button
-          type="button"
-          onClick={handleBuildDirect}
-          title="Let the engine place a compliant recurring direct schedule for the month"
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-            padding: '9px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--sage-200)',
-            background: 'var(--sage-50)', color: 'var(--sage-700)', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          }}
-        >
-          ⚙︎ Build direct schedule
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            type="button"
+            onClick={handleBuildDirect}
+            title="Let the engine place a compliant recurring direct schedule for the month"
+            style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              padding: '9px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--sage-200)',
+              background: 'var(--sage-50)', color: 'var(--sage-700)', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            }}
+          >
+            ⚙︎ Build direct schedule
+          </button>
+          <button
+            type="button"
+            onClick={handleBuildSupervision}
+            title="Chase every case to its supervision floor and cadence over the existing directs"
+            style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              padding: '9px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--sage-200)',
+              background: 'var(--sage-50)', color: 'var(--sage-700)', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            }}
+          >
+            ⚙︎ Build supervision
+          </button>
+        </div>
       )}
       {draftActive && draftStatus && (
         <DraftTray

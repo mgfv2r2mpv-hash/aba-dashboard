@@ -22,9 +22,11 @@ import ImportPreview from './components/ImportPreview';
 import { Button } from './components/ui';
 import { Rail, CommandBar, ZenStrip, DockChip, DockOverlay, resolveDockMode } from './components/shell';
 import type { RailItem, RailKey } from './components/shell';
-import { SAssiDock, buildDockIssues, useSassiSession, BuildResultPanel } from './components/dock';
+import { SAssiDock, buildDockIssues, useSassiSession, BuildResultPanel, TidyPanel } from './components/dock';
 import type { DockIssue, MeetPaceSeed } from './components/dock';
 import { buildSchedule, defaultBuilderConfig, supervisionBuilderConfig, parentTrainingBuilderConfig, type BuildResult } from './scheduleBuilder';
+import { analyzeTidy, defaultTidyConfig, type TidyResult } from './tidy';
+import { extendSeries } from './seriesExtend';
 import { useHomeTodos } from './hooks/useHomeTodos';
 import type { HomeTodo } from './hooks/useHomeTodos';
 import type { RitualAction } from './components/HomeView';
@@ -47,7 +49,9 @@ import {
   isFaceIdEnabled, enableFaceId, disableFaceId, recoverPinViaBiometric,
   clearStaleAtRest,
 } from './appLock';
-import { migrateScheduleData, wrapEnvelope, unwrapEnvelope } from './scheduleMigrations';
+import { migrateScheduleData, wrapEnvelope, unwrapEnvelope, collectUnresolvedRefs } from './scheduleMigrations';
+import { nameOf } from './entityRefs';
+import { RosterProvider } from './rosterContext';
 import { resolveAtRestAIConfig } from './aiConfigPolicy';
 import { isBiometricAvailable, checkBiometryFull, biometricAuthenticate, getBiometryLabel, BiometryLabel, getCachedBiometryAvailable, getCachedBiometryLabel } from './biometric';
 import { pastIncompleteAppointments } from './compliance';
@@ -191,6 +195,9 @@ export default function App() {
   // Metrics + unfillable-case blocks from the last deterministic "Build direct
   // schedule" run, shown alongside the staged draft; cleared when the draft ends.
   const [buildResult, setBuildResult] = useState<BuildResult | null>(null);
+  // Equivalence-verified auto cleanups + review suggestions from the last "Tidy
+  // schedule" run; shown alongside the staged draft, cleared when the draft ends.
+  const [tidyResult, setTidyResult] = useState<TidyResult | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [recoveryTarget, setRecoveryTarget] = useState<Appointment | null>(null);
@@ -375,6 +382,33 @@ export default function App() {
     const result = buildSchedule(scheduleData, parentTrainingBuilderConfig(scheduleData, now), now);
     stageSassiOps(result.solution.ops);
     setBuildResult(result);
+  };
+  // One-tap deterministic tidy: find behavior-preserving cleanups and stage ONLY
+  // the equivalence-verified auto set into the draft; the TidyPanel surfaces the
+  // badge + review-only suggestions. Staged WITHOUT dropInfeasibleTravelOps — tidy
+  // never introduces a travel leg (merges keep the footprint, removes drop rows,
+  // regroup/snap don't relocate to a new site), and the travel guard could drop a
+  // merge's `move` while keeping its `remove`s → orphaned hours. The equivalence
+  // oracle inside analyzeTidy is the authority; dropPastOps stays (harmless).
+  const handleTidy = () => {
+    if (!scheduleData) return;
+    const result = analyzeTidy(scheduleData, defaultTidyConfig(), new Date());
+    const { ops, blackouts } = wishSolutionToDraft({ id: 'tidy', summary: '', reasoning: '', ops: dropPastOps(result.auto.ops) }, scheduleData);
+    setSassiBlackouts(blackouts);
+    setDraftOps(ops);
+    setTidyResult(result);
+  };
+  // Extend a recurring series forward (from the Edit panel): materialize the missing
+  // occurrences up to the chosen date under the same seriesId, folding in stray
+  // lone-recurring rows, and stage them through the normal draft pipeline for review.
+  const handleExtendSeries = (seriesId: string, endDateISO: string) => {
+    if (!scheduleData) return;
+    const result = extendSeries(scheduleData, seriesId, endDateISO, new Date());
+    setEditingAppointment(null);
+    if (result.ops.length === 0) { setDebugMsg(result.reason ?? 'Nothing to extend for this series.'); return; }
+    stageSassiOps(result.ops);
+    const relinkNote = result.relinked ? `, relinked ${result.relinked} stray session${result.relinked === 1 ? '' : 's'}` : '';
+    setDebugMsg(`Extended series: +${result.added} session${result.added === 1 ? '' : 's'}${relinkNote} through ${result.through}. Review in the dock, then Accept.`);
   };
   const sassi = useSassiSession({
     getSchedule: () => scheduleData,
@@ -744,6 +778,16 @@ export default function App() {
     setNativeStore(migrated);
     commitFull(migrated);
     setSolutions([]);
+    // Surface any references the ID migration couldn't heal (a since-deleted entity,
+    // or an ambiguous stale name) so the user can reassign those sessions in Admin —
+    // rather than letting them silently orphan as before.
+    const orphans = collectUnresolvedRefs(migrated);
+    if (orphans.length) {
+      const total = orphans.reduce((n, o) => n + o.count, 0);
+      const head = orphans.slice(0, 8).map(o => `"${o.ref}" (${o.kind}×${o.count})`).join(', ');
+      console.warn('[import] unresolved entity references after ID migration:', orphans);
+      setDebugMsg(`${total} session/link reference${total === 1 ? '' : 's'} couldn't be matched to a current client/technician: ${head}${orphans.length > 8 ? ` +${orphans.length - 8} more` : ''}. Reassign them in Admin.`);
+    }
     if (embeddedConfig) await loadEmbeddedKey(embeddedConfig);
   };
 
@@ -841,6 +885,16 @@ export default function App() {
     stageOps([newMoveOp(appointment)]);
   };
 
+  // Apply one tidy review suggestion — append its ops to the current draft (same
+  // no-travel-guard rationale as handleTidy; each suggestion is a single group and
+  // user-reviewed, so appending is safe).
+  const applyTidySuggestion = (ops: WishOp[]) => {
+    if (!scheduleData) return;
+    const { ops: draftOps, blackouts } = wishSolutionToDraft({ id: 'tidy-sug', summary: '', reasoning: '', ops: dropPastOps(ops) }, scheduleData);
+    if (blackouts.length) setSassiBlackouts(prev => [...prev, ...blackouts]);
+    stageOps(draftOps);
+  };
+
   // Sync the in-memory store to a full replacement, then commit to React state +
   // rebuild the compliance cache. The adapter serves this store on every platform.
   const commitScheduleData = async (next: ScheduleData) => {
@@ -861,17 +915,17 @@ export default function App() {
     if (!scheduleData || !draftStatus) return;
     const next = withSassiBlackouts(draftStatus.resolved || applyOps(scheduleData, draftOps));
     await commitScheduleData(next);
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); sassi.reset();
+    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); setTidyResult(null); sassi.reset();
   };
 
   const saveAnyway = async () => {
     if (!scheduleData) return;
     if (!confirm('Save this schedule as-is, with the flagged conflicts?')) return;
     await commitScheduleData(withSassiBlackouts(applyOps(scheduleData, draftOps)));
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); sassi.reset();
+    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); setTidyResult(null); sassi.reset();
   };
 
-  const cancelDraft = () => { setDraftOps([]); setSolutions([]); setSassiBlackouts([]); setBuildResult(null); sassi.reset(); };
+  const cancelDraft = () => { setDraftOps([]); setSolutions([]); setSassiBlackouts([]); setBuildResult(null); setTidyResult(null); sassi.reset(); };
   const resetOp = (opId: string) => {
     setDraftOps(ops => ops.filter(o => o.id !== opId));
     // Removing the last staged op empties the draft (no commit fires), so the
@@ -1380,8 +1434,8 @@ export default function App() {
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
           <span style={{ ...metaChip, background: '#eef2ff', color: '#4338ca' }}>🕐 {dateStr} · {timeStr}</span>
-          {a.client && <span style={metaChip}>👤 {a.client}</span>}
-          {a.technician && <span style={metaChip}>🧑‍⚕️ {a.technician}</span>}
+          {a.client && <span style={metaChip}>👤 {nameOf(scheduleData?.clients ?? [], a.client)}</span>}
+          {a.technician && <span style={metaChip}>🧑‍⚕️ {nameOf(scheduleData?.technicians ?? [], a.technician)}</span>}
           {a.isMakeUp && <span style={{ ...metaChip, background: '#fef9c3', color: '#854d0e' }}>↩︎ Make-up</span>}
           {a.isBillable
             ? <span style={{ ...metaChip, background: '#dcfce7', color: '#15803d' }}>Billable</span>
@@ -1595,6 +1649,7 @@ export default function App() {
           onSave={handleSaveAppointments}
           onDelete={handleDeleteAppointments}
           onCancel={() => setInlineEdit(false)}
+          onExtendSeries={handleExtendSeries}
         />
       );
     }
@@ -1705,7 +1760,7 @@ export default function App() {
   const openMeetPace = (clientId: string, _intent: 'behind' | 'over') => {
     if (!scheduleData) return;
     meetPaceTokenRef.current += 1;
-    const client = scheduleData.clients.find(c => c.id === clientId || c.name === clientId);
+    const client = scheduleData.clients.find(c => c.id === clientId);
     setMeetPaceSeed({ clientId, label: `Fix ${client?.name ?? 'this case'}'s pace`, token: meetPaceTokenRef.current });
     // Surface the dock on whichever presentation this width uses (the column is
     // already on screen on the Home view at ≥1024).
@@ -1734,7 +1789,7 @@ export default function App() {
   const startSessionFromTodo = (todo: HomeTodo) => {
     // The appointment form keys its client <select> by name, so resolve the
     // to-do's client id → name for the prefill to take.
-    const c = scheduleData?.clients.find(cl => cl.id === todo.clientId || cl.name === todo.clientId);
+    const c = scheduleData?.clients.find(cl => cl.id === todo.clientId);
     setSessionSeed({
       title: todo.text,
       client: c?.name ?? todo.clientId,
@@ -1795,6 +1850,20 @@ export default function App() {
           </button>
         </div>
       )}
+      {!draftActive && (
+        <button
+          type="button"
+          onClick={handleTidy}
+          title="Find behavior-preserving cleanups (merge split sessions, drop empty/duplicate rows, group a recurring pattern) — every auto change is equivalence-verified and previewed before commit"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            padding: '9px 12px', borderRadius: 'var(--radius-md)', border: '1px dashed var(--sage-300, var(--sage-200))',
+            background: 'transparent', color: 'var(--sage-700)', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+          }}
+        >
+          🩺 Tidy schedule
+        </button>
+      )}
       {draftActive && draftStatus && (
         <DraftTray
           base={scheduleData}
@@ -1814,6 +1883,9 @@ export default function App() {
       )}
       {buildResult && (
         <BuildResultPanel result={buildResult} hasStagedProposal={draftActive} onDismiss={() => setBuildResult(null)} />
+      )}
+      {tidyResult && (
+        <TidyPanel result={tidyResult} onApplySuggestion={applyTidySuggestion} onDismiss={() => setTidyResult(null)} />
       )}
       {solutions.length > 0 && (
         <SolutionPanel
@@ -1835,6 +1907,7 @@ export default function App() {
   ) : null;
 
   return (
+    <RosterProvider clients={scheduleData?.clients ?? []} technicians={scheduleData?.technicians ?? []}>
     <div style={{
       display: 'flex', height: '100vh', maxWidth: '100vw',
       position: 'relative',
@@ -2390,6 +2463,7 @@ export default function App() {
           onSave={handleSaveAppointments}
           onDelete={handleDeleteAppointments}
           onCancel={() => setEditingAppointment(null)}
+          onExtendSeries={handleExtendSeries}
         />
       )}
 
@@ -2450,5 +2524,6 @@ export default function App() {
         </button>
       )}
     </div>
+    </RosterProvider>
   );
 }

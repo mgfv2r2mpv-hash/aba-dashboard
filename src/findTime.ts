@@ -41,7 +41,7 @@ const sameClient = (a: Appointment, id: string, name?: string): boolean =>
   a.client === id || (name !== undefined && a.client === name);
 
 const namesTech = (a: Appointment, tech: Technician): boolean =>
-  a.technician === tech.id || a.technician === tech.name;
+  a.technician === tech.id;
 
 export function assignedTechsForClient(data: ScheduleData, clientId: string): Technician[] {
   return data.technicians.filter(t => t.assignments.some(a => a.clientId === clientId));
@@ -102,7 +102,7 @@ export function findMoveOptions(
   const throughDate = endOfWeekYmd(now);
   // Moving frees the appointment's own slot — drop it so it never self-conflicts.
   const base: ScheduleData = { ...data, appointments: data.appointments.filter(a => a.id !== apt.id) };
-  const client = apt.client ? data.clients.find(c => c.id === apt.client || c.name === apt.client) : undefined;
+  const client = apt.client ? data.clients.find(c => c.id === apt.client) : undefined;
 
   if (apt.type === 'supervision') {
     if (!client) return [];

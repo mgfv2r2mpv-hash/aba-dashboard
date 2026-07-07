@@ -43,7 +43,7 @@ export default function TrimPanel({ solution, data, onApply, onClose }: Props) {
     for (const op of addOps) {
       if (!op.client) continue;
       if (seen.has(op.client)) continue;
-      const c = data.clients.find(cl => cl.id === op.client || cl.name === op.client);
+      const c = data.clients.find(cl => cl.id === op.client);
       const id = c?.id || op.client;
       const name = c?.name || op.client;
       seen.set(op.client, { id, name, hoursToGo: complianceMap.get(id) ?? 0 });

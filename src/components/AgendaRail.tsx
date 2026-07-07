@@ -2,6 +2,7 @@ import React from 'react';
 import { Appointment } from '../types';
 import { clientPastel } from '../calendarColors';
 import { format, isSameDay } from 'date-fns';
+import { useRoster } from '../rosterContext';
 
 // Default content for the docked context pane on wide screens, shown when no
 // appointment is selected and there's no draft/conflict to triage. Turns the
@@ -64,10 +65,11 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 function AgendaRow({ a, onSelect, withDate }: { a: Appointment; onSelect: (a: Appointment) => void; withDate?: boolean }) {
+  const { clientName, techName } = useRoster();
   const canceled = a.status === 'canceled';
   const completed = a.status === 'completed';
   const accent = a.client ? clientPastel(a.client) : '#e5e7eb';
-  const who = [a.client, a.technician].filter(Boolean).join(' · ');
+  const who = [a.client && clientName(a.client), a.technician && techName(a.technician)].filter(Boolean).join(' · ');
   const start = new Date(a.startTime);
   const end = new Date(a.endTime);
   return (

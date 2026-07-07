@@ -75,7 +75,7 @@ export interface Technician {
   isRBT: boolean;
   isFieldworkSupervisee?: boolean;
   assignments: {
-    clientId: string;
+    clientId: string; // client ID (immutable; normalized from any legacy name ref)
     hoursPerWeek: number;
     billable: boolean;
     // Optional per-case availability: when set, this BT can only serve THIS
@@ -466,14 +466,16 @@ export interface Appointment {
   id: string;
   title: string;
   description?: string;
-  technician?: string; // technician ID or name. On a DIRECT (client-session)
-                       // appointment this is the BT delivering the service. On a
-                       // supervision-counting BCBA session (supervision / parent-
-                       // training / case-planning) it instead names the BT being
-                       // OBSERVED — the supervisee — so the overlap can be credited
-                       // to that tech. Either way these BCBA sessions remain BCBA
-                       // billable (see bucketOf), since the BCBA runs them.
-  client?: string;     // client ID or name
+  technician?: string; // technician ID (immutable; never the display name — the
+                       // v2→v3 migration normalizes any legacy name ref to the id).
+                       // On a DIRECT (client-session) appointment this is the BT
+                       // delivering the service. On a supervision-counting BCBA
+                       // session (supervision / parent-training / case-planning) it
+                       // instead identifies the BT being OBSERVED — the supervisee —
+                       // so the overlap can be credited to that tech. Either way
+                       // these BCBA sessions remain BCBA billable (see bucketOf),
+                       // since the BCBA runs them. '' means no BT (BCBA-solo).
+  client?: string;     // client ID (immutable; never the display name)
   startTime: string;   // ISO 8601 format
   endTime: string;     // ISO 8601 format
   isFixed: boolean;    // cannot be moved
@@ -809,7 +811,7 @@ export const DEFAULT_FIXIT_OPTIONS: FixItOptions = {
 export type WishOp =
   | { op: 'move'; appointmentId: string; start: string; end: string }
   | { op: 'remove'; appointmentId: string }
-  | { op: 'add'; title?: string; type: Appointment['type']; client?: string; technician?: string; start: string; end: string; recurring?: boolean; pattern?: 'weekly' | 'biweekly' | 'monthly' }
+  | { op: 'add'; title?: string; type: Appointment['type']; client?: string; technician?: string; start: string; end: string; recurring?: boolean; pattern?: 'weekly' | 'biweekly' | 'monthly'; seriesId?: string }
   | { op: 'blackout'; entityType: 'client' | 'technician'; entity: string; date: string; reason?: string }
   // Agentic command ops (sAssI). Each references only an appointment token plus
   // enums/booleans — no names — so anonymization guards never trip. They map to a
@@ -818,7 +820,13 @@ export type WishOp =
   // on a past session is legitimate).
   | { op: 'setFixed'; appointmentId: string; isFixed: boolean }
   | { op: 'complete'; appointmentId: string }
-  | { op: 'cancel'; appointmentId: string; source: CancellationSource; reason: CancellationReason; unplanned: boolean; noticeMet?: boolean; notes?: string };
+  | { op: 'cancel'; appointmentId: string; source: CancellationSource; reason: CancellationReason; unplanned: boolean; noticeMet?: boolean; notes?: string }
+  // Tidy-only: stamp a shared seriesId (+ recurringPattern annotation) onto existing
+  // dated rows so they become a batch-editable series, WITHOUT collapsing them into a
+  // single recurring template (which would be lossy here) and WITHOUT setting
+  // isRecurring (which would change future builds). Carries no timestamp — like the
+  // command ops above it maps to `edit` DraftOps and survives dropPastOps.
+  | { op: 'regroup'; appointmentIds: string[]; seriesId: string; recurringPattern?: 'weekly' | 'biweekly' | 'monthly' };
 
 export interface WishSolution {
   id: string;

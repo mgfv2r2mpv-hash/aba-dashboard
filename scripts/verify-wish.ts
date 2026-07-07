@@ -83,7 +83,9 @@ console.log('wishSolutionToDraft');
   const d = wishSolutionToDraft(sol, base);
   check('move → move op carrying preserved fields', d.ops.some(o => o.kind === 'move' && o.appt?.id === 'a1' && o.appt?.startTime === '2026-06-19T17:00:00'));
   check('remove → remove op', d.ops.some(o => o.kind === 'remove' && o.targetId === 'a2'));
-  check('add → add op with new id + billable derived', d.ops.some(o => o.kind === 'add' && o.appt?.type === 'parent-training' && o.appt?.isBillable === true && o.appt?.client === 'Client One'));
+  // The add path normalizes the op's client/tech ref to the entity's immutable id
+  // (here 'Client One' → 'c1'), so the persisted appointment is always id-linked.
+  check('add → add op with new id + billable derived + client normalized to id', d.ops.some(o => o.kind === 'add' && o.appt?.type === 'parent-training' && o.appt?.isBillable === true && o.appt?.client === 'c1'));
   check('blackout resolved name → entityId', d.blackouts.length === 1 && d.blackouts[0].entityId === 'c1' && d.blackouts[0].entityName === 'Client One');
   check('unknown appointment counted as unresolved', d.unresolved === 1);
 

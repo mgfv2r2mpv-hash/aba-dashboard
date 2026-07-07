@@ -524,7 +524,7 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
                               style={{ ...inputStyle, flex: 2, width: 'auto' }}
                             >
                               <option value="">— Pick client —</option>
-                              {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </select>
                             <input
                               type="number" step="0.5"

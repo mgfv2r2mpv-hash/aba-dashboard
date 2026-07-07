@@ -173,7 +173,7 @@ function servingTechId(data: ScheduleData, clientId: string, now: Date): string 
     new Date(a.startTime).getTime() < period.end.getTime()
   );
   if (!direct?.technician) return undefined;
-  return data.technicians.find(t => t.id === direct.technician || t.name === direct.technician)?.id;
+  return data.technicians.find(t => t.id === direct.technician)?.id;
 }
 
 // A client this technician currently delivers direct service to this month.
@@ -183,12 +183,12 @@ function servedClientId(data: ScheduleData, techId: string, now: Date): string |
   if (!tech) return undefined;
   const direct = data.appointments.find(a =>
     a.type === 'client-session' && a.status !== 'canceled' && !a.isGhost && !!a.client &&
-    (a.technician === tech.id || a.technician === tech.name) &&
+    (a.technician === tech.id) &&
     new Date(a.startTime).getTime() >= period.start.getTime() &&
     new Date(a.startTime).getTime() < period.end.getTime()
   );
   if (!direct?.client) return undefined;
-  return data.clients.find(c => c.id === direct.client || c.name === direct.client)?.id;
+  return data.clients.find(c => c.id === direct.client)?.id;
 }
 
 function caseNeeds(data: ScheduleData, cs: CaseState, now: Date): CorrectionNeed[] {
@@ -317,7 +317,7 @@ function computeShaveRoom(data: ScheduleData, now: Date): ShaveEntry[] {
       new Date(a.startTime).getTime() >= Math.max(period.start.getTime(), now.getTime()) &&
       new Date(a.startTime).getTime() < period.end.getTime())
     .map(sup => {
-      const client = data.clients.find(c => c.id === sup.client || c.name === sup.client);
+      const client = data.clients.find(c => c.id === sup.client);
       const cs = client ? caseStates.get(client.id) : undefined;
       const slackH = cs ? cs.supervision.slackAboveFloor : 0;
       const supDur = (new Date(sup.endTime).getTime() - new Date(sup.startTime).getTime()) / 3_600_000;
@@ -454,11 +454,11 @@ function busyIntervals(
 ): Interval[] {
   const dayMs = new Date(`${dateStr}T00:00:00`).getTime();
   const idOf = (ref?: string): string | undefined =>
-    ref ? data.clients.find(c => c.id === ref || c.name === ref)?.id : undefined;
+    ref ? data.clients.find(c => c.id === ref)?.id : undefined;
   return data.appointments
     .filter(a => a.status !== 'canceled' && !a.isGhost && a.startTime.slice(0, 10) === dateStr && (
       (client && (a.client === client.id || a.client === client.name)) ||
-      (tech && (a.technician === tech.id || a.technician === tech.name)) ||
+      (tech && (a.technician === tech.id)) ||
       (includeClinician && CLINICIAN_TYPES.includes(a.type))
     ))
     // PT-coincides-with-direct mode: don't let the client's own direct sessions
@@ -489,7 +489,7 @@ function directIntervalsFor(
   return data.appointments
     .filter(a => a.type === 'client-session' && a.status !== 'canceled' && !a.isGhost && a.startTime.slice(0, 10) === dateStr &&
       (a.client === client.id || a.client === client.name) &&
-      (!tech || a.technician === tech.id || a.technician === tech.name))
+      (!tech || a.technician === tech.id))
     .map(a => ({ start: minutesOfDay(a.startTime), end: minutesOfDay(a.endTime) }));
 }
 

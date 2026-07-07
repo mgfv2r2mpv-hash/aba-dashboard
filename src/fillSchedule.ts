@@ -40,7 +40,7 @@ export function computeCaseUtilization(data: ScheduleData, weekStart: Date): Cas
     const auth = findAuthFor(data, c.id, weekISO) || findAuthFor(data, c.name, weekISO);
     const target = auth?.weekly?.direct && auth.weekly.direct > 0 ? auth.weekly.direct : 0;
     const scheduled = data.appointments
-      .filter(a => a.type === 'client-session' && isActive(a) && (a.client === c.id || a.client === c.name) && inWeek(a.startTime, weekStart))
+      .filter(a => a.type === 'client-session' && isActive(a) && a.client === c.id && inWeek(a.startTime, weekStart))
       .reduce((s, a) => s + dirHours(a), 0);
     const gap = target > 0 ? Math.max(0, target - scheduled) : 0;
     return {
@@ -75,7 +75,7 @@ export function feasibleDirectWindows(data: ScheduleData, weekStart: Date): Feas
     const date = isoOf(addDays(weekStart, d));
 
     for (const client of data.clients) {
-      const blackedOut = (data.blackouts || []).some(b => b.date === date && b.entityType === 'client' && (b.entityId === client.id || b.entityId === client.name));
+      const blackedOut = (data.blackouts || []).some(b => b.date === date && b.entityType === 'client' && b.entityId === client.id);
       if (blackedOut) continue;
       const clientAvail = windowsToIntervals(client.availabilityWindows?.[day]);
       if (clientAvail.length === 0) continue;
@@ -96,7 +96,7 @@ export function feasibleDirectWindows(data: ScheduleData, weekStart: Date): Feas
           : btCaseAvailability(tech, client.name, day);
         if (techCaseAvail.length === 0) continue;
         const techBusy = data.appointments
-          .filter(a => isActive(a) && a.technician === tech.name && a.startTime.startsWith(date))
+          .filter(a => isActive(a) && a.technician === tech.id && a.startTime.startsWith(date))
           .map(a => ({ start: minOf(a.startTime), end: minOf(a.endTime) }));
 
         // Free = clientAvail ∩ techCaseAvail − clientBusy − techBusy
@@ -197,9 +197,9 @@ export function buildSupervisableWindows(
     .filter(a => isAvail(a.startTime, a.endTime))
     .filter(a => !isBusy(new Date(a.startTime).getTime(), new Date(a.endTime).getTime()))
     .map(a => {
-      const client = data.clients.find(c => c.id === a.client || c.name === a.client);
+      const client = data.clients.find(c => c.id === a.client);
       const tech = a.technician
-        ? data.technicians.find(t => t.name === a.technician || t.id === a.technician)
+        ? data.technicians.find(t => t.id === a.technician)
         : undefined;
       return {
         clientId: client?.id || a.client || '',
@@ -356,9 +356,9 @@ export function buildComplianceFillContext(
       (caseIds.has(a.client || '') || caseNames.has(a.client || ''))
     )
     .map(a => {
-      const client = data.clients.find(c => c.id === a.client || c.name === a.client);
+      const client = data.clients.find(c => c.id === a.client);
       const tech   = a.technician
-        ? data.technicians.find(t => t.name === a.technician || t.id === a.technician)
+        ? data.technicians.find(t => t.id === a.technician)
         : undefined;
       return {
         clientId:      client?.id    || a.client || '',

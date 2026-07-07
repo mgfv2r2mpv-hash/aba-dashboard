@@ -401,8 +401,11 @@ console.log('per-RBT (D4): the BT furthest behind their own floor is preferred')
   // proving floor-gap selection, not chronological fallback (the review found the
   // old code degraded to day-of-week because per-RBT gaps were computed on
   // unmaterialized data and were all ~0).
-  const kiloSups = committed.appointments.filter(a => a.type === 'supervision' && a.client === 'Client Kilo');
-  check('a Client Kilo supervision names the behind RBT despite its later day', kiloSups.some(s => s.technician === 'Bea Behind'), JSON.stringify(kiloSups.map(s => s.technician)));
+  // Materialized appointments are id-linked (the add path normalizes refs to ids).
+  const kiloId = committed.clients.find(c => c.name === 'Client Kilo')?.id;
+  const beaId = committed.technicians.find(t => t.name === 'Bea Behind')?.id;
+  const kiloSups = committed.appointments.filter(a => a.type === 'supervision' && a.client === kiloId);
+  check('a Client Kilo supervision names the behind RBT despite its later day', kiloSups.some(s => s.technician === beaId), JSON.stringify(kiloSups.map(s => s.technician)));
 }
 
 console.log('standalone: Build supervision over EXISTING materialized directs');

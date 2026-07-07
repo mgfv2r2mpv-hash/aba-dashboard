@@ -57,18 +57,18 @@ export function affectedEntities(
   const techIds = new Set<string>();
   // Ghosts never enter the supervision math, so they touch no entities.
   if (appt.isGhost) return { clientIds, techIds };
-  const client = data.clients.find(c => c.id === appt.client || c.name === appt.client);
+  const client = data.clients.find(c => c.id === appt.client);
 
   if (appt.type === 'client-session') {
     if (client) clientIds.add(client.id);
-    const tech = data.technicians.find(t => t.id === appt.technician || t.name === appt.technician);
+    const tech = data.technicians.find(t => t.id === appt.technician);
     if (tech) techIds.add(tech.id);
   } else if (appt.type === 'supervision') {
     if (client) clientIds.add(client.id);
     for (const d of data.appointments) {
       if (d.type !== 'client-session' || d.isGhost) continue;
       if (overlapHours(appt, d) <= 0) continue;
-      const tech = data.technicians.find(t => t.id === d.technician || t.name === d.technician);
+      const tech = data.technicians.find(t => t.id === d.technician);
       if (tech) techIds.add(tech.id);
     }
   }

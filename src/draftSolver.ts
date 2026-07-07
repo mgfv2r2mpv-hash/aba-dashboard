@@ -217,8 +217,8 @@ function relocate(
   const weekEnd = new Date(weekStartMs + 6 * 86400000);
   const throughDate = `${weekEnd.getFullYear()}-${String(weekEnd.getMonth() + 1).padStart(2, '0')}-${String(weekEnd.getDate()).padStart(2, '0')}`;
   const from = new Date(Math.max(weekStartMs, nowMs));
-  const client = data.clients.find(c => c.id === appt.client || c.name === appt.client);
-  const tech = data.technicians.find(t => t.id === appt.technician || t.name === appt.technician);
+  const client = data.clients.find(c => c.id === appt.client);
+  const tech = data.technicians.find(t => t.id === appt.technician);
   const slots = findOpenSlots(data, {
     durationMinutes: durationMin(appt),
     clientId: client?.id,

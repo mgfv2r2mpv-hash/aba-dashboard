@@ -65,7 +65,7 @@ function windowDayCounts(now: Date): Record<CancelWindow, number> {
 const matchesClient = (a: Appointment, client: Client): boolean =>
   a.client === client.id || a.client === client.name;
 const matchesTech = (a: Appointment, tech: Technician): boolean =>
-  a.technician === tech.id || a.technician === tech.name;
+  a.technician === tech.id;
 
 export function initials(name: string): string {
   const parts = (name || '').trim().split(/\s+/).filter(Boolean);
@@ -121,7 +121,7 @@ export function computeOneCaseCancels(
   const seen = new Set(assigned.map(t => t.id));
   const extras: Technician[] = [];
   for (const a of btCancels) {
-    const t = data.technicians.find(x => x.id === a.technician || x.name === a.technician);
+    const t = data.technicians.find(x => x.id === a.technician);
     if (t && !seen.has(t.id)) { seen.add(t.id); extras.push(t); }
   }
   const techs = [...assigned, ...extras];

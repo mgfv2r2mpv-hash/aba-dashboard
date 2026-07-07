@@ -12,6 +12,7 @@ import {
   getActualLevel, getProjectedLevel, actualSectionStatus, projectedSectionStatus,
 } from '../caseStatus';
 import CompleteTimePrompt from './CompleteTimePrompt';
+import { useRoster } from '../rosterContext';
 import ConflictPanel from './ConflictPanel';
 import FixItPanel from './FixItPanel';
 import { AISettings } from './Settings';
@@ -310,6 +311,7 @@ function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }: {
   onRequestCancel: (a: Appointment) => void;
   onSelect: (a: Appointment) => void;
 }) {
+  const { clientName, techName } = useRoster();
   return (
     <div style={{
       backgroundColor: 'white', borderRadius: 6, padding: 8,
@@ -325,8 +327,8 @@ function PastIncompleteRow({ a, onMarkComplete, onRequestCancel, onSelect }: {
       >{a.title}</button>
       <div style={{ fontSize: 11, color: '#6b7280' }}>
         {new Date(a.startTime).toLocaleString()} → {new Date(a.endTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-        {a.client && <> · {a.client}</>}
-        {a.technician && <> · {a.technician}</>}
+        {a.client && <> · {clientName(a.client)}</>}
+        {a.technician && <> · {techName(a.technician)}</>}
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <CompleteTimePrompt a={a} onComplete={onMarkComplete} />

@@ -48,7 +48,7 @@ function durationHours(a: Appointment): number {
 }
 
 function matchesClient(a: Appointment, client: Client): boolean {
-  return a.client === client.id || a.client === client.name;
+  return a.client === client.id;
 }
 
 function inRange(a: Appointment, start: Date, end: Date): boolean {
@@ -341,7 +341,7 @@ export function computeBtState(
 
   const directHoursWeek = data.appointments.filter(a =>
     a.type === 'client-session' && a.status !== 'canceled' &&
-    (a.technician === tech.id || a.technician === tech.name) && inRange(a, wk.start, wk.end)
+    (a.technician === tech.id) && inRange(a, wk.start, wk.end)
   ).reduce((s, a) => s + durationHours(a), 0);
 
   return {
@@ -605,7 +605,7 @@ export function computeHomeTrends(data: ScheduleData, now: Date = new Date()): P
     if (weeklyAssigned <= 0) continue;
     const techPlanned = data.appointments.filter(a =>
       a.type === 'client-session' && !a.isGhost &&
-      (a.technician === tech.id || a.technician === tech.name));
+      (a.technician === tech.id));
     const directAll = techPlanned.filter(a => a.status !== 'canceled');
     const BT_BEHIND_PCT = 80;
     trends.push({

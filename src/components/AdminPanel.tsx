@@ -678,7 +678,7 @@ function TechnicianCard({ tech, clients, saving, onChange, onRemove }: {
                   style={{ ...inputStyle, flex: 2, width: 'auto', minWidth: 0 }}
                 >
                   <option value="">— Pick client —</option>
-                  {safeClients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                  {safeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 <input
                   type="number"

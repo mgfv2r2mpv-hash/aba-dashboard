@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Appointment } from '../types';
 import CompleteTimePrompt from './CompleteTimePrompt';
+import { useRoster } from '../rosterContext';
 
 // End-of-day sweep: every past-dated session still marked "scheduled" gets a
 // quick Complete / Cancel / Skip decision so actuals stay current without
@@ -11,6 +12,7 @@ export default function DayReview({ appointments, onComplete, onRequestCancel, o
   onRequestCancel: (a: Appointment) => void;
   onClose: () => void;
 }) {
+  const { clientName, techName } = useRoster();
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const visible = appointments.filter(a => !skipped.has(a.id));
 
@@ -56,7 +58,7 @@ export default function DayReview({ appointments, onComplete, onRequestCancel, o
                     {new Date(a.startTime).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                     {' → '}
                     {new Date(a.endTime).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-                    {a.technician ? ` · ${a.technician}` : ''}{a.client ? ` · ${a.client}` : ''}
+                    {a.technician ? ` · ${techName(a.technician)}` : ''}{a.client ? ` · ${clientName(a.client)}` : ''}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

@@ -259,7 +259,7 @@ function TodosCard({ data, todos, onAddTodo, onStartSession }: {
   const [text, setText] = useState('');
   const [due, setDue] = useState('');
 
-  const clientName = (id: string) => data.clients.find(c => c.id === id || c.name === id)?.name ?? id;
+  const clientName = (id: string) => data.clients.find(c => c.id === id)?.name ?? id;
 
   const submit = () => {
     if (!text.trim() || !clientId) return;

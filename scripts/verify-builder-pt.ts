@@ -89,8 +89,12 @@ const clientSupH = (d: ScheduleData, name: string): number => {
   const cc = computeClientCompliance(d, monthPeriod(NOW), NOW).find(c => c.client.name === name);
   return cc?.projected.supervisionHours ?? 0;
 };
-const clientPtH = (d: ScheduleData, name: string): number =>
-  ptAppts(d).filter(a => a.client === name).reduce((s, a) => s + durH(a), 0);
+const clientPtH = (d: ScheduleData, name: string): number => {
+  // Materialized appointments are id-linked (the add path normalizes refs to ids),
+  // so resolve the client's name to its id before matching.
+  const id = d.clients.find(c => c.name === name)?.id ?? name;
+  return ptAppts(d).filter(a => a.client === id).reduce((s, a) => s + durH(a), 0);
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('off switch: chasePT:false is byte-identical to directs-only');

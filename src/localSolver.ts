@@ -207,7 +207,7 @@ const ymd = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 export function solveMeetPace(data: ScheduleData, clientRef: string, now: Date): MeetPaceResult {
-  const client = data.clients.find(c => c.id === clientRef || c.name === clientRef);
+  const client = data.clients.find(c => c.id === clientRef);
   const blocked: string[] = [];
   const ops: WishOp[] = [];
 
@@ -227,7 +227,7 @@ export function solveMeetPace(data: ScheduleData, clientRef: string, now: Date):
   if (!client) return finish('ok', {}, 'Unknown case', 'No matching client.');
   const cid = client.id;
   const cname = client.name;
-  const matchesClient = (ref?: string) => ref === cid || ref === cname;
+  const matchesClient = (ref?: string) => ref === cid;
 
   const weekStart = startOfWeek(now, { weekStartsOn: 1 });
   const weekEnd = new Date(weekStart);

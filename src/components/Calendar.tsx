@@ -8,6 +8,7 @@ import { tileStyle, clientPastel, clientDarkBorder, legendStripeStyle } from '..
 import { useMinWidth, useIsLandscape } from '../useMediaQuery';
 import { usePinchZoom } from '../hooks/usePinchZoom';
 import ZoomResetPill from './ZoomResetPill';
+import { useRoster } from '../rosterContext';
 import {
   startOfMonth, endOfMonth, eachDayOfInterval, startOfWeek, endOfWeek,
   format, isSameMonth, isSameDay, addMonths, subMonths, addWeeks, subWeeks, addDays, getDay, parseISO,
@@ -980,6 +981,7 @@ function GridLine({ top, color }: { top: number; color: string }) {
 // Legend mapping client background colors (solid squares) and staff stripe
 // colors (diagonal stripes on white) for the sessions currently in view.
 function TileLegend({ appointments }: { appointments: Appointment[] }) {
+  const { clientName, techName } = useRoster();
   const clients = Array.from(new Set(appointments.map(a => a.client).filter((c): c is string => !!c)));
   const staff = Array.from(new Set(appointments.map(a => a.technician).filter((t): t is string => !!t)));
   if (clients.length === 0 && staff.length === 0) return null;
@@ -988,13 +990,13 @@ function TileLegend({ appointments }: { appointments: Appointment[] }) {
       {clients.map(c => (
         <span key={`c-${c}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
           <span style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: clientPastel(c), border: '1px solid rgba(0,0,0,0.1)', display: 'inline-block' }} />
-          {c}
+          {clientName(c)}
         </span>
       ))}
       {staff.map(t => (
         <span key={`t-${t}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
           <span style={{ width: 12, height: 12, borderRadius: 3, border: '1px solid rgba(0,0,0,0.1)', display: 'inline-block', ...legendStripeStyle(t) }} />
-          {t}
+          {techName(t)}
         </span>
       ))}
     </div>
@@ -1296,6 +1298,7 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
   roomy?: boolean;
   flags?: SessionFlags;
 }) {
+  const { clientName, techName } = useRoster();
   const look = blockLook(apt, mark, flags);
   // When drag is enabled, suppress the click (click fires after pointerup
   // and would re-open the detail panel after a drag). Track whether the
@@ -1364,7 +1367,7 @@ function AppointmentBlock({ apt, mark, onClick, onPointerDown, dragHandle, style
         )}
         {roomy && (apt.client || apt.technician) && (
           <div style={{ fontSize: 11, opacity: 0.8, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {[apt.client, apt.technician].filter(Boolean).join(' · ')}
+            {[apt.client && clientName(apt.client), apt.technician && techName(apt.technician)].filter(Boolean).join(' · ')}
           </div>
         )}
         {/* Marker row — full icons visible on roomy (iPad+) tiles */}

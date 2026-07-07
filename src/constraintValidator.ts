@@ -62,9 +62,8 @@ export class ConstraintValidator {
     const fmt = (n: number) => (Math.round(n * 10) / 10).toString();
 
     const isUnstaffed = (clientId: string): boolean => {
-      const clientName = this.data.clients.find(c => c.id === clientId)?.name;
       return !this.data.technicians.some(t =>
-        t.assignments.some(a => a.clientId === clientId || (clientName != null && a.clientId === clientName))
+        t.assignments.some(a => a.clientId === clientId)
       );
     };
 
@@ -347,10 +346,10 @@ export class ConstraintValidator {
       if (appointmentDate.getFullYear() !== this.now.getFullYear() || appointmentDate.getMonth() !== this.now.getMonth()) return;
 
       const technician = appointment.technician
-        ? this.data.technicians.find(t => t.id === appointment.technician || t.name === appointment.technician)
+        ? this.data.technicians.find(t => t.id === appointment.technician)
         : undefined;
       const client = appointment.client
-        ? this.data.clients.find(c => c.id === appointment.client || c.name === appointment.client)
+        ? this.data.clients.find(c => c.id === appointment.client)
         : undefined;
 
       // Nothing to check against — appointment has no resolvable parties.

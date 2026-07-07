@@ -224,7 +224,7 @@ export function dropInfeasibleTravelOps(ops: WishOp[], data: ScheduleData): Wish
   if (!ctx.settings.enabled) return ops;
 
   const idOf = (ref?: string): string | undefined =>
-    ref ? data.clients.find(c => c.id === ref || c.name === ref)?.id : undefined;
+    ref ? data.clients.find(c => c.id === ref)?.id : undefined;
 
   interface Session { s: number; e: number; loc?: string }
   const touched = new Set(
@@ -299,11 +299,17 @@ export function wishSolutionToDraft(sol: WishSolution, base: ScheduleData): Wish
       if (working.has(o.appointmentId)) { working.delete(o.appointmentId); ops.push(newRemoveOp(o.appointmentId)); }
       else unresolved++;
     } else if (o.op === 'add') {
+      // Normalize the op's refs to immutable ids so the PERSISTED appointment is
+      // always id-linked, regardless of source: a builder op carries an id, an AI op
+      // carries a de-anonymized name. This is the single sanctioned name→id boundary.
+      // Empty ('' on supervision) and unresolvable refs pass through untouched.
+      const clientId = resolveEntityId(o.client ?? '', base.clients)?.id ?? o.client;
+      const technicianId = resolveEntityId(o.technician ?? '', base.technicians)?.id ?? o.technician;
       const appt: Appointment = {
         id: uuidv4(),
         title: o.title || defaultTitle(o.type),
-        technician: o.technician,
-        client: o.client,
+        technician: technicianId,
+        client: clientId,
         startTime: o.start,
         endTime: o.end,
         isFixed: false,
@@ -312,6 +318,9 @@ export function wishSolutionToDraft(sol: WishSolution, base: ScheduleData): Wish
         status: 'scheduled',
       };
       if (o.recurring) { appt.isRecurring = true; appt.recurringPattern = o.pattern || 'weekly'; }
+      // Extend-series adds carry the EXISTING seriesId so the new occurrences join the
+      // series (not a fresh one) — the This/Following/All batch path keys on seriesId.
+      if (o.seriesId) appt.seriesId = o.seriesId;
       working.set(appt.id, appt);
       ops.push(newAddOp(appt));
     } else if (o.op === 'blackout') {
@@ -354,6 +363,18 @@ export function wishSolutionToDraft(sol: WishSolution, base: ScheduleData): Wish
         working.set(next.id, next);
         ops.push(newEditOp(next));
       } else unresolved++;
+    } else if (o.op === 'regroup') {
+      // Stamp a shared seriesId (+ pattern annotation) onto each named row via an
+      // `edit` — no time change, so rendering/compliance are untouched; it only
+      // unlocks the This/Following/All batch-edit path (keyed on seriesId).
+      for (const id of o.appointmentIds) {
+        const a = working.get(id);
+        if (a) {
+          const next: Appointment = { ...a, seriesId: o.seriesId, recurringPattern: o.recurringPattern ?? a.recurringPattern };
+          working.set(next.id, next);
+          ops.push(newEditOp(next));
+        } else unresolved++;
+      }
     }
   }
   return { ops, blackouts, unresolved };

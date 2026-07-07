@@ -641,13 +641,21 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
   add('TravelTimes', ['from', 'to', 'dow', 'hour', 'minutes'],
     (s.travelCache || []).map(e => [e.from, e.to, e.dow, e.hour, e.minutes]));
 
-  // Appointments (cancellation columns split out).
+  // Appointments (cancellation columns split out). technician/client hold immutable
+  // ids; the *Name columns are denormalized for human audit only and are IGNORED on
+  // read (the parser resolves nothing from them — a rename re-denormalizes on next save).
+  const techNameById = new Map(data.technicians.map(t => [t.id, t.name]));
+  const clientNameById = new Map(data.clients.map(c => [c.id, c.name]));
   add('Appointments',
-    ['id', 'title', 'description', 'technician', 'client', 'startTime', 'endTime', 'isFixed',
+    ['id', 'title', 'description', 'technician', 'technicianName', 'client', 'clientName',
+      'startTime', 'endTime', 'isFixed',
       'isBillable', 'type', 'isMakeUp', 'makeupForId', 'isGhost', 'isRecurring', 'recurringPattern',
       'seriesId', 'status'],
     data.appointments.map(a => [
-      a.id, a.title, W(a.description), W(a.technician), W(a.client), a.startTime, a.endTime,
+      a.id, a.title, W(a.description),
+      W(a.technician), W(techNameById.get(a.technician || '')),
+      W(a.client), W(clientNameById.get(a.client || '')),
+      a.startTime, a.endTime,
       WB(a.isFixed), WB(a.isBillable), a.type, WT(a.isMakeUp), W(a.makeupForId), WT(a.isGhost),
       WB(a.isRecurring), W(a.recurringPattern), W(a.seriesId), a.status || 'scheduled',
     ]));

@@ -986,7 +986,7 @@ function ClientWeekGrid({ date, clients, appointments, companyHolidays, focusIds
     const map = new Map<string, Appointment[]>();
     for (const a of appointments) {
       if (a.isGhost) continue;
-      const match = clients.find(c => c.id === a.client || c.name === a.client);
+      const match = clients.find(c => c.id === a.client);
       if (!match) continue;
       const iso = a.startTime.slice(0, 10);
       (map.get(iso) ?? map.set(iso, []).get(iso)!).push(a);

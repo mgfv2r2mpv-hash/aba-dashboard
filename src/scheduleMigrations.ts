@@ -12,11 +12,12 @@
 // (which versioned the Excel sheet layout, SCHEMA_VERSION in excelHandler.ts).
 
 import { ScheduleData } from './types';
+import { resolveRefToId } from './entityRefs';
 
 export const BLOB_FORMAT = 'aba-schedule';
 
 // Bump when a migration step is added to STEPS below.
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 // The on-disk (pre-encryption) shape. `data` is a ScheduleData at `schemaVersion`.
 export interface ScheduleEnvelope {
@@ -47,7 +48,55 @@ const STEPS: Record<number, (data: any) => any> = {
         )
       : data.appointments,
   }),
+  // 2→3: relational links used to store a Client/Technician DISPLAY NAME (or an id)
+  // in `appt.client` / `appt.technician` / `assignments[].clientId`. Names are
+  // mutable, so a rename silently orphaned every appointment holding the old name.
+  // Normalize every stored ref to the entity's immutable id via resolveRefToId
+  // (exact id → exact name → unique normalized/prefix heal, e.g. "Toniel" →
+  // "Toniel T"). An unresolvable ref (ambiguous or gone) is PRESERVED verbatim — no
+  // data loss — and later surfaced by collectUnresolvedRefs for manual reassignment.
+  // Empty technician ('' on supervision) is a valid no-ref and is left untouched.
+  2: (data) => {
+    const clients = Array.isArray(data.clients) ? data.clients : [];
+    const technicians = Array.isArray(data.technicians) ? data.technicians : [];
+    const heal = (ref: any, entities: { id: string; name: string }[]): any =>
+      typeof ref === 'string' && ref ? (resolveRefToId(ref, entities).id ?? ref) : ref;
+    const appointments = Array.isArray(data.appointments)
+      ? data.appointments.map((a: any) =>
+          a ? { ...a, client: heal(a.client, clients), technician: heal(a.technician, technicians) } : a,
+        )
+      : data.appointments;
+    const techsHealed = technicians.map((t: any) =>
+      t && Array.isArray(t.assignments)
+        ? { ...t, assignments: t.assignments.map((asg: any) => (asg ? { ...asg, clientId: heal(asg.clientId, clients) } : asg)) }
+        : t,
+    );
+    return { ...data, appointments, technicians: techsHealed };
+  },
 };
+
+// After migration, the refs that STILL don't match a current entity id are the
+// unhealable orphans (ambiguous or deleted). Surfaced at import time so the user
+// can reassign them. Scans appointment client/technician + assignment clientId.
+export interface UnresolvedRef { kind: 'client' | 'technician'; ref: string; count: number; }
+
+export function collectUnresolvedRefs(data: ScheduleData): UnresolvedRef[] {
+  const clientIds = new Set(data.clients.map(c => c.id));
+  const techIds = new Set(data.technicians.map(t => t.id));
+  const tally = new Map<string, UnresolvedRef>();
+  const note = (kind: 'client' | 'technician', ref: string | undefined, ids: Set<string>) => {
+    if (!ref || ids.has(ref)) return;
+    const key = `${kind}:${ref}`;
+    const cur = tally.get(key);
+    if (cur) cur.count++; else tally.set(key, { kind, ref, count: 1 });
+  };
+  for (const a of data.appointments) {
+    note('client', a.client, clientIds);
+    note('technician', a.technician, techIds);
+  }
+  for (const t of data.technicians) for (const asg of t.assignments || []) note('client', asg.clientId, clientIds);
+  return [...tally.values()].sort((a, b) => b.count - a.count);
+}
 
 function isEnvelope(v: any): v is ScheduleEnvelope {
   return !!v && typeof v === 'object'

@@ -431,7 +431,7 @@ ISO times are local (no timezone suffix). Verify: every op start ≥ NOW; no two
       : undefined;
     const focusTechIds = focusClient
       ? new Set(this.data.technicians
-          .filter(t => (t.assignments || []).some(a => a.clientId === focusClient.id || a.clientId === focusClient.name))
+          .filter(t => (t.assignments || []).some(a => a.clientId === focusClient.id))
           .map(t => t.id))
       : null;
     const focusTok = focusClient

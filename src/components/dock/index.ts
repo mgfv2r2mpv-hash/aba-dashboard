@@ -14,6 +14,7 @@ export { SolutionCard } from './SolutionCard';
 export type { SolutionCardProps } from './SolutionCard';
 
 export { BuildResultPanel } from './BuildResultPanel';
+export { TidyPanel } from './TidyPanel';
 
 export { buildDockIssues, useIssueQueue } from './dockIssues';
 export type { DockIssue, DockIssueKind, IssueQueueState } from './dockIssues';

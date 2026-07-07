@@ -5,16 +5,14 @@ import { Appointment, Client, ScheduleData, Technician, BACB_RBT_SUPERVISION_MIN
 // in different forms still match.
 function makeTechResolver(data: ScheduleData): (ref?: string) => string | undefined {
   const byId = new Map(data.technicians.map(t => [t.id, t.id]));
-  const byName = new Map(data.technicians.map(t => [t.name, t.id]));
-  return (ref?: string) => (ref ? (byId.get(ref) ?? byName.get(ref) ?? ref) : undefined);
+  return (ref?: string) => (ref ? (byId.get(ref) ?? ref) : undefined);
 }
 
 // Same idea for clients, so a supervision and a direct that reference the same
 // client in different forms (id vs name) still match.
 function makeClientResolver(data: ScheduleData): (ref?: string) => string | undefined {
   const byId = new Map(data.clients.map(c => [c.id, c.id]));
-  const byName = new Map(data.clients.map(c => [c.name, c.id]));
-  return (ref?: string) => (ref ? (byId.get(ref) ?? byName.get(ref) ?? ref) : undefined);
+  return (ref?: string) => (ref ? (byId.get(ref) ?? ref) : undefined);
 }
 
 export interface ClientComplianceMetrics {
@@ -132,8 +130,7 @@ function computeMetrics(
     const t = new Date(a.startTime).getTime();
     return t >= startMs && t < endMs;
   };
-  const matches = (a: Appointment) =>
-    a.client === client.id || a.client === client.name;
+  const matches = (a: Appointment) => a.client === client.id;
   const resolveTech = makeTechResolver(data);
 
   const direct = data.appointments.filter(a =>

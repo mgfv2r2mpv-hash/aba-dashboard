@@ -133,10 +133,9 @@ export function computeAuthUsage(data: ScheduleData, auth: Authorization, now: D
 // The authorization (if any) covering a given client + date. When several
 // overlap, the one ending soonest wins — that's the cliff that matters.
 export function findAuthFor(data: ScheduleData, clientRef: string, dateStr: string): Authorization | undefined {
-  const matches = (data.authorizations || []).filter(auth => {
-    const client = data.clients.find(c => c.id === auth.clientId);
-    return (auth.clientId === clientRef || client?.name === clientRef) && inAuthSpan(dateStr, auth);
-  });
+  const matches = (data.authorizations || []).filter(auth =>
+    auth.clientId === clientRef && inAuthSpan(dateStr, auth),
+  );
   return matches.sort((a, b) => a.endDate.localeCompare(b.endDate))[0];
 }
 
@@ -157,7 +156,7 @@ export function makeupCandidates(
 ): MakeupCandidate[] {
   const auth = findAuthFor(data, clientRef, dateStr);
   const inSpan = (d: string) => auth ? inAuthSpan(d, auth) : d.slice(0, 7) === dateStr.slice(0, 7);
-  const client = data.clients.find(c => c.id === clientRef || c.name === clientRef);
+  const client = data.clients.find(c => c.id === clientRef);
 
   return data.appointments
     .filter(a =>

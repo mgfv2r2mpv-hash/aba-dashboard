@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Appointment, Technician, Client, DayOfWeek, Authorization, ScheduleData, CompanySettings, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS } from '../types';
 import { makeupCandidates, findAuthFor } from '../authorization';
 import { overlapHours } from '../compliance';
+import { nameOf } from '../entityRefs';
 import { v4 as uuidv4 } from 'uuid';
 
 interface AppointmentFormProps {
@@ -24,6 +25,9 @@ interface AppointmentFormProps {
   // Delete is scope-aware too — returns the ids to remove (empty array on cancel).
   onDelete?: (ids: string[]) => void;
   onCancel: () => void;
+  // Extend a recurring series forward: materialize missing occurrences (staged for
+  // review). Only offered when editing an occurrence that carries a seriesId.
+  onExtendSeries?: (seriesId: string, endDateISO: string) => void;
   // 'modal' (default) renders the full-screen overlay; 'inline' renders just the
   // form body to fill its container (used by the slide-up edit panel/sheet).
   variant?: 'modal' | 'inline';
@@ -63,6 +67,7 @@ export default function AppointmentForm({
   onSave,
   onDelete,
   onCancel,
+  onExtendSeries,
   variant = 'modal',
 }: AppointmentFormProps) {
   const [title, setTitle] = useState(appointment?.title || '');
@@ -149,8 +154,8 @@ export default function AppointmentForm({
   };
 
   // BTs filtered to those assigned to this client, or all BTs if no client or no assignments.
-  const techsForClient = (clientName: string): Technician[] => {
-    const client = clients.find(c => c.name === clientName);
+  const techsForClient = (clientRef: string): Technician[] => {
+    const client = clients.find(c => c.id === clientRef);
     if (!client) return technicians;
     const filtered = technicians.filter(t => t.assignments?.some(a => a.clientId === client.id));
     return filtered.length > 0 ? filtered : technicians;
@@ -181,10 +186,10 @@ export default function AppointmentForm({
     setClientId(c);
     // Reset BT if they're no longer in the filtered set for the new client.
     if (technicianId) {
-      const client = clients.find(cl => cl.name === c);
+      const client = clients.find(cl => cl.id === c);
       if (client) {
         const filtered = technicians.filter(t => t.assignments?.some(a => a.clientId === client.id));
-        if (filtered.length > 0 && !filtered.find(t => t.name === technicianId)) {
+        if (filtered.length > 0 && !filtered.find(t => t.id === technicianId)) {
           setTechnicianId('');
         }
       }
@@ -221,6 +226,13 @@ export default function AppointmentForm({
   const [customDates, setCustomDates] = useState<string>(''); // newline-separated YYYY-MM-DD
   const [recurrenceEnd, setRecurrenceEnd] = useState<string>('');
   const [editScope, setEditScope] = useState<EditScope>('instance');
+  // Extend-series horizon defaults to the client's authorization end (never schedule
+  // past auth); the user can shorten it. Empty when the client has no auth on file.
+  const [extendThrough, setExtendThrough] = useState<string>(() => {
+    const cid = appointment?.client;
+    const auth = (authorizations || []).filter(a => a.clientId === cid).sort((a, b) => b.endDate.localeCompare(a.endDate))[0];
+    return auth?.endDate ?? '';
+  });
 
   // All other occurrences sharing this appointment's seriesId. When editing,
   // the scope picker only matters if there's a real series to act on.
@@ -499,7 +511,7 @@ export default function AppointmentForm({
         <label style={labelStyle}>Client {type === 'supervision' && '*'}</label>
         <select value={clientId} onChange={(e) => handleClientChange(e.target.value)} style={inputStyle}>
           <option value="">— None —</option>
-          {clients.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         {type === 'supervision' && (
           <p style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
@@ -523,7 +535,7 @@ export default function AppointmentForm({
         </label>
         <select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} style={inputStyle}>
           <option value="">— None —</option>
-          {filteredTechs.map(t => <option key={t.id} value={t.name}>{t.name}{t.isRBT ? ' (RBT)' : ''}</option>)}
+          {filteredTechs.map(t => <option key={t.id} value={t.id}>{t.name}{t.isRBT ? ' (RBT)' : ''}</option>)}
         </select>
       </div>
     );
@@ -634,6 +646,30 @@ export default function AppointmentForm({
               </select>
             </div>
           </div>
+
+          {appointment?.seriesId && onExtendSeries && (
+            <div style={{ padding: '10px 12px', background: 'var(--surface-sunken)', border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)', marginTop: 8 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-body)', marginBottom: 4 }}>Extend this recurring series</p>
+              <p style={{ fontSize: 11, color: '#6b7280', marginBottom: 8 }}>
+                Fills in the missing occurrences forward through the date below — staged in the dock for review, not committed. Defaults to the client’s authorization end.
+              </p>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  type="date"
+                  value={extendThrough}
+                  min={date || undefined}
+                  onChange={(e) => setExtendThrough(e.target.value)}
+                  style={{ ...inputStyle, flex: '1 1 140px' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => { if (appointment.seriesId && extendThrough) onExtendSeries(appointment.seriesId, extendThrough); }}
+                  disabled={!extendThrough}
+                  style={{ background: 'var(--sage-600, #4d7c4d)', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', padding: '8px 14px', fontWeight: 600, cursor: extendThrough ? 'pointer' : 'not-allowed', opacity: extendThrough ? 1 : 0.6 }}
+                >Extend series →</button>
+              </div>
+            </div>
+          )}
 
           <div style={groupHeader('Assignment')}>Assignment</div>
           {assignmentSection}
@@ -779,7 +815,7 @@ export default function AppointmentForm({
             background: '#fffbeb', border: '1px solid #fbbf24',
             borderRadius: 'var(--radius-md)', fontSize: 13, color: '#92400e',
           }}>
-            ⚠ {clientId}{conflictingDirectAppt.technician ? ` / ${conflictingDirectAppt.technician}` : ''} is assigned to a Direct Service appointment at this time:{' '}
+            ⚠ {nameOf(clients, clientId)}{conflictingDirectAppt.technician ? ` / ${nameOf(technicians, conflictingDirectAppt.technician)}` : ''} is assigned to a Direct Service appointment at this time:{' '}
             {conflictingDirectAppt.startTime.slice(11, 16)}–{conflictingDirectAppt.endTime.slice(11, 16)}
           </div>
         )}

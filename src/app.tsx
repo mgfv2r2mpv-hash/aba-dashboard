@@ -5,7 +5,11 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
-import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, WishOp, Cancellation, Blackout, cancellationReasonLabel, DEFAULT_FIXIT_OPTIONS } from './types';
+import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, WishOp, Cancellation, Blackout, cancellationReasonLabel, DEFAULT_FIXIT_OPTIONS, ActionLogEntry, SchedulingHints } from './types';
+import { deriveActionEntry, viewOnlyEntry, pruneLog, buildInverse, summarizeOps, type ActionMeta } from './actionLog';
+import ActivityLog from './components/ActivityLog';
+import CommitToast from './components/CommitToast';
+import UndoPreview from './components/UndoPreview';
 import { solveMeetPace } from './localSolver';
 import Calendar, { HoursSummary } from './components/Calendar';
 import { conflictKey } from './components/ConflictPanel';
@@ -198,6 +202,18 @@ export default function App() {
   // Equivalence-verified auto cleanups + review suggestions from the last "Tidy
   // schedule" run; shown alongside the staged draft, cleared when the draft ends.
   const [tidyResult, setTidyResult] = useState<TidyResult | null>(null);
+  // ── Action log / undo (see src/actionLog.ts) ─────────────────────────────
+  // Post-commit toast: the head log entry + a one-tap exact undo while nothing
+  // else has committed. Replaced by each new logged commit; auto-dismisses.
+  const [undoToast, setUndoToast] = useState<{ entryId: string; label: string } | null>(null);
+  const undoToastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A selective undo staged into the draft tray: which entry, plus the parts
+  // DraftOps can't model (blackout removals, hint restores) applied on Accept.
+  const [pendingUndo, setPendingUndo] = useState<{
+    entryId: string; label: string; superseded: string[];
+    removeBlackoutIds: string[]; hintRestores: { clientId: string; hints?: SchedulingHints }[];
+  } | null>(null);
+  const [showActivity, setShowActivity] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [recoveryTarget, setRecoveryTarget] = useState<Appointment | null>(null);
@@ -774,7 +790,13 @@ export default function App() {
   // the decrypted bytes through /api/upload. Migrate/backfill to the current schema
   // so new fields are present even when the source predates them.
   const applyImported = async (_bytes: Uint8Array, data: ScheduleData, embeddedConfig?: string) => {
-    const migrated = migrateScheduleData(data);
+    const base = migrateScheduleData(data);
+    // A wholesale replace: log a view-only marker (op diffs vs. the previous
+    // schedule would be noise, and inverse ops across an import are wrong).
+    const migrated: ScheduleData = {
+      ...base,
+      actionLog: pruneLog([...(base.actionLog ?? []), viewOnlyEntry(base, { label: 'Imported schedule file', source: 'import' })]),
+    };
     setNativeStore(migrated);
     commitFull(migrated);
     setSolutions([]);
@@ -897,9 +919,28 @@ export default function App() {
 
   // Sync the in-memory store to a full replacement, then commit to React state +
   // rebuild the compliance cache. The adapter serves this store on every platform.
-  const commitScheduleData = async (next: ScheduleData) => {
-    setNativeStore(next);
-    commitFull(next);
+  //
+  // When `log` metadata is supplied, the TRUE committed delta (prev vs next —
+  // including engine relocations and side-channel merges) is derived into an
+  // append-only ActionLogEntry riding inside the schedule itself, and the
+  // post-commit Undo toast is armed. Callers without metadata (unlock, raw
+  // store syncs) commit silently, exactly as before.
+  const showUndoToast = (entryId: string, label: string) => {
+    if (undoToastTimer.current) clearTimeout(undoToastTimer.current);
+    setUndoToast({ entryId, label });
+    undoToastTimer.current = setTimeout(() => setUndoToast(null), 8000);
+  };
+  const commitScheduleData = async (next: ScheduleData, log?: ActionMeta) => {
+    let final = next;
+    if (log && scheduleData) {
+      const entry = deriveActionEntry(scheduleData, next, log);
+      if (entry) {
+        final = { ...next, actionLog: pruneLog([...(next.actionLog ?? scheduleData.actionLog ?? []), entry]) };
+        if (entry.undoable) showUndoToast(entry.id, entry.label);
+      }
+    }
+    setNativeStore(final);
+    commitFull(final);
   };
 
   // Fold any sAssI-buffered day-offs into the schedule being committed, deduped by
@@ -911,26 +952,112 @@ export default function App() {
     return fresh.length ? { ...next, blackouts: [...existing, ...fresh] } : next;
   };
 
+  // Undo-specific parts DraftOps can't model, folded in at Accept: strip the
+  // entry's added blackouts, restore the entry's before-hints.
+  const withUndoExtras = (next: ScheduleData): ScheduleData => {
+    if (!pendingUndo) return next;
+    let out = next;
+    if (pendingUndo.removeBlackoutIds.length) {
+      out = { ...out, blackouts: (out.blackouts ?? []).filter(b => !pendingUndo.removeBlackoutIds.includes(b.id)) };
+    }
+    if (pendingUndo.hintRestores.length) {
+      out = {
+        ...out,
+        clients: out.clients.map(c => {
+          const h = pendingUndo.hintRestores.find(x => x.clientId === c.id);
+          return h ? { ...c, schedulingHints: h.hints } : c;
+        }),
+      };
+    }
+    return out;
+  };
+
+  // What kind of change is this draft, for the log line. Undo > build > tidy >
+  // chat > manual (a chat proposal stages through stageSassiOps like builds do).
+  const draftMeta = (): ActionMeta => {
+    if (pendingUndo) return { label: `Undid: ${pendingUndo.label}`, source: 'undo' };
+    if (buildResult) return { label: `Build — ${summarizeOps(draftOps)}`, source: 'build' };
+    if (tidyResult) return { label: `Tidy — ${summarizeOps(draftOps)}`, source: 'tidy' };
+    if (sassi.active) return { label: `sAssI — ${summarizeOps(draftOps)}`, source: 'chat' };
+    return { label: summarizeOps(draftOps), source: 'manual' };
+  };
+
   const acceptDraft = async () => {
     if (!scheduleData || !draftStatus) return;
-    const next = withSassiBlackouts(draftStatus.resolved || applyOps(scheduleData, draftOps));
-    await commitScheduleData(next);
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); setTidyResult(null); sassi.reset();
+    const next = withUndoExtras(withSassiBlackouts(draftStatus.resolved || applyOps(scheduleData, draftOps)));
+    await commitScheduleData(next, draftMeta());
+    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); setTidyResult(null); setPendingUndo(null); sassi.reset();
   };
 
   const saveAnyway = async () => {
     if (!scheduleData) return;
     if (!confirm('Save this schedule as-is, with the flagged conflicts?')) return;
-    await commitScheduleData(withSassiBlackouts(applyOps(scheduleData, draftOps)));
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); setTidyResult(null); sassi.reset();
+    const meta = draftMeta();
+    await commitScheduleData(withUndoExtras(withSassiBlackouts(applyOps(scheduleData, draftOps))), { ...meta, label: `${meta.label} (saved with conflicts)` });
+    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); setTidyResult(null); setPendingUndo(null); sassi.reset();
   };
 
-  const cancelDraft = () => { setDraftOps([]); setSolutions([]); setSassiBlackouts([]); setBuildResult(null); setTidyResult(null); sassi.reset(); };
+  const cancelDraft = () => { setDraftOps([]); setSolutions([]); setSassiBlackouts([]); setBuildResult(null); setTidyResult(null); setPendingUndo(null); sassi.reset(); };
   const resetOp = (opId: string) => {
     setDraftOps(ops => ops.filter(o => o.id !== opId));
     // Removing the last staged op empties the draft (no commit fires), so the
     // build snapshot is now stale — clear it alongside.
     if (draftOps.length <= 1) setBuildResult(null);
+  };
+
+  // ── Selective undo (nonlinear) ───────────────────────────────────────────
+  // Stage entry K's inverse ops into the NORMAL draft pipeline: the tray is the
+  // blast-radius preview (op list + per-op ✕, solveDraft grade, and the
+  // UndoPreview panel's superseded warnings + per-entity impact). Accept then
+  // commits through the same gates as any draft and logs a new 'undo' entry.
+  const stageUndo = (entry: ActionLogEntry) => {
+    if (!scheduleData || !entry.undoable) return;
+    if (draftOps.length > 0 && !confirm('Discard the currently staged changes and stage this undo instead?')) return;
+    const inv = buildInverse(entry, scheduleData);
+    if (inv.ops.length === 0 && inv.removeBlackoutIds.length === 0 && inv.hintRestores.length === 0) {
+      setDebugMsg('Nothing left to undo — every change in that entry was already superseded or removed.');
+      return;
+    }
+    cancelDraft();
+    setDraftOps(inv.ops);
+    setPendingUndo({
+      entryId: entry.id, label: entry.label, superseded: inv.superseded,
+      removeBlackoutIds: inv.removeBlackoutIds, hintRestores: inv.hintRestores,
+    });
+    setShowActivity(false);
+    setView('schedule');
+  };
+
+  // Toast Undo: while the entry is still the log head and no draft is open, the
+  // inverse is exact by construction → commit immediately (one tap). Any other
+  // state falls through to the previewed stageUndo path. One inverse
+  // implementation, two entry points.
+  const undoFromToast = async () => {
+    if (!scheduleData || !undoToast) return;
+    const log = scheduleData.actionLog ?? [];
+    const head = log.length ? log[log.length - 1] : undefined;
+    const toast = undoToast;
+    setUndoToast(null);
+    if (!head || head.id !== toast.entryId || !head.undoable) return;
+    const inv = buildInverse(head, scheduleData);
+    if (inv.superseded.length === 0 && draftOps.length === 0) {
+      let next = applyOps(scheduleData, inv.ops);
+      if (inv.removeBlackoutIds.length) {
+        next = { ...next, blackouts: (next.blackouts ?? []).filter(b => !inv.removeBlackoutIds.includes(b.id)) };
+      }
+      if (inv.hintRestores.length) {
+        next = {
+          ...next,
+          clients: next.clients.map(c => {
+            const h = inv.hintRestores.find(x => x.clientId === c.id);
+            return h ? { ...c, schedulingHints: h.hints } : c;
+          }),
+        };
+      }
+      await commitScheduleData(next, { label: `Undid: ${head.label}`, source: 'undo' });
+    } else {
+      stageUndo(head);
+    }
   };
 
   // Picking a yellow trade-off stages the corresponding op so the next solve
@@ -1011,13 +1138,13 @@ export default function App() {
     const { ops, blackouts } = draftFromSolution(sol, scheduleData);
     const status = solveDraft(scheduleData, ops, new Date(), scheduleData.settings);
     if (status.grade === 'red') {
-      if (blackouts.length) await commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] });
+      if (blackouts.length) await commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] }, { label: 'Day-offs added', source: 'wish' });
       stageOps(ops);
       return false;
     }
     const resolved = status.resolved || applyOps(scheduleData, ops);
     const next = blackouts.length ? { ...resolved, blackouts: [...(resolved.blackouts || []), ...blackouts] } : resolved;
-    await commitScheduleData(next);
+    await commitScheduleData(next, { label: sol.summary?.trim() || `Wish — ${summarizeOps(ops)}`, source: 'wish' });
     return true;
   };
 
@@ -1033,7 +1160,7 @@ export default function App() {
   const customizeWish = (sol: WishSolution) => {
     if (!scheduleData) return;
     const { ops, blackouts } = draftFromSolution(sol, scheduleData);
-    if (blackouts.length) commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] });
+    if (blackouts.length) commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] }, { label: 'Day-offs added', source: 'wish' });
     stageOps(ops);
     setView('schedule');
   };
@@ -1051,7 +1178,7 @@ export default function App() {
   const customizeFix = (sol: WishSolution) => {
     if (!scheduleData) return;
     const { ops, blackouts } = draftFromSolution(sol, scheduleData);
-    if (blackouts.length) commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] });
+    if (blackouts.length) commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] }, { label: 'Day-offs added', source: 'wish' });
     stageOps(ops);
     setView('schedule');
   };
@@ -1151,7 +1278,7 @@ export default function App() {
     const next = ghosts.length
       ? { ...scheduleData, appointments: [...scheduleData.appointments, ...ghosts] }
       : scheduleData;
-    await commitScheduleData(next);
+    await commitScheduleData(next, { label: `Logged ${ghosts.length} request${ghosts.length === 1 ? '' : 's'} as ghost${ghosts.length === 1 ? '' : 's'}`, source: 'manual' });
     setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]);
   };
 
@@ -1164,7 +1291,9 @@ export default function App() {
   const dismissGhost = async (a: Appointment) => {
     if (!scheduleData) return;
     await axios.delete(`${API_BASE}/admin/appointment/${a.id}`);
-    const next = { ...scheduleData, appointments: scheduleData.appointments.filter(x => x.id !== a.id) };
+    let next = { ...scheduleData, appointments: scheduleData.appointments.filter(x => x.id !== a.id) };
+    const entry = deriveActionEntry(scheduleData, next, { label: `Dismissed ghost ${a.title || 'request'}`, source: 'manual' });
+    if (entry) next = { ...next, actionLog: pruneLog([...(scheduleData.actionLog ?? []), entry]) };
     setScheduleData(next);
     setCompCache(prev => recomputeCache(prev, scheduleData, next, [{ before: a, after: undefined }]));
     setSelectedAppointment(null);
@@ -1175,10 +1304,21 @@ export default function App() {
     try {
       const before = scheduleData.appointments.find(a => a.id === updated.id);
       await axios.post(`${API_BASE}/admin/appointment`, updated);
-      const next: ScheduleData = {
+      let next: ScheduleData = {
         ...scheduleData,
         appointments: scheduleData.appointments.map(a => a.id === updated.id ? updated : a),
       };
+      // Log the lifecycle change (this path bypasses commitScheduleData to keep
+      // the incremental compliance-cache recompute below).
+      const lifecycle = updated.status === 'completed' && before?.status !== 'completed' ? 'Completed'
+        : updated.status === 'canceled' && before?.status !== 'canceled' ? 'Canceled'
+          : updated.status === 'scheduled' && before?.status && before.status !== 'scheduled' ? 'Reopened'
+            : 'Edited';
+      const entry = deriveActionEntry(scheduleData, next, { label: `${lifecycle} ${updated.title || 'session'}`, source: 'manual' });
+      if (entry) {
+        next = { ...next, actionLog: pruneLog([...(scheduleData.actionLog ?? []), entry]) };
+        if (entry.undoable) showUndoToast(entry.id, entry.label);
+      }
       setScheduleData(next);
       setSelectedAppointment(updated);
       setCompCache(prev => recomputeCache(prev, scheduleData, next, [{ before, after: updated }]));
@@ -1230,7 +1370,7 @@ export default function App() {
     if (allPast) {
       const status = solveDraft(scheduleData, ops, new Date(), scheduleData.settings);
       if (status.grade === 'green') {
-        await commitScheduleData(status.resolved || applyOps(scheduleData, ops));
+        await commitScheduleData(status.resolved || applyOps(scheduleData, ops), { label: `Logged past session${ops.length === 1 ? '' : 's'} — ${summarizeOps(ops)}`, source: 'manual' });
         setSelectedAppointment(null);
         setShowAddAppointment(false);
         setEditingAppointment(null);
@@ -1257,7 +1397,11 @@ export default function App() {
   const handleWizardComplete = async (data: ScheduleData) => {
     try {
       const response = await axios.post(`${API_BASE}/schedule`, data);
-      commitFull(response.data.data);
+      const built: ScheduleData = response.data.data;
+      commitFull({
+        ...built,
+        actionLog: pruneLog([...(built.actionLog ?? []), viewOnlyEntry(built, { label: 'Setup wizard created the schedule', source: 'admin' })]),
+      });
       setConflicts(response.data.conflicts || []);
       setSolutions([]);
       setShowWizard(false);
@@ -1698,6 +1842,12 @@ export default function App() {
 
   // Command-bar actions are contextual: onboarding entries before data loads,
   // "new session" once a schedule is in hand.
+  // "Activity" (the committed-change history + undo) is reachable from every
+  // view once data exists — reversibility shouldn't require remembering where
+  // the button lives.
+  const activityBtn = scheduleData
+    ? compactBtn('🕘', 'Activity — committed changes & undo', () => setShowActivity(true), '#374151')
+    : null;
   const commandActions = !scheduleData ? (
     <>
       {compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), 'var(--brand-ai)')}
@@ -1705,10 +1855,13 @@ export default function App() {
       {compactBtn('CPR', 'CPR & Analysis', () => setView('cpr'), view === 'cpr' ? 'var(--brand-accent)' : '#374151')}
     </>
   ) : view === 'schedule' ? (
-    <Button variant="primary" size="sm" onClick={() => setShowAddAppointment(true)} aria-label="Add appointment">
-      + New session
-    </Button>
-  ) : undefined;
+    <>
+      {activityBtn}
+      <Button variant="primary" size="sm" onClick={() => setShowAddAppointment(true)} aria-label="Add appointment">
+        + New session
+      </Button>
+    </>
+  ) : activityBtn;
 
   const hereText = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   const nextText = pendingReview.length > 0
@@ -1863,6 +2016,16 @@ export default function App() {
         >
           🩺 Tidy schedule
         </button>
+      )}
+      {draftActive && pendingUndo && scheduleData && (
+        <UndoPreview
+          base={scheduleData}
+          ops={draftOps}
+          label={pendingUndo.label}
+          superseded={pendingUndo.superseded.filter(id => draftOps.some(o => o.id === id))}
+          removedBlackouts={pendingUndo.removeBlackoutIds.length}
+          restoredHints={pendingUndo.hintRestores.length}
+        />
       )}
       {draftActive && draftStatus && (
         <DraftTray
@@ -2118,6 +2281,7 @@ export default function App() {
                   onStartSession={startSessionFromTodo}
                   onGo={homeGo}
                   onMeetPace={openMeetPace}
+                  onOpenActivity={() => setShowActivity(true)}
                 />
               </React.Suspense>
             )}
@@ -2359,6 +2523,25 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Activity — the committed-change history with selective, previewed undo */}
+      {showActivity && scheduleData && (
+        <ActivityLog
+          data={scheduleData}
+          onUndo={stageUndo}
+          onClose={() => setShowActivity(false)}
+        />
+      )}
+
+      {/* Post-commit receipt + one-tap undo (exact while nothing else committed) */}
+      {undoToast && (
+        <CommitToast
+          label={undoToast.label}
+          compact={compactRail}
+          onUndo={undoFromToast}
+          onDismiss={() => setUndoToast(null)}
+        />
       )}
 
       {/* Local find-a-spot rescheduler (Move This / Replace This) */}

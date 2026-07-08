@@ -684,7 +684,44 @@ export interface ScheduleData {
   // Per-instance conflict keys that the user has confirmed & dismissed. Stored in
   // the schedule so dismissals survive page reload and round-trip through Excel.
   confirmedConflicts?: string[];
+  // Append-only history of committed changes (see src/actionLog.ts): what
+  // changed, who/what sourced it, and enough before-state to stage a selective
+  // undo through the draft pipeline. Capped (count + bytes) by pruneLog.
+  // Rides the lossless envelope/native blob; deliberately NOT exported to xlsx.
+  actionLog?: ActionLogEntry[];
   lastModified: string; // ISO 8601
+}
+
+// Where a committed change came from — drives the Activity list's grouping/icon
+// and the undo label. 'undo' entries are themselves commits (append-only history).
+export type ActionSource = 'build' | 'wish' | 'tidy' | 'manual' | 'chat' | 'undo' | 'import' | 'admin';
+
+export interface ActionLogEntry {
+  id: string;
+  at: string;      // ISO commit time
+  label: string;   // human summary ("Build month: 34 adds · 2 moves")
+  source: ActionSource;
+  // Normalized committed delta (add | edit | remove; the after-state rides
+  // op.appt). Derived by diffing prev vs next at the commit chokepoint, so it
+  // captures engine relocations and side-channel merges too. Import/admin
+  // full-replaces log view-only entries with ops: [].
+  ops: DraftOpLike[];
+  // Pre-commit state of every touched appointment id (null = didn't exist).
+  before: Record<string, Appointment | null>;
+  blackoutsAdded?: Blackout[];
+  hintChanges?: { clientId: string; before?: SchedulingHints; after?: SchedulingHints }[];
+  undoable: boolean;
+  // Coarse counts for view-only entries (imports / wholesale admin edits).
+  counts?: { appts: number; clients: number; techs: number };
+}
+
+// Structural twin of draft.ts DraftOp (types.ts must not import draft.ts —
+// draft.ts already imports types.ts). draft.ts's DraftOp is assignable to it.
+export interface DraftOpLike {
+  id: string;
+  kind: 'add' | 'move' | 'shorten' | 'remove' | 'edit';
+  targetId?: string;
+  appt?: Appointment;
 }
 
 // How a single party's availability lines up with an appointment on its day.

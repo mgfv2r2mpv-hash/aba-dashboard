@@ -129,6 +129,7 @@ function backfillDefaults(data: ScheduleData): ScheduleData {
     authorizations: data.authorizations ?? [],
     manualUsage: data.manualUsage ?? [],
     confirmedConflicts: data.confirmedConflicts ?? [],
+    actionLog: data.actionLog ?? [],
   };
 }
 

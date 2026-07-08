@@ -23,6 +23,8 @@ export interface HomeViewProps {
   onGo: (action: RitualAction) => void;
   /** Hand a case-scoped "Fix pace with SAssi" request to the dock. */
   onMeetPace?: (clientId: string, intent: 'behind' | 'over') => void;
+  /** Open the Activity log (committed changes + selective undo). */
+  onOpenActivity?: () => void;
 }
 
 const STATUS_COLOR: Record<TrendStatus, string> = {
@@ -322,7 +324,7 @@ function TodosCard({ data, todos, onAddTodo, onStartSession }: {
   );
 }
 
-export function HomeView({ data, now, conflictCount, complianceFlagCount, todos, onAddTodo, onStartSession, onGo, onMeetPace }: HomeViewProps) {
+export function HomeView({ data, now, conflictCount, complianceFlagCount, todos, onAddTodo, onStartSession, onGo, onMeetPace, onOpenActivity }: HomeViewProps) {
   const [ritual, setRitual] = useState<RitualKey>('sunday');
   const [win, setWin] = useState<'week' | 'month'>('week');
   const todosRef = useRef<HTMLDivElement>(null);
@@ -358,6 +360,11 @@ export function HomeView({ data, now, conflictCount, complianceFlagCount, todos,
               value={ritual}
               onChange={(v) => setRitual(v as RitualKey)}
             />
+            {onOpenActivity && (
+              <Button variant="ghost" size="sm" onClick={onOpenActivity} title="Committed changes & undo">
+                🕘 Activity
+              </Button>
+            )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, margin: '16px 0' }}>
             {R.items.map((it, i) => (

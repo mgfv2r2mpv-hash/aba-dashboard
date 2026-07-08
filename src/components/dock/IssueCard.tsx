@@ -4,9 +4,10 @@ import type { DockIssue } from './dockIssues';
 
 /**
  * IssueCard — the single dock issue on show. Kind pill + title + plain-language
- * detail, then the affordances: a fix path (review in place for a conflict, or
- * hand off to SAssi for compliance) and "Not now" to cycle. A footer counts
- * what's queued behind it.
+ * detail, then the affordances: a fix path (review in place for a conflict; a
+ * CASE-SCOPED "Fix pace with SAssi" on per-client compliance cards; "Open
+ * compliance" navigation on the aggregate tail) and "Not now" to cycle. A
+ * footer counts what's queued behind it.
  */
 export interface IssueCardProps {
   issue: DockIssue;
@@ -21,6 +22,8 @@ export interface IssueCardProps {
   onReviewConflict: (issue: DockIssue) => void;
   onMuteConflict: (issue: DockIssue) => void;
   onFixCompliance: () => void;
+  /** Case-scoped fix — seeds the meet-pace solve for issue.clientId. */
+  onFixPace?: (clientId: string) => void;
   onNotNow: () => void;
 }
 
@@ -41,9 +44,11 @@ export function IssueCard({
   onReviewConflict,
   onMuteConflict,
   onFixCompliance,
+  onFixPace,
   onNotNow,
 }: IssueCardProps) {
   const isConflict = issue.kind === 'conflict';
+  const caseScoped = !isConflict && !!issue.clientId && !!onFixPace;
 
   return (
     <div
@@ -81,9 +86,13 @@ export function IssueCard({
               Snooze
             </Button>
           </>
-        ) : (
-          <Button variant="sassi" size="sm" onClick={onFixCompliance}>
+        ) : caseScoped ? (
+          <Button variant="sassi" size="sm" onClick={() => onFixPace!(issue.clientId!)}>
             Fix pace with SAssi
+          </Button>
+        ) : (
+          <Button variant="ghost" size="sm" onClick={onFixCompliance}>
+            Open compliance
           </Button>
         )}
         {remaining > 1 && (

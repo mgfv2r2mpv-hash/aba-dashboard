@@ -256,5 +256,46 @@ console.log('extend-vs-add: an adjacent existing session GROWS instead of a frag
   check('the applied schedule has no tech double-book', !techDoubleBooked(preview));
 }
 
+console.log('no-authorization: a skipped case is named honestly, never silently');
+{
+  const wide = { Monday: [{ start: '08:00', end: '16:00' }], Tuesday: [{ start: '08:00', end: '16:00' }] };
+  const cAuthless = client('c-none', 'Client NoAuth', wide);
+  const cEmptyWeekly = client('c-empty', 'Client EmptyWeekly', wide);
+  const cAuthed = client('c-ok', 'Client Authed', wide);
+  const t1 = tech('t1', 'Tech A', wide, [
+    { clientId: 'c-none', hoursPerWeek: 10, billable: true },
+    { clientId: 'c-empty', hoursPerWeek: 10, billable: true },
+    { clientId: 'c-ok', hoursPerWeek: 10, billable: true },
+  ]);
+  // c-none: no auth at all; c-empty: auth exists but no weekly direct rate.
+  const emptyWeekly: Authorization = { id: 'au-c-empty', clientId: 'c-empty', startDate: '2026-01-01', endDate: '2026-12-31', buckets: { direct: 10_000 }, weekly: {} };
+  const base = schedule([cAuthless, cEmptyWeekly, cAuthed], [t1], [emptyWeekly, auth('c-ok', 8)]);
+  const result = buildSchedule(base, defaultBuilderConfig(base, NOW), NOW);
+
+  const noAuthBlocks = result.blocks.filter(b => b.bindingConstraint === 'no-authorization');
+  check('both authless cases emit a no-authorization block', noAuthBlocks.length === 2
+    && noAuthBlocks.some(b => b.clientId === 'c-none') && noAuthBlocks.some(b => b.clientId === 'c-empty'),
+    JSON.stringify(noAuthBlocks.map(b => b.clientId)));
+  check('the missing-auth detail points at Caseload → Auths', noAuthBlocks.every(b => b.detail.includes('Caseload → Auths')));
+  check('the two variants explain differently (no auth vs no weekly rate)',
+    noAuthBlocks.find(b => b.clientId === 'c-none')!.detail.includes('no authorization')
+    && noAuthBlocks.find(b => b.clientId === 'c-empty')!.detail.includes('no weekly direct hours'));
+  check('the authed case still places', result.solution.ops.some(o => o.op === 'add' && (o as any).client === 'Client Authed'));
+  check('no-auth blocks carry zero direct gap (metrics semantics unchanged)', noAuthBlocks.every(b => b.directGapRemaining === 0));
+
+  // A supervision-only build over the same roster must NOT repeat the no-auth
+  // noise (the direct pass owns that diagnosis).
+  const supOnly = buildSchedule(base, { ...defaultBuilderConfig(base, NOW), chaseDirect: false, chaseSupervision: true }, NOW);
+  check('a sup-only build emits no no-authorization blocks', !supOnly.blocks.some(b => b.bindingConstraint === 'no-authorization'));
+
+  // The from-scratch trap: NOTHING authorized → the label used by the panel
+  // resolves and every block is the no-auth kind (BuildResultPanel keys off this).
+  const bare = schedule([cAuthless], [t1], []);
+  const bareResult = buildSchedule(bare, defaultBuilderConfig(bare, NOW), NOW);
+  check('an all-authless build yields ONLY no-authorization blocks and zero ops',
+    bareResult.solution.ops.length === 0 && bareResult.blocks.length === 1
+    && bareResult.blocks[0].bindingConstraint === 'no-authorization');
+}
+
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Appointment, ScheduleData, ScheduleConflict, WishSolution } from '../types';
+import { Appointment, ScheduleData, ScheduleConflict } from '../types';
 import {
   ClientCompliance, TechCompliance, TechComplianceMetrics,
   computeClientCompliance, computeTechCompliance, computeTechContactDays,
@@ -14,8 +14,6 @@ import {
 import CompleteTimePrompt from './CompleteTimePrompt';
 import { useRoster } from '../rosterContext';
 import ConflictPanel from './ConflictPanel';
-import FixItPanel from './FixItPanel';
-import { AISettings } from './Settings';
 
 interface Props {
   data: ScheduleData;
@@ -27,7 +25,6 @@ interface Props {
   // area so the Compliance tab is the one place to see everything that needs
   // attention. May be omitted (treated as none).
   conflicts?: ScheduleConflict[];
-  aiSettings?: AISettings;
   // Conflict triage (mute / confirm-dismiss), owned by App and threaded to the
   // warnings ConflictPanel so it stays consistent with the schedule view's.
   mutedConflictKeys?: string[];
@@ -37,13 +34,14 @@ interface Props {
   onMarkComplete: (a: Appointment) => void;
   onRequestCancel: (a: Appointment) => void;
   onSelectAppointment: (a: Appointment) => void;
-  // "Fix It" actions — accept applies a proposed solution; customize stages it
-  // into the editable draft. Optional (the panel hides its buttons without them).
-  onAcceptFix?: (sol: WishSolution) => void | Promise<void>;
-  onCustomizeFix?: (sol: WishSolution) => void;
 }
 
-export default function ComplianceDashboard({ data, cache, conflicts = [], aiSettings, mutedConflictKeys, onMuteConflict, onUnmuteConflict, onConfirmDismissConflict, onMarkComplete, onRequestCancel, onSelectAppointment, onAcceptFix, onCustomizeFix }: Props) {
+// Remediation lives in the SAssi dock now — per-case compliance cards seed a
+// case-scoped "Fix pace" solve, and the builders handle bulk gaps. The old
+// FixItPanel (a checkbox wall + all-clients AI generate) retired with it; its
+// engine (fixit.ts / generateFixSolutions) survives as the meet-pace variant
+// provider.
+export default function ComplianceDashboard({ data, cache, conflicts = [], mutedConflictKeys, onMuteConflict, onUnmuteConflict, onConfirmDismissConflict, onMarkComplete, onRequestCancel, onSelectAppointment }: Props) {
   const [periodRef, setPeriodRef] = useState(new Date());
   const [compView, setCompView] = useState<'case' | 'staff'>('case');
   const period = useMemo(() => monthPeriod(periodRef), [periodRef]);
@@ -112,16 +110,6 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], aiSet
           <NavBtn onClick={goNext}>→</NavBtn>
         </div>
       </div>
-
-      {aiSettings && onAcceptFix && onCustomizeFix && (
-        <FixItPanel
-          data={data}
-          aiSettings={aiSettings}
-          conflicts={conflicts}
-          onAccept={onAcceptFix}
-          onCustomize={onCustomizeFix}
-        />
-      )}
 
       {conflicts.length > 0 && (
         <ScheduleWarnings

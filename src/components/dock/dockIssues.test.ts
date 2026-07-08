@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { ScheduleConflict } from '../../types';
-import type { ComplianceSummary } from '../../complianceCache';
+import type { ComplianceSummary, ComplianceAttention } from '../../complianceCache';
 import { buildDockIssues, useIssueQueue, type DockIssue } from './dockIssues';
 
 const conflict = (
@@ -60,6 +60,54 @@ describe('buildDockIssues', () => {
     const err = conflict('availability-conflict', 'error', 'e');
     const issues = buildDockIssues([err], summary(1, 0));
     expect(issues.map((i) => i.kind)).toEqual(['conflict', 'compliance']);
+  });
+
+  // ── per-case cards (attention list) ──────────────────────────────────────
+  const att = (kind: 'client' | 'tech', id: string, status: 'red' | 'yellow', hoursToGo = 1): ComplianceAttention =>
+    ({ kind, id, name: `Name ${id}`, status, detail: `d-${id}`, hoursToGo });
+
+  it('emits per-case cards with clientId, capped, plus a counting tail', () => {
+    const attention = [
+      att('client', 'c1', 'red', 3), att('client', 'c2', 'red', 2),
+      att('client', 'c3', 'yellow', 1), att('client', 'c4', 'yellow', 0.5),
+      att('tech', 't1', 'yellow', 1),
+    ];
+    const issues = buildDockIssues([], summary(2, 3), attention, 3);
+    const cases = issues.filter(i => i.id.startsWith('compliance:case:'));
+    expect(cases).toHaveLength(3);
+    expect(cases.map(i => i.clientId)).toEqual(['c1', 'c2', 'c3']);
+    expect(cases[0].severity).toBe('error');
+    expect(cases[2].severity).toBe('warning');
+    expect(cases[0].title).toBe('Name c1 off pace');
+    const tail = issues.find(i => i.id === 'compliance:summary');
+    expect(tail).toBeDefined();
+    expect(tail!.clientId).toBeUndefined();
+    expect(tail!.detail).toContain('2 more');
+  });
+
+  it('techs never become per-case cards (they fold into the tail)', () => {
+    const issues = buildDockIssues([], summary(1, 0), [att('tech', 't1', 'red', 2)], 3);
+    expect(issues.filter(i => i.id.startsWith('compliance:case:'))).toHaveLength(0);
+    expect(issues.find(i => i.id === 'compliance:summary')?.detail).toContain('1 more');
+  });
+
+  it('no tail when every attention entry fits as a case card', () => {
+    const issues = buildDockIssues([], summary(1, 0), [att('client', 'c1', 'red')], 3);
+    expect(issues.filter(i => i.kind === 'compliance')).toHaveLength(1);
+    expect(issues[0].clientId).toBe('c1');
+  });
+
+  it('falls back to the single aggregate while the cache is rebuilding (empty attention, non-empty summary)', () => {
+    const issues = buildDockIssues([], summary(2, 1), [], 3);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].id).toBe('compliance:summary');
+    expect(issues[0].detail).toContain('2 at risk');
+  });
+
+  it('a red case card ranks ahead of a yellow conflict', () => {
+    const warn = conflict('training-violation', 'warning', 'w');
+    const issues = buildDockIssues([warn], summary(1, 0), [att('client', 'c1', 'red')], 3);
+    expect(issues.map(i => i.id.startsWith('compliance:case:'))).toEqual([true, false]);
   });
 });
 

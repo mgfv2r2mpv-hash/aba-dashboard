@@ -51,7 +51,7 @@ export interface ClientBlock {
   // cadence or its PT hours goal. Both are tracked separately from the direct-
   // staffing gap (via supervisionGapRemaining / ptGapRemaining) so casesFullyStaffed
   // keys only off direct blocks.
-  bindingConstraint: 'availability' | 'tech-contention' | 'auth-cap' | 'bcba-availability' | 'pt-availability' | 'none';
+  bindingConstraint: 'availability' | 'tech-contention' | 'auth-cap' | 'bcba-availability' | 'pt-availability' | 'no-authorization' | 'none';
   detail: string;
   supervisionGapRemaining?: number;
   ptGapRemaining?: number;
@@ -333,6 +333,7 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
 
   // ── Build per-client plans + MRV ordering ────────────────────────────────────
   const plans: CasePlan[] = [];
+  const blocks: ClientBlock[] = [];
   for (const client of data.clients) {
     const override = config.clientOverrides?.[client.id];
     if (override?.skip) continue;
@@ -346,7 +347,23 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
       target = authWeekly > 0 ? Math.min(authWeekly, override.directTarget) : override.directTarget;
       authClamped = authWeekly > 0 && override.directTarget < authWeekly;
     }
-    if (target <= 0) continue; // no authorization/target → nothing to build for this case
+    if (target <= 0) {
+      // Say WHY the case is skipped instead of silently vanishing — a wizard-only
+      // schedule (no authorizations yet) used to read "everything is already at
+      // target", the single worst from-scratch trap. Only the direct pass owns
+      // this diagnosis (a sup/PT-only build would just repeat it as noise), and
+      // directGapRemaining stays 0 so casesFullyStaffed semantics are unchanged.
+      if (config.chaseDirect !== false) {
+        blocks.push({
+          clientId: client.id, clientName: client.name, directGapRemaining: 0,
+          bindingConstraint: 'no-authorization',
+          detail: auth
+            ? `${client.name}'s authorization has no weekly direct hours — set one under Caseload → Auths.`
+            : `${client.name} has no authorization covering the week of ${config.weekStart} — add one under Caseload → Auths.`,
+        });
+      }
+      continue; // no authorization/target → nothing to build for this case
+    }
 
     const scheduled = data.appointments
       .filter(a => a.type === 'client-session' && a.status !== 'canceled' && !a.isGhost
@@ -374,7 +391,6 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
   // ── Fill loop ────────────────────────────────────────────────────────────────
   const ops: WishOp[] = [];
   const extendOps: WishOp[] = []; // per-instance resizes of existing sessions (not materialized)
-  const blocks: ClientBlock[] = [];
   let directHrsPlaced = 0;
   let extendedHorizonHrs = 0;     // hours the extension pass added across the horizon
 
@@ -663,6 +679,7 @@ export function bindingConstraintLabel(c: ClientBlock['bindingConstraint']): str
     case 'auth-cap': return 'At authorization cap';
     case 'bcba-availability': return 'BCBA unavailable to supervise';
     case 'pt-availability': return 'BCBA unavailable for parent training';
+    case 'no-authorization': return 'No authorization on file';
     case 'none': return 'Fully placed';
   }
 }

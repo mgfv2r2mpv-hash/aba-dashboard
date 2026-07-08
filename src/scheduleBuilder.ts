@@ -25,7 +25,7 @@ import { resolveUtilization } from './utilization';
 import { placeSupervision, SupervisionMetrics, EMPTY_SUPERVISION_METRICS } from './builderSupervision';
 import { placeParentTraining, ParentTrainingMetrics, EMPTY_PARENT_TRAINING_METRICS } from './builderPT';
 import { buildDirectCalendar, seedBcbaBusy } from './builderBcba';
-import { placeUnstaffedContact } from './builderFill';
+import { placeUnstaffedContact, fillToBillableTarget } from './builderFill';
 import { startOfWeek, startOfDay, addWeeks } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -536,6 +536,17 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
       bcbaBusy = fill.busyOut;
       bcbaOps.push(...fill.ops);
       blocks.push(...fill.blocks);
+    }
+    // Fill to the BCBA billable target — only the combined "build my month"
+    // (supervision + PT). After floors/goals/contact, top up each week to the weekly
+    // minimum and the month to its target via the user's cascade: more supervision
+    // over directs (to the 20% cap), then solo case-planning (bounded by weekly
+    // case-planning auth). Standalone supervision/PT builds stay single-purpose.
+    if (chaseSupervision && chasePT) {
+      const topUp = fillToBillableTarget(data, cal, bcbaBusy, now, config, bcbaOps, caseSupSeries);
+      bcbaBusy = topUp.busyOut;
+      bcbaOps.push(...topUp.ops);
+      blocks.push(...topUp.blocks);
     }
     // Dated backbone emitted ONCE, plus the resizes of existing sessions (which
     // buildDirectCalendar doesn't materialize — they edit rows already on the board).

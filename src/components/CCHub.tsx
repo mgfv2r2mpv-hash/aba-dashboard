@@ -33,6 +33,8 @@ interface Props {
   onMarkComplete: (a: Appointment) => void;
   onRequestCancel: (a: Appointment) => void;
   onSelectAppointment: (a: Appointment) => void;
+  // Case-scoped meet-pace fix, seeded from a compliance "needs attention" row.
+  onFixPace?: (clientId: string) => void;
   // Jump to Admin's editable C&C settings tab (from the view-only popup).
   onOpenAdminCandC: () => void;
 }
@@ -105,6 +107,7 @@ export default function CCHub(props: Props) {
             onMarkComplete={props.onMarkComplete}
             onRequestCancel={props.onRequestCancel}
             onSelectAppointment={props.onSelectAppointment}
+            onFixPace={props.onFixPace}
           />
         )}
         {tab === 'clients' && (

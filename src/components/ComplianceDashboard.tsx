@@ -5,7 +5,7 @@ import {
   computeClientCompliance, computeTechCompliance, computeTechContactDays,
   pastIncompleteAppointments, monthPeriod,
 } from '../compliance';
-import { ComplianceCache } from '../complianceCache';
+import { ComplianceCache, attentionFromReports, type ComplianceAttention } from '../complianceCache';
 import { BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
 import {
   ActualLevel, ProjectedLevel,
@@ -34,6 +34,8 @@ interface Props {
   onMarkComplete: (a: Appointment) => void;
   onRequestCancel: (a: Appointment) => void;
   onSelectAppointment: (a: Appointment) => void;
+  // Case-scoped meet-pace fix, seeded from a "needs attention" row (client only).
+  onFixPace?: (clientId: string) => void;
 }
 
 // Remediation lives in the SAssi dock now — per-case compliance cards seed a
@@ -41,7 +43,7 @@ interface Props {
 // FixItPanel (a checkbox wall + all-clients AI generate) retired with it; its
 // engine (fixit.ts / generateFixSolutions) survives as the meet-pace variant
 // provider.
-export default function ComplianceDashboard({ data, cache, conflicts = [], mutedConflictKeys, onMuteConflict, onUnmuteConflict, onConfirmDismissConflict, onMarkComplete, onRequestCancel, onSelectAppointment }: Props) {
+export default function ComplianceDashboard({ data, cache, conflicts = [], mutedConflictKeys, onMuteConflict, onUnmuteConflict, onConfirmDismissConflict, onMarkComplete, onRequestCancel, onSelectAppointment, onFixPace }: Props) {
   const [periodRef, setPeriodRef] = useState(new Date());
   const [compView, setCompView] = useState<'case' | 'staff'>('case');
   const period = useMemo(() => monthPeriod(periodRef), [periodRef]);
@@ -57,6 +59,17 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], muted
       ? data.technicians.map(t => cache!.techs.get(t.id)).filter((r): r is TechCompliance => !!r)
       : computeTechCompliance(data, period),
     [data, period, cache, usingCache],
+  );
+  // The red/yellow "needs attention" set for the VIEWED month — exactly the "N
+  // compliance" the header badge counts, but named, with deficits and a fix path.
+  const attention = useMemo(
+    () => attentionFromReports(clientReports, techReports, data.settings),
+    [clientReports, techReports, data.settings],
+  );
+  // Tech id → red/yellow, for sorting the Staff cards critical-first.
+  const attentionRank = useMemo(
+    () => new Map(attention.filter(a => a.kind === 'tech').map(a => [a.id, a.status] as const)),
+    [attention],
   );
   const techContactDays = useMemo(() => {
     const map = new Map<string, { actual: number; projected: number }>();
@@ -110,6 +123,8 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], muted
           <NavBtn onClick={goNext}>→</NavBtn>
         </div>
       </div>
+
+      <NeedsAttention items={attention} onFixPace={onFixPace} onViewStaff={() => setCompView('staff')} />
 
       {conflicts.length > 0 && (
         <ScheduleWarnings
@@ -174,7 +189,13 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], muted
                 No technicians yet.
               </p>
             )}
-            {techReports.map(r => (
+            {[...techReports].sort((a, b) => {
+              // Critical-first (red before yellow before the rest), then by name —
+              // mirrors the Cases sort so off-target staff lead.
+              const rank = (id: string) => { const s = attentionRank.get(id); return s === 'red' ? 0 : s === 'yellow' ? 1 : 2; };
+              const ra = rank(a.tech.id), rb = rank(b.tech.id);
+              return ra !== rb ? ra - rb : a.tech.name.localeCompare(b.tech.name);
+            }).map(r => (
               <TechCard
                 key={r.tech.id}
                 report={r}
@@ -190,6 +211,53 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], muted
     </div>
   );
 }
+
+// The "N compliance" the header badge counts, named and made actionable: every
+// red/yellow case + tech for the viewed month, with its deficit and — for cases
+// — a one-tap "Fix pace with SAssi". Techs jump to the Staff cards (their fix is
+// the underlying cases' supervision, not a single-case meet-pace).
+function NeedsAttention({ items, onFixPace, onViewStaff }: {
+  items: ComplianceAttention[];
+  onFixPace?: (clientId: string) => void;
+  onViewStaff: () => void;
+}) {
+  if (items.length === 0) return null;
+  const dot = (s: ComplianceAttention['status']) => s === 'red' ? 'var(--status-behind)' : 'var(--status-over)';
+  return (
+    <div style={{ marginBottom: 16, border: '1px solid #fecaca', borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{ background: '#fef2f2', padding: '10px 12px', fontSize: 14, fontWeight: 700, color: '#991b1b' }}>
+        Needs attention ({items.length})
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {items.map(a => (
+          <div key={`${a.kind}:${a.id}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderTop: '1px solid #f3f4f6' }}>
+            <span aria-hidden style={{ flexShrink: 0, width: 9, height: 9, borderRadius: 5, background: dot(a.status) }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
+                {a.name} <span style={{ fontWeight: 500, color: '#6b7280', fontSize: 11 }}>· {a.kind === 'client' ? 'case' : 'staff'}</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#4b5563', lineHeight: 1.4 }}>{a.detail}</div>
+            </div>
+            {a.kind === 'client' && onFixPace ? (
+              <button onClick={() => onFixPace(a.id)} style={fixPaceBtn}>Fix pace with SAssi</button>
+            ) : a.kind === 'tech' ? (
+              <button onClick={onViewStaff} style={reviewBtn}>Review ↓</button>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const fixPaceBtn: React.CSSProperties = {
+  flexShrink: 0, padding: '6px 12px', border: 'none', borderRadius: 6, cursor: 'pointer',
+  fontSize: 12, fontWeight: 700, background: 'var(--sage-600)', color: 'var(--white)', fontFamily: 'var(--font-sans)',
+};
+const reviewBtn: React.CSSProperties = {
+  flexShrink: 0, padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer',
+  fontSize: 12, fontWeight: 600, background: 'white', color: '#374151',
+};
 
 // The calendar's schedule warnings, surfaced on the Compliance tab in a
 // collapsible area (collapsed by default so the compliance cards lead). Reuses

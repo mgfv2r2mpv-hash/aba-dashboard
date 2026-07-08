@@ -577,5 +577,29 @@ console.log('travel adjacency: at equal need, the direct wedged between same-cit
     JSON.stringify(week0.map(s => s.startTime)));
 }
 
+console.log('archived: an archived case is skipped by every build pass, even with pre-archive directs this month');
+{
+  const active: Client = client('c1', 'Active Ann', WIDE_CLIN);
+  const gone: Client = { ...client('ar', 'Archie Gone', WIDE_CLIN), archived: true };
+  const t1 = tech('t1', 'Aide', WIDE_CLIN, [
+    { clientId: 'c1', hoursPerWeek: 40, billable: true },
+    { clientId: 'ar', hoursPerWeek: 40, billable: true },
+  ]);
+  // A direct from earlier this month, kept because it predates the archive — its
+  // presence is exactly what used to trick the supervision/PT passes into acting.
+  const preArchive: Appointment = {
+    id: 'd0', title: 'Direct', client: 'ar', technician: 't1', type: 'client-session',
+    startTime: '2026-07-06T09:00:00', endTime: '2026-07-06T12:00:00',
+    isFixed: true, isBillable: true, isRecurring: false, status: 'completed',
+  };
+  const base = schedule([active, gone], [t1], [auth('c1', 10), auth('ar', 10)], baseSettings(WIDE_CLIN), [preArchive]);
+  const { committed } = run(base, combinedBuilderConfig(base, NOW));
+  const forGone = (t: string) => committed.appointments.filter(a => a.type === t && (a.client === 'ar' || a.client === 'Archie Gone'));
+  check('archived: no supervision built for the archived case', forGone('supervision').length === 0, `sup=${forGone('supervision').length}`);
+  check('archived: no parent-training built for the archived case', forGone('parent-training').length === 0, `pt=${forGone('parent-training').length}`);
+  check('archived: no NEW directs built for the archived case (only the seeded one remains)', forGone('client-session').length === 1, `dir=${forGone('client-session').length}`);
+  check('archived: the active case is unaffected (still supervised)', committed.appointments.some(a => a.type === 'supervision' && (a.client === 'c1' || a.client === 'Active Ann')));
+}
+
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

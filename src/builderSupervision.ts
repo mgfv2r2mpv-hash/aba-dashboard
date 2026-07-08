@@ -88,7 +88,10 @@ export function placeSupervision(
   };
 
   // Cases that actually have directs to supervise, ordered riskiest/tightest first.
+  // Archived cases are off the caseload — skip even if this month still holds
+  // pre-archive directs (those don't earn new supervision).
   const entries = data.clients
+    .filter(client => !client.archived)
     .map(client => {
       const directs = cal.byClient.get(client.id) ?? [];
       const directHoursMonth = directs.reduce((s, d) => s + d.hours, 0);

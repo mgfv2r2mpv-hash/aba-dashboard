@@ -68,7 +68,7 @@ export function placeParentTraining(
   // client, so without this an inactive/no-service roster client (no auth, no
   // directs) would become a phantom PT target and emit a spurious shortfall block.
   const entries = data.clients
-    .filter(client => !client.disablePTRequirements)
+    .filter(client => !client.disablePTRequirements && !client.archived)
     .map(client => {
       const cs = computeCaseState(data, client, now);
       const directs = cal.byClient.get(client.id) ?? [];

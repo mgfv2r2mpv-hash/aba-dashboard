@@ -2339,6 +2339,7 @@ export default function App() {
                   onMarkComplete={handleMarkComplete}
                   onRequestCancel={(a) => setCancelTarget(a)}
                   onSelectAppointment={(a) => { setView('schedule'); setSelectedAppointment(a); }}
+                  onFixPace={(id) => openMeetPace(id, 'behind')}
                   onOpenAdminCandC={() => { setAdminInitialTab('candc'); setView('admin'); }}
                 />
               </React.Suspense>

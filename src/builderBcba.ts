@@ -158,6 +158,26 @@ export function expandDirectOccurrences(
   return out;
 }
 
+// Every week of the month horizon (from the soonest future day to month end),
+// keyed by the SAME weekIndex the direct calendar uses, with the calendar dates in
+// that week. Lets a post-pass find weeks a case has NO direct in (unstaffed) and
+// still place a caregiver contact there. DST-safe: steps by calendar day.
+export function enumerateHorizonWeeks(config: BuilderConfig, now: Date): { weekIndex: number; dates: Date[] }[] {
+  const lowerMs = Math.max(now.getTime(), parseLocalDate(config.monthHorizon.start).getTime());
+  const monthEndMs = parseLocalDate(config.monthHorizon.end).getTime();
+  const weekStartMs = parseLocalDate(config.weekStart).getTime();
+  const byWeek = new Map<number, Date[]>();
+  const d = new Date(lowerMs); d.setHours(0, 0, 0, 0);
+  while (d.getTime() < monthEndMs) {
+    const wi = weekIndexFor(d.getTime(), weekStartMs);
+    const arr = byWeek.get(wi) ?? [];
+    arr.push(new Date(d));
+    byWeek.set(wi, arr);
+    d.setDate(d.getDate() + 1);
+  }
+  return [...byWeek.entries()].sort((a, b) => a[0] - b[0]).map(([weekIndex, dates]) => ({ weekIndex, dates }));
+}
+
 // ── entity resolution (id-or-name → stable id), mirrors compliance.ts ──────────
 function makeResolver(list: { id: string; name: string }[]): (ref?: string) => string | undefined {
   const byId = new Map(list.map(x => [x.id, x.id]));

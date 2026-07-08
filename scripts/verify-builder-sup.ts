@@ -608,6 +608,23 @@ console.log('series: builder supervision shares one editable seriesId per case (
   check('supervision is marked recurring with a pattern', sups.every(s => s.isRecurring && !!s.recurringPattern));
 }
 
+console.log('unstaffed: an interior week with no direct gets a no-BT caregiver parent-training (weekly contact + PT goal)');
+{
+  // Directs on Mon week 0 and Mon week 2, nothing in week 1 → week 1 is an interior
+  // unstaffed gap. The build should place a caregiver PT (no tech) in week 1.
+  const c = client('c1', 'Gap Case', WIDE_CLIN, 'W');
+  const t = tech('t1', 'Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 20, billable: true }]);
+  const d0: Appointment = { id: 'd0', title: 'D', client: 'c1', technician: 't1', type: 'client-session', startTime: '2026-07-06T09:00:00', endTime: '2026-07-06T13:00:00', isFixed: true, isBillable: true, isRecurring: false, status: 'scheduled' };
+  const d2: Appointment = { id: 'd2', title: 'D', client: 'c1', technician: 't1', type: 'client-session', startTime: '2026-07-20T09:00:00', endTime: '2026-07-20T13:00:00', isFixed: true, isBillable: true, isRecurring: false, status: 'scheduled' };
+  const base = schedule([c], [t], [auth('c1', 20)], baseSettings(WIDE_CLIN), [d0, d2]);
+  const { committed } = run(base, supervisionBuilderConfig(base, NOW));
+  const pts = committed.appointments.filter(a => a.type === 'parent-training' && (a.client === 'c1' || a.client === 'Gap Case'));
+  const inWeek1 = (a: Appointment) => weekOf(a.startTime) === 1;
+  check('a caregiver PT lands in the unstaffed interior week (week 1)', pts.some(p => inWeek1(p) && !p.technician), `pt weeks=${pts.map(p => weekOf(p.startTime)).join(',')}`);
+  check('the unstaffed caregiver session names NO BT', pts.filter(inWeek1).every(p => !p.technician));
+  check('no standalone caregiver session fabricated in a staffed week (0/2)', !pts.some(p => weekOf(p.startTime) === 0 || weekOf(p.startTime) === 2));
+}
+
 console.log('archived: an archived case is skipped by every build pass, even with pre-archive directs this month');
 {
   const active: Client = client('c1', 'Active Ann', WIDE_CLIN);

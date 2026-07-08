@@ -625,6 +625,27 @@ console.log('unstaffed: an interior week with no direct gets a no-BT caregiver p
   check('no standalone caregiver session fabricated in a staffed week (0/2)', !pts.some(p => weekOf(p.startTime) === 0 || weekOf(p.startTime) === 2));
 }
 
+console.log('fill-to-target: a combined build tops the BCBA to the weekly minimum via supervision-to-cap then case-planning');
+{
+  const c = client('c1', 'Fill Case', WIDE_CLIN, 'W');
+  const t = tech('t1', 'Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
+  // Direct + a generous weekly case-planning authorization (the cascade's filler).
+  const a: Authorization = { id: 'au-c1', clientId: 'c1', startDate: '2026-01-01', endDate: '2026-12-31', buckets: { direct: 10_000, casePlanning: 10_000 } as any, weekly: { direct: 25, casePlanning: 30 } as any };
+  const base = schedule([c], [t], [a], baseSettings(WIDE_CLIN), []);
+  const { committed } = run(base, combinedBuilderConfig(base, NOW));
+  const BCBA = new Set(['supervision', 'parent-training', 'case-planning', 'reassessment']);
+  const wk0Bill = committed.appointments.filter(x => BCBA.has(x.type) && weekOf(x.startTime) === 0).reduce((s, x) => s + durH(x), 0);
+  check('week 0 BCBA billable reaches the weekly minimum (25h)', wk0Bill >= 25 - 0.5, `wk0=${wk0Bill.toFixed(1)}h`);
+  const cps = committed.appointments.filter(x => x.type === 'case-planning');
+  check('case-planning was used to fill the target', cps.length > 0, `n=${cps.length}`);
+  check('every case-planning block is solo (no BT named)', cps.every(x => !x.technician));
+  const directH = clientDirectH(committed, 'Fill Case');
+  const supH = clientSupH(committed, 'Fill Case');
+  check('supervision stays at/under the 20% cap', supH <= directH * 0.20 + 0.3, `sup=${supH.toFixed(1)} cap=${(directH * 0.2).toFixed(1)}`);
+  const cp0 = cps.filter(x => weekOf(x.startTime) === 0).reduce((s, x) => s + durH(x), 0);
+  check('week 0 case-planning stays within the weekly authorization (30h)', cp0 <= 30 + 0.01, `cp0=${cp0.toFixed(1)}`);
+}
+
 console.log('archived: an archived case is skipped by every build pass, even with pre-archive directs this month');
 {
   const active: Client = client('c1', 'Active Ann', WIDE_CLIN);

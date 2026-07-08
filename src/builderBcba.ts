@@ -127,7 +127,7 @@ export interface Occ { startMs: number; endMs: number; startIso: string; endIso:
 // DST-safe week index: whole calendar days between two local midnights ÷ 7. A
 // fixed-ms week miscounts across a spring-forward / fall-back transition (a 167h
 // or 169h week), collapsing two real weeks into one bucket.
-function weekIndexFor(startMs: number, weekStartMs: number): number {
+export function weekIndexFor(startMs: number, weekStartMs: number): number {
   const dm = new Date(startMs); dm.setHours(0, 0, 0, 0);
   return Math.floor(Math.round((dm.getTime() - weekStartMs) / DAY_MS) / 7);
 }

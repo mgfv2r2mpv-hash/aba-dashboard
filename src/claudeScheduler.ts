@@ -79,7 +79,7 @@ const RESPOND_TOOL = {
         items: {
           type: 'object',
           properties: {
-            op: { type: 'string', enum: ['add', 'move', 'remove', 'setFixed', 'complete', 'cancel', 'blackout'] },
+            op: { type: 'string', enum: ['add', 'move', 'remove', 'setFixed', 'complete', 'cancel', 'blackout', 'setHint'] },
             apt: { type: 'string', description: 'APT_n token of the target (move/remove/setFixed/complete/cancel).' },
             type: { type: 'string', description: 'add: appointment type (supervision|parent-training|case-planning|client-session|reassessment|other).' },
             client: { type: 'string', description: 'add: CLIENT_n token.' },
@@ -90,6 +90,8 @@ const RESPOND_TOOL = {
             source: { type: 'string', enum: ['bt', 'bcba', 'admin', 'family'], description: 'cancel: who initiated it.' },
             reason: { type: 'string', description: 'cancel: reason code (e.g. sick, pto, holiday, weather).' },
             unplanned: { type: 'boolean', description: 'cancel: unplanned (callout/sick) vs planned.' },
+            supervisionStyle: { type: 'string', enum: ['auto', 'consolidate', 'split'], description: 'setHint: how the builder shapes this client\'s supervision (consolidate = one longer visit, split = two shorter visits, auto = engine decides).' },
+            preferredDaypart: { type: 'string', enum: ['morning', 'midday', 'afternoon', 'evening'], description: 'setHint: preferred time of day for this client\'s BCBA-facing sessions.' },
           },
           required: ['op'],
         },
@@ -408,7 +410,7 @@ HOW TO REPLY — call exactly ONE tool every turn:
 - respond({reply, ops}) — reply is a short, plain-language message (what changed and WHY, clinical-but-friendly, with a follow-up when useful). ops is the COMPLETE current proposal, not a delta — the calendar preview is replaced with your ops each turn. Use ops:[] when you're only answering/explaining (e.g. the BCBA asked "why?").
 - clarify({reply, options}) — when you need a decision before acting (which client, which time, which session), ask ONE question and offer the likely answers as options.
 - build({reply}) — ONLY for a broad "build/fill my whole schedule this month" request. The deterministic engine (not you) then places the recurring direct backbone across the caseload and reports which cases it couldn't fill; you just frame it in reply. Never use build for a single-appointment change — use respond with ops for those.
-- op shapes: add {op:"add",type,client:"CLIENT_n",tech:"TECH_n"|null,start,end}; move {op:"move",apt:"APT_n",start,end}; lock {op:"setFixed",apt:"APT_n",isFixed:true|false}; complete {op:"complete",apt:"APT_n"}; cancel {op:"cancel",apt:"APT_n",source:"bt|bcba|admin|family",reason,unplanned:true|false}. "add" ops must NOT include an id.
+- op shapes: add {op:"add",type,client:"CLIENT_n",tech:"TECH_n"|null,start,end}; move {op:"move",apt:"APT_n",start,end}; lock {op:"setFixed",apt:"APT_n",isFixed:true|false}; complete {op:"complete",apt:"APT_n"}; cancel {op:"cancel",apt:"APT_n",source:"bt|bcba|admin|family",reason,unplanned:true|false}; setHint {op:"setHint",client:"CLIENT_n",supervisionStyle:"consolidate|split|auto"?,preferredDaypart:"morning|midday|afternoon|evening"?} — records a LASTING scheduling preference the builder honors on every future build (use when the BCBA states a per-client heuristic like "this client does better with two short mid-day supervisions"). "add" ops must NOT include an id.
 - If nothing can be added compliantly, DON'T say "no options": explain the specific blocker per case (from BLOCKERS) and suggest what the BCBA could change (add availability, free a slot, relax the cap).
 - When the BCBA says "this appointment"/"that one", resolve it to the APT token given in a [context: this appointment = APT_n] note on the latest message.
 ISO times are local (no timezone suffix). Verify: every op start ≥ NOW; no two BCBA items overlap; tokens exist in CLIENTS/TECHNICIANS; skip malformed tokens.`;

@@ -53,6 +53,7 @@ function opText(o: WishOp): string {
     case 'complete': return `Complete ${o.appointmentId.slice(0, 6)}`;
     case 'cancel': return `Cancel ${o.appointmentId.slice(0, 6)}${o.reason ? ` (${o.reason})` : ''}`;
     case 'regroup': return `Group ${o.appointmentIds.length} sessions into a ${o.recurringPattern || 'recurring'} series`;
+    case 'setHint': return `Remember a scheduling preference for ${o.client}`;
   }
 }
 

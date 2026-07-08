@@ -7,9 +7,11 @@ import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
 import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, WishOp, Cancellation, Blackout, cancellationReasonLabel, DEFAULT_FIXIT_OPTIONS, ActionLogEntry, SchedulingHints } from './types';
 import { deriveActionEntry, viewOnlyEntry, pruneLog, buildInverse, summarizeOps, type ActionMeta } from './actionLog';
+import { detectHintSignals, type HintSignal } from './hintCapture';
 import ActivityLog from './components/ActivityLog';
 import CommitToast from './components/CommitToast';
 import UndoPreview from './components/UndoPreview';
+import CaptureChip from './components/CaptureChip';
 import { solveMeetPace } from './localSolver';
 import Calendar, { HoursSummary } from './components/Calendar';
 import { conflictKey } from './components/ConflictPanel';
@@ -72,7 +74,7 @@ import {
 import { solveDraft, DraftStatus, PrioritizationChoice } from './draftSolver';
 import DraftTray from './components/DraftTray';
 import FindTimeModal from './components/FindTimeModal';
-import { wishSolutionToDraft, dropPastOps, dropInfeasibleTravelOps } from './wish';
+import { wishSolutionToDraft, dropPastOps, dropInfeasibleTravelOps, applyHintChanges, type WishDraft } from './wish';
 import { computeSessionFlags, SessionFlags, streakEmoji } from './sessionFlags';
 
 // Route axios /api/* calls through an in-memory store on EVERY platform. Native
@@ -196,6 +198,9 @@ export default function App() {
   // committed) and merged into the schedule when the draft is accepted, so a
   // proposal can't mutate the base mid-conversation and reset the chat session.
   const [sassiBlackouts, setSassiBlackouts] = useState<Blackout[]>([]);
+  // Per-client scheduling-hint patches sAssI proposed (setHint ops — the taught
+  // heuristics). Same buffer-and-commit-on-Accept lifecycle as the blackouts.
+  const [sassiHints, setSassiHints] = useState<WishDraft['hintChanges']>([]);
   // Metrics + unfillable-case blocks from the last deterministic "Build direct
   // schedule" run, shown alongside the staged draft; cleared when the draft ends.
   const [buildResult, setBuildResult] = useState<BuildResult | null>(null);
@@ -214,6 +219,9 @@ export default function App() {
     removeBlackoutIds: string[]; hintRestores: { clientId: string; hints?: SchedulingHints }[];
   } | null>(null);
   const [showActivity, setShowActivity] = useState(false);
+  // Teach-loop offers detected at Accept (corrections of builder-placed
+  // supervision → "Remember for <client>" chips), shown one at a time.
+  const [hintSignals, setHintSignals] = useState<HintSignal[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [recoveryTarget, setRecoveryTarget] = useState<Appointment | null>(null);
@@ -359,13 +367,14 @@ export default function App() {
     // Hard real-world guards: a suggestion can never place/move a session into
     // the past, nor land two BCBA sessions with no time to drive between them.
     const safe = dropInfeasibleTravelOps(dropPastOps(ops), base);
-    const { ops: draftOps, blackouts } = wishSolutionToDraft({ id: 'sassi', summary: '', reasoning: '', ops: safe }, base);
-    // Blackouts aren't part of the editable draft (DraftOps model appointments
-    // only), so buffer any proposed day-offs and commit them WITH the draft on
-    // Accept — committing mid-conversation would replace scheduleData and reset the
+    const { ops: draftOps, blackouts, hintChanges } = wishSolutionToDraft({ id: 'sassi', summary: '', reasoning: '', ops: safe }, base);
+    // Blackouts + hint patches aren't part of the editable draft (DraftOps model
+    // appointments only), so buffer them and commit WITH the draft on Accept —
+    // committing mid-conversation would replace scheduleData and reset the
     // sAssI session (fresh anonymization map + wiped history). sAssI re-emits the
-    // COMPLETE proposal each turn, so REPLACE the buffer (dedup happens at commit).
+    // COMPLETE proposal each turn, so REPLACE both buffers (dedup at commit).
     setSassiBlackouts(blackouts);
+    setSassiHints(hintChanges);
     setDraftOps(draftOps);
   }, [scheduleData]);
 
@@ -952,6 +961,10 @@ export default function App() {
     return fresh.length ? { ...next, blackouts: [...existing, ...fresh] } : next;
   };
 
+  // Fold any sAssI-proposed scheduling-hint patches (setHint ops) into the commit.
+  const withSassiHints = (next: ScheduleData): ScheduleData =>
+    sassiHints.length ? { ...next, clients: applyHintChanges(next.clients, sassiHints) } : next;
+
   // Undo-specific parts DraftOps can't model, folded in at Accept: strip the
   // entry's added blackouts, restore the entry's before-hints.
   const withUndoExtras = (next: ScheduleData): ScheduleData => {
@@ -984,20 +997,41 @@ export default function App() {
 
   const acceptDraft = async () => {
     if (!scheduleData || !draftStatus) return;
-    const next = withUndoExtras(withSassiBlackouts(draftStatus.resolved || applyOps(scheduleData, draftOps)));
+    const next = withUndoExtras(withSassiHints(withSassiBlackouts(draftStatus.resolved || applyOps(scheduleData, draftOps))));
+    // Teach loop: when a BUILD staged this draft, diff the builder's original
+    // supervision intent against what the user actually accepted — a
+    // recognizable correction (daypart move / split / unsplit) becomes a
+    // one-tap "Remember for <client>" offer. Confirmation only, never silent.
+    if (buildResult) {
+      try { setHintSignals(detectHintSignals(buildResult.solution.ops, next)); } catch { /* detection must never block a commit */ }
+    }
     await commitScheduleData(next, draftMeta());
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); setTidyResult(null); setPendingUndo(null); sassi.reset();
+    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); setSassiHints([]); setTidyResult(null); setPendingUndo(null); sassi.reset();
+  };
+
+  // One-tap hint capture from the chip: patch the client's schedulingHints with
+  // provenance 'learned' and log it (so even teaching is undoable).
+  const rememberHint = async (signal: HintSignal) => {
+    if (!scheduleData) return;
+    const next: ScheduleData = {
+      ...scheduleData,
+      clients: scheduleData.clients.map(c => c.id === signal.clientId
+        ? { ...c, schedulingHints: { ...c.schedulingHints, ...signal.suggest, source: 'learned' as const, updatedAt: new Date().toISOString().slice(0, 10) } }
+        : c),
+    };
+    await commitScheduleData(next, { label: `Hint: ${signal.clientName} — ${signal.detail}`, source: 'manual' });
+    setHintSignals(sig => sig.filter(s => s !== signal));
   };
 
   const saveAnyway = async () => {
     if (!scheduleData) return;
     if (!confirm('Save this schedule as-is, with the flagged conflicts?')) return;
     const meta = draftMeta();
-    await commitScheduleData(withUndoExtras(withSassiBlackouts(applyOps(scheduleData, draftOps))), { ...meta, label: `${meta.label} (saved with conflicts)` });
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); setTidyResult(null); setPendingUndo(null); sassi.reset();
+    await commitScheduleData(withUndoExtras(withSassiHints(withSassiBlackouts(applyOps(scheduleData, draftOps)))), { ...meta, label: `${meta.label} (saved with conflicts)` });
+    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); setSassiHints([]); setTidyResult(null); setPendingUndo(null); sassi.reset();
   };
 
-  const cancelDraft = () => { setDraftOps([]); setSolutions([]); setSassiBlackouts([]); setBuildResult(null); setTidyResult(null); setPendingUndo(null); sassi.reset(); };
+  const cancelDraft = () => { setDraftOps([]); setSolutions([]); setSassiBlackouts([]); setSassiHints([]); setBuildResult(null); setTidyResult(null); setPendingUndo(null); sassi.reset(); };
   const resetOp = (opId: string) => {
     setDraftOps(ops => ops.filter(o => o.id !== opId));
     // Removing the last staged op empties the draft (no commit fires), so the
@@ -1135,15 +1169,20 @@ export default function App() {
 
   const commitWishLikeSolution = async (sol: WishSolution): Promise<boolean> => {
     if (!scheduleData) return false;
-    const { ops, blackouts } = draftFromSolution(sol, scheduleData);
+    const { ops, blackouts, hintChanges } = draftFromSolution(sol, scheduleData);
     const status = solveDraft(scheduleData, ops, new Date(), scheduleData.settings);
     if (status.grade === 'red') {
-      if (blackouts.length) await commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] }, { label: 'Day-offs added', source: 'wish' });
+      if (blackouts.length || hintChanges.length) {
+        let side = { ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] };
+        side = { ...side, clients: applyHintChanges(side.clients, hintChanges) };
+        await commitScheduleData(side, { label: 'Day-offs / preferences recorded', source: 'wish' });
+      }
       stageOps(ops);
       return false;
     }
     const resolved = status.resolved || applyOps(scheduleData, ops);
-    const next = blackouts.length ? { ...resolved, blackouts: [...(resolved.blackouts || []), ...blackouts] } : resolved;
+    let next = blackouts.length ? { ...resolved, blackouts: [...(resolved.blackouts || []), ...blackouts] } : resolved;
+    if (hintChanges.length) next = { ...next, clients: applyHintChanges(next.clients, hintChanges) };
     await commitScheduleData(next, { label: sol.summary?.trim() || `Wish — ${summarizeOps(ops)}`, source: 'wish' });
     return true;
   };
@@ -1159,8 +1198,13 @@ export default function App() {
 
   const customizeWish = (sol: WishSolution) => {
     if (!scheduleData) return;
-    const { ops, blackouts } = draftFromSolution(sol, scheduleData);
-    if (blackouts.length) commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] }, { label: 'Day-offs added', source: 'wish' });
+    const { ops, blackouts, hintChanges } = draftFromSolution(sol, scheduleData);
+    if (blackouts.length || hintChanges.length) {
+      commitScheduleData(
+        { ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts], clients: applyHintChanges(scheduleData.clients, hintChanges) },
+        { label: 'Day-offs / preferences recorded', source: 'wish' },
+      );
+    }
     stageOps(ops);
     setView('schedule');
   };
@@ -1177,8 +1221,13 @@ export default function App() {
 
   const customizeFix = (sol: WishSolution) => {
     if (!scheduleData) return;
-    const { ops, blackouts } = draftFromSolution(sol, scheduleData);
-    if (blackouts.length) commitScheduleData({ ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts] }, { label: 'Day-offs added', source: 'wish' });
+    const { ops, blackouts, hintChanges } = draftFromSolution(sol, scheduleData);
+    if (blackouts.length || hintChanges.length) {
+      commitScheduleData(
+        { ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts], clients: applyHintChanges(scheduleData.clients, hintChanges) },
+        { label: 'Day-offs / preferences recorded', source: 'wish' },
+      );
+    }
     stageOps(ops);
     setView('schedule');
   };
@@ -2541,6 +2590,17 @@ export default function App() {
           compact={compactRail}
           onUndo={undoFromToast}
           onDismiss={() => setUndoToast(null)}
+        />
+      )}
+
+      {/* Teach-loop offer: a detected correction becomes a durable hint on tap */}
+      {hintSignals.length > 0 && (
+        <CaptureChip
+          signal={hintSignals[0]}
+          remaining={hintSignals.length - 1}
+          compact={compactRail}
+          onRemember={rememberHint}
+          onDismiss={() => setHintSignals(sig => sig.slice(1))}
         />
       )}
 

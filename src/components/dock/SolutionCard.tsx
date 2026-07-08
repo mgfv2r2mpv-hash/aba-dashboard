@@ -58,6 +58,8 @@ function opText(o: WishOp): string {
       return `Cancel ${o.appointmentId.slice(0, 6)}${o.reason ? ` (${o.reason})` : ''}`;
     case 'regroup':
       return `Group ${o.appointmentIds.length} sessions into a ${o.recurringPattern || 'recurring'} series`;
+    case 'setHint':
+      return `Remember: ${o.client} prefers ${[o.supervisionStyle === 'split' ? 'two shorter visits' : o.supervisionStyle === 'consolidate' ? 'one longer visit' : null, o.preferredDaypart].filter(Boolean).join(', ')}`;
   }
 }
 

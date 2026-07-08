@@ -885,7 +885,13 @@ export type WishOp =
   // single recurring template (which would be lossy here) and WITHOUT setting
   // isRecurring (which would change future builds). Carries no timestamp — like the
   // command ops above it maps to `edit` DraftOps and survives dropPastOps.
-  | { op: 'regroup'; appointmentIds: string[]; seriesId: string; recurringPattern?: 'weekly' | 'biweekly' | 'monthly' };
+  | { op: 'regroup'; appointmentIds: string[]; seriesId: string; recurringPattern?: 'weekly' | 'biweekly' | 'monthly' }
+  // Teach-the-assistant: record a lasting per-client placement preference the
+  // builder honors ("AB does better with two short mid-day supervisions").
+  // Carries only a client token + enums — anonymization guards never trip.
+  // Non-appointment op: rides wishSolutionToDraft's side-channel (like
+  // blackout), buffered in app.tsx and merge-patched on Accept.
+  | { op: 'setHint'; client: string; supervisionStyle?: SupervisionStyle; preferredDaypart?: Daypart };
 
 export interface WishSolution {
   id: string;

@@ -9,6 +9,7 @@
 import {
   WishRequest, WishSolution, WishOp, ScheduleData, Appointment, Blackout, Client, Technician,
   Cancellation, CANCELLATION_SOURCES, CANCELLATION_REASONS, activeCancellationCodes, applicableSources,
+  SchedulingHints,
 } from './types';
 import { computeClientCompliance, computeTechCompliance, monthPeriod, CompliancePeriod } from './compliance';
 import { DraftOp, newAddOp, newMoveOp, newRemoveOp, newEditOp, applyOps } from './draft';
@@ -112,6 +113,18 @@ export function parseOps(rawOps: any, rev: (v: any) => string | undefined): Wish
     } else if (kind === 'setfixed') {
       const id = rev(ro.apt ?? ro.appointmentId);
       if (id && typeof ro.isFixed === 'boolean') ops.push({ op: 'setFixed', appointmentId: id, isFixed: ro.isFixed });
+    } else if (kind === 'sethint') {
+      // Enum-validated; requires a resolvable client and at least one field.
+      const client = rev(ro.client);
+      const style = ['auto', 'consolidate', 'split'].includes(ro.supervisionStyle) ? ro.supervisionStyle : undefined;
+      const daypart = ['morning', 'midday', 'afternoon', 'evening'].includes(ro.preferredDaypart) ? ro.preferredDaypart : undefined;
+      if (client && (style || daypart)) {
+        ops.push({
+          op: 'setHint', client,
+          ...(style ? { supervisionStyle: style } : {}),
+          ...(daypart ? { preferredDaypart: daypart } : {}),
+        });
+      }
     } else if (kind === 'complete') {
       const id = rev(ro.apt ?? ro.appointmentId);
       if (id) ops.push({ op: 'complete', appointmentId: id });
@@ -276,6 +289,9 @@ function resolveEntityId(ref: string, list: { id: string; name: string }[]): { i
 export interface WishDraft {
   ops: DraftOp[];          // move/add/remove → the editable draft
   blackouts: Blackout[];   // applied on accept (not part of the appointment draft)
+  // Per-client scheduling-hint patches (setHint ops) — applied on accept via a
+  // merge into Client.schedulingHints, exactly the blackout side-channel shape.
+  hintChanges: { clientId: string; clientName: string; hints: Partial<SchedulingHints> }[];
   unresolved: number;      // ops we couldn't map (e.g. unknown appointment/entity)
 }
 
@@ -283,6 +299,7 @@ export interface WishDraft {
 export function wishSolutionToDraft(sol: WishSolution, base: ScheduleData): WishDraft {
   const ops: DraftOp[] = [];
   const blackouts: Blackout[] = [];
+  const hintChanges: WishDraft['hintChanges'] = [];
   let unresolved = 0;
   // A mutable working copy so several ops targeting the SAME appointment in one
   // proposal accumulate (e.g. "move it and lock it") instead of each rebuilding
@@ -375,9 +392,37 @@ export function wishSolutionToDraft(sol: WishSolution, base: ScheduleData): Wish
           ops.push(newEditOp(next));
         } else unresolved++;
       }
+    } else if (o.op === 'setHint') {
+      // Client-record patch, not an appointment op — resolves like blackout and
+      // rides the side-channel so the tray (appointments only) stays coherent.
+      const ent = resolveEntityId(o.client, base.clients);
+      if (ent) {
+        hintChanges.push({
+          clientId: ent.id, clientName: ent.name,
+          hints: {
+            ...(o.supervisionStyle ? { supervisionStyle: o.supervisionStyle } : {}),
+            ...(o.preferredDaypart ? { preferredDaypart: o.preferredDaypart } : {}),
+            source: 'chat', updatedAt: new Date().toISOString().slice(0, 10),
+          },
+        });
+      } else unresolved++;
     }
   }
-  return { ops, blackouts, unresolved };
+  return { ops, blackouts, hintChanges, unresolved };
+}
+
+// Merge one hint patch into a client list (shared by Accept paths).
+export function applyHintChanges(
+  clients: ScheduleData['clients'],
+  changes: WishDraft['hintChanges'],
+): ScheduleData['clients'] {
+  if (!changes.length) return clients;
+  return clients.map(c => {
+    const patch = changes.filter(h => h.clientId === c.id);
+    if (!patch.length) return c;
+    const merged = patch.reduce((acc, h) => ({ ...acc, ...h.hints }), { ...c.schedulingHints });
+    return { ...c, schedulingHints: merged };
+  });
 }
 
 function defaultTitle(type: Appointment['type']): string {
@@ -395,9 +440,11 @@ function defaultTitle(type: Appointment['type']): string {
 // Apply a whole wish solution (ops + blackouts) to produce the next schedule —
 // the Accept path. Customize stages just the appointment ops into the draft.
 export function applyWishSolution(base: ScheduleData, sol: WishSolution): ScheduleData {
-  const { ops, blackouts } = wishSolutionToDraft(sol, base);
-  const withOps = applyOps(base, ops);
-  return blackouts.length ? { ...withOps, blackouts: [...(withOps.blackouts || []), ...blackouts] } : withOps;
+  const { ops, blackouts, hintChanges } = wishSolutionToDraft(sol, base);
+  let out = applyOps(base, ops);
+  if (blackouts.length) out = { ...out, blackouts: [...(out.blackouts || []), ...blackouts] };
+  if (hintChanges.length) out = { ...out, clients: applyHintChanges(out.clients, hintChanges) };
+  return out;
 }
 
 // ── Per-solution compliance impact ───────────────────────────────────────────

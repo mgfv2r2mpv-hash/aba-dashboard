@@ -156,6 +156,40 @@ console.log('dropPastOps (real-world safety net)');
   check('total kept = 3', kept.length === 3);
 }
 
+console.log('setHint: parse → side-channel → apply (the taught-heuristic op)');
+{
+  // Parse: enum-validated, client token reversed, ≥1 field required.
+  const rev = (v: any) => (v === 'CLIENT_1' ? 'Client Hint' : undefined);
+  const parsed = parseOps([
+    { op: 'setHint', client: 'CLIENT_1', supervisionStyle: 'split', preferredDaypart: 'midday' },
+    { op: 'setHint', client: 'CLIENT_1', supervisionStyle: 'bogus' },          // no valid field → dropped
+    { op: 'setHint', client: 'CLIENT_9', supervisionStyle: 'split' },          // unknown token → dropped
+  ], rev as any);
+  check('valid setHint parses with both enums', parsed.length === 1
+    && parsed[0].op === 'setHint' && (parsed[0] as any).supervisionStyle === 'split' && (parsed[0] as any).preferredDaypart === 'midday');
+
+  // Side-channel: wishSolutionToDraft emits hintChanges (not DraftOps).
+  const base: ScheduleData = {
+    id: 'h', version: 2,
+    clients: [{ id: 'ch1', name: 'Client Hint', availabilityWindows: {} }],
+    technicians: [], settings: {} as ScheduleData['settings'], appointments: [], lastModified: 'x',
+  };
+  const sol: WishSolution = { id: 'hs', summary: '', reasoning: '', ops: parsed };
+  const draft = wishSolutionToDraft(sol, base);
+  check('setHint yields no draft ops, one hintChange', draft.ops.length === 0 && draft.hintChanges.length === 1
+    && draft.hintChanges[0].clientId === 'ch1' && draft.hintChanges[0].hints.supervisionStyle === 'split'
+    && draft.hintChanges[0].hints.source === 'chat');
+
+  // Both real-world guards pass it through untouched (no time, no location).
+  check('dropPastOps passes setHint through', dropPastOps(parsed, new Date('2099-01-01')).length === 1);
+
+  // Accept path: applyWishSolution merge-patches the client record.
+  const applied = applyWishSolution(base, sol);
+  check('applyWishSolution merges hints onto the client',
+    applied.clients[0].schedulingHints?.supervisionStyle === 'split'
+    && applied.clients[0].schedulingHints?.preferredDaypart === 'midday');
+}
+
 console.log('computeOpsImpact parity: raw DraftOps diff ≡ WishSolution diff');
 {
   // The selective-undo preview computes impact from raw DraftOps; it must agree

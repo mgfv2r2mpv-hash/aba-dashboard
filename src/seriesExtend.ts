@@ -50,6 +50,10 @@ export function extendSeries(
   const members = data.appointments.filter(a => a.seriesId === seriesId);
   if (members.length === 0) return { ops: [], added: 0, relinked: 0, reason: 'No sessions found in this series.' };
 
+  // Archived case: never extend a series forward for a client that's off the caseload.
+  const seriesClient = data.clients.find(c => c.id === members[0].client || c.name === members[0].client);
+  if (seriesClient?.archived) return { ops: [], added: 0, relinked: 0, reason: 'This client is archived — its series will not be extended.' };
+
   // Cadence: biweekly/monthly if the series says so, else weekly (covers 'weekly' and
   // 'custom' — custom weekday sets still repeat on a 7-day period).
   const pat: Pattern = (members.map(m => m.recurringPattern).find(p => p === 'biweekly' || p === 'monthly') as Pattern) ?? 'weekly';

@@ -646,7 +646,7 @@ console.log('fill-to-target: a combined build tops the BCBA to the weekly minimu
   check('week 0 case-planning stays within the weekly authorization (30h)', cp0 <= 30 + 0.01, `cp0=${cp0.toFixed(1)}`);
 }
 
-console.log('archived: an archived case is skipped by every build pass, even with pre-archive directs this month');
+console.log('archived: a case archived-as-of-now is never materialized forward — even from a stale RECURRING pre-archive direct with a deleted tech');
 {
   const active: Client = client('c1', 'Active Ann', WIDE_CLIN);
   const gone: Client = { ...client('ar', 'Archie Gone', WIDE_CLIN), archived: true };
@@ -654,19 +654,23 @@ console.log('archived: an archived case is skipped by every build pass, even wit
     { clientId: 'c1', hoursPerWeek: 40, billable: true },
     { clientId: 'ar', hoursPerWeek: 40, billable: true },
   ]);
-  // A direct from earlier this month, kept because it predates the archive — its
-  // presence is exactly what used to trick the supervision/PT passes into acting.
+  // The exact device-testing shape: a RECURRING direct dated BEFORE the archive
+  // (so planArchive didn't delete it) naming a tech no longer on the roster. Source B
+  // of buildDirectCalendar used to clone this forward to the auth end (months of
+  // directs, deleted tech and all). 'Ghost BT' is intentionally absent from the roster.
   const preArchive: Appointment = {
-    id: 'd0', title: 'Direct', client: 'ar', technician: 't1', type: 'client-session',
-    startTime: '2026-07-06T09:00:00', endTime: '2026-07-06T12:00:00',
-    isFixed: true, isBillable: true, isRecurring: false, status: 'completed',
+    id: 'd0', title: 'Direct', client: 'ar', technician: 'Ghost BT', type: 'client-session',
+    startTime: '2026-06-29T09:00:00', endTime: '2026-06-29T12:00:00',
+    isFixed: true, isBillable: true, isRecurring: true, status: 'completed',
   };
   const base = schedule([active, gone], [t1], [auth('c1', 10), auth('ar', 10)], baseSettings(WIDE_CLIN), [preArchive]);
   const { committed } = run(base, combinedBuilderConfig(base, NOW));
   const forGone = (t: string) => committed.appointments.filter(a => a.type === t && (a.client === 'ar' || a.client === 'Archie Gone'));
   check('archived: no supervision built for the archived case', forGone('supervision').length === 0, `sup=${forGone('supervision').length}`);
   check('archived: no parent-training built for the archived case', forGone('parent-training').length === 0, `pt=${forGone('parent-training').length}`);
-  check('archived: no NEW directs built for the archived case (only the seeded one remains)', forGone('client-session').length === 1, `dir=${forGone('client-session').length}`);
+  check('archived: recurring pre-archive direct is NOT expanded forward (only the inert seed remains)', forGone('client-session').length === 1, `dir=${forGone('client-session').length}`);
+  check('archived: NO direct is materialized on/after now for the archived case', forGone('client-session').every(a => new Date(a.startTime).getTime() < NOW.getTime()), `future=${forGone('client-session').filter(a => new Date(a.startTime).getTime() >= NOW.getTime()).length}`);
+  check('archived: the deleted "Ghost BT" tech never appears on a materialized (future) direct', !forGone('client-session').some(a => a.technician === 'Ghost BT' && new Date(a.startTime).getTime() >= NOW.getTime()));
   check('archived: the active case is unaffected (still supervised)', committed.appointments.some(a => a.type === 'supervision' && (a.client === 'c1' || a.client === 'Active Ann')));
 }
 

@@ -29,6 +29,7 @@ import {
 } from './builderBcba';
 import { pickBestSlot, compareCandidateDirects } from './builderScoring';
 import { buildTravelContext } from './travel';
+import { v4 as uuidv4 } from 'uuid';
 import type { ClientBlock } from './scheduleBuilder';
 
 // ── metrics ─────────────────────────────────────────────────────────────────────
@@ -97,6 +98,10 @@ export function placeParentTraining(
     // Already at goal, or a sub-schedulable residual (< a 15-min block) → done.
     if (remaining < MIN_SUP_HRS) { casesMeetingPtGoal++; continue; }
 
+    // One editable series per case so PT sessions group in the This/Following/All
+    // editor (same rationale as supervision).
+    const seriesId = uuidv4();
+
     // Candidate directs grouped by week; fill the gap greedily EARLIEST-week-first
     // (front-loaded buffer), one PT contact per week, each clamped to ≤ 2h by
     // placeBcbaSubinterval and to the remaining gap.
@@ -125,7 +130,7 @@ export function placeParentTraining(
       for (const d of ranked) {
         const slot = pickBestSlot(data, d, remaining, bcbaBusy, travelCtx, client.schedulingHints);
         if (!slot) continue;
-        ptOps.push({ op: 'add', type: 'parent-training', client: client.name, technician: d.techName, start: slot.startIso, end: slot.endIso });
+        ptOps.push({ op: 'add', type: 'parent-training', client: client.name, technician: d.techName, start: slot.startIso, end: slot.endIso, seriesId, recurring: true, pattern: 'weekly' });
         bcbaBusy = reserveBcba(bcbaBusy, slot.startMs, slot.endMs, d.clientId);
         const hrs = (slot.endMs - slot.startMs) / HR_MS;
         remaining -= hrs;

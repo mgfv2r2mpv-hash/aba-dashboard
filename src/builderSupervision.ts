@@ -10,7 +10,7 @@
 // Claude never places anything — this is pure and deterministic, unit-tested in
 // scripts/verify-builder-sup.ts.
 
-import { ScheduleData, WishOp } from './types';
+import { ScheduleData, WishOp, SupervisionCadence } from './types';
 import { computeCaseState, computeBtState } from './caseModel';
 import {
   DatedDirect, DirectCalendar, BcbaBusy,
@@ -18,7 +18,15 @@ import {
 } from './builderBcba';
 import { pickBestSlot, compareCandidateDirects, SlotCandidate } from './builderScoring';
 import { buildTravelContext } from './travel';
+import { v4 as uuidv4 } from 'uuid';
 import type { ClientBlock } from './scheduleBuilder';
+
+// A builder-placed supervision series is a soft weekly cadence; EOW cases group as
+// biweekly. The pattern only annotates the series (enables extendSeries cadence
+// inference) — the seriesId alone unlocks the This/Following/All editor.
+function cadencePattern(cadence?: SupervisionCadence): 'weekly' | 'biweekly' | 'monthly' {
+  return cadence === 'EOW' ? 'biweekly' : 'weekly';
+}
 
 // Re-export the primitives the verify harness imports from here, so
 // scripts/verify-builder-sup.ts keeps resolving unchanged after the extraction.
@@ -44,6 +52,19 @@ export interface SupervisionPlacement {
   busyOut: BcbaBusy;     // the BCBA plane after this pass's reservations (thread into the next pass)
 }
 
+export interface SupervisionOptions {
+  // A standalone "Add supervision" build (chaseDirect:false) must host supervision
+  // ONLY over directs already on the board (materialized:false) and must never
+  // fabricate a session over a projected/phantom future direct that won't be
+  // committed — the exact off-direct/0-credit bug from device testing. A combined
+  // build (chaseDirect:true) emits its materialized hosts concretely, so those are
+  // valid to host over.
+  buildingDirects: boolean;
+  // Caller-owned map of clientId → the supervision seriesId this pass minted, so a
+  // later fill pass can extend the SAME editable series for a case.
+  caseSeriesId?: Map<string, string>;
+}
+
 // ── the pass ───────────────────────────────────────────────────────────────────
 // Places supervision against the shared materialized `cal`, threading the BCBA
 // plane `busyIn` → `busyOut`. Does NOT emit direct rows or re-materialize — the
@@ -53,7 +74,10 @@ export function placeSupervision(
   cal: DirectCalendar,
   busyIn: BcbaBusy,
   now: Date,
+  opts: SupervisionOptions = { buildingDirects: true },
 ): SupervisionPlacement {
+  const { buildingDirects } = opts;
+  const caseSeriesId = opts.caseSeriesId ?? new Map<string, string>();
   const floorPct = data.settings.supervisionFloorPercent ?? 10;
   // Travel context (city centroids + routed cache) — enforces drive time between
   // the single BCBA's differently-located sessions. Self-disables when travel is off.
@@ -93,7 +117,11 @@ export function placeSupervision(
   const entries = data.clients
     .filter(client => !client.archived)
     .map(client => {
-      const directs = cal.byClient.get(client.id) ?? [];
+      // Host set. A standalone supervision build (chaseDirect:false) supervises only
+      // over directs already concrete on the board — never a projected/phantom future
+      // occurrence whose direct row won't be committed (the off-direct/0-credit bug).
+      const allDirects = cal.byClient.get(client.id) ?? [];
+      const directs = buildingDirects ? allDirects : allDirects.filter(d => !d.materialized);
       const directHoursMonth = directs.reduce((s, d) => s + d.hours, 0);
       const cs = computeCaseState(data, client, now);
       return {
@@ -151,9 +179,16 @@ export function placeSupervision(
     let placedForClient = 0;
     let contactsPlaced = 0;
 
+    // One editable series per case: every supervision this build places for the case
+    // shares a seriesId (+ weekly/biweekly pattern) so the calendar's This/Following/
+    // All editor groups them instead of forcing one-by-one edits.
+    const seriesId = uuidv4();
+    caseSeriesId.set(client.id, seriesId);
+    const pattern = cadencePattern(client.cadenceGoal);
+
     // Commit one placed sub-slot on host direct `d` (shared by whole + split paths).
     const commitSlot = (d: DatedDirect, slot: SlotCandidate): number => {
-      supOps.push({ op: 'add', type: 'supervision', client: client.name, technician: d.techName, start: slot.startIso, end: slot.endIso });
+      supOps.push({ op: 'add', type: 'supervision', client: client.name, technician: d.techName, start: slot.startIso, end: slot.endIso, seriesId, recurring: true, pattern });
       bcbaBusy = reserveBcba(bcbaBusy, slot.startMs, slot.endMs, d.clientId);
       const hrs = (slot.endMs - slot.startMs) / HR_MS;
       placedForClient += hrs;

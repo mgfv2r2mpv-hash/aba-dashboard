@@ -501,8 +501,11 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
     let bcbaBusy = seedBcbaBusy(data);
     blocks.push(...cal.blocks);
     const bcbaOps: WishOp[] = [];
+    // Shared clientId → supervision seriesId, so a later fill pass extends the same
+    // editable series a case's floor supervision already established.
+    const caseSupSeries = new Map<string, string>();
     if (chaseSupervision) {
-      const sup = placeSupervision(data, cal, bcbaBusy, now);
+      const sup = placeSupervision(data, cal, bcbaBusy, now, { buildingDirects, caseSeriesId: caseSupSeries });
       bcbaBusy = sup.busyOut;
       bcbaOps.push(...sup.supOps);
       blocks.push(...sup.blocks);
@@ -525,8 +528,12 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
     }
     // Dated backbone emitted ONCE, plus the resizes of existing sessions (which
     // buildDirectCalendar doesn't materialize — they edit rows already on the board).
-    finalOps = [...cal.directOps, ...bcbaOps, ...extendOps];
-    directHrsPlaced = cal.directOpsHrs + extendedHorizonHrs; // materialized + grown
+    // A standalone supervision/PT build (chaseDirect:false) must NOT emit new direct
+    // rows: its BCBA passes host only over already-concrete directs, so the phantom
+    // materialized backbone is dropped (keeping it would add directs the user never
+    // asked for and re-introduce the off-direct supervision bug).
+    finalOps = [...(buildingDirects ? cal.directOps : []), ...bcbaOps, ...extendOps];
+    directHrsPlaced = (buildingDirects ? cal.directOpsHrs : 0) + extendedHorizonHrs; // materialized + grown
   } else {
     const selfCheckBlocks = monthSelfCheck(data, ops, config, weekStart);
     blocks.push(...selfCheckBlocks);

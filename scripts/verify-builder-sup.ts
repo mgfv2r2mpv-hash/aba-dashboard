@@ -577,6 +577,37 @@ console.log('travel adjacency: at equal need, the direct wedged between same-cit
     JSON.stringify(week0.map(s => s.startTime)));
 }
 
+console.log('overlap-fix: a standalone supervision build hosts ONLY over concrete directs — never a phantom future-week occurrence');
+{
+  // One RECURRING concrete direct on Monday week 0. buildDirectCalendar would
+  // materialize future Mondays (Source B) as hosts; the supervision-only build must
+  // ignore those (they are never committed) and stage no new direct rows.
+  const c = client('c1', 'Rec Case', WIDE_CLIN, 'W');
+  const t = tech('t1', 'Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 20, billable: true }]);
+  const d0: Appointment = { id: 'd0', title: 'Direct', client: 'c1', technician: 't1', type: 'client-session', startTime: '2026-07-06T09:00:00', endTime: '2026-07-06T13:00:00', isFixed: false, isBillable: true, isRecurring: true, status: 'scheduled' };
+  const base = schedule([c], [t], [auth('c1', 20)], baseSettings(WIDE_CLIN), [d0]);
+  const { committed, staged } = run(base, supervisionBuilderConfig(base, NOW));
+  const newDirects = staged.filter((o: any) => o.op === 'add' && o.type === 'client-session');
+  check('supervision-only build stages ZERO new direct rows', newDirects.length === 0, `staged ${newDirects.length}`);
+  const dirs = directAppts(committed).filter(a => a.client === 'c1' || a.client === 'Rec Case');
+  const sups = supAppts(committed).filter(a => a.client === 'c1' || a.client === 'Rec Case');
+  const overlapsDirect = (s: Appointment) => dirs.some(dd => new Date(dd.startTime).getTime() < new Date(s.endTime).getTime() && new Date(s.startTime).getTime() < new Date(dd.endTime).getTime());
+  check('every placed supervision overlaps a concrete direct (0-credit bug fixed)', sups.length > 0 && sups.every(overlapsDirect), `${sups.filter(s => !overlapsDirect(s)).length} off-direct of ${sups.length}`);
+}
+
+console.log('series: builder supervision shares one editable seriesId per case (This / Following / All)');
+{
+  const c = client('c1', 'Case One', WIDE_CLIN, 'W');
+  const t = tech('t1', 'Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 30, billable: true }]);
+  const base = schedule([c], [t], [auth('c1', 30)], baseSettings(WIDE_CLIN), []);
+  const { committed } = run(base, combinedBuilderConfig(base, NOW));
+  const sups = supAppts(committed).filter(a => a.client === 'c1' || a.client === 'Case One');
+  check('supervision placed for the case', sups.length >= 1, `count ${sups.length}`);
+  const ids = new Set(sups.map(s => s.seriesId));
+  check('all of the case’s supervision share ONE seriesId', ids.size === 1 && !ids.has(undefined), `ids=${[...ids].join(',')}`);
+  check('supervision is marked recurring with a pattern', sups.every(s => s.isRecurring && !!s.recurringPattern));
+}
+
 console.log('archived: an archived case is skipped by every build pass, even with pre-archive directs this month');
 {
   const active: Client = client('c1', 'Active Ann', WIDE_CLIN);

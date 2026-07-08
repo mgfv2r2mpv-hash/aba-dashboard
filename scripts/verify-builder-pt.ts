@@ -259,5 +259,18 @@ console.log('cap safety: PT never overshoots a fractional goal (== the case cap)
   check('no shortfall block for the sub-min residual', !result.blocks.some(b => b.bindingConstraint === 'pt-availability'));
 }
 
+console.log('series: builder parent-training shares one editable seriesId per case');
+{
+  const c1 = client('c1', 'Client Series', daysWindows(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'], '08:00', '16:00'), 'W');
+  const t1 = tech('t1', 'Ben Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
+  const base = schedule([c1], [t1], [auth('c1', 20)], { ...baseSettings(WIDE_CLIN), parentTraining: { minimumHours: 1, targetMinHours: 6, targetMaxHours: 8, periodUnit: 'month' } } as any);
+  const { committed } = run(base, combinedBuilderConfig(base, NOW));
+  const pts = ptAppts(committed).filter(a => a.client === 'c1' || a.client === 'Client Series');
+  check('multiple PT sessions placed', pts.length >= 2, `count ${pts.length}`);
+  const ids = new Set(pts.map(p => p.seriesId));
+  check('all of the case’s PT share ONE seriesId', ids.size === 1 && !ids.has(undefined), `ids=${[...ids].join(',')}`);
+  check('PT is marked recurring with a pattern', pts.every(p => p.isRecurring && !!p.recurringPattern));
+}
+
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

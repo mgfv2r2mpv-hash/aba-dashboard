@@ -326,6 +326,9 @@ export function buildDirectCalendar(
     const cid = resolveClient(clientRef);
     const tid = resolveTech(techRef);
     if (!cid) return;
+    // Archived cases are off the caseload — never materialize (or expand a stale
+    // pre-archive recurring row) forward for them. Guards Source B + Source C.
+    if (clientById.get(cid)?.archived) return;
     // Auth caps never bypass: never materialize a direct on a date the client isn't
     // authorized for (mid-month auth end, gap between renewals, or an out-of-span tail).
     if (!authorizedOn(cid, occ.startIso.slice(0, 10))) return;
@@ -368,9 +371,13 @@ export function buildDirectCalendar(
     if (a.type !== 'client-session' || !isActive(a)) continue;
     const cid = resolveClient(a.client);
     if (!cid) continue;
+    const client = clientById.get(cid);
+    // Archived case: neither push its (already-deleted) rows as chase targets nor
+    // expand its stale pre-archive recurring direct forward. This is the Source A/B
+    // half of the guard; emitDated carries the same check for Source C.
+    if (client?.archived) continue;
     const startMs = new Date(a.startTime).getTime();
     const endMs = new Date(a.endTime).getTime();
-    const client = clientById.get(cid);
     const tech = data.technicians.find(t => t.id === resolveTech(a.technician) || t.name === a.technician);
 
     // The concrete row itself is a target when it falls in the current month.

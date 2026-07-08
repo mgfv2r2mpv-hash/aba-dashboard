@@ -17,6 +17,10 @@ const data: ScheduleData = {
     partialStaffAllowed: false, parentAvailableOutsideSessions: true,
     anticipatedDischarge: 'EI transition ~age 3', notes: 'note',
     city: 'Springfield',
+    // Exported hint fields only — source/updatedAt provenance is device-local
+    // (deliberately dropped by the xlsx writer) so it must NOT appear here or
+    // the full structural round-trip below would rightly fail.
+    schedulingHints: { supervisionStyle: 'split', preferredDaypart: 'midday', note: 'wedge between morning clients' },
   }],
   technicians: [{
     id: 'T1', name: 'Tech One', isRBT: true,
@@ -89,6 +93,11 @@ check('settings cancellationNotice columns', st.cancellationNotice?.unplannedHou
 check('settings report leads', st.reportDraftLead?.value === 4 && st.reportFinalLead?.unit === 'weeks');
 
 check('client.city round-trips', c.city === 'Springfield');
+check('client.schedulingHints round-trips (style/daypart/note)',
+  c.schedulingHints?.supervisionStyle === 'split' && c.schedulingHints?.preferredDaypart === 'midday'
+  && c.schedulingHints?.note === 'wedge between morning clients');
+check('client.schedulingHints provenance stays device-local',
+  c.schedulingHints?.source === undefined && c.schedulingHints?.updatedAt === undefined);
 check('settings.homeBase (address + coords)', st.homeBase?.address === '1 Main St' && st.homeBase?.city === 'Hometown' && st.homeBase?.lat === 40.0 && st.homeBase?.lng === -75.0);
 check('settings.travel tunables', st.travel?.enabled === true && st.travel?.withinCityMin === 15 && st.travel?.padPercent === 5 && st.travel?.hourBucketSize === 1);
 check('settings.cityCenters child sheet', st.cityCenters?.length === 2 && st.cityCenters?.[0].city === 'springfield' && st.cityCenters?.[0].lat === 40.1);

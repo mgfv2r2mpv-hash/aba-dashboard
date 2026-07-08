@@ -67,6 +67,28 @@ export interface Client {
   // public point shared by thousands, so it (and only it) may be geocoded and
   // used to estimate BCBA travel time between sessions. See CompanySettings.travel.
   city?: string;
+  // Per-case placement heuristics the builder honors (see builderScoring.ts).
+  // Captured from the owner's corrections, the sAssI chat, or the editor —
+  // the "taught scheduler knowledge" store. Absent == everything 'auto'.
+  schedulingHints?: SchedulingHints;
+}
+
+// How the builder should shape this case's BCBA-facing contacts. 'auto' (or an
+// absent field) lets the scoring engine decide; the explicit styles are owner
+// judgment the engine must honor (e.g. mid-day clients whose directs straddle
+// morning/evening often do better as two shorter visits wedged between nearby
+// sessions than one long evening block).
+export type SupervisionStyle = 'auto' | 'consolidate' | 'split';
+export type Daypart = 'morning' | 'midday' | 'afternoon' | 'evening';
+export interface SchedulingHints {
+  supervisionStyle?: SupervisionStyle;
+  preferredDaypart?: Daypart;
+  // Free text for the human (never parsed by the builder, never leaves device).
+  note?: string;
+  // Provenance: how this knowledge arrived — a hand edit, a chat instruction,
+  // or a detected-and-confirmed correction ("learned").
+  source?: 'manual' | 'chat' | 'learned';
+  updatedAt?: string; // ISO date of the last hint change
 }
 
 export interface Technician {

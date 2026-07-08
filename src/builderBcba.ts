@@ -388,7 +388,8 @@ export function buildDirectCalendar(
 }
 
 // ── BCBA availability windows on a given date (ms bounds) ──────────────────────
-function clinicianWindowsForDate(data: ScheduleData, date: Date): { s: number; e: number }[] {
+// Exported for builderScoring.ts (the scored slot enumerator shares this geometry).
+export function clinicianWindowsForDate(data: ScheduleData, date: Date): { s: number; e: number }[] {
   const avail = data.settings.clinicianAvailability as Record<string, TimeWindow[]> | undefined;
   const day0 = new Date(date); day0.setHours(0, 0, 0, 0);
   if (!avail) return [{ s: day0.getTime(), e: day0.getTime() + DAY_MS }]; // unset → available all day
@@ -404,7 +405,9 @@ function clinicianWindowsForDate(data: ScheduleData, date: Date): { s: number; e
 // BCBA needs to reach it (before) and leave it (after). travelMinutes self-guards
 // (returns 0 when travel is disabled, same-site, or a location is unknown), so
 // with no ctx this is the plain overlap subtraction it always was.
-function freeGaps(
+// Exported for builderScoring.ts (candidate enumeration reuses the same
+// travel-inflated feasibility geometry — scoring must never relax it).
+export function freeGaps(
   s: number, e: number, busy: BcbaBusy, thisLoc?: LocKey, ctx?: TravelContext,
 ): { s: number; e: number }[] {
   let cur = [{ s, e }];

@@ -25,8 +25,9 @@ import { ScheduleData, WishOp } from './types';
 import { computeCaseState } from './caseModel';
 import {
   DatedDirect, DirectCalendar, BcbaBusy,
-  reserveBcba, placeBcbaSubinterval, HR_MS, MIN_SUP_HRS,
+  reserveBcba, HR_MS, MIN_SUP_HRS,
 } from './builderBcba';
+import { pickBestSlot, compareCandidateDirects } from './builderScoring';
 import { buildTravelContext } from './travel';
 import type { ClientBlock } from './scheduleBuilder';
 
@@ -114,10 +115,15 @@ export function placeParentTraining(
       // per-case max is set, that overshoot would breach the case cap (a
       // constraintValidator 'training-violation'). Requests ≥ MIN never overshoot.
       if (remaining < MIN_SUP_HRS) break;
-      // Directs within a week are in start-time order (buildDirectCalendar sorts);
-      // take the first that has a BCBA-free sub-slot. PT names that direct's BT.
-      for (const d of (byWeek.get(wi) ?? [])) {
-        const slot = placeBcbaSubinterval(data, d, remaining, bcbaBusy, travelCtx);
+      // Directs ranked by the scored comparator (no per-RBT dimension in PT →
+      // zero btBehind, so travel adjacency / preferred daypart break ties and
+      // start-time order is the final key — byte-identical to the old
+      // start-time scan when travel is off and no hints exist). The slot inside
+      // the winning direct is scored the same way. PT names that direct's BT.
+      const ranked = (byWeek.get(wi) ?? []).slice()
+        .sort((x, y) => compareCandidateDirects(x, y, { btBehind: () => 0, hints: client.schedulingHints, busy: bcbaBusy, ctx: travelCtx }));
+      for (const d of ranked) {
+        const slot = pickBestSlot(data, d, remaining, bcbaBusy, travelCtx, client.schedulingHints);
         if (!slot) continue;
         ptOps.push({ op: 'add', type: 'parent-training', client: client.name, technician: d.techName, start: slot.startIso, end: slot.endIso });
         bcbaBusy = reserveBcba(bcbaBusy, slot.startMs, slot.endMs, d.clientId);

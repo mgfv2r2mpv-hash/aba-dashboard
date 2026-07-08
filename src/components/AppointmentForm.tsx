@@ -511,7 +511,9 @@ export default function AppointmentForm({
         <label style={labelStyle}>Client {type === 'supervision' && '*'}</label>
         <select value={clientId} onChange={(e) => handleClientChange(e.target.value)} style={inputStyle}>
           <option value="">— None —</option>
-          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          {/* Archived cases are off the caseload — hide them, but keep the current
+              selection so editing an existing session isn't broken. */}
+          {clients.filter(c => !c.archived || c.id === clientId).map(c => <option key={c.id} value={c.id}>{c.name}{c.archived ? ' (archived)' : ''}</option>)}
         </select>
         {type === 'supervision' && (
           <p style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>

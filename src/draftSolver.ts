@@ -16,6 +16,7 @@
 // The grade is advisory: the user can always override and Save anyway.
 
 import { Appointment, ScheduleData, CompanySettings, DayOfWeek, TimeWindow } from './types';
+import { nameOf } from './entityRefs';
 import { DraftOp, applyOps } from './draft';
 import { overlapHours } from './compliance';
 import { weekRange } from './caseModel';
@@ -306,7 +307,10 @@ function buildChoices(data: ScheduleData, conflicts: Conflict[], nowMs: number):
   const choices: PrioritizationChoice[] = [];
   const seen = new Set<string>();
   const label = (a: Appointment) => {
-    const who = a.client || a.title || a.id.slice(0, 4);
+    // `a.client` is an immutable id (a UUID post-migration), never a display name —
+    // resolve it through the sanctioned display path so the option reads "CL 9:00",
+    // not a raw UUID. Prefer a friendly title when the session already carries one.
+    const who = a.title || (a.client ? nameOf(data.clients, a.client) : a.id.slice(0, 4));
     const t = new Date(a.startTime);
     return `${who} ${t.getHours()}:${String(t.getMinutes()).padStart(2, '0')}`;
   };

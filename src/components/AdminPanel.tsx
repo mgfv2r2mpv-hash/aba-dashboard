@@ -7,6 +7,7 @@ import { resolvePtoConfig, activeBuckets, ptoBucketLabel, computePtoBalances } f
 import { computeAuthUsage, computeReportDates } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 import { resolveUtilization } from '../utilization';
+import { planArchive, unarchiveClient, sessionsCutByArchive } from '../clientArchive';
 
 // Platform-specific persistence adapter. Each method is optional: absent = apply
 // change locally only (webportal saves via encrypted download; native app must
@@ -48,6 +49,10 @@ interface AdminPanelProps {
   // When exactly one tab is shown the internal tab bar is hidden, letting a
   // parent (the C&C hub) own the chrome.
   tabs?: AdminTab[];
+  // Commit a whole-state change with an Activity-log entry (archive/unarchive a
+  // case). Needed because those actions delete appointments, which a plain
+  // Partial<Client> onChange can't express.
+  onCommitLogged?: (next: ScheduleData, label: string, undoable?: boolean) => void;
   // Which tab to open on mount; falls back to the first visible tab.
   initialTab?: AdminTab;
   // Platform-specific persistence; absent = local state only (webportal mode).
@@ -75,7 +80,11 @@ interface AdminPanelProps {
 }
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-export default function AdminPanel({ data, onDataChange, tabs, initialTab, persist, onImportFile, onRerunWizard, onDownload, onBackup, onClearData, onOpenAISettings, aiSettings, onSaveAISettings, onClearKey, onRequestUnlock, faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin }: AdminPanelProps) {
+// Local YYYY-MM-DD (the archive as-of date lives in the local calendar, not UTC).
+const ymdLocal = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+export default function AdminPanel({ data, onDataChange, onCommitLogged, tabs, initialTab, persist, onImportFile, onRerunWizard, onDownload, onBackup, onClearData, onOpenAISettings, aiSettings, onSaveAISettings, onClearKey, onRequestUnlock, faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin }: AdminPanelProps) {
   const visibleTabs = (tabs && tabs.length > 0 ? tabs : ALL_ADMIN_TABS);
   const showTabBar = visibleTabs.length > 1;
   const [activeTab, setActiveTab] = useState<AdminTab>(
@@ -452,6 +461,12 @@ export default function AdminPanel({ data, onDataChange, tabs, initialTab, persi
                     saving={savingId === client.id}
                     onChange={(patch) => persistClient(client.id, patch)}
                     onRemove={() => removeClient(client.id)}
+                    onArchive={onCommitLogged ? (asOf) => {
+                      const { next, removedCount } = planArchive(data, client.id, asOf);
+                      onCommitLogged(next, `Archived ${client.name}${removedCount ? ` — ${removedCount} session${removedCount === 1 ? '' : 's'} removed` : ''}`, false);
+                    } : undefined}
+                    onUnarchive={onCommitLogged ? () => onCommitLogged(unarchiveClient(data, client.id), `Reactivated ${client.name}`, false) : undefined}
+                    countCut={(asOf) => sessionsCutByArchive(data, client.id, asOf).length}
                   />
                 ))}
                 {data.clients.length === 0 && (
@@ -1059,14 +1074,20 @@ function AvailabilityEditor({ initial, onSave, onCancel }: {
   );
 }
 
-function ClientCard({ client, technicians, saving, onChange, onRemove }: {
+function ClientCard({ client, technicians, saving, onChange, onRemove, onArchive, onUnarchive, countCut }: {
   client: Client;
   technicians?: Technician[];
   saving: boolean;
   onChange: (patch: Partial<Client>) => void;
   onRemove: () => void;
+  // Archive off the active caseload (deletes sessions on/after the as-of date).
+  onArchive?: (asOf: string) => void;
+  onUnarchive?: () => void;
+  countCut?: (asOf: string) => number;
 }) {
   const [name, setName] = useState(client.name);
+  const [archiving, setArchiving] = useState(false);
+  const [asOf, setAsOf] = useState(ymdLocal(new Date()));
   const [maxStr, setMaxStr] = useState(client.parentTrainingMaxHours !== undefined ? String(client.parentTrainingMaxHours) : '');
   const [utilStr, setUtilStr] = useState(client.directUtilizationTarget !== undefined ? String(client.directUtilizationTarget) : '');
   const [supIdealStr, setSupIdealStr] = useState(client.supervisionIdealPct !== undefined ? String(client.supervisionIdealPct) : '');
@@ -1107,8 +1128,8 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
         collapsed={collapsed}
         onToggle={() => setCollapsed(c => !c)}
         name={client.name}
-        badges={noStaff ? ['(!) No Staff'] : []}
-        summary={`${availDays} day${availDays === 1 ? '' : 's'} avail${ptMax !== undefined ? ` · PT max ${ptMax}h` : ''}`}
+        badges={client.archived ? [`Archived${client.archivedAsOf ? ` ${client.archivedAsOf}` : ''}`] : (noStaff ? ['(!) No Staff'] : [])}
+        summary={client.archived ? 'Off the active caseload' : `${availDays} day${availDays === 1 ? '' : 's'} avail${ptMax !== undefined ? ` · PT max ${ptMax}h` : ''}`}
       />
 
       {!collapsed && (<>
@@ -1122,12 +1143,37 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
           />
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
-          {!editing && (
+          {!editing && !client.archived && (
             <button onClick={() => setEditing(true)} style={chipBtn}>Edit availability</button>
           )}
+          {client.archived
+            ? (onUnarchive && <button onClick={onUnarchive} style={chipBtn}>Unarchive</button>)
+            : (onArchive && <button onClick={() => { setAsOf(ymdLocal(new Date())); setArchiving(true); }} style={chipBtn}>Archive</button>)}
           <button onClick={onRemove} style={dangerBtn}>Remove</button>
         </div>
       </div>
+
+      {archiving && onArchive && (() => {
+        const cut = countCut ? countCut(asOf) : 0;
+        return (
+          <div style={{ border: '1px solid #fca5a5', background: '#fef2f2', borderRadius: 8, padding: 12, margin: '4px 0 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontWeight: 700, color: '#991b1b', fontSize: 13 }}>Archive {client.name}?</div>
+            <label style={{ fontSize: 12, color: 'var(--text-body)' }}>
+              Archive as of
+              <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={{ ...inputStyle, marginTop: 4 }} />
+            </label>
+            <div style={{ fontSize: 12.5, color: '#7f1d1d', lineHeight: 1.5 }}>
+              This permanently deletes <b>{cut} session{cut === 1 ? '' : 's'}</b> on or after {asOf} and removes {client.name} from your caseload (gone from compliance, counts, and the builder). Past sessions are kept. You can Unarchive later — the schedule comes back empty.
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => { onArchive(asOf); setArchiving(false); }} style={dangerBtn}>
+                {cut > 0 ? `Delete ${cut} & archive` : 'Archive'}
+              </button>
+              <button onClick={() => setArchiving(false)} style={chipBtn}>Cancel</button>
+            </div>
+          </div>
+        );
+      })()}
       {saving && <p style={{ fontSize: '11px', color: 'var(--brand-primary)' }}>Saving…</p>}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
         <label style={{ fontSize: '12px', color: 'var(--text-body)', whiteSpace: 'nowrap' }}>

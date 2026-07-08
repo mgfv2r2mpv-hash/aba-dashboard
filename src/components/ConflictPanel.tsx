@@ -138,6 +138,10 @@ export default function ConflictPanel({ conflicts, appointments = [], onSelectAp
   const mutedConflicts = conflicts.filter(c => muted.has(conflictKey(c)));
   const errorCount = active.filter(c => c.severity === 'error').length;
   const warningCount = active.filter(c => c.severity === 'warning').length;
+  // Everything not error/warning is info ("notes"). Surfacing it makes the split
+  // add up to the total on the card — otherwise errors+warnings silently omit them
+  // and the numbers look like they don't reconcile.
+  const infoCount = active.length - errorCount - warningCount;
 
   const getIcon = (severity: string) => {
     switch (severity) {
@@ -257,6 +261,7 @@ export default function ConflictPanel({ conflicts, appointments = [], onSelectAp
         Issues Found
         {errorCount > 0 && <span style={{ color: '#dc2626', fontWeight: 'bold' }}>({errorCount} error{errorCount !== 1 ? 's' : ''})</span>}
         {warningCount > 0 && <span style={{ color: '#f59e0b', fontWeight: 'bold' }}>({warningCount} warning{warningCount !== 1 ? 's' : ''})</span>}
+        {infoCount > 0 && <span style={{ color: '#6b7280', fontWeight: 'bold' }}>({infoCount} note{infoCount !== 1 ? 's' : ''})</span>}
       </h3>
       {!collapsed && (
         <>

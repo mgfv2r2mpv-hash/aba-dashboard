@@ -13,6 +13,7 @@ import CommitToast from './components/CommitToast';
 import UndoPreview from './components/UndoPreview';
 import CaptureChip from './components/CaptureChip';
 import { solveMeetPace } from './localSolver';
+import { buildDossier, type Dossier } from './dossier';
 import Calendar, { HoursSummary } from './components/Calendar';
 import { conflictKey } from './components/ConflictPanel';
 import SolutionPanel from './components/SolutionPanel';
@@ -30,7 +31,7 @@ import { Rail, CommandBar, ZenStrip, DockChip, DockOverlay, resolveDockMode } fr
 import type { RailItem, RailKey } from './components/shell';
 import { SAssiDock, buildDockIssues, useSassiSession, BuildResultPanel, TidyPanel } from './components/dock';
 import type { DockIssue, MeetPaceSeed } from './components/dock';
-import { buildSchedule, defaultBuilderConfig, supervisionBuilderConfig, parentTrainingBuilderConfig, type BuildResult } from './scheduleBuilder';
+import { buildSchedule, defaultBuilderConfig, supervisionBuilderConfig, parentTrainingBuilderConfig, combinedBuilderConfig, type BuildResult } from './scheduleBuilder';
 import { analyzeTidy, defaultTidyConfig, type TidyResult } from './tidy';
 import { extendSeries } from './seriesExtend';
 import { useHomeTodos } from './hooks/useHomeTodos';
@@ -38,7 +39,6 @@ import type { HomeTodo } from './hooks/useHomeTodos';
 import type { RitualAction } from './components/HomeView';
 
 const HomeView = React.lazy(() => import('./components/HomeView'));
-const WishComposer = React.lazy(() => import('./components/WishComposer'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
 const CCHub = React.lazy(() => import('./components/CCHub'));
 import type { HubTab } from './components/CCHub';
@@ -63,7 +63,7 @@ import { isBiometricAvailable, checkBiometryFull, biometricAuthenticate, getBiom
 import { pastIncompleteAppointments } from './compliance';
 import {
   ComplianceCache, ComplianceSummary, ApptChange,
-  buildCache, recomputeCache, summarize,
+  buildCache, recomputeCache, summarize, attentionList,
 } from './complianceCache';
 import {
   obfuscateKey, deobfuscateKey, encryptBytes, decryptBytes, isEncryptedSchedule,
@@ -158,7 +158,7 @@ export default function App() {
   const [mutedConflicts, setMutedConflicts] = useState<string[]>([]);
   const [solutions, setSolutions] = useState<ScheduleSolution[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [view, setView] = useState<'home' | 'schedule' | 'admin' | 'compliance' | 'caseload' | 'wish' | 'cpr'>('schedule');
+  const [view, setView] = useState<'home' | 'schedule' | 'admin' | 'compliance' | 'caseload' | 'cpr'>('schedule');
   // Which Admin section opens on entry. The C&C hub's view-only settings popup
   // deep-links to the editable 'candc' tab; normal Admin entry resets to settings.
   const [adminInitialTab, setAdminInitialTab] = useState<AdminTab>('settings');
@@ -180,10 +180,13 @@ export default function App() {
   // the dock. Bumping the token re-triggers the solve for the same or a new case.
   const [meetPaceSeed, setMeetPaceSeed] = useState<MeetPaceSeed | null>(null);
   const meetPaceTokenRef = React.useRef(0);
-  // Which Caseload sub-tab to open — the dock's "fix compliance" routes to Issues
-  // (where FixItPanel does remediation), now that the per-case Fix It is gone.
+  // "Doctor my schedule" — a local, AI-free diagnosis of whatever's in focus
+  // (the selected appointment / its case). Cleared when the focus changes so it
+  // never lingers stale over a different session.
+  const [dossier, setDossier] = useState<Dossier | null>(null);
+  // Which Caseload sub-tab to open — the dock's "fix compliance" routes to Issues,
+  // where per-case compliance cards hand off to the SAssi dock for remediation.
   const [ccInitialTab, setCcInitialTab] = useState<HubTab>('cases');
-  // Wish view is now a full page (view === 'wish') rather than a modal.
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   // Whether the selected appointment's detail panel is expanded into its inline
   // edit form (slide-up), replacing the old edit modal on the schedule view.
@@ -378,6 +381,17 @@ export default function App() {
     setDraftOps(draftOps);
   }, [scheduleData]);
 
+  // THE one-tap assistant move: directs → supervision → parent training in a
+  // single pass (the same engine the chat's "build my month" routes to), staged
+  // as one reviewable draft. The three pass buttons below remain for partial
+  // rebuilds.
+  const handleBuildCombined = () => {
+    if (!scheduleData) return;
+    const now = new Date();
+    const result = buildSchedule(scheduleData, combinedBuilderConfig(scheduleData, now), now);
+    stageSassiOps(result.solution.ops);
+    setBuildResult(result);
+  };
   // One-tap deterministic build: the engine (never Claude) places a recurring
   // direct backbone for the month and stages it through the normal draft pipeline;
   // the BuildResultPanel surfaces what it placed and which cases it couldn't fill.
@@ -1209,29 +1223,6 @@ export default function App() {
     setView('schedule');
   };
 
-  // "Fix It" produces WishSolutions too, so accept/customize reuse the Wish
-  // plumbing — but they live on the Compliance tab, so after staging we jump to
-  // the Schedule view where the draft tray (Customize) or the committed change
-  // (Accept) is visible.
-  const acceptFix = async (sol: WishSolution) => {
-    if (!scheduleData) return;
-    await commitWishLikeSolution(sol);
-    setView('schedule');
-  };
-
-  const customizeFix = (sol: WishSolution) => {
-    if (!scheduleData) return;
-    const { ops, blackouts, hintChanges } = draftFromSolution(sol, scheduleData);
-    if (blackouts.length || hintChanges.length) {
-      commitScheduleData(
-        { ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts], clients: applyHintChanges(scheduleData.clients, hintChanges) },
-        { label: 'Day-offs / preferences recorded', source: 'wish' },
-      );
-    }
-    stageOps(ops);
-    setView('schedule');
-  };
-
   // ---- Move This / Replace This / Cancel Recovery ----
   const runRecoveryAI = async (
     kind: 'move' | 'replace' | 'cancel',
@@ -1886,8 +1877,7 @@ export default function App() {
         : view === 'compliance' || view === 'caseload' ? 'Caseload'
           : view === 'cpr' ? 'CPR & analysis'
             : view === 'admin' ? 'Settings'
-              : view === 'wish' ? 'Ask SAssi'
-                : 'SAssi';
+              : 'SAssi';
 
   // Command-bar actions are contextual: onboarding entries before data loads,
   // "new session" once a schedule is in hand.
@@ -1921,7 +1911,13 @@ export default function App() {
 
   // ── Dock feed (M3) ─────────────────────────────────────────────────────
   // Normalize the live conflict + compliance feeds into the one-at-a-time queue.
-  const dockIssues = buildDockIssues(activeConflicts, compSummary);
+  // Per-case cards (worst clients first, each with a case-scoped fix) + a tail
+  // aggregate; the bare summary covers the async cache-rebuild window.
+  const dockIssues = buildDockIssues(
+    activeConflicts,
+    compSummary,
+    scheduleData && compCache ? attentionList(compCache, scheduleData) : [],
+  );
 
   const reviewConflictIssue = (issue: DockIssue) => {
     const id = issue.appointmentIds?.[0];
@@ -1974,6 +1970,30 @@ export default function App() {
     ? { data: scheduleData, settings: scheduleData.settings, now: viewDate }
     : undefined;
 
+  // "Doctor my schedule with me": the quick "what's wrong here?" diagnosis of the
+  // selected appointment (and its case). Facts are local — no key needed — so the
+  // read is honest and instant. With a key, "dig in" hands the case to the chat.
+  const openDoctor = () => {
+    if (!scheduleData || !selectedAppointment) return;
+    const d = buildDossier(scheduleData, { kind: 'appointment', appointmentId: selectedAppointment.id }, viewDate, activeConflicts);
+    setDossier(d);
+    if (dockMode === 'sheet') setDockSheetOpen(true);
+    else if (dockMode === 'chip') setDockOpen(true);
+  };
+
+  // Hand the diagnosed session off to the sAssI chat. The focused appointment id
+  // rides the conversation deictically (sassiSession appends its token), so no
+  // client name ever leaves the device — the prompt itself is generic.
+  const askAboutFocus = () => {
+    if (!selectedAppointment) return;
+    void sassi.send("What's wrong with this appointment, and how would you fix it?");
+  };
+
+  // A stale dossier over a different session is misleading — drop it whenever the
+  // focused appointment changes (opening the doctor sets it without changing focus).
+  React.useEffect(() => { setDossier(null); }, [selectedAppointment?.id]);
+  const canDoctor = !!selectedAppointment;
+
   // ── Home wiring (M4) ───────────────────────────────────────────────────
   // Ritual/flag routing: the SAssi dock is wide-only (>=1024) and already on
   // screen there, so 'assistant' only needs a fallback on narrow widths.
@@ -2011,6 +2031,20 @@ export default function App() {
     <>
       {!draftActive && calLens !== 'client' && (
         <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} timeOff={scheduleData.timeOff} currentDate={viewDate} />
+      )}
+      {!draftActive && (
+        <button
+          type="button"
+          onClick={handleBuildCombined}
+          title="One pass: place directs, supervision, and parent training for the month — staged as a single reviewable draft"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            padding: '11px 12px', borderRadius: 'var(--radius-md)', border: 'none',
+            background: 'var(--sage-600)', color: 'var(--white, #fff)', fontSize: 13.5, fontWeight: 800, cursor: 'pointer',
+          }}
+        >
+          ⚙︎ Build month
+        </button>
       )}
       {!draftActive && (
         <div style={{ display: 'flex', gap: 6 }}>
@@ -2288,7 +2322,6 @@ export default function App() {
                   cache={compCache}
                   conflicts={visibleConflicts}
                   conflictCount={activeConflicts.length}
-                  aiSettings={aiSettings}
                   mutedConflictKeys={mutedConflicts}
                   onMuteConflict={muteConflict}
                   onUnmuteConflict={unmuteConflict}
@@ -2296,8 +2329,6 @@ export default function App() {
                   onMarkComplete={handleMarkComplete}
                   onRequestCancel={(a) => setCancelTarget(a)}
                   onSelectAppointment={(a) => { setView('schedule'); setSelectedAppointment(a); }}
-                  onAcceptFix={acceptFix}
-                  onCustomizeFix={customizeFix}
                   onOpenAdminCandC={() => { setAdminInitialTab('candc'); setView('admin'); }}
                 />
               </React.Suspense>
@@ -2305,17 +2336,6 @@ export default function App() {
             {view === 'caseload' && (
               <React.Suspense fallback={null}>
                 <CaseloadView data={scheduleData} now={viewDate} />
-              </React.Suspense>
-            )}
-            {view === 'wish' && (
-              <React.Suspense fallback={null}>
-                <WishComposer
-                  data={scheduleData}
-                  aiSettings={aiSettings}
-                  onAccept={acceptWish}
-                  onCustomize={customizeWish}
-                  onClose={() => setView('schedule')}
-                />
               </React.Suspense>
             )}
             {view === 'home' && (
@@ -2379,6 +2399,12 @@ export default function App() {
           onReviewConflict={reviewConflictIssue}
           onMuteConflict={muteConflictIssue}
           onFixCompliance={() => { setCcInitialTab('issues'); setView('compliance'); }}
+          onFixPace={(id) => openMeetPace(id, 'behind')}
+          dossier={dossier}
+          canDoctor={canDoctor}
+          onDoctor={openDoctor}
+          onClearDossier={() => setDossier(null)}
+          onAskAboutFocus={askAboutFocus}
           seedRequest={meetPaceSeed}
           onSeedResolve={resolveMeetPace}
           graderCtx={meetPaceGraderCtx}
@@ -2458,6 +2484,12 @@ export default function App() {
               onReviewConflict={(i) => { setDockSheetOpen(false); reviewConflictIssue(i); }}
               onMuteConflict={muteConflictIssue}
               onFixCompliance={() => { setDockSheetOpen(false); setCcInitialTab('issues'); setView('compliance'); }}
+              onFixPace={(id) => openMeetPace(id, 'behind')}
+              dossier={dossier}
+              canDoctor={canDoctor}
+              onDoctor={openDoctor}
+              onClearDossier={() => setDossier(null)}
+              onAskAboutFocus={askAboutFocus}
               seedRequest={meetPaceSeed}
               onSeedResolve={resolveMeetPace}
               graderCtx={meetPaceGraderCtx}
@@ -2483,6 +2515,12 @@ export default function App() {
             onReviewConflict={reviewConflictIssue}
             onMuteConflict={muteConflictIssue}
             onFixCompliance={() => { setDockOpen(false); setCcInitialTab('issues'); setView('compliance'); }}
+            onFixPace={(id) => openMeetPace(id, 'behind')}
+            dossier={dossier}
+            canDoctor={canDoctor}
+            onDoctor={openDoctor}
+            onClearDossier={() => setDossier(null)}
+            onAskAboutFocus={askAboutFocus}
             seedRequest={meetPaceSeed}
             onSeedResolve={resolveMeetPace}
             graderCtx={meetPaceGraderCtx}

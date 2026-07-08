@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import type { ScheduleConflict } from '../../types';
-import type { ComplianceSummary } from '../../complianceCache';
+import type { ComplianceSummary, ComplianceAttention } from '../../complianceCache';
 import { conflictKey } from '../ConflictPanel';
 
 /**
  * The dock speaks one language — DockIssue — over two live engine feeds:
- * hard scheduling conflicts (ConstraintValidator) and compliance pressure
- * (the summarized cache). The queue shows one at a time, worst first.
+ * hard scheduling conflicts (ConstraintValidator) and compliance pressure.
+ * Compliance surfaces as PER-CASE cards for the worst few clients (each with a
+ * case-scoped fix CTA) plus one aggregate tail for the remainder; the queue
+ * shows one at a time, worst first.
  */
 export type DockIssueKind = 'conflict' | 'compliance';
 
@@ -20,7 +22,12 @@ export interface DockIssue {
   appointmentIds?: string[];
   /** The conflict's stable key, for mute/dismiss. Absent on compliance items. */
   conflictKey?: string;
+  /** Present on per-CASE compliance cards — drives the case-scoped fix CTA. */
+  clientId?: string;
 }
+
+/** How many per-case compliance cards ride the queue before the tail aggregate. */
+export const MAX_CASE_CARDS = 3;
 
 const CONFLICT_TITLE: Record<ScheduleConflict['type'], string> = {
   'supervision-violation': 'Supervision gap',
@@ -35,6 +42,8 @@ const SEVERITY_RANK: Record<DockIssue['severity'], number> = { error: 0, warning
 export function buildDockIssues(
   conflicts: ScheduleConflict[],
   compliance: ComplianceSummary | null,
+  attention: ComplianceAttention[] = [],
+  maxCaseCards = MAX_CASE_CARDS,
 ): DockIssue[] {
   const fromConflicts: DockIssue[] = conflicts.map((c) => {
     const key = conflictKey(c);
@@ -49,21 +58,47 @@ export function buildDockIssues(
     };
   });
 
-  const attention = (compliance?.red ?? 0) + (compliance?.yellow ?? 0);
-  const complianceIssue: DockIssue[] =
-    attention > 0 && compliance
-      ? [{
-        id: 'compliance:summary',
-        kind: 'compliance' as const,
-        severity: compliance.red > 0 ? 'error' : 'warning',
-        title: 'Compliance attention',
-        detail: complianceDetail(compliance),
-      }]
-      : [];
+  // Per-case cards for the worst few CLIENTS (each carries a case-scoped fix);
+  // everything else (overflow clients + techs) folds into one aggregate tail.
+  // When the attention list is empty but the summary still shows counts (the
+  // cache is mid-rebuild after a commit), fall back to the single aggregate so
+  // the queue never flickers empty.
+  const caseCards: DockIssue[] = attention
+    .filter(a => a.kind === 'client')
+    .slice(0, maxCaseCards)
+    .map(a => ({
+      id: `compliance:case:${a.id}`,
+      kind: 'compliance' as const,
+      severity: a.status === 'red' ? 'error' as const : 'warning' as const,
+      title: `${a.name} off pace`,
+      detail: a.detail,
+      clientId: a.id,
+    }));
+  const remainder = attention.length - caseCards.length;
+  const summaryCount = (compliance?.red ?? 0) + (compliance?.yellow ?? 0);
+  const tail: DockIssue[] = [];
+  if (attention.length > 0 && remainder > 0) {
+    const worstLeft = attention.slice(caseCards.length);
+    tail.push({
+      id: 'compliance:summary',
+      kind: 'compliance' as const,
+      severity: worstLeft.some(a => a.status === 'red') ? 'error' : 'warning',
+      title: 'More compliance attention',
+      detail: `${remainder} more ${remainder === 1 ? 'entity' : 'entities'} off pace — open the compliance view for the full picture.`,
+    });
+  } else if (attention.length === 0 && summaryCount > 0 && compliance) {
+    tail.push({
+      id: 'compliance:summary',
+      kind: 'compliance' as const,
+      severity: compliance.red > 0 ? 'error' : 'warning',
+      title: 'Compliance attention',
+      detail: complianceDetail(compliance),
+    });
+  }
 
-  // Stable sort by severity keeps conflicts ahead of the compliance summary at
-  // equal severity, so a red conflict still leads a red compliance flag.
-  return [...fromConflicts, ...complianceIssue].sort(
+  // Stable sort by severity keeps conflicts ahead of equal-severity compliance
+  // cards, so a red conflict still leads a red compliance flag.
+  return [...fromConflicts, ...caseCards, ...tail].sort(
     (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
   );
 }

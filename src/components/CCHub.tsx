@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { Appointment, ScheduleData, ScheduleConflict, WishSolution } from '../types';
+import { Appointment, ScheduleData, ScheduleConflict } from '../types';
 import { ComplianceCache } from '../complianceCache';
-import { AISettings } from './Settings';
 import { AdminPersist } from './AdminPanel';
 import AdminPanel from './AdminPanel';
 import ComplianceDashboard from './ComplianceDashboard';
@@ -25,7 +24,6 @@ interface Props {
   cache?: ComplianceCache | null;
   conflicts?: ScheduleConflict[];
   conflictCount?: number;
-  aiSettings?: AISettings;
   mutedConflictKeys?: string[];
   onMuteConflict?: (key: string) => void;
   onUnmuteConflict?: (key: string) => void;
@@ -33,8 +31,6 @@ interface Props {
   onMarkComplete: (a: Appointment) => void;
   onRequestCancel: (a: Appointment) => void;
   onSelectAppointment: (a: Appointment) => void;
-  onAcceptFix?: (sol: WishSolution) => void | Promise<void>;
-  onCustomizeFix?: (sol: WishSolution) => void;
   // Jump to Admin's editable C&C settings tab (from the view-only popup).
   onOpenAdminCandC: () => void;
 }
@@ -100,7 +96,6 @@ export default function CCHub(props: Props) {
             data={data}
             cache={props.cache}
             conflicts={props.conflicts}
-            aiSettings={props.aiSettings}
             mutedConflictKeys={props.mutedConflictKeys}
             onMuteConflict={props.onMuteConflict}
             onUnmuteConflict={props.onUnmuteConflict}
@@ -108,8 +103,6 @@ export default function CCHub(props: Props) {
             onMarkComplete={props.onMarkComplete}
             onRequestCancel={props.onRequestCancel}
             onSelectAppointment={props.onSelectAppointment}
-            onAcceptFix={props.onAcceptFix}
-            onCustomizeFix={props.onCustomizeFix}
           />
         )}
         {tab === 'clients' && (

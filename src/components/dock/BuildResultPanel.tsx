@@ -20,11 +20,16 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 
 export function BuildResultPanel({ result, hasStagedProposal, onDismiss }: BuildResultPanelProps) {
   const { metrics, blocks } = result;
+  // A from-scratch schedule with no authorizations must say WHY nothing placed
+  // (the old copy read "everything is already at target" — actively misleading).
+  const allNoAuth = blocks.length > 0 && blocks.every(b => b.bindingConstraint === 'no-authorization');
   const nextStep = hasStagedProposal
     ? 'Review the proposal in the tray, then Accept.'
-    : blocks.length > 0
-      ? 'Nothing could be placed — see the blocks below.'
-      : 'Nothing to place — everything is already at target.';
+    : allNoAuth
+      ? 'Nothing was placed — no case has an authorization with weekly direct hours yet. Add them under Caseload → Auths, then build again.'
+      : blocks.length > 0
+        ? 'Nothing could be placed — see the blocks below.'
+        : 'Nothing to place — everything is already at target.';
 
   return (
     <section aria-label="Build result" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

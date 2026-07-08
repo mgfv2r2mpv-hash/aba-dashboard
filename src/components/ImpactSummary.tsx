@@ -7,9 +7,9 @@ function fmt1(n: number): string { return n.toFixed(1); }
 
 // Compact compliance-impact summary for a single solution card.
 // Shows projected before→after supervision % and hours for every affected
-// client and tech, plus net session count. Used in both FixItPanel and
-// WishComposer so the BCBA can compare options on real numbers, not just
-// the AI's prose reasoning.
+// client and tech, plus net session count. Rendered on the SAssi dock's
+// SolutionCards (and the undo blast-radius preview) so the BCBA can compare
+// options on real numbers, not just the AI's prose reasoning.
 export default function ImpactSummary({ impact }: { impact: SolutionImpact }) {
   const { clientImpacts, techImpacts, sessionsAdded, sessionsRemoved } = impact;
   const hasClients  = clientImpacts.length > 0;

@@ -5,9 +5,11 @@ import { wishSolutionToDraft, computeSolutionImpact } from '../../wish';
 import { solveDraft } from '../../draftSolver';
 import { IssueCard } from './IssueCard';
 import { SolutionCard } from './SolutionCard';
+import { DossierCard } from './DossierCard';
 import { SassiChat } from './SassiChat';
 import type { SassiSession } from './sassiSession';
 import type { ClaudeModel } from '../../claudeScheduler';
+import type { Dossier } from '../../dossier';
 import { useIssueQueue, type DockIssue } from './dockIssues';
 
 /** Multi-turn chat wiring folded into the dock (the "sAssI" conversational mode). */
@@ -46,6 +48,17 @@ export interface SAssiDockProps {
   onReviewConflict: (issue: DockIssue) => void;
   onMuteConflict: (issue: DockIssue) => void;
   onFixCompliance: () => void;
+  /** Case-scoped fix for per-client compliance cards (seeds meet-pace). */
+  onFixPace?: (clientId: string) => void;
+  /** "Doctor my schedule": a local analysis of whatever's in focus (an appt/case).
+   *  Present (with `canDoctor`) → a "What's wrong here?" chip offers it. */
+  dossier?: Dossier | null;
+  /** Whether something is in focus to diagnose (a selected appointment/case). */
+  canDoctor?: boolean;
+  onDoctor?: () => void;
+  onClearDossier?: () => void;
+  /** Hand the diagnosed focus off to the chat for narration (key only). */
+  onAskAboutFocus?: () => void;
   /** Route the dock's freeform input into the sAssI conversation. */
   onAsk?: (text: string) => void;
   /** Multi-turn chat state; when active, the chat surface replaces the freeform thread. */
@@ -86,6 +99,12 @@ export function SAssiDock({
   onReviewConflict,
   onMuteConflict,
   onFixCompliance,
+  onFixPace,
+  dossier,
+  canDoctor,
+  onDoctor,
+  onClearDossier,
+  onAskAboutFocus,
   onAsk,
   chat,
   onAcceptWish,
@@ -119,9 +138,37 @@ export function SAssiDock({
 
   const hasWish = wish.status !== 'idle';
   const chatActive = !!chat && chat.session.active;
+  // Offer the "doctor" chip whenever something is in focus and we're not already
+  // showing its analysis (or mid-conversation, where the chat is the surface).
+  const showDoctorChip = !!canDoctor && !!onDoctor && !dossier && !chatActive;
   const body =
-    contextTop || chatActive || hasWish || queue.current ? (
+    contextTop || chatActive || hasWish || queue.current || dossier || showDoctorChip ? (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {showDoctorChip && (
+          <button
+            type="button"
+            onClick={onDoctor}
+            style={{
+              alignSelf: 'flex-start',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '6px 12px', borderRadius: 999,
+              border: '1px solid var(--sage-200)', background: 'var(--sage-50)',
+              color: 'var(--sage-700)', fontSize: 12.5, fontWeight: 700,
+              fontFamily: 'var(--font-sans)', cursor: 'pointer',
+            }}
+          >
+            🩺 What’s wrong here?
+          </button>
+        )}
+        {dossier && (
+          <DossierCard
+            dossier={dossier}
+            aiEnabled={aiEnabled}
+            onFixPace={onFixPace}
+            onAskAboutFocus={onAskAboutFocus}
+            onClear={() => onClearDossier?.()}
+          />
+        )}
         {contextTop}
         {chatActive && (
           <SassiChat session={chat!.session} model={chat!.model} onToggleModel={chat!.onToggleModel} />
@@ -147,6 +194,7 @@ export function SAssiDock({
             onReviewConflict={onReviewConflict}
             onMuteConflict={onMuteConflict}
             onFixCompliance={onFixCompliance}
+            onFixPace={onFixPace}
             onNotNow={queue.notNow}
           />
         )}

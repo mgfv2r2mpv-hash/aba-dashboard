@@ -438,23 +438,42 @@ export function computeSolutionImpact(
   sol: WishSolution,
   period?: CompliancePeriod,
 ): SolutionImpact {
-  const p = period ?? monthPeriod(new Date());
-  const now = new Date();
-
-  const clientsBefore = computeClientCompliance(base, p, now);
-  const techsBefore   = computeTechCompliance(base, p, now);
-
-  const hypothetical  = applyWishSolution(base, sol);
-
-  const clientsAfter  = computeClientCompliance(hypothetical, p, now);
-  const techsAfter    = computeTechCompliance(hypothetical, p, now);
-
   let sessionsAdded = 0;
   let sessionsRemoved = 0;
   for (const op of sol.ops) {
     if (op.op === 'add') sessionsAdded++;
     else if (op.op === 'remove') sessionsRemoved++;
   }
+  return diffImpact(base, applyWishSolution(base, sol), sessionsAdded, sessionsRemoved, period);
+}
+
+// Impact of raw DraftOps (the selective-undo preview path — inverse ops have no
+// WishSolution wrapper). Same compliance diff, sessions counted per op kind.
+export function computeOpsImpact(
+  base: ScheduleData,
+  ops: DraftOp[],
+  period?: CompliancePeriod,
+): SolutionImpact {
+  const sessionsAdded = ops.filter(o => o.kind === 'add').length;
+  const sessionsRemoved = ops.filter(o => o.kind === 'remove').length;
+  return diffImpact(base, applyOps(base, ops), sessionsAdded, sessionsRemoved, period);
+}
+
+// Shared before/after projected-compliance diff.
+function diffImpact(
+  base: ScheduleData,
+  hypothetical: ScheduleData,
+  sessionsAdded: number,
+  sessionsRemoved: number,
+  period?: CompliancePeriod,
+): SolutionImpact {
+  const p = period ?? monthPeriod(new Date());
+  const now = new Date();
+
+  const clientsBefore = computeClientCompliance(base, p, now);
+  const techsBefore   = computeTechCompliance(base, p, now);
+  const clientsAfter  = computeClientCompliance(hypothetical, p, now);
+  const techsAfter    = computeTechCompliance(hypothetical, p, now);
 
   const afterClientMap = new Map(clientsAfter.map(c => [c.client.id, c]));
   const clientImpacts: ClientImpact[] = [];

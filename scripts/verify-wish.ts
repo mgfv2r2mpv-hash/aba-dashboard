@@ -4,7 +4,8 @@
  * Run: npx tsx scripts/verify-wish.ts
  */
 import { ScheduleData, WishSolution, WishOp } from '../src/types';
-import { parseWishSolutions, parseOps, parseChatTurn, dropPastOps, wishSolutionToDraft, applyWishSolution, summarizeWish } from '../src/wish';
+import { parseWishSolutions, parseOps, parseChatTurn, dropPastOps, wishSolutionToDraft, applyWishSolution, summarizeWish, computeSolutionImpact, computeOpsImpact } from '../src/wish';
+import { monthPeriod } from '../src/compliance';
 
 let passed = 0, failed = 0;
 function check(name: string, cond: boolean, extra?: string) {
@@ -153,6 +154,42 @@ console.log('dropPastOps (real-world safety net)');
   check('remove passes through', kept.some(o => o.op === 'remove'));
   check('unparseable start dropped', !kept.some(o => o.op === 'add' && (o as any).start === 'not-a-date'));
   check('total kept = 3', kept.length === 3);
+}
+
+console.log('computeOpsImpact parity: raw DraftOps diff ≡ WishSolution diff');
+{
+  // The selective-undo preview computes impact from raw DraftOps; it must agree
+  // with the WishSolution path when both describe the same change.
+  const base: ScheduleData = {
+    id: 'imp', version: 2,
+    clients: [{ id: 'c1', name: 'Client Imp', availabilityWindows: {} }],
+    technicians: [{ id: 't1', name: 'Tech Imp', isRBT: true, availability: {}, assignments: [{ clientId: 'c1', hoursPerWeek: 10, billable: true }] }],
+    settings: {
+      supervisionDirectHoursPercent: 5, supervisionRBTHoursPercent: 5,
+      parentTraining: { minimumHours: 1, targetMinHours: 2, targetMaxHours: 4, periodUnit: 'month' },
+    } as ScheduleData['settings'],
+    appointments: [{
+      id: 'd1', title: 'Direct', client: 'c1', technician: 't1', type: 'client-session',
+      startTime: '2099-01-05T09:00:00', endTime: '2099-01-05T13:00:00', isFixed: false, isBillable: true, isRecurring: false, status: 'scheduled',
+    }],
+    lastModified: 'x',
+  };
+  const sol: WishSolution = {
+    id: 's', summary: '', reasoning: '',
+    ops: [{ op: 'add', type: 'supervision', client: 'Client Imp', technician: 'Tech Imp', start: '2099-01-05T10:00:00', end: '2099-01-05T11:00:00' }],
+  };
+  const period = monthPeriod(new Date('2099-01-10T00:00:00'));
+  const viaSolution = computeSolutionImpact(base, sol, period);
+  const { ops } = wishSolutionToDraft(sol, base);
+  const viaOps = computeOpsImpact(base, ops, period);
+  check('sessionsAdded agree', viaSolution.sessionsAdded === 1 && viaOps.sessionsAdded === 1);
+  check('client impact deltas agree',
+    viaSolution.clientImpacts.length === viaOps.clientImpacts.length
+    && viaSolution.clientImpacts.every((c, i) =>
+      Math.abs(c.deltaPct - viaOps.clientImpacts[i].deltaPct) < 1e-9
+      && Math.abs(c.deltaSupHours - viaOps.clientImpacts[i].deltaSupHours) < 1e-9),
+    JSON.stringify({ sol: viaSolution.clientImpacts, ops: viaOps.clientImpacts }));
+  check('impact registers the supervision hour', viaOps.clientImpacts.some(c => c.deltaSupHours > 0.9));
 }
 
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed\n`);

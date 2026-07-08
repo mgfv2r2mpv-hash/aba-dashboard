@@ -121,5 +121,18 @@ console.log('forward-compatible passthrough (newer schema version)');
   check('passes through unknown future fields', out !== null && (out as any).someFutureField === 42);
 }
 
+console.log('action log: envelope round-trip + backfill');
+{
+  const entry = {
+    id: 'e1', at: '2026-07-08T12:00:00.000Z', label: 'Build — 3 adds', source: 'build' as const,
+    ops: [], before: {}, undoable: true,
+  };
+  const withLog: ScheduleData = { ...full, actionLog: [entry] };
+  const out = unwrapEnvelope(wrapEnvelope(withLog));
+  check('actionLog survives the envelope round-trip', JSON.stringify(out.actionLog) === JSON.stringify([entry]));
+  const bare = migrateScheduleData({ ...full });
+  check('absent actionLog backfills to []', Array.isArray(bare.actionLog) && bare.actionLog.length === 0);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

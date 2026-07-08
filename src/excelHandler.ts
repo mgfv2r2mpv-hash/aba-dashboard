@@ -143,6 +143,22 @@ function parseClients(workbook: XLSX.WorkBook): Client[] {
     if (supIdeal !== undefined) client.supervisionIdealPct = supIdeal;
     const city = text(row.city);
     if (city) client.city = city;
+    // Scheduling hints — enum-validated (mirrors the cadenceGoal guard above);
+    // only construct the object when a field is actually present so untouched
+    // workbooks round-trip byte-identical.
+    const hintStyle = row.supervisionStyle === 'auto' || row.supervisionStyle === 'consolidate' || row.supervisionStyle === 'split'
+      ? row.supervisionStyle : undefined;
+    const hintDaypart = row.preferredDaypart === 'morning' || row.preferredDaypart === 'midday'
+      || row.preferredDaypart === 'afternoon' || row.preferredDaypart === 'evening'
+      ? row.preferredDaypart : undefined;
+    const hintNote = text(row.hintNote);
+    if (hintStyle || hintDaypart || hintNote) {
+      client.schedulingHints = {
+        ...(hintStyle ? { supervisionStyle: hintStyle } : {}),
+        ...(hintDaypart ? { preferredDaypart: hintDaypart } : {}),
+        ...(hintNote ? { note: hintNote } : {}),
+      };
+    }
     return client;
   });
 }
@@ -561,15 +577,17 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
 
   if (embeddedConfig) add('_Config', ['encryptedBlob'], [[embeddedConfig]]);
 
-  // Clients (scalars only).
+  // Clients (scalars only). schedulingHints flatten to three optional columns
+  // (source/updatedAt provenance is device-local and intentionally not exported).
   add('Clients',
     ['id', 'name', 'parentTrainingMaxHours', 'cadenceGoal', 'isEI', 'eiDate',
       'partialStaffAllowed', 'parentAvailableOutsideSessions', 'anticipatedDischarge', 'notes',
-      'supervisionIdealPct', 'city'],
+      'supervisionIdealPct', 'city', 'supervisionStyle', 'preferredDaypart', 'hintNote'],
     data.clients.map(c => [
       c.id, c.name, W(c.parentTrainingMaxHours), W(c.cadenceGoal), WT(c.isEI), W(c.eiDate),
       WB(c.partialStaffAllowed), WT(c.parentAvailableOutsideSessions), W(c.anticipatedDischarge), W(c.notes),
       W(c.supervisionIdealPct), W(c.city),
+      W(c.schedulingHints?.supervisionStyle), W(c.schedulingHints?.preferredDaypart), W(c.schedulingHints?.note),
     ]));
 
   // Technicians (scalars only).

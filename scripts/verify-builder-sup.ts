@@ -452,5 +452,130 @@ console.log('dropPastOps guard: a mid-horizon build emits no past-dated supervis
   check('some supervision still placed in the remaining weeks', staged.some(o => o.op === 'add' && o.type === 'supervision'));
 }
 
+// ── Scored placement (schedulingHints) ───────────────────────────────────────
+
+console.log('hint split+midday (the AB case): two midday sub-contacts on different days');
+{
+  // Directs Mon+Wed 09:00-13:00; hint says split + midday. Expect each week to
+  // get TWO sub-contacts, band-anchored at 11:00, on two DIFFERENT days — and
+  // the credit to be real.
+  const c1: Client = {
+    ...client('c1', 'Client Split', daysWindows(['Monday', 'Wednesday'], '09:00', '13:00')),
+    disablePTRequirements: true,
+    schedulingHints: { supervisionStyle: 'split', preferredDaypart: 'midday' },
+  };
+  const t1 = tech('t1', 'Sal Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
+  const base = schedule([c1], [t1], [auth('c1', 8)], baseSettings(WIDE_CLIN));
+  const { committed, result } = run(base, combinedBuilderConfig(base, NOW));
+  const sups = supAppts(committed);
+  const week0 = sups.filter(s => weekOf(s.startTime) === 0);
+  check('split hint: week 0 has exactly two sub-contacts', week0.length === 2, `n=${week0.length}`);
+  check('split hint: the two land on different days', new Set(week0.map(s => new Date(s.startTime).getDay())).size === 2,
+    JSON.stringify(week0.map(s => s.startTime)));
+  check('split hint: every sub-contact is ≥ the 15-min minimum', sups.every(s => durH(s) >= 0.25 - 1e-9),
+    JSON.stringify(sups.map(durH)));
+  check('split hint: sub-contacts anchor at the midday band (11:00)', week0.every(s => new Date(s.startTime).getHours() === 11),
+    JSON.stringify(week0.map(s => s.startTime)));
+  const floorH = clientDirectH(committed, 'Client Split') * 0.10;
+  check('split hint: floor met with real credit', clientSupH(committed, 'Client Split') >= floorH - 0.01,
+    `sup=${clientSupH(committed, 'Client Split')} floor=${floorH}`);
+  check('split hint: no supervision shortfall block', !result.blocks.some(b => b.clientId === 'c1' && b.bindingConstraint === 'bcba-availability'));
+}
+
+console.log('auto default: a roomy week still gets ONE consolidated contact');
+{
+  const c1: Client = {
+    ...client('c1', 'Client Whole', daysWindows(['Monday', 'Wednesday'], '09:00', '13:00')),
+    disablePTRequirements: true,
+  };
+  const t1 = tech('t1', 'Wes Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
+  const base = schedule([c1], [t1], [auth('c1', 8)], baseSettings(WIDE_CLIN));
+  const { committed } = run(base, combinedBuilderConfig(base, NOW));
+  const sups = supAppts(committed);
+  const perWeek = new Map<number, number>();
+  for (const s of sups) perWeek.set(weekOf(s.startTime), (perWeek.get(weekOf(s.startTime)) ?? 0) + 1);
+  check('auto: exactly one contact per placed week (no fragmentation)', [...perWeek.values()].every(n => n === 1),
+    JSON.stringify([...perWeek.entries()]));
+  check('auto: no sub-minimum fragments', sups.every(s => durH(s) >= 0.25 - 1e-9), JSON.stringify(sups.map(durH)));
+}
+
+console.log('auto-split recovery: hours the old first-fit silently truncated get placed');
+{
+  // BCBA availability is two 1h windows (Mon + Tue) against a front-loaded
+  // ~1.4-1.6h/week target: no single gap fits whole → auto splits across both
+  // and the client reaches the floor (the old first-fit placed only the first
+  // window each week and blocked the rest). Sizing keeps every week's split
+  // residual ≥ the 15-min schedulable minimum.
+  const clin = { Monday: [{ start: '09:00', end: '10:00' }], Tuesday: [{ start: '09:00', end: '10:00' }] };
+  const c1: Client = {
+    ...client('c1', 'Client Recover', daysWindows(['Monday', 'Tuesday', 'Wednesday'], '08:00', '16:00')),
+    disablePTRequirements: true,
+  };
+  const t1 = tech('t1', 'Rea Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
+  const base = schedule([c1], [t1], [auth('c1', 15)], baseSettings(clin));
+  const { committed, result } = run(base, combinedBuilderConfig(base, NOW));
+  const sups = supAppts(committed);
+  const week0 = sups.filter(s => weekOf(s.startTime) === 0);
+  check('recovery: week 0 places two sub-contacts across the two small windows', week0.length === 2, `n=${week0.length}`);
+  const floorH = clientDirectH(committed, 'Client Recover') * 0.10;
+  check('recovery: floor met (old first-fit fell short here)', clientSupH(committed, 'Client Recover') >= floorH - 0.01,
+    `sup=${clientSupH(committed, 'Client Recover')} floor=${floorH}`);
+  check('recovery: no supervision shortfall block', !result.blocks.some(b => b.clientId === 'c1' && b.bindingConstraint === 'bcba-availability'));
+}
+
+console.log('consolidate hint: one visit even when the week cannot fit it whole');
+{
+  const clin = { Monday: [{ start: '09:00', end: '09:45' }], Tuesday: [{ start: '09:00', end: '09:30' }] };
+  const c1: Client = {
+    ...client('c1', 'Client OneBlock', daysWindows(['Monday', 'Tuesday', 'Wednesday'], '08:00', '16:00')),
+    disablePTRequirements: true,
+    schedulingHints: { supervisionStyle: 'consolidate' },
+  };
+  const t1 = tech('t1', 'Ona Aide', WIDE_CLIN, [{ clientId: 'c1', hoursPerWeek: 40, billable: true }]);
+  const base = schedule([c1], [t1], [auth('c1', 12)], baseSettings(clin));
+  const { committed, result } = run(base, combinedBuilderConfig(base, NOW));
+  const sups = supAppts(committed);
+  const perWeek = new Map<number, number>();
+  for (const s of sups) perWeek.set(weekOf(s.startTime), (perWeek.get(weekOf(s.startTime)) ?? 0) + 1);
+  check('consolidate: never splits a week', [...perWeek.values()].every(n => n === 1), JSON.stringify([...perWeek.entries()]));
+  check('consolidate: takes the biggest single block (45 min)', supAppts(committed).every(s => Math.abs(durH(s) - 0.75) < 1e-9),
+    JSON.stringify(sups.map(durH)));
+  check('consolidate: the unreachable residual is reported honestly',
+    result.blocks.some(b => b.clientId === 'c1' && b.bindingConstraint === 'bcba-availability'));
+}
+
+console.log('travel adjacency: at equal need, the direct wedged between same-city blocks wins');
+{
+  // Week 0 candidates: a Monday direct sandwiched between two B-town BCBA blocks
+  // (big detour) and a Tuesday direct sandwiched between two A-town blocks
+  // (within-city floor only). Same tech (equal btBehind) → travel breaks the tie.
+  const st = baseSettings(WIDE_CLIN);
+  st.travel = { enabled: true, withinCityMin: 15, padPercent: 0, avgSpeedMph: 30, defaultUnknownMin: 45, hourBucketSize: 1 };
+  st.cityCenters = [{ city: 'a town', lat: 40.0, lng: -75.0 }, { city: 'b town', lat: 40.5, lng: -75.5 }];
+  st.homeBase = { lat: 40.0, lng: -75.0 };
+  const cv: Client = {
+    ...client('cv', 'Client Vera', daysWindows(['Monday', 'Tuesday'], '10:00', '12:00')),
+    disablePTRequirements: true, city: 'A Town',
+  };
+  const cw: Client = { ...client('cw', 'Client Far', {}), city: 'B Town', disablePTRequirements: true };
+  const cu: Client = { ...client('cu', 'Client Near', {}), city: 'A Town', disablePTRequirements: true };
+  const t1 = tech('t1', 'Vic Aide', WIDE_CLIN, [{ clientId: 'cv', hoursPerWeek: 40, billable: true }]);
+  const mkSup = (id: string, clientId: string, day: string, s: string, e: string): Appointment => ({
+    id, title: 'Supervision', client: clientId, technician: '', type: 'supervision',
+    startTime: `${day}T${s}:00`, endTime: `${day}T${e}:00`, isFixed: true, isBillable: true, isRecurring: false, status: 'scheduled',
+  });
+  const base = schedule([cv, cw, cu], [t1], [auth('cv', 8)], st, [
+    mkSup('x1', 'cw', '2026-07-06', '08:00', '09:00'),  // Mon morning, B town
+    mkSup('x2', 'cw', '2026-07-06', '13:00', '14:00'),  // Mon afternoon, B town
+    mkSup('x3', 'cu', '2026-07-07', '08:00', '09:00'),  // Tue morning, A town
+    mkSup('x4', 'cu', '2026-07-07', '13:00', '14:00'),  // Tue afternoon, A town
+  ]);
+  const { committed } = run(base, combinedBuilderConfig(base, NOW));
+  const week0 = supAppts(committed).filter(s => weekOf(s.startTime) === 0 && (s.client === 'cv' || s.client === 'Client Vera'));
+  check('travel: week 0 supervision hosted on the same-city day (Tuesday)',
+    week0.length > 0 && week0.every(s => new Date(s.startTime).getDay() === 2),
+    JSON.stringify(week0.map(s => s.startTime)));
+}
+
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

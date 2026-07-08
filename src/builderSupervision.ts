@@ -14,8 +14,9 @@ import { ScheduleData, WishOp } from './types';
 import { computeCaseState, computeBtState } from './caseModel';
 import {
   DatedDirect, DirectCalendar, BcbaBusy,
-  reserveBcba, placeBcbaSubinterval, contactsForCadence, cancellationRiskWeight, weeksForCadence, HR_MS,
+  reserveBcba, contactsForCadence, cancellationRiskWeight, weeksForCadence, HR_MS, MIN_SUP_HRS,
 } from './builderBcba';
+import { pickBestSlot, compareCandidateDirects, SlotCandidate } from './builderScoring';
 import { buildTravelContext } from './travel';
 import type { ClientBlock } from './scheduleBuilder';
 
@@ -142,8 +143,23 @@ export function placeSupervision(
     const weights = selectedWeeks.map((wi, k) => weekHrs(wi) * (1 + risk * (n > 1 ? (n - 1 - k) / (n - 1) : 0)));
     const wsum = weights.reduce((s, w) => s + w, 0) || 1;
 
+    const hints = client.schedulingHints;
+    const style = hints?.supervisionStyle ?? 'auto';
     let placedForClient = 0;
     let contactsPlaced = 0;
+
+    // Commit one placed sub-slot on host direct `d` (shared by whole + split paths).
+    const commitSlot = (d: DatedDirect, slot: SlotCandidate): number => {
+      supOps.push({ op: 'add', type: 'supervision', client: client.name, technician: d.techName, start: slot.startIso, end: slot.endIso });
+      bcbaBusy = reserveBcba(bcbaBusy, slot.startMs, slot.endMs, d.clientId);
+      const hrs = (slot.endMs - slot.startMs) / HR_MS;
+      placedForClient += hrs;
+      supervisionHrsPlaced += hrs;
+      if (d.techId) { const bs = btState.get(d.techId); if (bs) bs.placed += hrs; }
+      return hrs;
+    };
+    const dayKey = (ms: number) => { const dd = new Date(ms); return `${dd.getFullYear()}-${dd.getMonth()}-${dd.getDate()}`; };
+
     for (let k = 0; k < selectedWeeks.length; k++) {
       // Stop once BOTH the floor and the cadence count are satisfied (D1).
       const floorMetNow = existingSupH + placedForClient >= floorH - 0.01;
@@ -151,20 +167,79 @@ export function placeSupervision(
       if (floorMetNow && contactsMetNow) break;
 
       const targetH = gapHrs * (weights[k] / wsum);
-      // Prefer the direct whose BT is furthest behind their own floor (D4).
-      const cands = (byWeek.get(selectedWeeks[k]) ?? []).slice().sort((x, y) => btBehind(y) - btBehind(x));
-      for (const d of cands) {
-        const slot = placeBcbaSubinterval(data, d, targetH, bcbaBusy, travelCtx);
-        if (!slot) continue;
-        supOps.push({ op: 'add', type: 'supervision', client: client.name, technician: d.techName, start: slot.startIso, end: slot.endIso });
-        bcbaBusy = reserveBcba(bcbaBusy, slot.startMs, slot.endMs, d.clientId);
-        const hrs = (slot.endMs - slot.startMs) / HR_MS;
-        placedForClient += hrs;
-        supervisionHrsPlaced += hrs;
-        contactsPlaced++;
-        if (d.techId) { const bs = btState.get(d.techId); if (bs) bs.placed += hrs; }
-        break; // one contact per week
+      // D4 stays the PRIMARY direct key (furthest-behind BT); taught preferences
+      // (travel adjacency, preferred daypart) only break its ties.
+      const cands = (byWeek.get(selectedWeeks[k]) ?? []).slice()
+        .sort((x, y) => compareCandidateDirects(x, y, { btBehind, hints, busy: bcbaBusy, ctx: travelCtx }));
+      let placedWeek = false;
+
+      // ── one whole contact (auto default / explicit consolidate) ──────────────
+      if (style !== 'split') {
+        // Whole-fit pass: the first direct (D4 order) able to host the FULL
+        // contact wins — never silently truncate when another direct has room.
+        for (const d of cands) {
+          const slot = pickBestSlot(data, d, targetH, bcbaBusy, travelCtx, hints);
+          if (slot?.fitsWhole) { commitSlot(d, slot); placedWeek = true; break; }
+        }
+        // Explicit 'consolidate' keeps the one-block-even-if-short behavior
+        // (the owner asked for a single visit; a residual shows in the block).
+        if (!placedWeek && style === 'consolidate') {
+          for (const d of cands) {
+            const slot = pickBestSlot(data, d, targetH, bcbaBusy, travelCtx, hints);
+            if (slot) { commitSlot(d, slot); placedWeek = true; break; }
+          }
+        }
       }
+
+      // ── two shorter visits (hinted split, or auto when nothing fits whole) ───
+      // The AB pattern: a client whose directs straddle busy dayparts is easier
+      // to reach with two sub-contacts than one long block. Also recovers hours
+      // the old first-fit silently truncated (gap shorter than target).
+      if (!placedWeek && style !== 'consolidate' && targetH >= 2 * MIN_SUP_HRS) {
+        const firstH = style === 'split' ? targetH / 2 : targetH;
+        let first: { d: DatedDirect; hrs: number } | null = null;
+        for (const d of cands) {
+          const slot = pickBestSlot(data, d, firstH, bcbaBusy, travelCtx, hints);
+          if (!slot) continue;
+          first = { d, hrs: commitSlot(d, slot) };
+          break;
+        }
+        if (first) {
+          placedWeek = true;
+          const remaining = targetH - first.hrs;
+          if (remaining >= MIN_SUP_HRS) {
+            // Second visit prefers a DIFFERENT day, then a different direct on
+            // the same day, then (last resort) the first direct's leftover room
+            // (freeGaps re-run against the grown busy plane handles that).
+            const firstDay = dayKey(first.d.startMs);
+            const ordered = [
+              ...cands.filter(d => dayKey(d.startMs) !== firstDay),
+              ...cands.filter(d => dayKey(d.startMs) === firstDay && d !== first!.d),
+              first.d,
+            ];
+            for (const d of ordered) {
+              const slot = pickBestSlot(data, d, remaining, bcbaBusy, travelCtx, hints);
+              if (!slot) continue;
+              commitSlot(d, slot);
+              break;
+            }
+          }
+        }
+      }
+
+      // Last resort (auto with a sub-2×MIN target, or a lone short gap): the
+      // best single truncated block — the legacy behavior.
+      if (!placedWeek) {
+        for (const d of cands) {
+          const slot = pickBestSlot(data, d, targetH, bcbaBusy, travelCtx, hints);
+          if (slot) { commitSlot(d, slot); placedWeek = true; break; }
+        }
+      }
+
+      // A split week still counts ONE cadence touchpoint: cadence is a weekly
+      // pacing floor. The dashboard (countCaseContacts) counts distinct DAYS, so
+      // a cross-day split can only overshoot the required minimum — never under.
+      if (placedWeek) contactsPlaced++;
     }
 
     const totalSupH = existingSupH + placedForClient;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, Appointment, CompanyHoliday, TravelSettings, DEFAULT_TRAVEL_SETTINGS, HomeBase } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, Appointment, CompanyHoliday, TravelSettings, DEFAULT_TRAVEL_SETTINGS, HomeBase, SchedulingHints, SupervisionStyle, Daypart } from '../types';
 import { AISettings, ClaudeModel } from './Settings';
 import { GoogleRoutingProvider, refreshTravelTimes } from '../routing';
 import { resolvePtoConfig, activeBuckets, ptoBucketLabel, computePtoBalances } from '../pto';
@@ -1072,8 +1072,20 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
   const [supIdealStr, setSupIdealStr] = useState(client.supervisionIdealPct !== undefined ? String(client.supervisionIdealPct) : '');
   const [dischargeStr, setDischargeStr] = useState(client.anticipatedDischarge || '');
   const [cityStr, setCityStr] = useState(client.city || '');
+  const [hintNoteStr, setHintNoteStr] = useState(client.schedulingHints?.note || '');
   const [editing, setEditing] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
+
+  // Merge-patch schedulingHints; drop the object entirely when every field
+  // empties so an untouched client stays byte-identical (Excel round-trip).
+  const patchHints = (patch: Partial<SchedulingHints>) => {
+    const merged: SchedulingHints = { ...client.schedulingHints, ...patch, source: 'manual' as const, updatedAt: new Date().toISOString().slice(0, 10) };
+    for (const k of Object.keys(merged) as (keyof SchedulingHints)[]) {
+      if (merged[k] === undefined || merged[k] === '') delete merged[k];
+    }
+    const hasContent = merged.supervisionStyle || merged.preferredDaypart || merged.note;
+    onChange({ schedulingHints: hasContent ? merged : undefined });
+  };
 
   const noStaff = !(technicians ?? []).some(t =>
     t.assignments.some(a => a.clientId === client.id || a.clientId === client.name)
@@ -1219,6 +1231,53 @@ function ClientCard({ client, technicians, saving, onChange, onRemove }: {
             onBlur={() => { const v = cityStr.trim() || undefined; if (v !== client.city) onChange({ city: v }); }}
             placeholder="e.g. Springfield, IL" style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
         </label>
+      </div>
+
+      {/* Scheduling hints — placement heuristics the builder honors (taught
+          scheduler knowledge: hand-set here, via sAssI chat, or learned from
+          a confirmed correction). */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10, fontSize: 12, color: 'var(--text-body)' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+          title="How the builder shapes supervision for this case. Auto lets the engine pick; 'Two shorter visits' suits cases whose sessions straddle busy dayparts.">
+          <span style={{ whiteSpace: 'nowrap' }}>Supervision style:</span>
+          <select
+            value={client.schedulingHints?.supervisionStyle || ''}
+            onChange={e => patchHints({ supervisionStyle: (e.target.value || undefined) as SupervisionStyle | undefined })}
+            style={{ ...inputStyle, width: 'auto' }}
+          >
+            <option value="">— (auto)</option>
+            <option value="consolidate">One longer visit</option>
+            <option value="split">Two shorter visits</option>
+          </select>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+          title="Preferred time of day for BCBA-facing sessions (supervision / parent training) on this case.">
+          <span style={{ whiteSpace: 'nowrap' }}>Preferred time of day:</span>
+          <select
+            value={client.schedulingHints?.preferredDaypart || ''}
+            onChange={e => patchHints({ preferredDaypart: (e.target.value || undefined) as Daypart | undefined })}
+            style={{ ...inputStyle, width: 'auto' }}
+          >
+            <option value="">—</option>
+            <option value="morning">Morning</option>
+            <option value="midday">Midday</option>
+            <option value="afternoon">Afternoon</option>
+            <option value="evening">Evening</option>
+          </select>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 200px' }}>
+          <span style={{ whiteSpace: 'nowrap' }}>Hint note:</span>
+          <input value={hintNoteStr}
+            onChange={e => setHintNoteStr(e.target.value)}
+            onBlur={() => { const v = hintNoteStr.trim() || undefined; if (v !== client.schedulingHints?.note) patchHints({ note: v }); }}
+            placeholder="e.g. wedge between nearby morning clients" style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
+        </label>
+        {client.schedulingHints?.source === 'learned' && (
+          <span style={{ color: 'var(--text-muted, #9ca3af)', fontSize: 11 }}
+            title="This hint was captured from one of your schedule corrections and confirmed by you.">
+            learned from your correction{client.schedulingHints.updatedAt ? ` · ${client.schedulingHints.updatedAt}` : ''}
+          </span>
+        )}
       </div>
 
       {!editing ? (

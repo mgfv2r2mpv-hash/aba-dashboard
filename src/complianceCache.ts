@@ -12,7 +12,7 @@ import {
   ClientCompliance, TechCompliance, TechComplianceMetrics, CompliancePeriod,
   computeOneClientCompliance, computeOneTechCompliance, monthPeriod, overlapHours,
 } from './compliance';
-import { Appointment, ScheduleData } from './types';
+import { Appointment, ScheduleData, CompanySettings } from './types';
 
 export interface ComplianceCache {
   period: CompliancePeriod;
@@ -213,12 +213,22 @@ export interface ComplianceAttention {
 }
 
 export function attentionList(cache: ComplianceCache, data: ScheduleData): ComplianceAttention[] {
-  const clientTarget = data.settings.supervisionDirectHoursPercent || 5;
-  const preferredPct = data.settings.supervisionPreferredMinPercent ?? 15;
-  const maxPct = data.settings.supervisionMaxHoursPercent;
+  return attentionFromReports([...cache.clients.values()], [...cache.techs.values()], data.settings);
+}
+
+// Reports-based core — lets the Compliance dashboard build the same red/yellow
+// "needs attention" set for the VIEWED month (which may differ from the cache's).
+export function attentionFromReports(
+  clients: ClientCompliance[],
+  techs: TechCompliance[],
+  settings: CompanySettings,
+): ComplianceAttention[] {
+  const clientTarget = settings.supervisionDirectHoursPercent || 5;
+  const preferredPct = settings.supervisionPreferredMinPercent ?? 15;
+  const maxPct = settings.supervisionMaxHoursPercent;
   const out: ComplianceAttention[] = [];
 
-  for (const r of cache.clients.values()) {
+  for (const r of clients) {
     const s = clientStatus(r, clientTarget, preferredPct, maxPct);
     if (s !== 'red' && s !== 'yellow') continue;
     const toGo = r.projected.hoursToGo;
@@ -227,7 +237,7 @@ export function attentionList(cache: ComplianceCache, data: ScheduleData): Compl
       : `Projected ${r.projected.pct.toFixed(1)}% vs ${clientTarget}% floor — ${toGo.toFixed(1)}h to go this month.`;
     out.push({ kind: 'client', id: r.client.id, name: r.client.name, status: s, detail, hoursToGo: toGo });
   }
-  for (const r of cache.techs.values()) {
+  for (const r of techs) {
     const s = techStatus(r);
     if (s !== 'red' && s !== 'yellow') continue;
     const toGo = Math.max(r.projected.companyHoursToGo, r.tech.isRBT ? (r.projected.bacbHoursToGo ?? 0) : 0);

@@ -184,6 +184,11 @@ export default function App() {
   // (the selected appointment / its case). Cleared when the focus changes so it
   // never lingers stale over a different session.
   const [dossier, setDossier] = useState<Dossier | null>(null);
+  // A stale dossier over a different session is misleading — drop it whenever the
+  // focused appointment changes (opening the doctor sets it without changing focus).
+  // MUST stay above the lock/splash early returns — a hook below them changes the
+  // hook count between the locked and unlocked renders and blanks the tree.
+  React.useEffect(() => { setDossier(null); }, [selectedAppointment?.id]);
   // Which Caseload sub-tab to open — the dock's "fix compliance" routes to Issues,
   // where per-case compliance cards hand off to the SAssi dock for remediation.
   const [ccInitialTab, setCcInitialTab] = useState<HubTab>('cases');
@@ -1989,9 +1994,6 @@ export default function App() {
     void sassi.send("What's wrong with this appointment, and how would you fix it?");
   };
 
-  // A stale dossier over a different session is misleading — drop it whenever the
-  // focused appointment changes (opening the doctor sets it without changing focus).
-  React.useEffect(() => { setDossier(null); }, [selectedAppointment?.id]);
   const canDoctor = !!selectedAppointment;
 
   // ── Home wiring (M4) ───────────────────────────────────────────────────

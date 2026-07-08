@@ -159,6 +159,11 @@ function parseClients(workbook: XLSX.WorkBook): Client[] {
         ...(hintNote ? { note: hintNote } : {}),
       };
     }
+    // Archive state — only stamp when archived so active clients round-trip clean.
+    if (truthy(row.archived)) {
+      client.archived = true;
+      if (!isBlank(row.archivedAsOf)) client.archivedAsOf = normalizeDateString(row.archivedAsOf);
+    }
     return client;
   });
 }
@@ -582,12 +587,14 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
   add('Clients',
     ['id', 'name', 'parentTrainingMaxHours', 'cadenceGoal', 'isEI', 'eiDate',
       'partialStaffAllowed', 'parentAvailableOutsideSessions', 'anticipatedDischarge', 'notes',
-      'supervisionIdealPct', 'city', 'supervisionStyle', 'preferredDaypart', 'hintNote'],
+      'supervisionIdealPct', 'city', 'supervisionStyle', 'preferredDaypart', 'hintNote',
+      'archived', 'archivedAsOf'],
     data.clients.map(c => [
       c.id, c.name, W(c.parentTrainingMaxHours), W(c.cadenceGoal), WT(c.isEI), W(c.eiDate),
       WB(c.partialStaffAllowed), WT(c.parentAvailableOutsideSessions), W(c.anticipatedDischarge), W(c.notes),
       W(c.supervisionIdealPct), W(c.city),
       W(c.schedulingHints?.supervisionStyle), W(c.schedulingHints?.preferredDaypart), W(c.schedulingHints?.note),
+      WT(c.archived), W(c.archivedAsOf),
     ]));
 
   // Technicians (scalars only).

@@ -13,7 +13,7 @@ import {
 } from '../caseStatus';
 import CompleteTimePrompt from './CompleteTimePrompt';
 import { useRoster } from '../rosterContext';
-import ConflictPanel from './ConflictPanel';
+import ConflictPanel, { conflictKey } from './ConflictPanel';
 
 interface Props {
   data: ScheduleData;
@@ -204,6 +204,12 @@ function ScheduleWarnings({ conflicts, appointments, onSelect, mutedConflictKeys
   onConfirmDismissConflict?: (key: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(true);
+  // Count the ACTIVE set (post-mute) so this header matches the "conflicts" pill
+  // and the Issues tab badge — a snoozed one is shown as a muted aside, not folded
+  // silently into a bigger number.
+  const mutedSet = new Set(mutedConflictKeys || []);
+  const snoozed = conflicts.filter(c => mutedSet.has(conflictKey(c))).length;
+  const activeCount = conflicts.length - snoozed;
   return (
     <div style={{ marginBottom: 16, border: '1px solid #fcd34d', borderRadius: 8, overflow: 'hidden' }}>
       <button
@@ -214,7 +220,7 @@ function ScheduleWarnings({ conflicts, appointments, onSelect, mutedConflictKeys
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
         }}
       >
-        <span>⚠️ Schedule warnings ({conflicts.length})</span>
+        <span>⚠️ Schedule warnings ({activeCount}){snoozed > 0 ? ` · ${snoozed} snoozed` : ''}</span>
         <span>{collapsed ? '▸' : '▾'}</span>
       </button>
       {!collapsed && (

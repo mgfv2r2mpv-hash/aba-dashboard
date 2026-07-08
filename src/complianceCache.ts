@@ -34,7 +34,7 @@ export function buildCache(data: ScheduleData, now: Date = new Date()): Complian
   const period = monthPeriod(now);
   const clients = new Map<string, ClientCompliance>();
   const techs = new Map<string, TechCompliance>();
-  for (const c of data.clients) clients.set(c.id, computeOneClientCompliance(data, c, period, now));
+  for (const c of data.clients) { if (c.archived) continue; clients.set(c.id, computeOneClientCompliance(data, c, period, now)); }
   for (const t of data.technicians) techs.set(t.id, computeOneTechCompliance(data, t, period, now));
   return { period, now, clients, techs };
 }

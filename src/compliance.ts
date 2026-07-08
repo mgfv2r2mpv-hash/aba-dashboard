@@ -91,7 +91,8 @@ export function computeClientCompliance(
   period: CompliancePeriod,
   now: Date = new Date(),
 ): ClientCompliance[] {
-  return data.clients.map(client => computeOneClientCompliance(data, client, period, now));
+  // Archived cases are off the active caseload — no compliance card, no count.
+  return data.clients.filter(client => !client.archived).map(client => computeOneClientCompliance(data, client, period, now));
 }
 
 // Single-client compliance — the unit the incremental cache recomputes when an

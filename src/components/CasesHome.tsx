@@ -56,7 +56,7 @@ export default function CasesHome({ data, now = new Date() }: Props) {
       factorsById.set(n.clientId, list);
     }
 
-    return data.clients.map(client => {
+    return data.clients.filter(client => !client.archived).map(client => {
       const state = computeCaseState(data, client, now);
       const ptActual = data.appointments.filter(a =>
         a.type === 'parent-training' && a.status !== 'canceled' && matchesClient(a, client) &&

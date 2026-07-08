@@ -16,6 +16,8 @@ export type HubTab = 'cases' | 'issues' | 'clients' | 'technicians' | 'auths';
 interface Props {
   data: ScheduleData;
   onDataChange: (data: ScheduleData) => void;
+  /** Commit a whole-state change with an Activity-log entry (archive/unarchive). */
+  onCommitLogged?: (next: ScheduleData, label: string, undoable?: boolean) => void;
   persist?: AdminPersist;
   now: Date;
   /** Which sub-tab to open on entry (e.g. the SAssi dock routes here to Issues). */
@@ -106,7 +108,7 @@ export default function CCHub(props: Props) {
           />
         )}
         {tab === 'clients' && (
-          <AdminPanel data={data} onDataChange={onDataChange} persist={persist} tabs={['clients']} />
+          <AdminPanel data={data} onDataChange={onDataChange} onCommitLogged={props.onCommitLogged} persist={persist} tabs={['clients']} />
         )}
         {tab === 'technicians' && (
           <AdminPanel data={data} onDataChange={onDataChange} persist={persist} tabs={['bts']} />

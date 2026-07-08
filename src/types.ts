@@ -71,6 +71,13 @@ export interface Client {
   // Captured from the owner's corrections, the sAssI chat, or the editor —
   // the "taught scheduler knowledge" store. Absent == everything 'auto'.
   schedulingHints?: SchedulingHints;
+  // Archived = temporarily off the active caseload (e.g. the family moved to
+  // another BCBA for the summer). An archived client is excluded from the
+  // builder, compliance, counts, and the Cases list, but kept in the roster so
+  // it can be unarchived. Archiving deletes the client's sessions dated on/after
+  // `archivedAsOf` (past sessions stay for history). Absent == active.
+  archived?: boolean;
+  archivedAsOf?: string; // YYYY-MM-DD — the effective date sessions were cut from.
 }
 
 // How the builder should shape this case's BCBA-facing contacts. 'auto' (or an

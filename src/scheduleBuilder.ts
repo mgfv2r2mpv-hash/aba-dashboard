@@ -335,6 +335,7 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
   const plans: CasePlan[] = [];
   const blocks: ClientBlock[] = [];
   for (const client of data.clients) {
+    if (client.archived) continue; // off the active caseload — never schedule for them
     const override = config.clientOverrides?.[client.id];
     if (override?.skip) continue;
 

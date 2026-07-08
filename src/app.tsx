@@ -971,6 +971,13 @@ export default function App() {
     commitFull(final);
   };
 
+  // Admin-driven whole-state change (archive / unarchive a case) with an Activity
+  // entry. Archive passes undoable:false — the session deletions are permanent by
+  // design (Unarchive is the reversal), so we record it without offering a
+  // half-undo that would restore sessions but leave the client archived.
+  const commitLogged = (next: ScheduleData, label: string, undoable = true) =>
+    commitScheduleData(next, { label, source: 'admin', undoable });
+
   // Fold any sAssI-buffered day-offs into the schedule being committed, deduped by
   // (entity, date) so a proposal that persisted across turns can't double-log them.
   const withSassiBlackouts = (next: ScheduleData): ScheduleData => {
@@ -2319,6 +2326,7 @@ export default function App() {
                   initialTab={ccInitialTab}
                   data={scheduleData}
                   onDataChange={commitFull}
+                  onCommitLogged={commitLogged}
                   persist={serverPersist}
                   now={viewDate}
                   cache={compCache}

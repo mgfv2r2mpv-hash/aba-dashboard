@@ -25,6 +25,7 @@ import { resolveUtilization } from './utilization';
 import { placeSupervision, SupervisionMetrics, EMPTY_SUPERVISION_METRICS } from './builderSupervision';
 import { placeParentTraining, ParentTrainingMetrics, EMPTY_PARENT_TRAINING_METRICS } from './builderPT';
 import { buildDirectCalendar, seedBcbaBusy } from './builderBcba';
+import { placeUnstaffedContact } from './builderFill';
 import { startOfWeek, startOfDay, addWeeks } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -525,6 +526,16 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
       bcbaOps.push(...pt.ptOps);
       blocks.push(...pt.blocks);
       ptMetrics = pt.metrics;
+    }
+    // Unstaffed-week caregiver contact (runs when supervision was chased): a week
+    // with no direct still needs the client seen — a parent-training (caregiver)
+    // session toward the PT goal, or once that's met a no-BT supervision. Runs
+    // AFTER PT so it counts the PT already placed and never overshoots the goal.
+    if (chaseSupervision) {
+      const fill = placeUnstaffedContact(data, cal, bcbaBusy, now, config, bcbaOps, caseSupSeries);
+      bcbaBusy = fill.busyOut;
+      bcbaOps.push(...fill.ops);
+      blocks.push(...fill.blocks);
     }
     // Dated backbone emitted ONCE, plus the resizes of existing sessions (which
     // buildDirectCalendar doesn't materialize — they edit rows already on the board).

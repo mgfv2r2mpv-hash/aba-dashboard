@@ -99,12 +99,12 @@ interface Candidate {
 const flag = (ruleId: TidyRuleId, rationale: string): Candidate => ({ ruleId, ops: [], rationale, preferReview: true });
 
 // Identity for a behavior-neutral merge: same client, tech, type, billable-ness,
-// fixed-ness. seriesId is deliberately NOT part of identity so a series-less orphan
-// can fold into an adjacent series occurrence (the survivor keeps the series tag).
-// The run builder below still refuses to combine two DIFFERENT non-empty seriesIds,
-// so a merge never silently crosses two distinct series. Real schedules are mostly
-// recurring dated occurrences, so merge must NOT skip recurring rows — merging two
-// contiguous occurrences ON A DATE is a safe local edit that the oracle verifies.
+// fixed-ness. seriesId is deliberately NOT part of identity, and for BCBA sessions
+// it is not a merge barrier either — two occurrences that meet ON A DATE fuse even
+// when they came from different builds' series (seriesId is internal). The survivor
+// keeps the LARGER series so the recurring pattern on other dates is untouched, and
+// the equivalence oracle verifies the edit is credit-neutral. Real schedules are
+// mostly recurring dated occurrences, so merge must NOT skip recurring rows.
 const identityKey = (a: Appointment): string => [a.type, a.client ?? '', a.technician ?? '', billable(a), a.isFixed].join('|');
 
 const overlaps = (a: Appointment, b: Appointment): boolean => ms(a.startTime) < ms(b.endTime) && ms(b.startTime) < ms(a.endTime);
@@ -113,44 +113,72 @@ const overlaps = (a: Appointment, b: Appointment): boolean => ms(a.startTime) < 
 // double-book — so the conflict scan never crosses a direct with one of these.
 const BCBA_SESSION_TYPES = new Set<Appointment['type']>(SUPERVISION_COUNTING_TYPES);
 
-// ── rule 1: merge exactly-contiguous fragments (auto) ───────────────────────
+// ── rule 1: merge contiguous / overlapping fragments (auto) ─────────────────
+// Adjacent same-identity fragments fuse into one session; the redundant occurrence
+// is dropped, and the survivor keeps the LARGEST series so the recurring pattern on
+// other dates is untouched. For BCBA session types (builder-placed supervision/PT/
+// etc. that legitimately splinter across repeated builds) seriesId is an internal
+// tag, NOT a run barrier — fragments that meet on a date fuse even across different
+// series, and a run absorbs genuine OVERLAP, not just an exact touch. Directs keep
+// strict adjacency AND cap a run at one series, so a deliberate recurring commitment
+// or a real double-book is never silently fused. Every candidate still passes the
+// equivalence oracle in analyzeTidy before it auto-applies.
 function ruleMerge(elig: Appointment[], names: Names): Candidate[] {
   const out: Candidate[] = [];
+  // Occurrence count per series (over the eligible set) → pick the survivor from the
+  // biggest series so a lone orphan sliver is the row that gets dropped.
+  const seriesSize = new Map<string, number>();
+  for (const a of elig) if (a.seriesId) seriesSize.set(a.seriesId, (seriesSize.get(a.seriesId) ?? 0) + 1);
+  const sizeOf = (a: Appointment): number => (a.seriesId ? seriesSize.get(a.seriesId) ?? 0 : 0);
+  const sameSpan = (a: Appointment, b: Appointment): boolean => ms(a.startTime) === ms(b.startTime) && ms(a.endTime) === ms(b.endTime);
+
   const groups = groupBy(elig, identityKey);
   for (const rows of groups.values()) {
-    // Merge only rows that don't overlap or duplicate ANOTHER row in the group —
-    // those are ambiguous (double-books / dups) and belong to dedup/doubleBook, not
-    // merge. Excluding just the ambiguous rows (not the whole group) lets a clean
-    // contiguous run still merge even when unrelated noise sits in the same case.
-    const clean = rows.filter(a => ms(a.endTime) > ms(a.startTime) && !rows.some(b => b !== a && overlaps(a, b)));
+    const bcba = rows.length > 0 && BCBA_SESSION_TYPES.has(rows[0].type);
+    // Drop zero-length rows. For BCBA keep partial overlaps (we coalesce them) but
+    // leave EXACT-duplicate spans to ruleDedup; for directs exclude any overlap —
+    // ambiguous (double-book / dup), belongs to dedup/doubleBook, not merge.
+    const clean = rows.filter(a => {
+      if (ms(a.endTime) <= ms(a.startTime)) return false;
+      if (bcba) return !rows.some(b => b !== a && sameSpan(a, b));
+      return !rows.some(b => b !== a && overlaps(a, b));
+    });
     const sorted = [...clean].sort((x, y) => ms(x.startTime) - ms(y.startTime));
     let i = 0;
     while (i < sorted.length) {
       let j = i;
-      // Extend the run while each next row exactly abuts AND stays series-compatible:
-      // the run may hold at most ONE distinct non-empty seriesId, so an orphan folds
-      // into a series (or a run of orphans merges), but two different series never do.
+      let runEnd = ms(sorted[i].endTime);
+      // Directs cap a run at ONE distinct series (a deliberate recurring commitment
+      // is never silently cross-merged); BCBA sessions ignore seriesId entirely.
       const runSeries = new Set<string>();
-      if (sorted[i].seriesId) runSeries.add(sorted[i].seriesId!);
-      while (j + 1 < sorted.length && ms(sorted[j].endTime) === ms(sorted[j + 1].startTime)) {
-        const next = sorted[j + 1].seriesId;
-        if (next && runSeries.size >= 1 && !runSeries.has(next)) break; // would be a 2nd distinct series
-        if (next) runSeries.add(next);
+      if (!bcba && sorted[i].seriesId) runSeries.add(sorted[i].seriesId!);
+      // Extend the run while the next row abuts (directs) or abuts-or-overlaps (BCBA)
+      // the running span.
+      while (j + 1 < sorted.length) {
+        const nextStart = ms(sorted[j + 1].startTime);
+        if (bcba ? nextStart > runEnd : nextStart !== runEnd) break;
+        if (!bcba) {
+          const next = sorted[j + 1].seriesId;
+          if (next && runSeries.size >= 1 && !runSeries.has(next)) break; // 2nd distinct series
+          if (next) runSeries.add(next);
+        }
+        runEnd = Math.max(runEnd, ms(sorted[j + 1].endTime));
         j++;
       }
       if (j > i) {
         const run = sorted.slice(i, j + 1);
-        // Survivor keeps series membership: prefer a row carrying the seriesId so the
-        // merged occurrence stays in its series (and recurring); else the earliest row.
-        const survivor = run.find(r => r.seriesId) ?? run[0];
-        const start = run[0].startTime, end = run[run.length - 1].endTime;
+        // Survivor keeps series membership; prefer the row in the LARGEST series so
+        // the recurring pattern survives (stable sort keeps the earliest row on ties).
+        const survivor = [...run].sort((a, b) => sizeOf(b) - sizeOf(a))[0];
+        const start = run[0].startTime;
+        const end = run.reduce((acc, r) => (ms(r.endTime) > ms(acc) ? r.endTime : acc), run[0].endTime);
         out.push({
           ruleId: 'merge', preferReview: false,
           ops: [
             { op: 'move', appointmentId: survivor.id, start, end },
             ...run.filter(r => r !== survivor).map((r): WishOp => ({ op: 'remove', appointmentId: r.id })),
           ],
-          rationale: `Merge ${run.length} contiguous ${survivor.type} fragments (${names.client(survivor.client)} / ${names.tech(survivor.technician)}) into one ${clock(start)}–${clock(end)} session.`,
+          rationale: `Merge ${run.length} ${survivor.type} fragments (${names.client(survivor.client)} / ${names.tech(survivor.technician)}) into one ${clock(start)}–${clock(end)} session.`,
         });
       }
       i = j + 1;
@@ -273,11 +301,15 @@ function ruleDoubleBook(elig: Appointment[], names: Names): Candidate[] {
   const directs = elig.filter(a => a.type === 'client-session');
   const bcba = elig.filter(a => BCBA_SESSION_TYPES.has(a.type));
   const seen = new Set<string>();
-  const scan = (rows: Appointment[], reason: (a: Appointment) => string) => {
+  const scan = (rows: Appointment[], reason: (a: Appointment) => string, skipSameIdentity = false) => {
     const s = [...rows].sort((x, y) => ms(x.startTime) - ms(y.startTime));
     for (let i = 0; i < s.length - 1; i++) {
       for (let j = i + 1; j < s.length && ms(s[j].startTime) < ms(s[i].endTime); j++) {
         if (!overlaps(s[i], s[j])) continue;
+        // Same-identity BCBA overlaps are coalescable duplicates (ruleMerge owns
+        // them), not a genuine analyst conflict — only cross-client/cross-tech
+        // BCBA overlaps are a real double-book of the single analyst.
+        if (skipSameIdentity && identityKey(s[i]) === identityKey(s[j])) continue;
         const key = [s[i].id, s[j].id].sort().join('|');
         if (seen.has(key)) continue;
         seen.add(key);
@@ -289,7 +321,7 @@ function ruleDoubleBook(elig: Appointment[], names: Names): Candidate[] {
     scan(rows, a => `Double-book — ${names.tech(a.technician)} has two overlapping direct sessions`);
   for (const rows of groupBy(directs.filter(a => a.client), a => a.client!).values())
     scan(rows, a => `Double-book — ${names.client(a.client)} has two overlapping direct sessions`);
-  scan(bcba, () => `Double-book — two overlapping supervising-analyst sessions`);
+  scan(bcba, () => `Double-book — two overlapping supervising-analyst sessions`, true);
 
   // Near-adjacent same-identity rows separated by a small real gap.
   for (const rows of groupBy(elig.filter(a => !a.isRecurring && !a.seriesId), identityKey).values()) {

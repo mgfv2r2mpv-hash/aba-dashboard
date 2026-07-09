@@ -148,14 +148,67 @@ console.log('tidy — a contiguous orphan folds into a series occurrence (the JO
     !r.auto.ops.some(o => o.op === 'remove' && (o as any).appointmentId === 'ser'));
 }
 
-console.log('tidy — two DIFFERENT series never combine');
+console.log('tidy — two DIFFERENT direct series never combine');
 {
   const now = new Date(2026, 5, 1);
   const r = analyzeTidy(mkData([
     direct('15:30', '17:30', { id: 'a', seriesId: 's1', isRecurring: true }),
     direct('17:30', '18:30', { id: 'b', seriesId: 's2', isRecurring: true }),
   ]), defaultTidyConfig(), now);
-  check('no merge across two distinct series', !r.auto.ops.some(o => o.op === 'move' || o.op === 'remove'));
+  check('directs: no merge across two distinct series', !r.auto.ops.some(o => o.op === 'move' || o.op === 'remove'));
+}
+
+console.log('tidy — adjacent BCBA supervision fragments in DIFFERENT series combine (the EC/Hannah case)');
+{
+  const now = new Date(2026, 5, 1);
+  // Two supervision occurrences for the same client + BT that meet exactly at 09:00
+  // but carry different seriesIds (accumulated across repeated builds). seriesId is
+  // internal — they must fuse into one 08:45–09:15 session, dropping the redundant
+  // orphan, and the survivor must stay in the LARGER series (its other dates untouched).
+  const big = appt({ type: 'supervision', client: 'C1', technician: 'T1', date: D, start: '08:45', end: '09:00', id: 'sup-a', seriesId: 's1', isRecurring: true, recurringPattern: 'weekly' });
+  const bigTwin = appt({ type: 'supervision', client: 'C1', technician: 'T1', date: '2026-06-22', start: '08:45', end: '09:00', id: 'sup-a2', seriesId: 's1', isRecurring: true, recurringPattern: 'weekly' }); // 2nd occ → s1 is the bigger series
+  const orphan = appt({ type: 'supervision', client: 'C1', technician: 'T1', date: D, start: '09:00', end: '09:15', id: 'sup-b', seriesId: 's2', isRecurring: true, recurringPattern: 'weekly' });
+  const r = analyzeTidy(mkData([big, bigTwin, orphan]), defaultTidyConfig(), now);
+  const moveOp = r.auto.ops.find(o => o.op === 'move') as any;
+  check('cross-series BCBA merge is oracle-equivalent (auto)', r.equivalence.equivalent);
+  check('fragments fuse into one 08:45–09:15 session on the survivor',
+    !!moveOp && moveOp.appointmentId === 'sup-a' && moveOp.start === big.startTime && moveOp.end === orphan.endTime);
+  check('the redundant orphan (smaller series) is dropped, larger series kept',
+    r.auto.ops.some(o => o.op === 'remove' && (o as any).appointmentId === 'sup-b') &&
+    !r.auto.ops.some(o => o.op === 'remove' && ((o as any).appointmentId === 'sup-a' || (o as any).appointmentId === 'sup-a2')));
+}
+
+console.log('tidy — overlapping BCBA supervision fragments coalesce, never silently ignored');
+{
+  const now = new Date(2026, 5, 1);
+  // Two supervision rows for the same client + BT that genuinely OVERLAP. They must
+  // be combined into their union span (10:00–11:15). Coalescing overlap drops the
+  // double-scheduled minutes, so the oracle routes it to REVIEW (not auto) — the
+  // point of the test is that it is acted on and NOT flagged as a double-book.
+  const r = analyzeTidy(mkData([
+    appt({ type: 'supervision', client: 'C1', technician: 'T1', date: D, start: '10:00', end: '10:45', id: 'ov1', seriesId: 's1', isRecurring: true }),
+    appt({ type: 'supervision', client: 'C1', technician: 'T1', date: D, start: '10:30', end: '11:15', id: 'ov2', seriesId: 's2', isRecurring: true }),
+  ]), defaultTidyConfig(), now);
+  const mergeSug = r.suggestions.find(s => s.ruleId === 'merge');
+  const moveOp = (mergeSug?.ops ?? r.auto.ops).find(o => o.op === 'move') as any;
+  check('overlapping BCBA fragments are combined (auto or review), not ignored',
+    r.auto.ops.some(o => o.op === 'move') || !!mergeSug);
+  check('coalesced span covers the union 10:00–11:15',
+    !!moveOp && moveOp.start.endsWith('10:00:00') && moveOp.end.endsWith('11:15:00'));
+  check('overlapping same-case BCBA fragments are NOT flagged as an analyst double-book',
+    !r.suggestions.some(s => s.ruleId === 'doubleBook' && s.rationale.startsWith('Double-book')));
+}
+
+console.log('tidy — cross-client BCBA overlap is still a real analyst double-book');
+{
+  const now = new Date(2026, 5, 1);
+  const r = analyzeTidy(mkData([
+    appt({ type: 'supervision', client: 'C1', technician: 'T1', date: D, start: '10:00', end: '11:00', id: 'x1', seriesId: 's1', isRecurring: true }),
+    appt({ type: 'supervision', client: 'C2', technician: 'T2', date: D, start: '10:30', end: '11:30', id: 'x2', seriesId: 's2', isRecurring: true }),
+  ]), defaultTidyConfig(), now);
+  check('different-client BCBA overlap still flags a double-book',
+    r.suggestions.some(s => s.ruleId === 'doubleBook' && s.rationale.startsWith('Double-book')));
+  check('different-client BCBA sessions are NOT merged', !r.auto.ops.some(o => o.op === 'move' || o.op === 'remove'));
 }
 
 console.log('tidy — review rules (never auto)');

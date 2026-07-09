@@ -17,7 +17,9 @@ import { Appointment, ScheduleData, WishOp, SUPERVISION_COUNTING_TYPES } from '.
 // Identity = type + client + technician (mirrors tidy.ts ruleMerge). Merging two
 // contiguous same-participant intervals is credit-preserving (Σ min(overlap,dur) is
 // unchanged), so compliance is untouched — same guarantee tidy's equivalence oracle
-// verifies. At most one distinct non-empty seriesId per run (never crosses two series).
+// verifies. seriesId is an internal tag, NOT a run barrier — exactly-adjacent
+// same-identity fragments fuse across series; the survivor keeps a seriesId if any
+// fragment carries one.
 
 const BCBA_TYPES = new Set<Appointment['type']>(SUPERVISION_COUNTING_TYPES);
 const ms = (iso: string): number => new Date(iso).getTime();
@@ -47,14 +49,9 @@ export function consolidateAdjacentBcba(ops: WishOp[], data: ScheduleData): Wish
     let i = 0;
     while (i < sorted.length) {
       let j = i;
-      const runSeries = new Set<string>();
-      if (sorted[i].seriesId) runSeries.add(sorted[i].seriesId!);
-      while (j + 1 < sorted.length && ms(sorted[j].end) === ms(sorted[j + 1].start)) {
-        const next = sorted[j + 1].seriesId;
-        if (next && runSeries.size >= 1 && !runSeries.has(next)) break; // would be a 2nd distinct series
-        if (next) runSeries.add(next);
-        j++;
-      }
+      // seriesId no longer breaks a run — adjacent same-identity fragments fuse
+      // across series (mirrors tidy.ts ruleMerge).
+      while (j + 1 < sorted.length && ms(sorted[j].end) === ms(sorted[j + 1].start)) j++;
       if (j > i) {
         const run = sorted.slice(i, j + 1);
         const survivor = run.find(r => r.seriesId) ?? run[0];

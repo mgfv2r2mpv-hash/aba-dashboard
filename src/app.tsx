@@ -35,6 +35,7 @@ import { buildSchedule, defaultBuilderConfig, supervisionBuilderConfig, parentTr
 import { analyzeTidy, defaultTidyConfig, type TidyResult } from './tidy';
 import { extendSeries } from './seriesExtend';
 import { buildSeriesEdit, summarizeSeriesEdit } from './seriesEdit';
+import { findEndingSeries } from './seriesHorizon';
 import { useHomeTodos } from './hooks/useHomeTodos';
 import type { HomeTodo } from './hooks/useHomeTodos';
 import type { RitualAction } from './components/HomeView';
@@ -1958,11 +1959,19 @@ export default function App() {
   // ── Dock feed (M3) ─────────────────────────────────────────────────────
   // Normalize the live conflict + compliance feeds into the one-at-a-time queue.
   // Per-case cards (worst clients first, each with a case-scoped fix) + a tail
-  // aggregate; the bare summary covers the async cache-rebuild window.
+  // aggregate; the bare summary covers the async cache-rebuild window. Series
+  // about to run off their materialized horizon ride along as info-level
+  // "extend?" prompts (user decision: prompt, never silent adds).
+  const endingSeries = React.useMemo(
+    () => (scheduleData ? findEndingSeries(scheduleData, new Date()) : []),
+    [scheduleData],
+  );
   const dockIssues = buildDockIssues(
     activeConflicts,
     compSummary,
     scheduleData && compCache ? attentionList(compCache, scheduleData) : [],
+    undefined,
+    endingSeries,
   );
 
   const reviewConflictIssue = (issue: DockIssue) => {
@@ -2445,6 +2454,7 @@ export default function App() {
           onMuteConflict={muteConflictIssue}
           onFixCompliance={() => { setCcInitialTab('issues'); setView('compliance'); }}
           onFixPace={(id) => openMeetPace(id, 'behind')}
+          onExtendSeries={handleExtendSeries}
           dossier={dossier}
           canDoctor={canDoctor}
           onDoctor={openDoctor}
@@ -2530,6 +2540,7 @@ export default function App() {
               onMuteConflict={muteConflictIssue}
               onFixCompliance={() => { setDockSheetOpen(false); setCcInitialTab('issues'); setView('compliance'); }}
               onFixPace={(id) => openMeetPace(id, 'behind')}
+              onExtendSeries={(sid, end) => { setDockSheetOpen(false); handleExtendSeries(sid, end); }}
               dossier={dossier}
               canDoctor={canDoctor}
               onDoctor={openDoctor}
@@ -2561,6 +2572,7 @@ export default function App() {
             onMuteConflict={muteConflictIssue}
             onFixCompliance={() => { setDockOpen(false); setCcInitialTab('issues'); setView('compliance'); }}
             onFixPace={(id) => openMeetPace(id, 'behind')}
+            onExtendSeries={handleExtendSeries}
             dossier={dossier}
             canDoctor={canDoctor}
             onDoctor={openDoctor}

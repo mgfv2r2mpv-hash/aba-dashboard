@@ -50,6 +50,8 @@ export interface SAssiDockProps {
   onFixCompliance: () => void;
   /** Case-scoped fix for per-client compliance cards (seeds meet-pace). */
   onFixPace?: (clientId: string) => void;
+  /** Series-ending card CTA — stages an extension through the suggested date. */
+  onExtendSeries?: (seriesId: string, endDateISO: string) => void;
   /** "Doctor my schedule": a local analysis of whatever's in focus (an appt/case).
    *  Present (with `canDoctor`) → a "What's wrong here?" chip offers it. */
   dossier?: Dossier | null;
@@ -100,6 +102,7 @@ export function SAssiDock({
   onMuteConflict,
   onFixCompliance,
   onFixPace,
+  onExtendSeries,
   dossier,
   canDoctor,
   onDoctor,
@@ -195,6 +198,7 @@ export function SAssiDock({
             onMuteConflict={onMuteConflict}
             onFixCompliance={onFixCompliance}
             onFixPace={onFixPace}
+            onExtendSeries={onExtendSeries}
             onNotNow={queue.notNow}
           />
         )}

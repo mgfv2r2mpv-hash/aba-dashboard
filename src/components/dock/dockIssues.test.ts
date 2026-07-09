@@ -104,6 +104,24 @@ describe('buildDockIssues', () => {
     expect(issues[0].detail).toContain('2 at risk');
   });
 
+  it('a series-ending prompt rides the queue as info, ranked after errors and warnings', () => {
+    const warn = conflict('training-violation', 'warning', 'w');
+    const ending = {
+      seriesId: 'SER-1', clientName: 'Jordan', title: 'Session',
+      lastOccurrence: '2026-07-13', suggestedThrough: '2026-08-31', pendingCount: 2,
+    };
+    const issues = buildDockIssues([warn], summary(1, 0), [att('client', 'c1', 'red')], 3, [ending]);
+    const card = issues.find(i => i.kind === 'series-ending');
+    expect(card).toBeDefined();
+    expect(card!.severity).toBe('info');
+    expect(card!.seriesId).toBe('SER-1');
+    expect(card!.suggestedThrough).toBe('2026-08-31');
+    expect(card!.title).toContain('Jordan');
+    expect(card!.detail).toContain('2026-08-31');
+    // info ranks last — a courtesy prompt never outranks a real problem.
+    expect(issues[issues.length - 1].kind).toBe('series-ending');
+  });
+
   it('a red case card ranks ahead of a yellow conflict', () => {
     const warn = conflict('training-violation', 'warning', 'w');
     const issues = buildDockIssues([warn], summary(1, 0), [att('client', 'c1', 'red')], 3);

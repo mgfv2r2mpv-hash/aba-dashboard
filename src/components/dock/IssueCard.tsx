@@ -24,6 +24,8 @@ export interface IssueCardProps {
   onFixCompliance: () => void;
   /** Case-scoped fix — seeds the meet-pace solve for issue.clientId. */
   onFixPace?: (clientId: string) => void;
+  /** Series-ending prompt — stages an extension through issue.suggestedThrough. */
+  onExtendSeries?: (seriesId: string, endDateISO: string) => void;
   onNotNow: () => void;
 }
 
@@ -45,10 +47,12 @@ export function IssueCard({
   onMuteConflict,
   onFixCompliance,
   onFixPace,
+  onExtendSeries,
   onNotNow,
 }: IssueCardProps) {
   const isConflict = issue.kind === 'conflict';
-  const caseScoped = !isConflict && !!issue.clientId && !!onFixPace;
+  const isSeriesEnding = issue.kind === 'series-ending';
+  const caseScoped = !isConflict && !isSeriesEnding && !!issue.clientId && !!onFixPace;
 
   return (
     <div
@@ -65,7 +69,7 @@ export function IssueCard({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <StatusPill intent={SEVERITY_INTENT[issue.severity]}>
-          {isConflict ? 'Conflict' : 'Compliance'}
+          {isConflict ? 'Conflict' : isSeriesEnding ? 'Series' : 'Compliance'}
         </StatusPill>
         <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)' }}>
           {issue.title}
@@ -86,6 +90,10 @@ export function IssueCard({
               Snooze
             </Button>
           </>
+        ) : isSeriesEnding && issue.seriesId && issue.suggestedThrough && onExtendSeries ? (
+          <Button variant="fix" size="sm" onClick={() => onExtendSeries(issue.seriesId!, issue.suggestedThrough!)}>
+            Extend series →
+          </Button>
         ) : caseScoped ? (
           <Button variant="sassi" size="sm" onClick={() => onFixPace!(issue.clientId!)}>
             Fix pace with SAssi

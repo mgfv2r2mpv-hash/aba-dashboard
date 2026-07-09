@@ -75,6 +75,7 @@ import { solveDraft, DraftStatus, PrioritizationChoice } from './draftSolver';
 import DraftTray from './components/DraftTray';
 import FindTimeModal from './components/FindTimeModal';
 import { wishSolutionToDraft, dropPastOps, dropInfeasibleTravelOps, dropDoubleBookedOps, applyHintChanges, type WishDraft } from './wish';
+import { consolidateAdjacentBcba } from './builderConsolidate';
 import { computeSessionFlags, SessionFlags, streakEmoji } from './sessionFlags';
 
 // Route axios /api/* calls through an in-memory store on EVERY platform. Native
@@ -374,8 +375,9 @@ export default function App() {
     if (!base) return;
     // Hard real-world guards: a suggestion can never place/move a session into the
     // past, double-book the single BCBA, nor land two BCBA sessions with no time to
-    // drive between them.
-    const safe = dropDoubleBookedOps(dropInfeasibleTravelOps(dropPastOps(ops), base), base);
+    // drive between them. Then fuse any adjacent BCBA fragments (from the build OR a
+    // free-authored edit) so no split sliver reaches the tray — "tidy the draft".
+    const safe = consolidateAdjacentBcba(dropDoubleBookedOps(dropInfeasibleTravelOps(dropPastOps(ops), base), base), base);
     const { ops: draftOps, blackouts, hintChanges } = wishSolutionToDraft({ id: 'sassi', summary: '', reasoning: '', ops: safe }, base);
     // Blackouts + hint patches aren't part of the editable draft (DraftOps model
     // appointments only), so buffer them and commit WITH the draft on Accept —
@@ -1192,7 +1194,7 @@ export default function App() {
   // any past-dated add/move first so a suggestion can never land a session before
   // now — the same real-world guard the sAssI chat uses (dropPastOps).
   const draftFromSolution = (sol: WishSolution, base: ScheduleData) =>
-    wishSolutionToDraft({ ...sol, ops: dropDoubleBookedOps(dropInfeasibleTravelOps(dropPastOps(sol.ops), base), base) }, base);
+    wishSolutionToDraft({ ...sol, ops: consolidateAdjacentBcba(dropDoubleBookedOps(dropInfeasibleTravelOps(dropPastOps(sol.ops), base), base), base) }, base);
 
   const commitWishLikeSolution = async (sol: WishSolution): Promise<boolean> => {
     if (!scheduleData) return false;

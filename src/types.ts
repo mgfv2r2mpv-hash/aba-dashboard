@@ -517,6 +517,13 @@ export interface Cancellation {
   notes?: string;
 }
 
+// The stored recurrence vocabulary. 'custom' = a weekday-set-per-week series
+// (e.g. Mon–Fri, M/W/F) whose slots each advance on a 7-day period. Monthly's
+// nth-weekday flavor is NOT stored — it is MEASURED from the member dates
+// (seriesProfile.measurePattern); dated rows fully determine it, and a stored
+// flavor could contradict reality.
+export type StoredRecurrencePattern = 'weekly' | 'biweekly' | 'monthly' | 'custom';
+
 export interface Appointment {
   id: string;
   title: string;
@@ -542,7 +549,7 @@ export interface Appointment {
   isMakeUp?: boolean;
   makeupForId?: string;
   isRecurring?: boolean;
-  recurringPattern?: 'weekly' | 'biweekly' | 'monthly';
+  recurringPattern?: StoredRecurrencePattern;
   // Shared by all occurrences of a recurring series — set when the series is
   // first expanded. Lets edit/delete operations target "this and following"
   // or "all in series" without having to match by signature.
@@ -903,7 +910,7 @@ export const DEFAULT_FIXIT_OPTIONS: FixItOptions = {
 export type WishOp =
   | { op: 'move'; appointmentId: string; start: string; end: string }
   | { op: 'remove'; appointmentId: string }
-  | { op: 'add'; title?: string; type: Appointment['type']; client?: string; technician?: string; start: string; end: string; recurring?: boolean; pattern?: 'weekly' | 'biweekly' | 'monthly'; seriesId?: string }
+  | { op: 'add'; title?: string; type: Appointment['type']; client?: string; technician?: string; start: string; end: string; recurring?: boolean; pattern?: StoredRecurrencePattern; seriesId?: string }
   | { op: 'blackout'; entityType: 'client' | 'technician'; entity: string; date: string; reason?: string }
   // Agentic command ops (sAssI). Each references only an appointment token plus
   // enums/booleans — no names — so anonymization guards never trip. They map to a
@@ -918,7 +925,7 @@ export type WishOp =
   // single recurring template (which would be lossy here) and WITHOUT setting
   // isRecurring (which would change future builds). Carries no timestamp — like the
   // command ops above it maps to `edit` DraftOps and survives dropPastOps.
-  | { op: 'regroup'; appointmentIds: string[]; seriesId: string; recurringPattern?: 'weekly' | 'biweekly' | 'monthly' }
+  | { op: 'regroup'; appointmentIds: string[]; seriesId: string; recurringPattern?: StoredRecurrencePattern }
   // Teach-the-assistant: record a lasting per-client placement preference the
   // builder honors ("AB does better with two short mid-day supervisions").
   // Carries only a client token + enums — anonymization guards never trip.

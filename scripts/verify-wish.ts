@@ -250,9 +250,12 @@ console.log('consolidateAdjacentBcba (fuse adjacent BCBA fragments)');
   const diffType = consolidateAdjacentBcba([sup('C One', 'T One', '2026-07-16T08:45:00', '2026-07-16T09:00:00'), { op: 'add', type: 'parent-training', client: 'C One', technician: 'T One', start: '2026-07-16T09:00:00', end: '2026-07-16T09:15:00' }], data);
   check('adjacent but different type → not merged', diffType.filter(o => o.op === 'add' && (o as any).type === 'supervision').length === 1 && diffType.filter(o => o.op === 'add').length === 2);
 
-  // Two different non-empty seriesIds never cross.
+  // seriesId is an internal tag, not a run barrier: adjacent same-identity BCBA
+  // fragments fuse ACROSS two series (the EC/Hannah case), survivor keeps a series.
   const twoSeries = consolidateAdjacentBcba([sup('C One', 'T One', '2026-07-16T08:45:00', '2026-07-16T09:00:00', 'S-A'), sup('C One', 'T One', '2026-07-16T09:00:00', '2026-07-16T09:15:00', 'S-B')], data);
-  check('two distinct non-empty seriesIds do not fuse', twoSeries.filter(o => o.op === 'add').length === 2);
+  const ts = twoSeries.filter(o => o.op === 'add');
+  check('two distinct seriesIds fuse across series (survivor keeps one)',
+    ts.length === 1 && (ts[0] as any).start === '2026-07-16T08:45:00' && (ts[0] as any).end === '2026-07-16T09:15:00' && !!(ts[0] as any).seriesId);
   // An orphan folds into a series occurrence, survivor keeps the seriesId.
   const orphan = consolidateAdjacentBcba([sup('C One', 'T One', '2026-07-16T08:45:00', '2026-07-16T09:00:00', 'S-A'), sup('C One', 'T One', '2026-07-16T09:00:00', '2026-07-16T09:15:00')], data);
   const of = orphan.filter(o => o.op === 'add');
@@ -361,6 +364,59 @@ console.log('computeOpsImpact parity: raw DraftOps diff ≡ WishSolution diff');
       && Math.abs(c.deltaSupHours - viaOps.clientImpacts[i].deltaSupHours) < 1e-9),
     JSON.stringify({ sol: viaSolution.clientImpacts, ops: viaOps.clientImpacts }));
   check('impact registers the supervision hour', viaOps.clientImpacts.some(c => c.deltaSupHours > 0.9));
+}
+
+console.log('recurrence trio invariant (Phase 1 choke point)');
+{
+  // regroup must yield the FULL trio: seriesId + isRecurring + a coherent pattern.
+  const sol: WishSolution = {
+    id: 'r', summary: '', reasoning: '',
+    ops: [{ op: 'regroup', appointmentIds: ['a1', 'a2'], seriesId: 'SER', recurringPattern: 'weekly' }],
+  };
+  const d = wishSolutionToDraft(sol, base);
+  const edits = d.ops.filter(o => o.kind === 'edit' && (o.appt?.seriesId === 'SER'));
+  check('regroup op yields the full trio on every member',
+    edits.length === 2 && edits.every(o => o.appt!.isRecurring === true && o.appt!.recurringPattern === 'weekly'),
+    JSON.stringify(edits.map(o => ({ r: o.appt?.isRecurring, p: o.appt?.recurringPattern }))));
+}
+{
+  // ≥2 matching recurring adds (same identity + clock) in one solution share ONE
+  // minted seriesId — a real series is born whole, not as flag-only half-states.
+  const sol: WishSolution = {
+    id: 'm', summary: '', reasoning: '',
+    ops: [
+      { op: 'add', type: 'supervision', client: 'Client One', technician: 'Tech One', start: '2026-07-20T10:00:00', end: '2026-07-20T11:00:00', recurring: true, pattern: 'weekly' },
+      { op: 'add', type: 'supervision', client: 'Client One', technician: 'Tech One', start: '2026-07-27T10:00:00', end: '2026-07-27T11:00:00', recurring: true, pattern: 'weekly' },
+    ],
+  };
+  const d = wishSolutionToDraft(sol, base);
+  const adds = d.ops.filter(o => o.kind === 'add' && o.appt?.type === 'supervision');
+  check('batch of matching recurring adds mints a SHARED seriesId',
+    adds.length === 2 && !!adds[0].appt!.seriesId && adds[0].appt!.seriesId === adds[1].appt!.seriesId);
+  check('minted members carry the full trio',
+    adds.every(o => o.appt!.isRecurring === true && !!o.appt!.recurringPattern));
+}
+{
+  // A LONE recurring add has no siblings — it must land as an honest one-time,
+  // not a "recurs weekly" label with no series behind it (half-state A factory).
+  const sol: WishSolution = {
+    id: 'l', summary: '', reasoning: '',
+    ops: [{ op: 'add', type: 'supervision', client: 'Client One', start: '2026-07-20T10:00:00', end: '2026-07-20T11:00:00', recurring: true, pattern: 'weekly' }],
+  };
+  const d = wishSolutionToDraft(sol, base);
+  const add = d.ops.find(o => o.kind === 'add' && o.appt?.type === 'supervision');
+  check('lone recurring add becomes one-time (no flag, no series, no pattern)',
+    !!add && !add.appt!.isRecurring && !add.appt!.seriesId && add.appt!.recurringPattern === undefined,
+    JSON.stringify({ r: add?.appt?.isRecurring, s: add?.appt?.seriesId, p: add?.appt?.recurringPattern }));
+}
+{
+  // The stored-pattern vocabulary includes 'custom' (weekday-set-per-week).
+  const rev = (v: any) => { if (v === undefined || v === null || v === '') return undefined; const s = String(v); return reverseMap[s] ?? s; };
+  const ops = parseOps([
+    { op: 'add', type: 'client-session', client: 'CLIENT_1', tech: 'TECH_1', start: '2026-07-20T10:00:00', end: '2026-07-20T11:00:00', recurring: true, pattern: 'custom' },
+  ], rev);
+  check("add op accepts pattern 'custom'", ops.length === 1 && ops[0].op === 'add' && (ops[0] as any).pattern === 'custom',
+    JSON.stringify(ops));
 }
 
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed\n`);

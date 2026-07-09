@@ -20,6 +20,7 @@ const RULE_LABEL: Record<TidyRuleId, string> = {
   degenerate: 'Degenerate',
   dedup: 'Duplicate',
   grouping: 'Series',
+  seriesConsolidate: 'Split series',
   snap: 'Snap',
   doubleBook: 'Conflict',
 };

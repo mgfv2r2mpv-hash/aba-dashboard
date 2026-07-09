@@ -22,9 +22,10 @@
 // oracle — not the travel guard — is the authority; app.tsx stages tidy ops without
 // dropInfeasibleTravelOps to avoid a partial drop that could orphan a merge's removes.
 
-import { ScheduleData, Appointment, WishOp, WishSolution, SUPERVISION_COUNTING_TYPES } from './types';
+import { ScheduleData, Appointment, WishOp, WishSolution, StoredRecurrencePattern, SUPERVISION_COUNTING_TYPES } from './types';
 import { applyWishSolution } from './wish';
 import { checkEquivalence, summarizeDiffs, EquivReport } from './tidyEquivalence';
+import { measurePattern } from './seriesProfile';
 import { v4 as uuidv4 } from 'uuid';
 
 const MS_PER_MIN = 60_000;
@@ -34,7 +35,7 @@ const SNAP_GRID_MIN = 15;         // snap timestamps to :00 / :15 / :30 / :45
 const SNAP_MAX_SHIFT_MIN = 5;     // …but only when the row is within this of the grid
 const NEAR_ADJACENT_GAP_MIN = 15; // a real gap ≤ this flags a "could merge" review
 
-export type TidyRuleId = 'merge' | 'degenerate' | 'dedup' | 'grouping' | 'snap' | 'doubleBook';
+export type TidyRuleId = 'merge' | 'degenerate' | 'dedup' | 'grouping' | 'seriesConsolidate' | 'snap' | 'doubleBook';
 
 export interface TidySuggestion {
   ruleId: TidyRuleId;
@@ -53,7 +54,7 @@ export interface TidyResult {
 export interface TidyConfig { rules: Record<TidyRuleId, boolean>; }
 
 export function defaultTidyConfig(): TidyConfig {
-  return { rules: { merge: true, degenerate: true, dedup: true, grouping: true, snap: true, doubleBook: true } };
+  return { rules: { merge: true, degenerate: true, dedup: true, grouping: true, seriesConsolidate: true, snap: true, doubleBook: true } };
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -217,42 +218,163 @@ function ruleDedup(elig: Appointment[], names: Names): Candidate[] {
 }
 
 // ── rule 4: consolidate a recurring pattern (review — a judgment call) ───────
-function cadenceRuns(sorted: Appointment[]): { rows: Appointment[]; pattern: 'weekly' | 'biweekly' }[] {
-  const dayMs = (iso: string): number => { const d = new Date(iso); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
-  const out: { rows: Appointment[]; pattern: 'weekly' | 'biweekly' }[] = [];
+// Two-stage series detection on the full pattern vocabulary. A bucket is
+// identity + clock — the weekday is deliberately NOT in the key, so a Mon–Fri
+// custom series is ONE bucket (the old per-weekday key surfaced it as five
+// separate "weekly series" cards).
+//   Stage 0: monthly runs on the whole bucket (28–35-day gaps) — a same-date
+//            monthly series wobbles across weekdays and would shatter under a
+//            per-weekday split; measurePattern names the flavor (same-date /
+//            first-Tuesday / last-Friday) for the rationale.
+//   Stage 1: per-weekday runs of consistent 7- or 14-day steps.
+//   Stage 2: 7-day runs that overlap in calendar time (same bucket = same
+//            clock) union into ONE 'custom' weekday-set candidate.
+interface SeriesRun { rows: Appointment[]; pattern: StoredRecurrencePattern; weekdays: number[]; label: string }
+
+const SHORT_DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dayMsOf = (iso: string): number => { const d = new Date(iso); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+
+// Maximal runs over date-sorted rows where every consecutive gap satisfies `accept`.
+function runsWhere(sorted: Appointment[], accept: (gapDays: number) => boolean): Appointment[][] {
+  const out: Appointment[][] = [];
   let i = 0;
   while (i < sorted.length) {
-    let j = i, step: number | null = null;
-    while (j + 1 < sorted.length) {
-      const diff = Math.round((dayMs(sorted[j + 1].startTime) - dayMs(sorted[j].startTime)) / MS_PER_DAY);
-      if (diff !== 7 && diff !== 14) break;
-      if (step === null) step = diff; else if (diff !== step) break;
-      j++;
-    }
-    if (step !== null && j > i) { out.push({ rows: sorted.slice(i, j + 1), pattern: step === 7 ? 'weekly' : 'biweekly' }); i = j + 1; }
+    let j = i;
+    while (j + 1 < sorted.length && accept(Math.round((dayMsOf(sorted[j + 1].startTime) - dayMsOf(sorted[j].startTime)) / MS_PER_DAY))) j++;
+    if (j > i) { out.push(sorted.slice(i, j + 1)); i = j + 1; }
     else i += 1;
   }
   return out;
 }
 
+function weekdaySetLabel(weekdays: number[]): string {
+  const names = weekdays.map(w => SHORT_DAY[w]);
+  // Contiguous span (Mon–Fri) reads better than a slash list.
+  const contiguous = weekdays.length >= 3 && weekdays.every((w, i) => i === 0 || w === weekdays[i - 1] + 1);
+  return contiguous ? `${names[0]}–${names[names.length - 1]}` : names.join('/');
+}
+
+function monthlyLabel(rows: Appointment[]): string {
+  const m = measurePattern(rows.map(r => r.startTime));
+  if (m.monthlyFlavor === 'nth-weekday') {
+    const wd = WEEKDAYS[new Date(rows[0].startTime).getDay()];
+    const nth = m.nth === 'last' ? 'last' : ['', 'first', 'second', 'third', 'fourth', 'fifth'][m.nth as number] ?? `${m.nth}th`;
+    return `the ${nth} ${wd} of each month`;
+  }
+  return `the ${new Date(rows[0].startTime).getDate()}th of each month`;
+}
+
+function detectSeriesRuns(rows: Appointment[]): SeriesRun[] {
+  const out: SeriesRun[] = [];
+  const sorted = [...rows].sort((x, y) => ms(x.startTime) - ms(y.startTime));
+
+  // Stage 0 — monthly (before any weekday split).
+  const monthlyRows = new Set<Appointment>();
+  for (const run of runsWhere(sorted, g => g >= 28 && g <= 35)) {
+    if (run.length < MIN_SERIES_LEN) continue;
+    if (measurePattern(run.map(r => r.startTime)).pattern !== 'monthly') continue;
+    run.forEach(r => monthlyRows.add(r));
+    out.push({
+      rows: run, pattern: 'monthly',
+      weekdays: [...new Set(run.map(r => new Date(r.startTime).getDay()))].sort((a, b) => a - b),
+      label: `on ${monthlyLabel(run)}`,
+    });
+  }
+  const rest = sorted.filter(r => !monthlyRows.has(r));
+
+  // Stage 1 — per-weekday 7/14-day runs.
+  interface WRun { weekday: number; rows: Appointment[]; step: 7 | 14; firstMs: number; lastMs: number }
+  const wruns: WRun[] = [];
+  for (const [wd, wrows] of groupBy(rest, a => String(new Date(a.startTime).getDay()))) {
+    const wsorted = [...wrows].sort((x, y) => ms(x.startTime) - ms(y.startTime));
+    for (const step of [7, 14] as const) {
+      // 7-day runs first; whatever they consume can't re-run at 14.
+      const consumed = new Set(wruns.flatMap(r => r.rows));
+      const open = wsorted.filter(r => !consumed.has(r));
+      for (const run of runsWhere(open, g => g === step)) {
+        if (run.length < 2) continue;
+        wruns.push({
+          weekday: Number(wd), rows: run, step,
+          firstMs: dayMsOf(run[0].startTime), lastMs: dayMsOf(run[run.length - 1].startTime),
+        });
+      }
+    }
+  }
+
+  // Stage 2 — cluster CALENDAR-OVERLAPPING weekly (7-day) runs into one custom
+  // weekday-set series; a lone weekly run stays weekly. Biweekly runs stand alone.
+  const weekly = wruns.filter(r => r.step === 7).sort((a, b) => a.firstMs - b.firstMs);
+  const SLACK = 6 * MS_PER_DAY; // same-week runs may not strictly overlap
+  const clusters: WRun[][] = [];
+  for (const run of weekly) {
+    const cur = clusters[clusters.length - 1];
+    if (cur && run.firstMs <= Math.max(...cur.map(r => r.lastMs)) + SLACK) cur.push(run);
+    else clusters.push([run]);
+  }
+  for (const cluster of clusters) {
+    const weekdays = [...new Set(cluster.map(r => r.weekday))].sort((a, b) => a - b);
+    const crows = cluster.flatMap(r => r.rows).sort((x, y) => ms(x.startTime) - ms(y.startTime));
+    if (weekdays.length >= 2 && crows.length >= MIN_SERIES_LEN) {
+      out.push({ rows: crows, pattern: 'custom', weekdays, label: `every ${weekdaySetLabel(weekdays)}` });
+    } else if (weekdays.length === 1 && crows.length >= MIN_SERIES_LEN) {
+      out.push({ rows: crows, pattern: 'weekly', weekdays, label: `every ${WEEKDAYS[weekdays[0]]}` });
+    }
+  }
+  for (const run of wruns.filter(r => r.step === 14)) {
+    if (run.rows.length < MIN_SERIES_LEN) continue;
+    out.push({ rows: run.rows, pattern: 'biweekly', weekdays: [run.weekday], label: `every other ${WEEKDAYS[run.weekday]}` });
+  }
+  return out;
+}
+
+const seriesBucketKey = (a: Appointment): string =>
+  [a.type, a.client ?? '', a.technician ?? '', billable(a), clock(a.startTime), clock(a.endTime)].join('|');
+
 function ruleGrouping(elig: Appointment[], names: Names): Candidate[] {
-  const groups = groupBy(
-    elig.filter(a => !a.isRecurring && !a.seriesId),
-    a => [a.type, a.client ?? '', a.technician ?? '', billable(a), weekdayOf(a.startTime), clock(a.startTime), clock(a.endTime)].join('|'),
-  );
+  // Series-less rows only — INCLUDING lone-recurring pre-heal rows (a flag with
+  // no series behind it is exactly what grouping repairs).
+  const groups = groupBy(elig.filter(a => !a.seriesId), seriesBucketKey);
   const out: Candidate[] = [];
   for (const rows of groups.values()) {
     if (rows.length < MIN_SERIES_LEN) continue;
-    const sorted = [...rows].sort((x, y) => ms(x.startTime) - ms(y.startTime));
-    for (const run of cadenceRuns(sorted)) {
-      if (run.rows.length < MIN_SERIES_LEN) continue;
+    for (const run of detectSeriesRuns(rows)) {
       const first = run.rows[0];
       out.push({
         ruleId: 'grouping', preferReview: true,
         ops: [{ op: 'regroup', appointmentIds: run.rows.map(r => r.id), seriesId: uuidv4(), recurringPattern: run.pattern }],
-        rationale: `${run.rows.length} ${first.type} sessions every ${weekdayOf(first.startTime)} ${clock(first.startTime)}–${clock(first.endTime)} (${names.client(first.client)} / ${names.tech(first.technician)}) look like a ${run.pattern} series — group for batch (This / Following / All) edits.`,
+        rationale: `${run.rows.length} ${first.type} sessions ${run.label} ${clock(first.startTime)}–${clock(first.endTime)} (${names.client(first.client)} / ${names.tech(first.technician)}) look like one ${run.pattern === 'custom' ? `${weekdaySetLabel(run.weekdays)} ` : ''}${run.pattern} series — group for batch (This / Following / All) edits.`,
       });
     }
+  }
+  return out;
+}
+
+// ── rule 4b: consolidate SPLIT series (review — a judgment call) ─────────────
+// Rows that already carry ≥2 different seriesIds but measure as ONE logical
+// series — e.g. the builder materialized Mon..Fri as five weekly series, or an
+// extend bug split one weekly line across two ids. One regroup onto the LARGEST
+// series' id with the measured pattern. Review-only; pending/future rows only,
+// so the losing series' completed/canceled facts keep their old seriesId
+// (history intact — scope edits spare facts anyway).
+function ruleSeriesConsolidate(elig: Appointment[], names: Names): Candidate[] {
+  const groups = groupBy(elig.filter(a => a.seriesId), seriesBucketKey);
+  const out: Candidate[] = [];
+  for (const rows of groups.values()) {
+    const seriesIds = new Set(rows.map(r => r.seriesId!));
+    if (seriesIds.size < 2 || rows.length < MIN_SERIES_LEN) continue;
+    // Coherence bar: ONE detected run must cover EVERY row in the bucket —
+    // partial matches stay separate series (never force-fuse).
+    const covering = detectSeriesRuns(rows).find(r => r.rows.length === rows.length);
+    if (!covering) continue;
+    const counts = new Map<string, number>();
+    for (const r of rows) counts.set(r.seriesId!, (counts.get(r.seriesId!) ?? 0) + 1);
+    const target = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    const first = rows[0];
+    out.push({
+      ruleId: 'seriesConsolidate', preferReview: true,
+      ops: [{ op: 'regroup', appointmentIds: covering.rows.map(r => r.id), seriesId: target, recurringPattern: covering.pattern }],
+      rationale: `${rows.length} ${first.type} sessions (${names.client(first.client)} / ${names.tech(first.technician)}) sit in ${seriesIds.size} separate series but look like ONE ${covering.pattern === 'custom' ? `${weekdaySetLabel(covering.weekdays)} ` : ''}${covering.pattern} series ${covering.label} ${clock(first.startTime)}–${clock(first.endTime)} — consolidate so This / Following / All edits reach every occurrence.`,
+    });
   }
   return out;
 }
@@ -353,6 +475,7 @@ export function analyzeTidy(data: ScheduleData, config: TidyConfig, now: Date): 
   if (config.rules.degenerate) candidates.push(...ruleDegenerate(elig, names));
   if (config.rules.dedup) candidates.push(...ruleDedup(elig, names));
   if (config.rules.grouping) candidates.push(...ruleGrouping(elig, names));
+  if (config.rules.seriesConsolidate) candidates.push(...ruleSeriesConsolidate(elig, names));
   if (config.rules.snap) candidates.push(...ruleSnap(elig, names));
   if (config.rules.doubleBook) candidates.push(...ruleDoubleBook(elig, names));
 

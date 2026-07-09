@@ -306,6 +306,30 @@ console.log('tidy — a Mon–Fri same-clock cluster is ONE custom series, not f
   check('rationale names the multi-weekday shape', /Mon/.test(regroups[0]?.rationale ?? '') && /Fri/.test(regroups[0]?.rationale ?? ''), regroups[0]?.rationale);
 }
 
+console.log('tidy — the real-world CL/IR case: 26 weeks of Tue–Fri same-clock rows = ONE custom series');
+{
+  // Device-test shape (2026-07-09 screenshot): ~26 occurrences each on Tue, Wed,
+  // Thu, Fri (one extra Friday), all 08:45–12:45, same client/tech, no seriesId.
+  // The old detector showed FOUR weekly cards; must be ONE Tue–Fri custom card.
+  const rows: Appointment[] = [];
+  const anchors = ['2026-07-14', '2026-07-15', '2026-07-16', '2026-07-17']; // Tue..Fri
+  anchors.forEach((a0, wd) => {
+    const weeks = wd === 3 ? 27 : 26;
+    for (let w = 0; w < weeks; w++) {
+      const d = new Date(`${a0}T12:00:00`); d.setDate(d.getDate() + w * 7);
+      const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      rows.push(appt({ type: 'client-session', client: 'C1', technician: 'T1', date: day, start: '08:45', end: '12:45', id: `ir-${wd}-${w}` }));
+    }
+  });
+  const r = analyzeTidy(mkData(rows), defaultTidyConfig(), new Date(2026, 6, 9));
+  const regroups = r.suggestions.filter(s => s.ruleId === 'grouping' && s.ops.some(o => o.op === 'regroup'));
+  check('exactly ONE card for the Tue–Fri block', regroups.length === 1, `got ${regroups.length}: ${regroups.map(g => g.rationale.slice(0, 60)).join(' | ')}`);
+  const op = regroups[0]?.ops.find(o => o.op === 'regroup') as any;
+  check('all 105 rows in the one regroup', op?.appointmentIds.length === 105, String(op?.appointmentIds.length));
+  check("pattern 'custom', rationale names Tue–Fri", op?.recurringPattern === 'custom' && /Tue–Fri/.test(regroups[0]?.rationale ?? ''),
+    regroups[0]?.rationale);
+}
+
 console.log('tidy — biweekly and monthly runs are detected');
 {
   const bi = analyzeTidy(mkData(['2026-06-01', '2026-06-15', '2026-06-29'].map((d, i) => looseAt(d, `bi${i}`))), defaultTidyConfig(), NOW_MAY);

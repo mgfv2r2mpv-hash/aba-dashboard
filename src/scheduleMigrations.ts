@@ -13,11 +13,12 @@
 
 import { ScheduleData } from './types';
 import { resolveRefToId } from './entityRefs';
+import { normalizeRecurrenceFields } from './seriesProfile';
 
 export const BLOB_FORMAT = 'aba-schedule';
 
 // Bump when a migration step is added to STEPS below.
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 // The on-disk (pre-encryption) shape. `data` is a ScheduleData at `schemaVersion`.
 export interface ScheduleEnvelope {
@@ -73,6 +74,20 @@ const STEPS: Record<number, (data: any) => any> = {
     );
     return { ...data, appointments, technicians: techsHealed };
   },
+  // 3→4: enforce the recurrence trio invariant (recurring ⇔ member of a multi-row
+  // series ⇔ coherent measured pattern). Six historical writers set isRecurring/
+  // recurringPattern and seriesId independently, leaving half-states: rows labeled
+  // "recurs weekly" with no series behind them, and real series whose members carry
+  // no flag (so the form offered no This/Following/All). normalizeRecurrenceFields
+  // heals PENDING rows only — completed/canceled rows are records of fact and pass
+  // through by identity. Bare imported workbooks arrive as version 0, so every
+  // import heals too.
+  3: (data) => ({
+    ...data,
+    appointments: Array.isArray(data.appointments)
+      ? normalizeRecurrenceFields(data.appointments).appointments
+      : data.appointments,
+  }),
 };
 
 // After migration, the refs that STILL don't match a current entity id are the

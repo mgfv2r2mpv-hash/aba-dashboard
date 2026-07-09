@@ -523,6 +523,7 @@ export interface Cancellation {
 // (seriesProfile.measurePattern); dated rows fully determine it, and a stored
 // flavor could contradict reality.
 export type StoredRecurrencePattern = 'weekly' | 'biweekly' | 'monthly' | 'custom';
+export const STORED_RECURRENCE_PATTERNS: readonly StoredRecurrencePattern[] = ['weekly', 'biweekly', 'monthly', 'custom'];
 
 export interface Appointment {
   id: string;

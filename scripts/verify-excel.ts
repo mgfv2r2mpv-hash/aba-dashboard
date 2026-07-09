@@ -2,6 +2,7 @@
 import * as XLSX from 'xlsx';
 import { ScheduleData } from '../src/types';
 import { generateExcelFile, parseWorkbook, SCHEMA_VERSION } from '../src/excelHandler';
+import { migrateScheduleData } from '../src/scheduleMigrations';
 import { deepEqual } from './migrate-legacy-xlsx';
 
 let passed = 0, failed = 0;
@@ -128,6 +129,46 @@ check('pto config (mode/buckets/unpaid/accruals/openings)',
 const norm = (d: ScheduleData) => { const x: any = JSON.parse(JSON.stringify(d)); delete x.lastModified; return x; };
 const diff = deepEqual(norm(data), norm(rt));
 check('full structural round-trip', diff === null, diff || undefined);
+
+console.log('recurrence pattern vocabulary at the import boundary');
+{
+  const mini: ScheduleData = {
+    ...data,
+    appointments: [
+      // 'custom' is a first-class stored pattern — must round-trip.
+      { id: 'CU1', title: 'MWF', technician: 'T1', client: 'C1', startTime: '2026-06-01T09:00:00', endTime: '2026-06-01T10:00:00', isFixed: false, isBillable: true, type: 'client-session', isRecurring: true, recurringPattern: 'custom', seriesId: 'S-CU' },
+      // Garbage from a hand-edited workbook — must be DROPPED on import, not stored.
+      { id: 'GX1', title: 'Bad', technician: 'T1', client: 'C1', startTime: '2026-06-02T09:00:00', endTime: '2026-06-02T10:00:00', isFixed: false, isBillable: true, type: 'client-session', isRecurring: true, recurringPattern: 'fortnightly' as any },
+    ],
+  };
+  const rt2 = parseWorkbook(XLSX.read(generateExcelFile(mini), { type: 'buffer' })).data;
+  check("'custom' pattern round-trips", rt2.appointments.find(a => a.id === 'CU1')?.recurringPattern === 'custom');
+  check('garbage pattern dropped on import', rt2.appointments.find(a => a.id === 'GX1')?.recurringPattern === undefined,
+    String(rt2.appointments.find(a => a.id === 'GX1')?.recurringPattern));
+}
+
+console.log('imported workbook half-states heal via migrateScheduleData (v0 → current)');
+{
+  const halfStates: ScheduleData = {
+    ...data,
+    appointments: [
+      // Half-state A: recurring-labeled, no series.
+      { id: 'HA', title: 'Lone', technician: 'T1', client: 'C1', startTime: '2026-06-01T09:00:00', endTime: '2026-06-01T10:00:00', isFixed: false, isBillable: true, type: 'client-session', isRecurring: true, recurringPattern: 'weekly' },
+      // Half-state B: unlabeled biweekly-gapped series (heal must MEASURE).
+      { id: 'HB1', title: 'S', technician: 'T1', client: 'C1', startTime: '2026-06-01T13:00:00', endTime: '2026-06-01T14:00:00', isFixed: false, isBillable: true, type: 'client-session', seriesId: 'S-HB' },
+      { id: 'HB2', title: 'S', technician: 'T1', client: 'C1', startTime: '2026-06-15T13:00:00', endTime: '2026-06-15T14:00:00', isFixed: false, isBillable: true, type: 'client-session', seriesId: 'S-HB' },
+      { id: 'HB3', title: 'S', technician: 'T1', client: 'C1', startTime: '2026-06-29T13:00:00', endTime: '2026-06-29T14:00:00', isFixed: false, isBillable: true, type: 'client-session', seriesId: 'S-HB' },
+    ],
+  };
+  const imported = parseWorkbook(XLSX.read(generateExcelFile(halfStates), { type: 'buffer' })).data;
+  const healed = migrateScheduleData(imported);
+  const ha = healed.appointments.find(a => a.id === 'HA')!;
+  check('imported lone-recurring row healed to one-time', !ha.isRecurring && ha.recurringPattern === undefined);
+  const hb = healed.appointments.filter(a => a.seriesId === 'S-HB');
+  check('imported unlabeled series healed with measured biweekly trio',
+    hb.length === 3 && hb.every(a => a.isRecurring === true && a.recurringPattern === 'biweekly'),
+    hb.map(a => `${a.isRecurring}/${a.recurringPattern}`).join(','));
+}
 
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);

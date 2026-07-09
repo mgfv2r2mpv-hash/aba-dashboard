@@ -6,6 +6,7 @@ import {
   BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS,
   MinSessionMinutes, DEFAULT_MIN_SESSION_MINUTES,
   TravelSettings, DEFAULT_TRAVEL_SETTINGS, CityCenter, TravelCacheEntry,
+  STORED_RECURRENCE_PATTERNS,
 } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -258,7 +259,12 @@ function parseAppointments(workbook: XLSX.WorkBook): Appointment[] {
     };
     const desc = text(row.description);
     if (desc) appt.description = desc;
-    if (!isBlank(row.recurringPattern)) appt.recurringPattern = row.recurringPattern;
+    // Validate against the stored vocabulary — a hand-edited workbook can carry any
+    // string. Unknown patterns are DROPPED, not stored: the v4 migration heal that
+    // every import funnels through re-measures the pattern from the series' dates.
+    if (!isBlank(row.recurringPattern) && (STORED_RECURRENCE_PATTERNS as readonly string[]).includes(String(row.recurringPattern))) {
+      appt.recurringPattern = row.recurringPattern;
+    }
     if (!isBlank(row.seriesId)) appt.seriesId = String(row.seriesId);
     if (truthy(row.isMakeUp)) appt.isMakeUp = true;
     if (!isBlank(row.makeupForId)) appt.makeupForId = String(row.makeupForId);

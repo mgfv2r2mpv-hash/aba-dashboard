@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
-import { Appointment, Technician, Client, DayOfWeek, Authorization, ScheduleData, CompanySettings, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS } from '../types';
+import { Appointment, Technician, Client, DayOfWeek, Authorization, ScheduleData, CompanySettings, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, StoredRecurrencePattern } from '../types';
 import { makeupCandidates, findAuthFor } from '../authorization';
 import { overlapHours } from '../compliance';
 import { nameOf } from '../entityRefs';
+import { seriesProfileOf } from '../seriesProfile';
+import { buildSeriesEdit, summarizeSeriesEdit, SeriesCadence } from '../seriesEdit';
+import { materializeSeries } from '../seriesMaterialize';
 import { v4 as uuidv4 } from 'uuid';
 
 interface AppointmentFormProps {
@@ -20,8 +23,9 @@ interface AppointmentFormProps {
   // Pre-select a type on new appointments (e.g. based on the calendar lens).
   initialType?: Appointment['type'];
   // Save can affect more than one record when editing with scope > instance;
-  // signature returns the full list of upserts to apply.
-  onSave: (appointments: Appointment[]) => void;
+  // signature returns the full list of upserts to apply, plus the ids a series
+  // re-space / truncate / collapse removes (staged as remove ops by the caller).
+  onSave: (appointments: Appointment[], removeIds?: string[]) => void;
   // Delete is scope-aware too — returns the ids to remove (empty array on cancel).
   onDelete?: (ids: string[]) => void;
   onCancel: () => void;
@@ -218,11 +222,28 @@ export default function AppointmentForm({
       )
     : [];
 
-  // Recurrence
-  const [recurrence, setRecurrence] = useState<RecurrencePattern>(
-    appointment?.isRecurring ? (appointment.recurringPattern as RecurrencePattern) : 'none'
-  );
-  const [selectedDays, setSelectedDays] = useState<Set<DayOfWeek>>(new Set());
+  // All other occurrences sharing this appointment's seriesId. When editing,
+  // the scope picker only matters if there's a real series to act on.
+  const siblings = (appointment?.seriesId && allAppointments)
+    ? allAppointments.filter(a => a.seriesId === appointment.seriesId)
+    : [];
+  const hasSeries = siblings.length > 1;
+  // The series' MEASURED profile — pattern from the members' own dates (the
+  // single cadence oracle), not the stored isRecurring label, which can lie.
+  const seriesProfile = (hasSeries && appointment?.seriesId && allAppointments)
+    ? seriesProfileOf(allAppointments, appointment.seriesId)
+    : null;
+
+  // Recurrence — seeded from the measured profile: a real series shows its real
+  // cadence; a one-time (or stale flag-only) row honestly shows One-time.
+  const [recurrence, setRecurrence] = useState<RecurrencePattern>(() => {
+    if (!appointment) return 'none';
+    if (seriesProfile) return seriesProfile.pattern === 'custom' ? 'custom-days' : seriesProfile.pattern;
+    return 'none';
+  });
+  const [selectedDays, setSelectedDays] = useState<Set<DayOfWeek>>(() => new Set(
+    seriesProfile?.pattern === 'custom' ? seriesProfile.weekdays.map(w => DAYS[(w + 6) % 7]) : [],
+  ));
   const [customDates, setCustomDates] = useState<string>(''); // newline-separated YYYY-MM-DD
   const [recurrenceEnd, setRecurrenceEnd] = useState<string>('');
   const [editScope, setEditScope] = useState<EditScope>('instance');
@@ -234,72 +255,73 @@ export default function AppointmentForm({
     return auth?.endDate ?? '';
   });
 
-  // All other occurrences sharing this appointment's seriesId. When editing,
-  // the scope picker only matters if there's a real series to act on.
-  const siblings = (appointment?.seriesId && allAppointments)
-    ? allAppointments.filter(a => a.seriesId === appointment.seriesId)
-    : [];
-  const hasSeries = siblings.length > 1;
-
   const toggleDay = (day: DayOfWeek) => {
     const next = new Set(selectedDays);
     if (next.has(day)) next.delete(day); else next.add(day);
     setSelectedDays(next);
   };
 
-  // Same local-no-Z format the seeded sample uses, so the calendar's
-  // `startTime.startsWith('yyyy-MM-dd')` filter doesn't shift across timezones.
-  const pad2 = (n: number) => String(n).padStart(2, '0');
-  const formatLocalISO = (d: Date) =>
-    `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  // The cadence directive for a series-scope edit: null = unchanged (a plain
+  // shift/retime/field edit), 'none' = One-time selected (truncate/collapse),
+  // else the new pattern spec. Derived by comparing the select against the
+  // MEASURED profile so re-selecting the current cadence stays a no-op.
+  const seriesCadence: SeriesCadence = (() => {
+    if (!hasSeries || !seriesProfile) return null;
+    if (recurrence === 'none') return 'none';
+    const uiPattern: StoredRecurrencePattern = recurrence === 'custom-days' ? 'custom' : recurrence as StoredRecurrencePattern;
+    const weekdays = [...selectedDays].map(d => (DAYS.indexOf(d) + 1) % 7).sort((a, b) => a - b);
+    if (uiPattern === seriesProfile.pattern) {
+      if (uiPattern !== 'custom') return null;
+      // Same 'custom' pattern but a different weekday set is still a re-space.
+      if (JSON.stringify(weekdays) === JSON.stringify(seriesProfile.weekdays)) return null;
+    }
+    return uiPattern === 'custom' ? { pattern: 'custom', weekdays } : { pattern: uiPattern };
+  })();
 
-  // Edit on an existing series with scope > instance: take this occurrence's
-  // edits and propagate to the relevant siblings. Title/desc/type/tech/client/
-  // isBillable replace 1:1. Time-of-day is applied as HH:MM to each sibling
-  // while preserving that sibling's date, and the duration becomes the new
-  // (endTime - startTime). Status / cancellation stay per-instance.
-  const buildSeriesEdit = (): Appointment[] => {
-    if (!appointment) return [];
-    const newStart = new Date(startTime);
-    const newEnd = new Date(endTime);
-    if (isNaN(newStart.getTime()) || isNaN(newEnd.getTime())) return [appointment];
-    const newDurationMs = newEnd.getTime() - newStart.getTime();
-    const newHour = newStart.getHours();
-    const newMin = newStart.getMinutes();
-    const newSec = newStart.getSeconds();
-
-    const cutoff = new Date(appointment.startTime).getTime();
-    const targets = siblings.filter(s =>
-      editScope === 'all' || new Date(s.startTime).getTime() >= cutoff
-    );
-
-    return targets.map(sib => {
-      const sibDate = new Date(sib.startTime);
-      const updatedStart = new Date(sibDate);
-      updatedStart.setHours(newHour, newMin, newSec, 0);
-      const updatedEnd = new Date(updatedStart.getTime() + newDurationMs);
-      return {
-        ...sib,
-        title,
-        description,
-        type,
-        technician: type === 'supervision' ? '' : technicianId,
-        client: clientId,
-        isBillable,
-        startTime: formatLocalISO(updatedStart),
-        endTime: formatLocalISO(updatedEnd),
-      };
-    });
+  // The edited occurrence as the form currently describes it (same id).
+  const editedForm = (): Appointment | null => {
+    if (!appointment || !startTime || !endTime) return null;
+    return {
+      ...appointment,
+      title, description, type,
+      technician: type === 'supervision' ? '' : technicianId,
+      client: clientId,
+      isBillable,
+      startTime, endTime,
+    };
   };
 
-  const buildAppointments = (): Appointment[] => {
+  // Live preview of a series-scope edit — the consequence is visible BEFORE
+  // Save ("Removes 6 upcoming sessions", "Moves 5 upcoming sessions to
+  // Wednesday", …). Only shown when the edit actually rewrites the series.
+  const seriesPreview = (() => {
+    if (!appointment || !hasSeries || editScope === 'instance' || isMakeUp) return null;
+    const edited = editedForm();
+    if (!edited) return null;
+    const dateChanged = date !== appointment.startTime.slice(0, 10);
+    if (seriesCadence === null && !dateChanged) return null;
+    try {
+      return summarizeSeriesEdit(buildSeriesEdit({
+        all: allAppointments || [], original: appointment, edited,
+        scope: editScope, cadence: seriesCadence,
+      }));
+    } catch { return null; }
+  })();
+
+  const buildAppointments = (): { appointments: Appointment[]; removeIds: string[] } => {
     const editing = !!appointment?.id;
 
-    // Scope-aware edit branches before the build-from-scratch logic. A make-up is
-    // never part of a series (see base below), so series-scope edits don't apply.
+    // Series-scope edits ride the real series engine: day-delta shifts, cadence
+    // re-materialization, truncate/collapse — facts always spared. A make-up is
+    // never part of a series, so series-scope edits don't apply.
     if (editing && hasSeries && editScope !== 'instance' && !isMakeUp) {
-      const updates = buildSeriesEdit();
-      return updates.length > 0 ? updates : [];
+      const edited = editedForm();
+      if (!edited) return { appointments: [], removeIds: [] };
+      const r = buildSeriesEdit({
+        all: allAppointments || [], original: appointment!, edited,
+        scope: editScope, cadence: seriesCadence,
+      });
+      return { appointments: r.upserts, removeIds: r.removeIds };
     }
 
     const base: Appointment = {
@@ -315,105 +337,43 @@ export default function AppointmentForm({
       isBillable,
       isMakeUp: isMakeUp || undefined,
       makeupForId: isMakeUp && makeupForId ? makeupForId : undefined,
-      // A make-up recovers ONE specific canceled session, so it is inherently a
-      // one-off — never a recurring series. This guards every path: a fresh add,
-      // and (critically) editing a single instance of a recurring session into a
-      // make-up, where `recurrence` was seeded from the original's pattern.
-      isRecurring: !isMakeUp && recurrence !== 'none',
-      recurringPattern: isMakeUp || recurrence === 'none' ? undefined : (recurrence as any),
-      // Preserve series membership on single-instance edit so the slider
-      // stays meaningful for future opens.
-      seriesId: appointment?.seriesId,
+      // Instance edit preserves the stored trio VERBATIM (the cadence select is
+      // disabled under "just this", so nothing here can drift) — except a
+      // make-up conversion, which is inherently a one-off and drops the series.
+      isRecurring: isMakeUp ? undefined : appointment?.isRecurring,
+      recurringPattern: isMakeUp ? undefined : appointment?.recurringPattern,
+      seriesId: isMakeUp ? undefined : appointment?.seriesId,
     };
 
-    // A make-up is a single dated session; skip all series expansion below.
-    if (isMakeUp) return [base];
+    // A make-up is a single dated session; never expands.
+    if (isMakeUp) return { appointments: [base], removeIds: [] };
 
-    if (recurrence === 'none') return [base];
+    // Instance-scope edit on a series member: just this row, trio preserved.
+    if (editing && hasSeries) return { appointments: [base], removeIds: [] };
 
-    // Editing an existing record with scope === 'instance': only this one.
-    if (editing) return [base];
+    if (recurrence === 'none') return { appointments: [base], removeIds: [] };
 
-    const start = new Date(startTime);
-    if (isNaN(start.getTime())) return [base];
-    const duration = new Date(endTime).getTime() - start.getTime();
+    // New recurring appointment OR a one-time→recurring conversion on an
+    // existing non-series row (base keeps its id): materialize the bounded
+    // series — every occurrence born with the full trio.
     const authEnd = (() => {
       if (!clientId || !date) return undefined;
       const auth = findAuthFor(
         { appointments: allAppointments || [], authorizations: authorizations || [], clients } as unknown as ScheduleData,
         clientId, date,
       );
-      return auth?.endDate ? new Date(`${auth.endDate}T23:59:59`) : undefined;
+      return auth?.endDate;
     })();
-    const defaultEnd = authEnd ?? new Date(start.getTime() + 90 * 24 * 60 * 60 * 1000);
-    const end = recurrenceEnd ? new Date(`${recurrenceEnd}T23:59:59`) : defaultEnd;
-    // One seriesId for all instances of this new series, so future edits can
-    // target "this and following" or "all in series".
-    const seriesId = uuidv4();
-
-    if (recurrence === 'weekly' || recurrence === 'biweekly' || recurrence === 'monthly') {
-      const result: Appointment[] = [];
-      let occStart = new Date(start);
-      while (occStart <= end) {
-        const occEnd = new Date(occStart.getTime() + duration);
-        result.push({
-          ...base,
-          id: result.length === 0 ? base.id : uuidv4(),
-          startTime: formatLocalISO(occStart),
-          endTime: formatLocalISO(occEnd),
-          seriesId,
-        });
-        if (recurrence === 'monthly') {
-          const next = new Date(occStart);
-          next.setMonth(next.getMonth() + 1);
-          occStart = next;
-        } else {
-          const stepDays = recurrence === 'weekly' ? 7 : 14;
-          occStart = new Date(occStart.getTime() + stepDays * 24 * 60 * 60 * 1000);
-        }
-      }
-      return result.length > 0 ? result : [{ ...base, seriesId }];
-    }
-
-    const result: Appointment[] = [];
-
-    if (recurrence === 'custom-days') {
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dayName = DAYS[(d.getDay() + 6) % 7];
-        if (dayName && selectedDays.has(dayName)) {
-          const occStart = new Date(d);
-          occStart.setHours(start.getHours(), start.getMinutes(), 0, 0);
-          const occEnd = new Date(occStart.getTime() + duration);
-          result.push({
-            ...base,
-            id: result.length === 0 ? base.id : uuidv4(),
-            startTime: formatLocalISO(occStart),
-            endTime: formatLocalISO(occEnd),
-            isRecurring: true,
-            recurringPattern: 'custom' as any,
-            seriesId,
-          });
-        }
-      }
-    } else if (recurrence === 'custom-dates') {
-      const dates = customDates.split(/\s+/).filter(Boolean);
-      for (const dateStr of dates) {
-        const occStart = new Date(`${dateStr}T${pad2(start.getHours())}:${pad2(start.getMinutes())}:00`);
-        if (isNaN(occStart.getTime())) continue;
-        const occEnd = new Date(occStart.getTime() + duration);
-        result.push({
-          ...base,
-          id: result.length === 0 ? base.id : uuidv4(),
-          startTime: formatLocalISO(occStart),
-          endTime: formatLocalISO(occEnd),
-          isRecurring: true,
-          recurringPattern: 'custom' as any,
-          seriesId,
-        });
-      }
-    }
-
-    return result.length > 0 ? result : [{ ...base, seriesId }];
+    return {
+      appointments: materializeSeries({
+        base, recurrence,
+        selectedDays: [...selectedDays],
+        customDates: customDates.split(/\s+/).filter(Boolean),
+        recurrenceEnd: recurrenceEnd || undefined,
+        authEnd,
+      }),
+      removeIds: [],
+    };
   };
 
   // Delete is also scope-aware. Completed and canceled siblings are spared
@@ -442,8 +402,8 @@ export default function AppointmentForm({
       alert('Supervision sessions must have a client. A technician is optional but a client is required.');
       return;
     }
-    const appointments = buildAppointments();
-    if (appointments.length > 0) onSave(appointments);
+    const { appointments, removeIds } = buildAppointments();
+    if (appointments.length > 0 || removeIds.length > 0) onSave(appointments, removeIds);
   };
 
   const handleDelete = () => {
@@ -597,8 +557,8 @@ export default function AppointmentForm({
             <ScopePicker value={editScope} onChange={setEditScope} />
             <p style={{ fontSize: 11, color: '#6b7280', marginTop: 6 }}>
               {editScope === 'instance' && 'Only this occurrence will change.'}
-              {editScope === 'following' && `This and ${siblings.filter(s => new Date(s.startTime).getTime() >= new Date(appointment.startTime).getTime()).length - 1} future occurrence(s) in the series will change. Time-of-day edits keep each occurrence's original date.`}
-              {editScope === 'all' && `All ${siblings.length} occurrences in the series will change. Time-of-day edits keep each occurrence's original date.`}
+              {editScope === 'following' && `This and ${siblings.filter(s => new Date(s.startTime).getTime() >= new Date(appointment.startTime).getTime()).length - 1} future occurrence(s) in the series will change. A date change moves each occurrence by the same number of days; completed/canceled sessions are never touched.`}
+              {editScope === 'all' && `All ${siblings.length} occurrences in the series will change. A date change moves each occurrence by the same number of days; completed/canceled sessions are never touched.`}
             </p>
           </div>
         )}
@@ -631,25 +591,41 @@ export default function AppointmentForm({
             <div>
               <label style={labelStyle}>Recurrence</label>
               {/* A make-up is one-off by definition — force and lock it to One-time
-                  so a recurring series of make-ups can't be created. */}
+                  so a recurring series of make-ups can't be created. On a series
+                  member the select is scope-gated: cadence is a SERIES property,
+                  so "just this" can't change it (that path used to mint flag-only
+                  half-states). */}
               <select
                 value={isMakeUp ? 'none' : recurrence}
                 onChange={(e) => setRecurrence(e.target.value as RecurrencePattern)}
-                disabled={isMakeUp}
-                style={{ ...inputStyle, ...(isMakeUp ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
-                title={isMakeUp ? 'Make-up sessions are always one-time.' : undefined}
+                disabled={isMakeUp || (hasSeries && editScope === 'instance')}
+                style={{ ...inputStyle, ...(isMakeUp || (hasSeries && editScope === 'instance') ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
+                title={isMakeUp ? 'Make-up sessions are always one-time.'
+                  : hasSeries && editScope === 'instance' ? "Switch to 'This + Following' or 'All in Series' to change how often this repeats." : undefined}
               >
                 <option value="none">One-time</option>
                 <option value="weekly">Weekly</option>
                 <option value="biweekly">Every 2 weeks</option>
                 <option value="monthly">Monthly</option>
                 <option value="custom-days">Custom days of week</option>
-                <option value="custom-dates">Specific dates</option>
+                {/* Re-spacing a series onto an explicit date list isn't a cadence —
+                    only offered when creating / converting, not on a series member. */}
+                {!hasSeries && <option value="custom-dates">Specific dates</option>}
               </select>
+              {hasSeries && editScope === 'instance' && !isMakeUp && (
+                <p style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+                  Switch to “This + Following” or “All in Series” to change how often this repeats.
+                </p>
+              )}
+              {seriesPreview && (
+                <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--status-behind, #b45309)', marginTop: 6 }}>
+                  {seriesPreview}
+                </p>
+              )}
             </div>
           </div>
 
-          {appointment?.seriesId && onExtendSeries && (
+          {appointment?.seriesId && hasSeries && onExtendSeries && (
             <div style={{ padding: '10px 12px', background: 'var(--surface-sunken)', border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)', marginTop: 8 }}>
               <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-body)', marginBottom: 4 }}>Extend this recurring series</p>
               <p style={{ fontSize: 11, color: '#6b7280', marginBottom: 8 }}>
@@ -756,6 +732,7 @@ export default function AppointmentForm({
                   <button
                     key={day}
                     type="button"
+                    disabled={hasSeries && editScope === 'instance'}
                     onClick={() => toggleDay(day)}
                     style={{
                       padding: '6px 10px',
@@ -774,8 +751,9 @@ export default function AppointmentForm({
             </div>
           )}
 
-          {/* End-of-recurrence input shared across every series-style recurrence. */}
-          {(recurrence === 'weekly' || recurrence === 'biweekly' || recurrence === 'monthly' || recurrence === 'custom-days') && (
+          {/* End-of-recurrence input for a NEW series (or a one-time→recurring
+              conversion). An existing series' horizon is grown via Extend above. */}
+          {!hasSeries && (recurrence === 'weekly' || recurrence === 'biweekly' || recurrence === 'monthly' || recurrence === 'custom-days') && (
             <div>
               <label style={labelStyle}>End recurrence on (optional)</label>
               <input
@@ -786,9 +764,7 @@ export default function AppointmentForm({
               />
               <p style={{ fontSize: '11px', color: '#6b7280', marginTop: 4 }}>
                 The series starts on the Date at the Start time above and repeats until
-                this date (or the client's auth end date if left blank; falls back to 90 days if no auth). When editing an existing
-                appointment, changes apply only to that single occurrence — the
-                rest of the series is independent.
+                this date (or the client's auth end date if left blank; falls back to 90 days if no auth).
               </p>
             </div>
           )}

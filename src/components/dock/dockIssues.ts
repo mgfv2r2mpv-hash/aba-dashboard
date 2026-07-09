@@ -4,13 +4,15 @@ import type { ComplianceSummary, ComplianceAttention } from '../../complianceCac
 import { conflictKey } from '../ConflictPanel';
 
 /**
- * The dock speaks one language — DockIssue — over two live engine feeds:
- * hard scheduling conflicts (ConstraintValidator) and compliance pressure.
+ * The dock speaks one language — DockIssue — over three live engine feeds:
+ * hard scheduling conflicts (ConstraintValidator), compliance pressure, and
+ * series-horizon prompts (a recurring series about to run off its materialized
+ * end — recurrence is bounded dated rows, so an unextended series just stops).
  * Compliance surfaces as PER-CASE cards for the worst few clients (each with a
  * case-scoped fix CTA) plus one aggregate tail for the remainder; the queue
  * shows one at a time, worst first.
  */
-export type DockIssueKind = 'conflict' | 'compliance';
+export type DockIssueKind = 'conflict' | 'compliance' | 'series-ending';
 
 export interface DockIssue {
   id: string;
@@ -24,6 +26,19 @@ export interface DockIssue {
   conflictKey?: string;
   /** Present on per-CASE compliance cards — drives the case-scoped fix CTA. */
   clientId?: string;
+  /** Present on series-ending cards — drives the one-tap Extend CTA. */
+  seriesId?: string;
+  suggestedThrough?: string; // YYYY-MM-DD the Extend CTA materializes through
+}
+
+/** The slice of seriesHorizon.EndingSeries the dock card needs. */
+export interface EndingSeriesCard {
+  seriesId: string;
+  clientName: string;
+  title: string;
+  lastOccurrence: string;
+  suggestedThrough: string;
+  pendingCount: number;
 }
 
 /** How many per-case compliance cards ride the queue before the tail aggregate. */
@@ -44,6 +59,7 @@ export function buildDockIssues(
   compliance: ComplianceSummary | null,
   attention: ComplianceAttention[] = [],
   maxCaseCards = MAX_CASE_CARDS,
+  endingSeries: EndingSeriesCard[] = [],
 ): DockIssue[] {
   const fromConflicts: DockIssue[] = conflicts.map((c) => {
     const key = conflictKey(c);
@@ -96,9 +112,22 @@ export function buildDockIssues(
     });
   }
 
+  // Series about to run off their materialized horizon — a courtesy prompt
+  // (severity 'info'), never outranking a real problem. CTA stages an extension
+  // through suggestedThrough for review; nothing auto-commits.
+  const seriesCards: DockIssue[] = endingSeries.map(s => ({
+    id: `series-ending:${s.seriesId}`,
+    kind: 'series-ending' as const,
+    severity: 'info' as const,
+    title: `${s.clientName} — series ending`,
+    detail: `${s.title} last runs ${s.lastOccurrence} and has no sessions after that. Extend the series through ${s.suggestedThrough}? (Staged for review, not committed.)`,
+    seriesId: s.seriesId,
+    suggestedThrough: s.suggestedThrough,
+  }));
+
   // Stable sort by severity keeps conflicts ahead of equal-severity compliance
   // cards, so a red conflict still leads a red compliance flag.
-  return [...fromConflicts, ...caseCards, ...tail].sort(
+  return [...fromConflicts, ...caseCards, ...tail, ...seriesCards].sort(
     (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
   );
 }

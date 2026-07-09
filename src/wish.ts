@@ -14,6 +14,7 @@ import {
 import { computeClientCompliance, computeTechCompliance, monthPeriod, CompliancePeriod } from './compliance';
 import { DraftOp, newAddOp, newMoveOp, newRemoveOp, newEditOp, applyOps } from './draft';
 import { buildTravelContext, travelMinutes } from './travel';
+import { normalizeRecurrenceFields } from './seriesProfile';
 import { v4 as uuidv4 } from 'uuid';
 
 const APPT_TYPES: Appointment['type'][] = [
@@ -99,7 +100,7 @@ export function parseOps(rawOps: any, rev: (v: any) => string | undefined): Wish
         if (title) add.title = title;
         const client = rev(ro.client); if (client) add.client = client;
         const tech = rev(ro.tech ?? ro.technician); if (tech) add.technician = tech;
-        if (ro.recurring) { add.recurring = true; add.pattern = ['weekly', 'biweekly', 'monthly'].includes(ro.pattern) ? ro.pattern : 'weekly'; }
+        if (ro.recurring) { add.recurring = true; add.pattern = ['weekly', 'biweekly', 'monthly', 'custom'].includes(ro.pattern) ? ro.pattern : 'weekly'; }
         ops.push(add);
       }
     } else if (kind === 'blackout') {
@@ -346,6 +347,27 @@ export function wishSolutionToDraft(sol: WishSolution, base: ScheduleData): Wish
   // per id, so the final op for an id must carry the fully-accumulated state.
   const working = new Map(base.appointments.map(a => [a.id, { ...a }]));
 
+  // Recurring adds WITHOUT a seriesId: ≥2 matching adds (same identity + clock +
+  // duration) in one solution are a series being born — mint them ONE shared
+  // seriesId so they land as a real series. A lone recurring add has no siblings
+  // and lands as an honest one-time (normalizeRecurrenceFields clears the flag).
+  const mintKeyOf = (o: Extract<WishOp, { op: 'add' }>): string =>
+    [o.type, o.client ?? '', o.technician ?? '', o.start.slice(11, 16),
+      new Date(o.end).getTime() - new Date(o.start).getTime()].join('|');
+  const mintGroups = new Map<string, Extract<WishOp, { op: 'add' }>[]>();
+  for (const o of sol.ops) {
+    if (o.op !== 'add' || !o.recurring || o.seriesId) continue;
+    const key = mintKeyOf(o);
+    const arr = mintGroups.get(key);
+    if (arr) arr.push(o); else mintGroups.set(key, [o]);
+  }
+  const mintedSeries = new Map<WishOp, string>();
+  for (const group of mintGroups.values()) {
+    if (group.length < 2) continue;
+    const sid = uuidv4();
+    for (const o of group) mintedSeries.set(o, sid);
+  }
+
   for (const o of sol.ops) {
     if (o.op === 'move') {
       const a = working.get(o.appointmentId);
@@ -373,10 +395,15 @@ export function wishSolutionToDraft(sol: WishSolution, base: ScheduleData): Wish
         type: o.type,
         status: 'scheduled',
       };
-      if (o.recurring) { appt.isRecurring = true; appt.recurringPattern = o.pattern || 'weekly'; }
       // Extend-series adds carry the EXISTING seriesId so the new occurrences join the
       // series (not a fresh one) — the This/Following/All batch path keys on seriesId.
-      if (o.seriesId) appt.seriesId = o.seriesId;
+      // Batch-minted adds share the seriesId minted above. Either way the trio is only
+      // set WITH a series behind it; a lone recurring add stays an honest one-time.
+      const seriesId = o.seriesId ?? mintedSeries.get(o);
+      if (seriesId) {
+        appt.seriesId = seriesId;
+        if (o.recurring) { appt.isRecurring = true; appt.recurringPattern = o.pattern || 'weekly'; }
+      }
       working.set(appt.id, appt);
       ops.push(newAddOp(appt));
     } else if (o.op === 'blackout') {
@@ -420,13 +447,14 @@ export function wishSolutionToDraft(sol: WishSolution, base: ScheduleData): Wish
         ops.push(newEditOp(next));
       } else unresolved++;
     } else if (o.op === 'regroup') {
-      // Stamp a shared seriesId (+ pattern annotation) onto each named row via an
-      // `edit` — no time change, so rendering/compliance are untouched; it only
-      // unlocks the This/Following/All batch-edit path (keyed on seriesId).
+      // Stamp the full recurrence trio onto each named row via an `edit` — no time
+      // change, so rendering/compliance are untouched; it unlocks the This/
+      // Following/All batch-edit path (keyed on seriesId) and displays honestly as
+      // recurring (a series member IS recurring — the trio invariant).
       for (const id of o.appointmentIds) {
         const a = working.get(id);
         if (a) {
-          const next: Appointment = { ...a, seriesId: o.seriesId, recurringPattern: o.recurringPattern ?? a.recurringPattern };
+          const next: Appointment = { ...a, seriesId: o.seriesId, isRecurring: true, recurringPattern: o.recurringPattern ?? a.recurringPattern };
           working.set(next.id, next);
           ops.push(newEditOp(next));
         } else unresolved++;
@@ -447,6 +475,23 @@ export function wishSolutionToDraft(sol: WishSolution, base: ScheduleData): Wish
       } else unresolved++;
     }
   }
+
+  // Trio-invariant choke point: EVERY producer (AI chat, builder, tidy, extend-
+  // series, Fix It) funnels through here, so normalizing the projected working set
+  // once retrofits them all. Emits a metadata-only `edit` per changed PENDING row —
+  // e.g. a remove that leaves a series with one member collapses the survivor to
+  // one-time, and a lone recurring add loses its flag. Facts are never touched
+  // (normalizeRecurrenceFields returns them by identity).
+  const normalized = normalizeRecurrenceFields([...working.values()]);
+  if (normalized.changedIds.length) {
+    const changed = new Set(normalized.changedIds);
+    for (const a of normalized.appointments) {
+      if (!changed.has(a.id)) continue;
+      working.set(a.id, a);
+      ops.push(newEditOp(a));
+    }
+  }
+
   return { ops, blackouts, hintChanges, unresolved };
 }
 

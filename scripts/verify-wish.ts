@@ -4,8 +4,9 @@
  * Run: npx tsx scripts/verify-wish.ts
  */
 import { ScheduleData, WishSolution, WishOp } from '../src/types';
-import { parseWishSolutions, parseOps, parseChatTurn, dropPastOps, wishSolutionToDraft, applyWishSolution, summarizeWish, computeSolutionImpact, computeOpsImpact } from '../src/wish';
+import { parseWishSolutions, parseOps, parseChatTurn, dropPastOps, dropDoubleBookedOps, wishSolutionToDraft, applyWishSolution, summarizeWish, computeSolutionImpact, computeOpsImpact } from '../src/wish';
 import { monthPeriod } from '../src/compliance';
+import { buildAnonymizationMap, deAnonymizeNarration, deAnonymizeText } from '../src/anonymizer';
 
 let passed = 0, failed = 0;
 function check(name: string, cond: boolean, extra?: string) {
@@ -154,6 +155,90 @@ console.log('dropPastOps (real-world safety net)');
   check('remove passes through', kept.some(o => o.op === 'remove'));
   check('unparseable start dropped', !kept.some(o => o.op === 'add' && (o as any).start === 'not-a-date'));
   check('total kept = 3', kept.length === 3);
+}
+
+console.log('dropDoubleBookedOps (single BCBA — one place at a time)');
+{
+  const data: ScheduleData = {
+    id: 'db', version: 2,
+    clients: [
+      { id: 'c1', name: 'C One', availabilityWindows: {} },
+      { id: 'c2', name: 'C Two', availabilityWindows: {} },
+    ],
+    technicians: [{ id: 't1', name: 'T One', isRBT: true, assignments: [], availability: {} }],
+    settings: {} as ScheduleData['settings'],
+    appointments: [
+      // an existing committed supervision (a BCBA session) 10:00–11:00
+      { id: 's0', title: 'Sup', client: 'C One', technician: 'T One', startTime: '2026-07-13T10:00:00', endTime: '2026-07-13T11:00:00', isFixed: false, isBillable: true, type: 'supervision' },
+      // an existing committed DIRECT 13:00–15:00 (NOT BCBA-run — supervision may sit inside it)
+      { id: 'd0', title: 'Direct', client: 'C Two', technician: 'T One', startTime: '2026-07-13T13:00:00', endTime: '2026-07-13T15:00:00', isFixed: false, isBillable: true, type: 'client-session' },
+    ],
+    lastModified: 'x',
+  };
+
+  // Exactly the device symptom: two overlapping supervisions on the single BCBA.
+  const overlapPair: WishOp[] = [
+    { op: 'add', type: 'supervision', client: 'C One', start: '2026-07-14T14:00:00', end: '2026-07-14T16:00:00' },
+    { op: 'add', type: 'supervision', client: 'C Two', start: '2026-07-14T14:15:00', end: '2026-07-14T16:15:00' },
+  ];
+  check('two overlapping supervisions (diff clients) → one dropped', dropDoubleBookedOps(overlapPair, data).length === 1);
+
+  const sameClient: WishOp[] = [
+    { op: 'add', type: 'supervision', client: 'C One', start: '2026-07-14T14:00:00', end: '2026-07-14T15:00:00' },
+    { op: 'add', type: 'supervision', client: 'C One', start: '2026-07-14T14:30:00', end: '2026-07-14T15:30:00' },
+  ];
+  check('same-client overlapping supervisions → one dropped', dropDoubleBookedOps(sameClient, data).length === 1);
+
+  const insideDirect: WishOp[] = [
+    { op: 'add', type: 'supervision', client: 'C Two', technician: 'T One', start: '2026-07-13T13:30:00', end: '2026-07-13T14:30:00' },
+  ];
+  check('supervision inside a client-session direct → kept', dropDoubleBookedOps(insideDirect, data).length === 1);
+
+  const hitsCommitted: WishOp[] = [
+    { op: 'add', type: 'supervision', client: 'C Two', start: '2026-07-13T10:30:00', end: '2026-07-13T11:30:00' },
+  ];
+  check('supervision overlapping an existing supervision → dropped', dropDoubleBookedOps(hitsCommitted, data).length === 0);
+
+  const clear: WishOp[] = [
+    { op: 'add', type: 'supervision', client: 'C One', start: '2026-07-15T09:00:00', end: '2026-07-15T10:00:00' },
+  ];
+  check('non-overlapping supervision → kept', dropDoubleBookedOps(clear, data).length === 1);
+
+  // A move of s0 onto a slot that only overlaps its OWN old position is fine — the
+  // moved session's old slot is excluded from the conflict context.
+  const moveOntoSelf: WishOp[] = [
+    { op: 'move', appointmentId: 's0', start: '2026-07-13T10:30:00', end: '2026-07-13T11:30:00' },
+  ];
+  check('move overlapping only its own old slot → kept', dropDoubleBookedOps(moveOntoSelf, data).length === 1);
+
+  const direct: WishOp[] = [
+    { op: 'add', type: 'client-session', client: 'C One', technician: 'T One', start: '2026-07-13T10:15:00', end: '2026-07-13T11:15:00' },
+  ];
+  check('non-BCBA (direct) op passes through', dropDoubleBookedOps(direct, data).length === 1);
+}
+
+console.log('deAnonymizeNarration (friendly appt labels; names restored)');
+{
+  const data: ScheduleData = {
+    id: 'n', version: 2,
+    clients: [{ id: 'c1', name: 'Julianna D', availabilityWindows: {} }],
+    technicians: [{ id: 't1', name: 'Sam K', isRBT: true, assignments: [], availability: {} }],
+    settings: {} as ScheduleData['settings'],
+    appointments: [
+      { id: 'apt-x', title: 'Direct', client: 'Julianna D', technician: 'Sam K', startTime: '2026-07-14T14:00:00', endTime: '2026-07-14T16:00:00', isFixed: false, isBillable: true, type: 'client-session' },
+    ],
+    lastModified: 'x',
+  };
+  const map = buildAnonymizationMap(data);
+  const aptTok = map.appointments.get('apt-x')!;   // APT_1
+  const cliTok = map.clients.get('c1')!;            // CLIENT_1
+  const techTok = map.technicians.get('t1')!;       // TECH_1
+  const out = deAnonymizeNarration(`place inside ${aptTok} (${cliTok}) with ${techTok}`, map, data);
+  check('APT token → friendly label, never the raw id', !out.includes(aptTok) && !out.includes('apt-x') && out.includes('Jul 14'));
+  check('client token → real name', out.includes('Julianna D'));
+  check('tech token → real name', out.includes('Sam K'));
+  // The op-field path (deAnonymizeText) still restores the raw id so move/cancel resolve.
+  check('deAnonymizeText still restores the raw id', deAnonymizeText(`ref ${aptTok}`, map).includes('apt-x'));
 }
 
 console.log('setHint: parse → side-channel → apply (the taught-heuristic op)');

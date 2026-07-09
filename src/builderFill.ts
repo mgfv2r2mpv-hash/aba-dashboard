@@ -289,25 +289,32 @@ export function fillToBillableTarget(
     return added;
   };
 
-  // Weekly minimum first (PTO-shaved), then push the monthly total to target.
+  // Weekly minimum first (PTO-shaved). A chat "fill my week to N hours" sets the
+  // per-week target explicitly via weeklyTargetOverride — that means EACH week to N,
+  // so it also suppresses the monthly top-up below (which would otherwise push weeks
+  // above N to chase the monthly total).
+  const override = config.weeklyTargetOverride && config.weeklyTargetOverride > 0 ? config.weeklyTargetOverride : undefined;
+  const weeklyFloor = override ?? util.bcbaWeeklyBillableMin;
   for (const wk of futureWeeks) {
-    const floor = reduceRequirementForPto(util.bcbaWeeklyBillableMin, ptoHoursInRange(data.timeOff, weekBounds(wk.dates).s, weekBounds(wk.dates).e), ratio);
+    const floor = reduceRequirementForPto(weeklyFloor, ptoHoursInRange(data.timeOff, weekBounds(wk.dates).s, weekBounds(wk.dates).e), ratio);
     if (floor > 0) fillWeek(wk, floor);
   }
 
-  const monthStart = parseLocalDate(config.monthHorizon.start);
-  const monthEnd = parseLocalDate(config.monthHorizon.end);
-  const monthWeeks = enumerateHorizonWeeks(config, monthStart).length;
-  const monthlyBase = monthWeeks >= 5 ? util.bcbaMonthlyBillableHours5Week : util.bcbaMonthlyBillableHours;
-  const monthlyTarget = reduceRequirementForPto(monthlyBase, ptoHoursInRange(data.timeOff, monthStart.getTime(), monthEnd.getTime()), ratio);
-  const monthTotal = () => [...billableByWeek.values()].reduce((s, h) => s + h, 0);
-  for (let guard = 0; monthTotal() < monthlyTarget - 0.01 && guard < 100; guard++) {
-    let progressed = false;
-    for (const wk of futureWeeks) {
-      if (monthTotal() >= monthlyTarget - 0.01) break;
-      if (fillWeek(wk, (billableByWeek.get(wk.weekIndex) ?? 0) + MAX_SUP_HRS) > 0.01) progressed = true;
+  if (override === undefined) {
+    const monthStart = parseLocalDate(config.monthHorizon.start);
+    const monthEnd = parseLocalDate(config.monthHorizon.end);
+    const monthWeeks = enumerateHorizonWeeks(config, monthStart).length;
+    const monthlyBase = monthWeeks >= 5 ? util.bcbaMonthlyBillableHours5Week : util.bcbaMonthlyBillableHours;
+    const monthlyTarget = reduceRequirementForPto(monthlyBase, ptoHoursInRange(data.timeOff, monthStart.getTime(), monthEnd.getTime()), ratio);
+    const monthTotal = () => [...billableByWeek.values()].reduce((s, h) => s + h, 0);
+    for (let guard = 0; monthTotal() < monthlyTarget - 0.01 && guard < 100; guard++) {
+      let progressed = false;
+      for (const wk of futureWeeks) {
+        if (monthTotal() >= monthlyTarget - 0.01) break;
+        if (fillWeek(wk, (billableByWeek.get(wk.weekIndex) ?? 0) + MAX_SUP_HRS) > 0.01) progressed = true;
+      }
+      if (!progressed) break;
     }
-    if (!progressed) break;
   }
 
   return { ops, blocks: [], busyOut: bcbaBusy };

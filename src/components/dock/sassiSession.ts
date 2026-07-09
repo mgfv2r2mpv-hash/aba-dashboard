@@ -135,7 +135,7 @@ export function useSassiSession({ getSchedule, apiKey, model, onProposal, getFoc
       // it goes to the UI ONLY — history keeps res.raw (token space) so no name ever
       // rides back to the API on the next turn.
       if (res.build) {
-        const result = scheduler.runBuild(new Date(), res.buildScope ?? 'all');
+        const result = scheduler.runBuild(new Date(), res.buildScope ?? 'fill', res.weeklyTarget);
         const staged = result.solution.ops.length > 0;
         // A build REPLACES the live preview even when it placed nothing — same as the
         // deterministic button (handleBuildDirect) — so a 0-op build clears any stale

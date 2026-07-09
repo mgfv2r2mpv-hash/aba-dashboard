@@ -11,7 +11,7 @@
  * Client names here are synthetic ("Client Alpha"); nothing real is logged.
  */
 import { ScheduleData, Client, Technician, Authorization, CompanySettings, Appointment, SupervisionCadence } from '../src/types';
-import { buildSchedule, BuilderConfig, defaultBuilderConfig, combinedBuilderConfig, supervisionBuilderConfig, formatBuildSummary, sessionTitle } from '../src/scheduleBuilder';
+import { buildSchedule, BuilderConfig, defaultBuilderConfig, combinedBuilderConfig, supervisionBuilderConfig, fillBuilderConfig, formatBuildSummary, sessionTitle } from '../src/scheduleBuilder';
 import { weeksForCadence, cancellationRiskWeight, isBcbaFree, reserveBcba, expandDirectOccurrences } from '../src/builderSupervision';
 import { wishSolutionToDraft, dropPastOps } from '../src/wish';
 import { applyOps } from '../src/draft';
@@ -672,6 +672,59 @@ console.log('archived: a case archived-as-of-now is never materialized forward �
   check('archived: NO direct is materialized on/after now for the archived case', forGone('client-session').every(a => new Date(a.startTime).getTime() < NOW.getTime()), `future=${forGone('client-session').filter(a => new Date(a.startTime).getTime() >= NOW.getTime()).length}`);
   check('archived: the deleted "Ghost BT" tech never appears on a materialized (future) direct', !forGone('client-session').some(a => a.technician === 'Ghost BT' && new Date(a.startTime).getTime() >= NOW.getTime()));
   check('archived: the active case is unaffected (still supervised)', committed.appointments.some(a => a.type === 'supervision' && (a.client === 'c1' || a.client === 'Active Ann')));
+}
+
+console.log('fill (chat "fill my week to N"): tops BCBA billable over EXISTING directs, no new directs, no double-books');
+{
+  const BCBA = new Set(['supervision', 'parent-training', 'case-planning', 'reassessment']);
+  const cs = ['fa', 'fb', 'fc', 'fd'].map(id => client(id, `Fill ${id.toUpperCase()}`, WIDE_CLIN));
+  const t1 = tech('t1', 'Aide', WIDE_CLIN, cs.map(c => ({ clientId: c.id, hoursPerWeek: 40, billable: true })));
+  // Case-planning headroom so the fill has room to reach a real weekly target (not
+  // just the supervision cap) — this is what lets "fill to 25" actually reach 25.
+  const auths = cs.map(c => ({ ...auth(c.id, 10), weekly: { direct: 10, casePlanning: 20 } }));
+  // Concrete (non-recurring) directs: each case Mon+Wed 09:00–14:00 (10h/wk) for the
+  // first three in-month weeks — real windows to supervise over, nothing recurring to
+  // materialize forward. Days 6,8 / 13,15 / 20,22 are all in July.
+  const directs: Appointment[] = [];
+  for (const c of cs) for (let w = 0; w < 3; w++) for (const dow of [1, 3]) {
+    const dd = String(6 + w * 7 + (dow - 1)).padStart(2, '0');
+    directs.push({
+      id: `d-${c.id}-${w}-${dow}`, title: 'Direct', client: c.name, technician: 'Aide', type: 'client-session',
+      startTime: `2026-07-${dd}T09:00:00`, endTime: `2026-07-${dd}T14:00:00`, isFixed: true, isBillable: true, isRecurring: false,
+    });
+  }
+  const base = schedule(cs, [t1], auths, baseSettings(WIDE_CLIN), directs);
+
+  const wk0Billable = (d: ScheduleData) => d.appointments.filter(a => BCBA.has(a.type) && weekOf(a.startTime) === 0).reduce((s, a) => s + durH(a), 0);
+  const def = run(base, fillBuilderConfig(base, NOW));
+  const staged = def.staged;
+
+  check('fill emits ZERO new direct (client-session) ops', staged.every(o => !(o.op === 'add' && (o as any).type === 'client-session')),
+    `dir=${staged.filter(o => o.op === 'add' && (o as any).type === 'client-session').length}`);
+  check('fill places supervision over the existing directs', staged.some(o => o.op === 'add' && (o as any).type === 'supervision'));
+
+  const bcba = def.committed.appointments.filter(a => BCBA.has(a.type)).map(a => ({ s: new Date(a.startTime).getTime(), e: new Date(a.endTime).getTime() })).sort((x, y) => x.s - y.s);
+  let overlap = false;
+  for (let i = 1; i < bcba.length; i++) if (bcba[i].s < bcba[i - 1].e) overlap = true;
+  check('no two BCBA sessions overlap (single BCBA can be one place at a time)', !overlap);
+
+  const perCaseSupOK = cs.every(c => {
+    const h = def.committed.appointments.filter(a => a.type === 'supervision' && a.client === c.name && weekOf(a.startTime) === 0).reduce((s, a) => s + durH(a), 0);
+    return h <= 2.001; // 20% of 10h direct
+  });
+  check('no case exceeds its 20% supervision cap', perCaseSupOK);
+
+  // Default target is the configured weekly min (25); with case-planning headroom the
+  // fill reaches it.
+  check('fill reaches the default weekly target (~25) given headroom', wk0Billable(def.committed) >= 23,
+    `def=${wk0Billable(def.committed).toFixed(1)}`);
+
+  // weeklyTargetOverride sets the per-week target: "fill my week to 12" fills each week
+  // to ~12 — below the default 25 — and never past 12 (monthly top-up suppressed).
+  const lo = run(base, fillBuilderConfig(base, NOW, 12));
+  check('weeklyTargetOverride sets the per-week fill target (≈12 < default)',
+    wk0Billable(lo.committed) <= 13.5 && wk0Billable(lo.committed) < wk0Billable(def.committed),
+    `lo=${wk0Billable(lo.committed).toFixed(1)} def=${wk0Billable(def.committed).toFixed(1)}`);
 }
 
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed`);

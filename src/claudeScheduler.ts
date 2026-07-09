@@ -7,6 +7,7 @@ import {
   anonymizeSchedule,
   scrubText,
   deAnonymizeText,
+  deAnonymizeNarration,
   resolveClientReferences,
   containsEntityName,
   EntityResolution,
@@ -19,7 +20,7 @@ import { allowedStrategies } from './fixit';
 import { computeClientCompliance, computeTechCompliance, monthPeriod } from './compliance';
 import { resolveUtilization } from './utilization';
 import { buildFillContext, buildComplianceFillContext, buildBcbaWeekFillContext, buildSupervisableWindows, buildFeasibilityDiagnostics } from './fillSchedule';
-import { buildSchedule, combinedBuilderConfig, supervisionBuilderConfig, parentTrainingBuilderConfig, BuildResult } from './scheduleBuilder';
+import { buildSchedule, combinedBuilderConfig, supervisionBuilderConfig, parentTrainingBuilderConfig, fillBuilderConfig, BuildResult } from './scheduleBuilder';
 import { startOfWeek } from 'date-fns';
 
 export type ClaudeModel = 'claude-opus-4-8' | 'claude-sonnet-4-6' | 'claude-haiku-4-5-20251001';
@@ -58,7 +59,11 @@ export interface SassiChatResult {
   // (default "build my month"); 'supervision' = supervision-only over the existing
   // directs; 'parent-training' = PT-only over the existing directs.
   build?: boolean;
-  buildScope?: 'all' | 'supervision' | 'parent-training';
+  buildScope?: 'all' | 'supervision' | 'parent-training' | 'fill';
+  // Set on a 'fill' build when the BCBA named a number ("fill my week to 30 hours");
+  // the caller passes it to runBuild so the engine tops each week to it. Undefined →
+  // the configured weekly billable minimum.
+  weeklyTarget?: number;
 }
 
 // sAssI answers through exactly one of these two tools every turn (tool_choice
@@ -121,12 +126,13 @@ const CLARIFY_TOOL = {
 // cases it couldn't fill; you only frame the outcome in `reply`.
 const BUILD_TOOL = {
   name: 'build',
-  description: 'Run the deterministic scheduler for a WHOLE-caseload build this month. Use ONLY for broad "build/fill my schedule" requests — never for a single-appointment change (use respond for those). You do not place anything; the engine does and reports blocks. Set scope:"all" to build directs AND chase supervision AND parent training to their targets ("build my month"); scope:"supervision" to chase supervision over the EXISTING directs ("hit everyone\'s supervision floor"); scope:"parent-training" to chase parent-training hours over the EXISTING directs ("add everyone\'s parent training").',
+  description: 'Run the deterministic scheduler for a bulk build/fill. Use for any broad "build/fill my schedule/week/month to N hours" request — never for a single-appointment change (use respond for those). You do not place anything; the engine does (no double-books, travel-aware, respects the supervision cap) and reports what it couldn\'t fill. Set scope:"fill" to top the BCBA\'s OWN billable (supervision + parent training + case-planning) to their weekly/monthly target OVER the existing directs, adding NO new direct sessions — this is the default for "fill my week to N hours" / "get me to 25". Set scope:"all" only when they want the whole direct backbone (re)built too ("build my month from scratch"). scope:"supervision" = supervision-only over existing directs; scope:"parent-training" = PT-only over existing directs.',
   input_schema: {
     type: 'object' as const,
     properties: {
-      reply: { type: 'string', description: 'Short framing message to the BCBA — that you are building and will report what couldn’t be filled.' },
-      scope: { type: 'string', enum: ['all', 'supervision', 'parent-training'], description: 'all = directs + supervision + parent training (default); supervision = supervision only; parent-training = parent training only. Each single scope runs over the existing directs.' },
+      reply: { type: 'string', description: 'Short framing message to the BCBA — that you are filling toward their target and will report what couldn’t be filled.' },
+      scope: { type: 'string', enum: ['fill', 'all', 'supervision', 'parent-training'], description: 'fill = top BCBA billable to target over existing directs, no new directs (default for "fill my week to N"); all = also (re)build the direct backbone; supervision = supervision only; parent-training = PT only.' },
+      weeklyTarget: { type: 'number', description: 'scope:"fill" only — the weekly billable-hours target the BCBA named (e.g. 25 for "fill my week to 25 hours"). Omit if they didn\'t state a number; the engine then uses their configured weekly minimum.' },
     },
     required: ['reply'],
   },
@@ -270,29 +276,31 @@ export class ClaudeScheduler {
         const label = deAnonymizeText(String(o), this.anonMap);
         return { label, value: label };
       });
-      const reply = deAnonymizeText(typeof input.reply === 'string' ? input.reply : '', this.anonMap);
+      const reply = deAnonymizeNarration(typeof input.reply === 'string' ? input.reply : '', this.anonMap, this.data);
       return { raw: JSON.stringify(input), reply, ops: [], questions };
     }
     if (toolUse && toolUse.name === 'build') {
       const input = toolUse.input || {};
-      const reply = deAnonymizeText(typeof input.reply === 'string' ? input.reply : '', this.anonMap);
-      const buildScope: 'all' | 'supervision' | 'parent-training' =
+      const reply = deAnonymizeNarration(typeof input.reply === 'string' ? input.reply : '', this.anonMap, this.data);
+      const buildScope: 'all' | 'supervision' | 'parent-training' | 'fill' =
         input.scope === 'supervision' ? 'supervision'
         : input.scope === 'parent-training' ? 'parent-training'
-        : 'all';
+        : input.scope === 'all' ? 'all'
+        : 'fill';
+      const weeklyTarget = typeof input.weeklyTarget === 'number' && input.weeklyTarget > 0 ? input.weeklyTarget : undefined;
       // ops stays empty — the caller runs runBuild() locally and stages those ops.
-      return { raw: JSON.stringify(input), reply, ops: [], build: true, buildScope };
+      return { raw: JSON.stringify(input), reply, ops: [], build: true, buildScope, weeklyTarget };
     }
     if (toolUse && toolUse.name === 'respond') {
       const turn = parseToolTurn(toolUse.input, reverse);
-      return { raw: JSON.stringify(toolUse.input || {}), reply: deAnonymizeText(turn.reply, this.anonMap), ops: turn.ops };
+      return { raw: JSON.stringify(toolUse.input || {}), reply: deAnonymizeNarration(turn.reply, this.anonMap, this.data), ops: turn.ops };
     }
     // Defensive fallback: tool_choice:'any' should always yield a tool call, but if
     // the model somehow returned a text block, parse it the old way rather than blank.
     const textBlock = response.content.find((c: any) => c.type === 'text') as any;
     const raw = textBlock && typeof textBlock.text === 'string' ? textBlock.text : '';
     const turn = parseChatTurn(raw, reverse);
-    return { raw, reply: deAnonymizeText(turn.reply, this.anonMap), ops: turn.ops };
+    return { raw, reply: deAnonymizeNarration(turn.reply, this.anonMap, this.data), ops: turn.ops };
   }
 
   // Scrub a user's typed message to token space before it enters the history —
@@ -319,10 +327,11 @@ export class ClaudeScheduler {
   // the model picks the `build` tool: placement is entirely local and deterministic
   // (buildSchedule on the REAL schedule — never the anonymized one, never Claude),
   // so its ops are staged straight into the draft, and its blocks report locally.
-  runBuild(now: Date, scope: 'all' | 'supervision' | 'parent-training' = 'all'): BuildResult {
+  runBuild(now: Date, scope: 'all' | 'supervision' | 'parent-training' | 'fill' = 'all', weeklyTarget?: number): BuildResult {
     const config =
       scope === 'supervision' ? supervisionBuilderConfig(this.data, now)
       : scope === 'parent-training' ? parentTrainingBuilderConfig(this.data, now)
+      : scope === 'fill' ? fillBuilderConfig(this.data, now, weeklyTarget)
       : combinedBuilderConfig(this.data, now);
     return buildSchedule(this.data, config, now);
   }
@@ -379,7 +388,7 @@ PERIOD: ${ctx.periodLabel} (through ${period.end.toISOString().slice(0, 10)})
 BCBA availability: ${clinicianAvail}
 
 YOUR JOB — help the BCBA fill and refine their OWN calendar across the period above, COMPLIANCE-FIRST, and carry out the everyday edits they ask for.
-- The BCBA already has ~${ctx.bcbaScheduledHrs}h of their own billable work (supervision / parent-training / case-planning / reassessment) scheduled this period. They tell you their weekly-hours target in chat (e.g. "fill my week to 25 hours") — work toward it week over week across the period.
+- The BCBA already has ~${ctx.bcbaScheduledHrs}h of their own billable work (supervision / parent-training / case-planning / reassessment) scheduled this period. When they ask to reach a billable target — "fill my week to 25 hours", "top up my week", "get me to 25" — DON'T hand-place the sessions yourself: call build({reply, scope:"fill", weeklyTarget:N}). The deterministic engine fills toward the target over the existing directs (no double-books, travel-aware, respects the supervision cap) far more reliably than you can by reasoning it out. Use respond+ops only for the targeted edits they ask for afterward.
 - Every session you add must move a case toward its ideal supervision range (${ctx.idealMinPct}%–${ctx.idealMaxPct}% of direct hours) or otherwise advance compliance. Prioritize the cases most behind.
 - This is a back-and-forth. Propose a plan, then adjust it as the BCBA reacts ("I have parent training Tuesday", "move that earlier", "why did you pick that slot?"). Explain your moves plainly so they can fine-tune with you.
 
@@ -407,9 +416,9 @@ ${anon.blackouts.length ? `BLACKOUT DAYS (each blocks only the named entity): ${
 ${anon.timeOff.length ? `BCBA TIME OFF: ${JSON.stringify(anon.timeOff)}` : ''}
 
 HOW TO REPLY — call exactly ONE tool every turn:
-- respond({reply, ops}) — reply is a short, plain-language message (what changed and WHY, clinical-but-friendly, with a follow-up when useful). ops is the COMPLETE current proposal, not a delta — the calendar preview is replaced with your ops each turn. Use ops:[] when you're only answering/explaining (e.g. the BCBA asked "why?").
+- respond({reply, ops}) — reply is a short, plain-language message (what changed and WHY, clinical-but-friendly, with a follow-up when useful). ops is the COMPLETE current proposal, not a delta — the calendar preview is replaced with your ops each turn. Use ops:[] when you're only answering/explaining (e.g. the BCBA asked "why?"). Your reply must describe EXACTLY the sessions in ops — never narrate a session (a tally, a "7 new sessions" list) that isn't in the ops array.
 - clarify({reply, options}) — when you need a decision before acting (which client, which time, which session), ask ONE question and offer the likely answers as options.
-- build({reply}) — ONLY for a broad "build/fill my whole schedule this month" request. The deterministic engine (not you) then places the recurring direct backbone across the caseload and reports which cases it couldn't fill; you just frame it in reply. Never use build for a single-appointment change — use respond with ops for those.
+- build({reply, scope, weeklyTarget?}) — hand a BULK build/fill to the deterministic engine (it places, you only frame it in reply). scope:"fill" (default) tops the BCBA's billable to their target OVER the existing directs with NO new directs — use it for "fill my week to N hours" (pass weeklyTarget:N when they state a number). scope:"all" also (re)builds the direct backbone — use only for "build my whole month from scratch". Never use build for a single-appointment change — use respond with ops for those.
 - op shapes: add {op:"add",type,client:"CLIENT_n",tech:"TECH_n"|null,start,end}; move {op:"move",apt:"APT_n",start,end}; lock {op:"setFixed",apt:"APT_n",isFixed:true|false}; complete {op:"complete",apt:"APT_n"}; cancel {op:"cancel",apt:"APT_n",source:"bt|bcba|admin|family",reason,unplanned:true|false}; setHint {op:"setHint",client:"CLIENT_n",supervisionStyle:"consolidate|split|auto"?,preferredDaypart:"morning|midday|afternoon|evening"?} — records a LASTING scheduling preference the builder honors on every future build (use when the BCBA states a per-client heuristic like "this client does better with two short mid-day supervisions"). "add" ops must NOT include an id.
 - If nothing can be added compliantly, DON'T say "no options": explain the specific blocker per case (from BLOCKERS) and suggest what the BCBA could change (add availability, free a slot, relax the cap).
 - When the BCBA says "this appointment"/"that one", resolve it to the APT token given in a [context: this appointment = APT_n] note on the latest message.

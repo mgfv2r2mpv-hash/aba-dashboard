@@ -37,6 +37,10 @@ export interface BuilderConfig {
   weekStart: string;                    // ISO Monday — the recurring "template" week
   monthHorizon: { start: string; end: string };  // for the cross-week self-check
   bcbaWeeklyBillableTarget: number;     // carried for later phases (supervision)
+  // Optional per-build override for the weekly billable floor the fill pass tops each
+  // week to (e.g. the chat's "fill my week to 30 hours"). Undefined → the configured
+  // bcbaWeeklyBillableMin. Only fillToBillableTarget reads this.
+  weeklyTargetOverride?: number;
   chaseDirect: boolean;                 // Phase 1 uses only this
   chaseSupervision?: boolean;
   chasePT?: boolean;
@@ -700,6 +704,21 @@ export function combinedBuilderConfig(data: ScheduleData, now: Date): BuilderCon
   return { ...defaultBuilderConfig(data, now), chaseDirect: true, chaseSupervision: true, chasePT: true };
 }
 
+// "Fill my week/month to N hours": top the BCBA's OWN billable (supervision +
+// parent training + solo case-planning) to the weekly/monthly target OVER the
+// existing directs — WITHOUT rebuilding the direct backbone (chaseDirect:false, so
+// buildSchedule drops cal.directOps). This is the chat's target-fill intent; a
+// stated number rides in via weeklyTargetOverride. Same passes as the combined
+// build minus the directs, so supervision hosts on concrete existing directs, the
+// occupancy plane forbids double-books, and the 20% cap holds.
+export function fillBuilderConfig(data: ScheduleData, now: Date, weeklyTargetOverride?: number): BuilderConfig {
+  return {
+    ...defaultBuilderConfig(data, now),
+    chaseDirect: false, chaseSupervision: true, chasePT: true,
+    weeklyTargetOverride: weeklyTargetOverride && weeklyTargetOverride > 0 ? weeklyTargetOverride : undefined,
+  };
+}
+
 // Human label for why a case couldn't be fully filled. Shared by the dock panel
 // and the chat summary so the wording stays in one place.
 export function bindingConstraintLabel(c: ClientBlock['bindingConstraint']): string {
@@ -741,13 +760,20 @@ export function formatBuildSummary(result: BuildResult, hasStaged: boolean): str
       ? 'Nothing to place — every case is already at its direct target.'
       : `No sessions could be placed:\n${blockLines.join('\n')}`;
   }
-  let head = `Placed ${round1(metrics.directHrsPlaced)}h of direct across ${metrics.totalCases} case${metrics.totalCases === 1 ? '' : 's'} (${metrics.casesFullyStaffed}/${metrics.totalCases} fully staffed).`;
+  // Lead with the direct line only on a build that placed directs; a fill/supervision/
+  // PT build over the EXISTING directs (directBuilt:false) would otherwise open with a
+  // misleading "Placed 0.0h of direct".
+  const parts: string[] = [];
+  if (metrics.directBuilt) {
+    parts.push(`Placed ${round1(metrics.directHrsPlaced)}h of direct across ${metrics.totalCases} case${metrics.totalCases === 1 ? '' : 's'} (${metrics.casesFullyStaffed}/${metrics.totalCases} fully staffed).`);
+  }
   if (metrics.supervisionBuilt) {
-    head += ` Placed ${round1(metrics.supervisionHrsPlaced)}h of supervision (${metrics.casesMeetingFloor}/${metrics.floorTargetCases} case${metrics.floorTargetCases === 1 ? '' : 's'} at floor).`;
+    parts.push(`Placed ${round1(metrics.supervisionHrsPlaced)}h of supervision (${metrics.casesMeetingFloor}/${metrics.floorTargetCases} case${metrics.floorTargetCases === 1 ? '' : 's'} at floor).`);
   }
   if (metrics.ptBuilt) {
-    head += ` Placed ${round1(metrics.ptHrsPlaced)}h of parent training (${metrics.casesMeetingPtGoal}/${metrics.ptTargetCases} case${metrics.ptTargetCases === 1 ? '' : 's'} at goal).`;
+    parts.push(`Placed ${round1(metrics.ptHrsPlaced)}h of parent training (${metrics.casesMeetingPtGoal}/${metrics.ptTargetCases} case${metrics.ptTargetCases === 1 ? '' : 's'} at goal).`);
   }
+  let head = parts.length ? parts.join(' ') : `Placed ${round1(metrics.directHrsPlaced)}h.`;
   head += ' Review the proposal in the tray, then Accept.';
   return blockLines.length === 0 ? head : `${head}\nCouldn’t fully fill:\n${blockLines.join('\n')}`;
 }

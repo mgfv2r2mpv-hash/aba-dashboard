@@ -9,7 +9,7 @@
 import {
   WishRequest, WishSolution, WishOp, ScheduleData, Appointment, Blackout, Client, Technician,
   Cancellation, CANCELLATION_SOURCES, CANCELLATION_REASONS, activeCancellationCodes, applicableSources,
-  SchedulingHints,
+  SchedulingHints, STORED_RECURRENCE_PATTERNS,
 } from './types';
 import { computeClientCompliance, computeTechCompliance, monthPeriod, CompliancePeriod } from './compliance';
 import { DraftOp, newAddOp, newMoveOp, newRemoveOp, newEditOp, applyOps } from './draft';
@@ -100,7 +100,7 @@ export function parseOps(rawOps: any, rev: (v: any) => string | undefined): Wish
         if (title) add.title = title;
         const client = rev(ro.client); if (client) add.client = client;
         const tech = rev(ro.tech ?? ro.technician); if (tech) add.technician = tech;
-        if (ro.recurring) { add.recurring = true; add.pattern = ['weekly', 'biweekly', 'monthly', 'custom'].includes(ro.pattern) ? ro.pattern : 'weekly'; }
+        if (ro.recurring) { add.recurring = true; add.pattern = (STORED_RECURRENCE_PATTERNS as readonly string[]).includes(ro.pattern) ? ro.pattern : 'weekly'; }
         ops.push(add);
       }
     } else if (kind === 'blackout') {

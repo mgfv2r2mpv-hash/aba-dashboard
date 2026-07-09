@@ -85,7 +85,10 @@ console.log('make-up normalization (never recurring)');
     clients: [], technicians: [], settings: full.settings,
     appointments: [
       { id: 'mu', title: 'Sat make-up', client: 'C', technician: 'T', startTime: '2026-07-04T09:00:00', endTime: '2026-07-04T11:00:00', isFixed: false, isBillable: true, type: 'client-session', isMakeUp: true, isRecurring: true, recurringPattern: 'weekly', makeupForId: 'orig' },
-      { id: 'reg', title: 'Weekly', client: 'C', technician: 'T', startTime: '2026-07-06T13:00:00', endTime: '2026-07-06T15:00:00', isFixed: false, isBillable: true, type: 'client-session', isRecurring: true, recurringPattern: 'weekly' },
+      // A REAL recurring series (multi-member) — must survive both the make-up strip
+      // (1→2) and the trio heal (3→4) intact.
+      { id: 'reg', title: 'Weekly', client: 'C', technician: 'T', startTime: '2026-07-06T13:00:00', endTime: '2026-07-06T15:00:00', isFixed: false, isBillable: true, type: 'client-session', isRecurring: true, recurringPattern: 'weekly', seriesId: 'S-REG' },
+      { id: 'reg2', title: 'Weekly', client: 'C', technician: 'T', startTime: '2026-07-13T13:00:00', endTime: '2026-07-13T15:00:00', isFixed: false, isBillable: true, type: 'client-session', isRecurring: true, recurringPattern: 'weekly', seriesId: 'S-REG' },
     ],
     lastModified: '2026-06-14T00:00:00.000Z',
   };
@@ -95,7 +98,7 @@ console.log('make-up normalization (never recurring)');
   check('make-up isRecurring stripped to false', mu.isRecurring === false);
   check('make-up recurringPattern cleared', mu.recurringPattern === undefined);
   check('make-up flag + makeupForId preserved', mu.isMakeUp === true && mu.makeupForId === 'orig');
-  check('non-make-up recurring session left intact', reg.isRecurring === true && reg.recurringPattern === 'weekly');
+  check('non-make-up recurring series left intact', reg.isRecurring === true && reg.recurringPattern === 'weekly' && reg.seriesId === 'S-REG');
 
   // A clean make-up (already one-off) is untouched, and an envelope already at the
   // current version does not double-apply.
@@ -132,6 +135,88 @@ console.log('action log: envelope round-trip + backfill');
   check('actionLog survives the envelope round-trip', JSON.stringify(out.actionLog) === JSON.stringify([entry]));
   const bare = migrateScheduleData({ ...full });
   check('absent actionLog backfills to []', Array.isArray(bare.actionLog) && bare.actionLog.length === 0);
+}
+
+console.log('recurrence heal (3→4): half-state A — recurring-labeled, no series');
+{
+  const env = {
+    blobFormat: BLOB_FORMAT, schemaVersion: 3, gzip: false,
+    data: { ...full, appointments: [
+      { id: 'lone', title: 'S', client: 'c1', technician: 't1', startTime: '2026-06-01T10:00:00', endTime: '2026-06-01T11:00:00', isFixed: false, isBillable: true, type: 'client-session', isRecurring: true, recurringPattern: 'weekly' },
+    ] },
+  };
+  const out = migrateScheduleData(env);
+  const lone = out.appointments.find(a => a.id === 'lone')!;
+  check('lone recurring row healed to one-time', !lone.isRecurring && lone.recurringPattern === undefined && !lone.seriesId,
+    JSON.stringify({ r: lone.isRecurring, p: lone.recurringPattern, s: lone.seriesId }));
+}
+
+console.log('recurrence heal (3→4): half-state B — seriesId with no flags (measured, not label-copied)');
+{
+  // Biweekly-gapped fixture with NO stored pattern anywhere: a heal that merely
+  // copies labels around cannot fake this pass — it must MEASURE the 14d gaps.
+  const mk = (id: string, day: string) => ({
+    id, title: 'S', client: 'c1', technician: 't1',
+    startTime: `${day}T10:00:00`, endTime: `${day}T11:00:00`,
+    isFixed: false, isBillable: true, type: 'client-session' as const, seriesId: 'SER-B',
+  });
+  const env = {
+    blobFormat: BLOB_FORMAT, schemaVersion: 3, gzip: false,
+    data: { ...full, appointments: [mk('b1', '2026-06-01'), mk('b2', '2026-06-15'), mk('b3', '2026-06-29')] },
+  };
+  const out = migrateScheduleData(env);
+  check('members gain isRecurring', out.appointments.every(a => a.isRecurring === true));
+  check('pattern is MEASURED biweekly', out.appointments.every(a => a.recurringPattern === 'biweekly'),
+    out.appointments.map(a => a.recurringPattern).join(','));
+}
+
+console.log('recurrence heal (3→4): records of fact are spared byte-for-byte');
+{
+  const factA = { id: 'fa', title: 'S', client: 'c1', startTime: '2026-05-01T10:00:00', endTime: '2026-05-01T11:00:00', isFixed: false, isBillable: true, type: 'client-session' as const, status: 'completed' as const, isRecurring: true, recurringPattern: 'weekly' as const };
+  const factB = { id: 'fb', title: 'S', client: 'c1', startTime: '2026-05-08T10:00:00', endTime: '2026-05-08T11:00:00', isFixed: false, isBillable: true, type: 'client-session' as const, status: 'canceled' as const, seriesId: 'GONE-SINGLETON' };
+  const env = { blobFormat: BLOB_FORMAT, schemaVersion: 3, gzip: false, data: { ...full, appointments: [factA, factB] } };
+  const out = migrateScheduleData(env);
+  check('completed half-state row byte-equal after heal', JSON.stringify(out.appointments.find(a => a.id === 'fa')) === JSON.stringify(factA));
+  check('canceled singleton-series row byte-equal after heal', JSON.stringify(out.appointments.find(a => a.id === 'fb')) === JSON.stringify(factB));
+}
+
+console.log('recurrence heal (3→4): pending make-up drops its seriesId');
+{
+  const mk = (id: string, day: string, extra: any = {}) => ({
+    id, title: 'S', client: 'c1', technician: 't1',
+    startTime: `${day}T10:00:00`, endTime: `${day}T11:00:00`,
+    isFixed: false, isBillable: true, type: 'client-session' as const, seriesId: 'SER-M', ...extra,
+  });
+  const env = {
+    blobFormat: BLOB_FORMAT, schemaVersion: 3, gzip: false,
+    data: { ...full, appointments: [
+      mk('m1', '2026-06-01'), mk('m2', '2026-06-08'),
+      mk('mu', '2026-06-10', { isMakeUp: true, makeupForId: 'orig' }),
+    ] },
+  };
+  const out = migrateScheduleData(env);
+  const mu = out.appointments.find(a => a.id === 'mu')!;
+  check('make-up trio cleared', !mu.seriesId && !mu.isRecurring && mu.recurringPattern === undefined);
+  check('make-up linkage preserved', mu.isMakeUp === true && mu.makeupForId === 'orig');
+  check('real siblings keep the series', out.appointments.filter(a => a.seriesId === 'SER-M').length === 2);
+}
+
+console.log('recurrence heal (3→4): idempotent + only fires below v4');
+{
+  check('CURRENT_SCHEMA_VERSION is 4', CURRENT_SCHEMA_VERSION === 4, String(CURRENT_SCHEMA_VERSION));
+  const dirty = {
+    blobFormat: BLOB_FORMAT, schemaVersion: 3, gzip: false,
+    data: { ...full, appointments: [
+      { id: 'x1', title: 'S', client: 'c1', startTime: '2026-06-01T10:00:00', endTime: '2026-06-01T11:00:00', isFixed: false, isBillable: true, type: 'client-session' as const, isRecurring: true },
+    ] },
+  };
+  const once = migrateScheduleData(dirty);
+  const twice = migrateScheduleData({ blobFormat: BLOB_FORMAT, schemaVersion: 3, gzip: false, data: once });
+  check('re-running the heal changes nothing', JSON.stringify(once) === JSON.stringify(twice));
+  // A v4 envelope was written by a healed app — the step must NOT fire on it
+  // (a contrived half-state passes through untouched, proving the version gate).
+  const atV4 = migrateScheduleData({ blobFormat: BLOB_FORMAT, schemaVersion: 4, gzip: false, data: dirty.data });
+  check('v4 envelope passes through unhealed', atV4.appointments.find(a => a.id === 'x1')!.isRecurring === true);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

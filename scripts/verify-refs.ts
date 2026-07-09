@@ -60,7 +60,7 @@ console.log('v2→v3 migration — normalize refs to ids');
 
   const out = migrateScheduleData(raw);
   const byId = Object.fromEntries(out.appointments.map(a => [a.id, a]));
-  check('CURRENT_SCHEMA_VERSION is 3', CURRENT_SCHEMA_VERSION === 3);
+  check('CURRENT_SCHEMA_VERSION covers the id-linking step (≥3)', CURRENT_SCHEMA_VERSION >= 3);
   check('a1 client name → id', byId.a1.client === 'c1');
   check('a1 stale tech name → id (prefix heal)', byId.a1.technician === 't1');
   check('a2 ids untouched', byId.a2.client === 'c1' && byId.a2.technician === 't1');

@@ -121,5 +121,96 @@ console.log('extend — never absorbs rows from another series or non-recurring 
   check('no regroup (neither row is a stray recurring orphan)', regroups.length === 0);
 }
 
+// ── Measured cadence beats a wrong label ────────────────────────────────────
+console.log('extend — a mislabeled biweekly series extends at 14 days (measured, not label)');
+{
+  const S = 's';
+  // Three members 14 days apart but stamped 'weekly' by a buggy old writer.
+  const rows = ['2026-06-01', '2026-06-15', '2026-06-29']
+    .map((d, i) => appt({ id: `ml${i}`, start: `${d}T10:00:00`, end: `${d}T12:00:00`, seriesId: S, isRecurring: true, recurringPattern: 'weekly' }));
+  const r = extendSeries(mkData(rows), S, '2026-07-27', new Date('2026-06-30T08:00:00'));
+  const adds = r.ops.filter(o => o.op === 'add') as Extract<typeof r.ops[number], { op: 'add' }>[];
+  check('adds Jul 13 + Jul 27 only (14-day step, label ignored)',
+    adds.length === 2 && adds.some(a => a.start.startsWith('2026-07-13')) && adds.some(a => a.start.startsWith('2026-07-27')),
+    adds.map(a => a.start.slice(0, 10)).join(','));
+  check('adds are stamped with the MEASURED biweekly pattern', adds.every(a => a.pattern === 'biweekly'),
+    adds.map(a => a.pattern).join(','));
+}
+
+console.log('extend — an UNLABELED biweekly series extends at 14 days');
+{
+  const S = 's';
+  const rows = ['2026-06-01', '2026-06-15', '2026-06-29']
+    .map((d, i) => appt({ id: `ul${i}`, start: `${d}T10:00:00`, end: `${d}T12:00:00`, seriesId: S }));
+  const r = extendSeries(mkData(rows), S, '2026-07-27', new Date('2026-06-30T08:00:00'));
+  const adds = r.ops.filter(o => o.op === 'add') as Extract<typeof r.ops[number], { op: 'add' }>[];
+  check('adds Jul 13 + Jul 27 only (no label to lean on)',
+    adds.length === 2 && adds.some(a => a.start.startsWith('2026-07-13')) && adds.some(a => a.start.startsWith('2026-07-27')),
+    adds.map(a => a.start.slice(0, 10)).join(','));
+}
+
+// ── Monthly flavors ─────────────────────────────────────────────────────────
+console.log('extend — monthly same-date steps to the same day-of-month (one add per month)');
+{
+  const S = 's';
+  // Jan/Feb/Mar 15 land on DIFFERENT weekdays — a per-(weekday|clock) slot walk
+  // would advance each as its own monthly slot and triple-book the series.
+  const rows = ['2026-01-15', '2026-02-15', '2026-03-15']
+    .map((d, i) => appt({ id: `md${i}`, start: `${d}T10:00:00`, end: `${d}T11:00:00`, seriesId: S }));
+  const r = extendSeries(mkData(rows), S, '2026-05-20', new Date('2026-03-20T08:00:00'));
+  const adds = r.ops.filter(o => o.op === 'add') as Extract<typeof r.ops[number], { op: 'add' }>[];
+  check('exactly Apr 15 + May 15 added (no duplicates from weekday slots)',
+    adds.length === 2 && adds.some(a => a.start.startsWith('2026-04-15')) && adds.some(a => a.start.startsWith('2026-05-15')),
+    adds.map(a => a.start.slice(0, 10)).join(','));
+  check("adds stamped 'monthly'", adds.every(a => a.pattern === 'monthly'), adds.map(a => a.pattern).join(','));
+}
+
+console.log('extend — monthly first-Tuesday steps to the next FIRST TUESDAY (no drift)');
+{
+  const S = 's';
+  // First Tuesdays of 2026: Jan 6, Feb 3, Mar 3. A naive setMonth(+1) from Mar 3
+  // gives Apr 3 (a Friday) — off the weekday. Must land Apr 7 and May 5.
+  const rows = ['2026-01-06', '2026-02-03', '2026-03-03']
+    .map((d, i) => appt({ id: `nt${i}`, start: `${d}T10:00:00`, end: `${d}T11:00:00`, seriesId: S }));
+  const r = extendSeries(mkData(rows), S, '2026-05-31', new Date('2026-03-10T08:00:00'));
+  const adds = r.ops.filter(o => o.op === 'add') as Extract<typeof r.ops[number], { op: 'add' }>[];
+  check('adds Apr 7 + May 5 (first Tuesdays), never Apr 3',
+    adds.length === 2 && adds.some(a => a.start.startsWith('2026-04-07')) && adds.some(a => a.start.startsWith('2026-05-05'))
+    && !adds.some(a => a.start.startsWith('2026-04-03')),
+    adds.map(a => a.start.slice(0, 10)).join(','));
+  check('every add is a Tuesday', adds.every(a => new Date(a.start).getDay() === 2));
+}
+
+console.log("extend — monthly last-Friday steps to the next LAST Friday (nth='last')");
+{
+  const S = 's';
+  // Last Fridays: Jan 30 (a 5th Friday), Feb 27, Mar 27. Next: Apr 24, May 29.
+  const rows = ['2026-01-30', '2026-02-27', '2026-03-27']
+    .map((d, i) => appt({ id: `lf${i}`, start: `${d}T10:00:00`, end: `${d}T11:00:00`, seriesId: S }));
+  const r = extendSeries(mkData(rows), S, '2026-05-31', new Date('2026-04-01T08:00:00'));
+  const adds = r.ops.filter(o => o.op === 'add') as Extract<typeof r.ops[number], { op: 'add' }>[];
+  check('adds Apr 24 + May 29 (last Fridays)',
+    adds.length === 2 && adds.some(a => a.start.startsWith('2026-04-24')) && adds.some(a => a.start.startsWith('2026-05-29')),
+    adds.map(a => a.start.slice(0, 10)).join(','));
+}
+
+// ── Custom series stamp 'custom', not 'weekly' ──────────────────────────────
+console.log("extend — a custom weekday-set series stamps its adds 'custom'");
+{
+  const S = 's';
+  const rows = [
+    appt({ id: 'c1', start: '2026-06-01T16:00:00', end: '2026-06-01T18:00:00', seriesId: S }), // Mon
+    appt({ id: 'c2', start: '2026-06-03T16:00:00', end: '2026-06-03T18:00:00', seriesId: S }), // Wed
+    appt({ id: 'c3', start: '2026-06-08T16:00:00', end: '2026-06-08T18:00:00', seriesId: S }), // Mon
+    appt({ id: 'c4', start: '2026-06-10T16:00:00', end: '2026-06-10T18:00:00', seriesId: S }), // Wed
+  ];
+  const r = extendSeries(mkData(rows), S, '2026-06-24', new Date('2026-06-09T08:00:00'));
+  const adds = r.ops.filter(o => o.op === 'add') as Extract<typeof r.ops[number], { op: 'add' }>[];
+  check('both weekday slots advance weekly', adds.filter(a => new Date(a.start).getDay() === 1).length === 2
+    && adds.filter(a => new Date(a.start).getDay() === 3).length === 2);
+  check("adds carry pattern 'custom' (not 'weekly')", adds.every(a => a.pattern === 'custom'),
+    adds.map(a => a.pattern).join(','));
+}
+
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILED'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

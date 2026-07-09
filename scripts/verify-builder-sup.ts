@@ -708,6 +708,15 @@ console.log('fill (chat "fill my week to N"): tops BCBA billable over EXISTING d
   for (let i = 1; i < bcba.length; i++) if (bcba[i].s < bcba[i - 1].e) overlap = true;
   check('no two BCBA sessions overlap (single BCBA can be one place at a time)', !overlap);
 
+  // No case has two EXACTLY-ADJACENT supervision fragments — consolidateAdjacentBcba
+  // fuses them (the EC/7-16 8:45–9:00 + 9:00–9:15 bug).
+  const noAdjacentFrag = cs.every(c => {
+    const sups = def.committed.appointments.filter(a => a.type === 'supervision' && a.client === c.name)
+      .map(a => ({ s: new Date(a.startTime).getTime(), e: new Date(a.endTime).getTime() })).sort((x, y) => x.s - y.s);
+    return sups.every((x, i) => i === 0 || sups[i - 1].e !== x.s);
+  });
+  check('no case has exactly-adjacent supervision fragments (they fuse)', noAdjacentFrag);
+
   const perCaseSupOK = cs.every(c => {
     const h = def.committed.appointments.filter(a => a.type === 'supervision' && a.client === c.name && weekOf(a.startTime) === 0).reduce((s, a) => s + durH(a), 0);
     return h <= 2.001; // 20% of 10h direct

@@ -7,6 +7,7 @@ import { ScheduleData, WishSolution, WishOp } from '../src/types';
 import { parseWishSolutions, parseOps, parseChatTurn, dropPastOps, dropDoubleBookedOps, wishSolutionToDraft, applyWishSolution, summarizeWish, computeSolutionImpact, computeOpsImpact } from '../src/wish';
 import { monthPeriod } from '../src/compliance';
 import { buildAnonymizationMap, deAnonymizeNarration, deAnonymizeText } from '../src/anonymizer';
+import { consolidateAdjacentBcba } from '../src/builderConsolidate';
 
 let passed = 0, failed = 0;
 function check(name: string, cond: boolean, extra?: string) {
@@ -215,6 +216,57 @@ console.log('dropDoubleBookedOps (single BCBA — one place at a time)');
     { op: 'add', type: 'client-session', client: 'C One', technician: 'T One', start: '2026-07-13T10:15:00', end: '2026-07-13T11:15:00' },
   ];
   check('non-BCBA (direct) op passes through', dropDoubleBookedOps(direct, data).length === 1);
+}
+
+console.log('consolidateAdjacentBcba (fuse adjacent BCBA fragments)');
+{
+  const data: ScheduleData = {
+    id: 'cc', version: 2,
+    clients: [{ id: 'c1', name: 'C One', availabilityWindows: {} }, { id: 'c2', name: 'C Two', availabilityWindows: {} }],
+    technicians: [{ id: 't1', name: 'T One', isRBT: true, assignments: [], availability: {} }, { id: 't2', name: 'T Two', isRBT: true, assignments: [], availability: {} }],
+    settings: {} as ScheduleData['settings'],
+    appointments: [
+      // a committed supervision that a staged add will abut
+      { id: 'sup-committed', title: 'Sup', client: 'C Two', technician: 'T One', type: 'supervision', startTime: '2026-07-16T09:00:00', endTime: '2026-07-16T09:30:00', isFixed: false, isBillable: true },
+    ],
+    lastModified: 'x',
+  };
+  const sup = (client: string, tech: string | undefined, start: string, end: string, seriesId?: string): WishOp =>
+    ({ op: 'add', type: 'supervision', client, technician: tech, start, end, ...(seriesId ? { seriesId } : {}) });
+
+  // Two exactly-adjacent same-identity supervision adds → one fused session.
+  const adj = consolidateAdjacentBcba([sup('C One', 'T One', '2026-07-16T08:45:00', '2026-07-16T09:00:00'), sup('C One', 'T One', '2026-07-16T09:00:00', '2026-07-16T09:15:00')], data);
+  const fusedAdds = adj.filter(o => o.op === 'add');
+  check('adjacent same-identity supervisions fuse to one', fusedAdds.length === 1
+    && (fusedAdds[0] as any).start === '2026-07-16T08:45:00' && (fusedAdds[0] as any).end === '2026-07-16T09:15:00');
+
+  // Non-adjacent same-day fragments (a genuine second visit) → left as two.
+  const gap = consolidateAdjacentBcba([sup('C One', 'T One', '2026-07-16T08:45:00', '2026-07-16T09:00:00'), sup('C One', 'T One', '2026-07-16T11:45:00', '2026-07-16T12:15:00')], data);
+  check('non-adjacent same-case fragments stay separate', gap.filter(o => o.op === 'add').length === 2);
+
+  // Different tech / different type → not merged.
+  const diffTech = consolidateAdjacentBcba([sup('C One', 'T One', '2026-07-16T08:45:00', '2026-07-16T09:00:00'), sup('C One', 'T Two', '2026-07-16T09:00:00', '2026-07-16T09:15:00')], data);
+  check('adjacent but different tech → not merged', diffTech.filter(o => o.op === 'add').length === 2);
+  const diffType = consolidateAdjacentBcba([sup('C One', 'T One', '2026-07-16T08:45:00', '2026-07-16T09:00:00'), { op: 'add', type: 'parent-training', client: 'C One', technician: 'T One', start: '2026-07-16T09:00:00', end: '2026-07-16T09:15:00' }], data);
+  check('adjacent but different type → not merged', diffType.filter(o => o.op === 'add' && (o as any).type === 'supervision').length === 1 && diffType.filter(o => o.op === 'add').length === 2);
+
+  // Two different non-empty seriesIds never cross.
+  const twoSeries = consolidateAdjacentBcba([sup('C One', 'T One', '2026-07-16T08:45:00', '2026-07-16T09:00:00', 'S-A'), sup('C One', 'T One', '2026-07-16T09:00:00', '2026-07-16T09:15:00', 'S-B')], data);
+  check('two distinct non-empty seriesIds do not fuse', twoSeries.filter(o => o.op === 'add').length === 2);
+  // An orphan folds into a series occurrence, survivor keeps the seriesId.
+  const orphan = consolidateAdjacentBcba([sup('C One', 'T One', '2026-07-16T08:45:00', '2026-07-16T09:00:00', 'S-A'), sup('C One', 'T One', '2026-07-16T09:00:00', '2026-07-16T09:15:00')], data);
+  const of = orphan.filter(o => o.op === 'add');
+  check('orphan folds into series occurrence (survivor keeps seriesId)', of.length === 1 && (of[0] as any).seriesId === 'S-A');
+
+  // A staged add abutting a COMMITTED supervision → a move extending it, add dropped.
+  const abut = consolidateAdjacentBcba([sup('C Two', 'T One', '2026-07-16T09:30:00', '2026-07-16T09:45:00')], data);
+  const mv = abut.find(o => o.op === 'move') as any;
+  check('add abutting a committed supervision → move extends it', !!mv && mv.appointmentId === 'sup-committed'
+    && mv.start === '2026-07-16T09:00:00' && mv.end === '2026-07-16T09:45:00' && abut.every(o => o.op !== 'add'));
+
+  // Non-BCBA ops (a direct add, a move) pass straight through.
+  const passthru = consolidateAdjacentBcba([{ op: 'add', type: 'client-session', client: 'C One', technician: 'T One', start: '2026-07-16T08:00:00', end: '2026-07-16T09:00:00' }, { op: 'remove', appointmentId: 'zzz' }], data);
+  check('non-BCBA ops pass through untouched', passthru.length === 2);
 }
 
 console.log('deAnonymizeNarration (friendly appt labels; names restored)');

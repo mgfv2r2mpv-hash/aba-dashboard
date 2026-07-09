@@ -26,6 +26,7 @@ import { placeSupervision, SupervisionMetrics, EMPTY_SUPERVISION_METRICS } from 
 import { placeParentTraining, ParentTrainingMetrics, EMPTY_PARENT_TRAINING_METRICS } from './builderPT';
 import { buildDirectCalendar, seedBcbaBusy } from './builderBcba';
 import { placeUnstaffedContact, fillToBillableTarget } from './builderFill';
+import { consolidateAdjacentBcba } from './builderConsolidate';
 import { startOfWeek, startOfDay, addWeeks } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -559,6 +560,10 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
     // materialized backbone is dropped (keeping it would add directs the user never
     // asked for and re-introduce the off-direct supervision bug).
     finalOps = [...(buildingDirects ? cal.directOps : []), ...bcbaOps, ...extendOps];
+    // Fuse any exactly-adjacent BCBA fragments the passes produced (floor + fill over
+    // the same direct, or a split contact's back-to-back halves) into single sessions —
+    // the directs already have extendAdjacentDirects; this is the BCBA-session analogue.
+    finalOps = consolidateAdjacentBcba(finalOps, data);
     directHrsPlaced = (buildingDirects ? cal.directOpsHrs : 0) + extendedHorizonHrs; // materialized + grown
   } else {
     const selfCheckBlocks = monthSelfCheck(data, ops, config, weekStart);

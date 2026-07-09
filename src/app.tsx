@@ -34,6 +34,7 @@ import type { DockIssue, MeetPaceSeed } from './components/dock';
 import { buildSchedule, defaultBuilderConfig, supervisionBuilderConfig, parentTrainingBuilderConfig, combinedBuilderConfig, type BuildResult } from './scheduleBuilder';
 import { analyzeTidy, defaultTidyConfig, type TidyResult } from './tidy';
 import { extendSeries } from './seriesExtend';
+import { buildSeriesEdit, summarizeSeriesEdit } from './seriesEdit';
 import { useHomeTodos } from './hooks/useHomeTodos';
 import type { HomeTodo } from './hooks/useHomeTodos';
 import type { RitualAction } from './components/HomeView';
@@ -934,8 +935,32 @@ export default function App() {
   };
 
   // Calendar drag → stage a move (uncommitted). No server call, no auto-AI.
+  // Dragging a SERIES MEMBER first asks for scope (This / This+Following / All)
+  // — series scopes apply the same day+time delta to every pending occurrence
+  // via buildSeriesEdit (user decision: ask on drop, never silently move one
+  // row out of its series). One-time rows keep the instant single-move.
+  const [dragScopePrompt, setDragScopePrompt] = useState<{ original: Appointment; moved: Appointment } | null>(null);
   const handleAppointmentChange = (appointment: Appointment) => {
+    const original = scheduleData?.appointments.find(a => a.id === appointment.id);
+    const isSeriesMember = !!original?.seriesId
+      && scheduleData!.appointments.filter(a => a.seriesId === original.seriesId).length > 1;
+    if (original && isSeriesMember) {
+      setDragScopePrompt({ original, moved: appointment });
+      return;
+    }
     stageOps([newMoveOp(appointment)]);
+  };
+  const resolveDragScope = (scope: 'instance' | 'following' | 'all' | 'cancel') => {
+    if (!dragScopePrompt || !scheduleData) { setDragScopePrompt(null); return; }
+    const { original, moved } = dragScopePrompt;
+    setDragScopePrompt(null);
+    if (scope === 'cancel') return;
+    if (scope === 'instance') { stageOps([newMoveOp(moved)]); return; }
+    const r = buildSeriesEdit({ all: scheduleData.appointments, original, edited: moved, scope, cadence: null });
+    stageOps([
+      ...r.upserts.map(u => (scheduleData.appointments.some(x => x.id === u.id) ? newMoveOp(u) : newAddOp(u))),
+      ...r.removeIds.map(id => newRemoveOp(id)),
+    ]);
   };
 
   // Apply one tidy review suggestion — append its ops to the current draft (same
@@ -2627,6 +2652,57 @@ export default function App() {
                 disabled={aiLoading}
                 style={{ padding: '7px 14px', border: 'none', borderRadius: 6, background: '#6366f1', color: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 600, opacity: aiLoading ? 0.6 : 1 }}
               >{aiLoading ? 'Searching…' : 'Find Replacement'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Drag scope prompt — a series member was dragged; ask how far the move reaches */}
+      {dragScopePrompt && scheduleData && (
+        <div
+          onClick={() => resolveDragScope('cancel')}
+          style={{
+            position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400, padding: 16,
+          }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{
+            background: 'white', borderRadius: 10, padding: 20, maxWidth: 360, width: '100%',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+          }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Move recurring session</div>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 14 }}>
+              {(() => {
+                try {
+                  const preview = summarizeSeriesEdit(buildSeriesEdit({
+                    all: scheduleData.appointments,
+                    original: dragScopePrompt.original,
+                    edited: dragScopePrompt.moved,
+                    scope: 'following', cadence: null,
+                  }));
+                  return `This session repeats. Move just this one, or shift the series by the same amount? (${preview.replace(/\.$/, '')} under “This + following”.)`;
+                } catch {
+                  return 'This session repeats. Move just this one, or shift the series by the same amount?';
+                }
+              })()}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                onClick={() => resolveDragScope('instance')}
+                style={{ padding: '9px 14px', border: '1px solid #d1d5db', borderRadius: 6, background: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+              >Just this session</button>
+              <button
+                onClick={() => resolveDragScope('following')}
+                style={{ padding: '9px 14px', border: 'none', borderRadius: 6, background: '#6366f1', color: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+              >This + following</button>
+              <button
+                onClick={() => resolveDragScope('all')}
+                style={{ padding: '9px 14px', border: '1px solid #6366f1', borderRadius: 6, background: 'white', color: '#6366f1', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+              >All in series</button>
+              <button
+                onClick={() => resolveDragScope('cancel')}
+                style={{ padding: '7px 14px', border: 'none', borderRadius: 6, background: 'transparent', color: '#6b7280', cursor: 'pointer', fontSize: 13 }}
+              >Cancel — put it back</button>
             </div>
           </div>
         </div>

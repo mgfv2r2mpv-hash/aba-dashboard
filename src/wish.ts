@@ -281,6 +281,45 @@ export function dropInfeasibleTravelOps(ops: WishOp[], data: ScheduleData): Wish
   return kept;
 }
 
+// Real-world safety net #3 (one body, one place at a time): the single BCBA can run
+// only ONE supervision / parent-training / case-planning / reassessment session at a
+// time. This is the CODE source of truth for double-booking — the prompt's "no two
+// BCBA items overlap" is only a hint, and dropInfeasibleTravelOps only rejects an
+// overlap when the two sites DIFFER (and self-disables when travel is off), so a
+// same-city or location-unknown double-book slips past it. This runs UNCONDITIONALLY.
+// Each add/move that lands a BCBA session is checked against the untouched existing
+// BCBA sessions and the already-accepted ops; an overlapping one is dropped. Directs
+// (client-session) are not BCBA-run and are never in the conflict set, so a
+// supervision placed INSIDE a direct window stays valid. Non-BCBA ops always pass.
+export function dropDoubleBookedOps(ops: WishOp[], data: ScheduleData): WishOp[] {
+  interface Slot { s: number; e: number }
+  const touched = new Set(
+    ops.filter((o): o is Extract<WishOp, { appointmentId: string }> => 'appointmentId' in o && (o.op === 'move' || o.op === 'remove'))
+      .map(o => o.appointmentId),
+  );
+  const accepted: Slot[] = data.appointments
+    .filter(a => a.status !== 'canceled' && !a.isGhost && BCBA_TRAVEL_TYPES.has(a.type) && !touched.has(a.id))
+    .map(a => ({ s: new Date(a.startTime).getTime(), e: new Date(a.endTime).getTime() }));
+
+  const slotOf = (o: WishOp): Slot | null => {
+    if (o.op !== 'add' && o.op !== 'move') return null;
+    const s = new Date(o.start).getTime(), e = new Date(o.end).getTime();
+    if (Number.isNaN(s) || Number.isNaN(e)) return null;
+    const type = o.op === 'add' ? o.type : data.appointments.find(x => x.id === o.appointmentId)?.type;
+    if (!type || !BCBA_TRAVEL_TYPES.has(type)) return null;
+    return { s, e };
+  };
+
+  const kept: WishOp[] = [];
+  for (const o of ops) {
+    const cand = slotOf(o);
+    if (!cand) { kept.push(o); continue; }
+    if (accepted.some(b => b.s < cand.e && b.e > cand.s)) continue; // double-book — drop
+    kept.push(o); accepted.push(cand);
+  }
+  return kept;
+}
+
 // Resolve a client/tech reference (real name or id) to the entity's id.
 function resolveEntityId(ref: string, list: { id: string; name: string }[]): { id: string; name: string } | undefined {
   return list.find(e => e.id === ref || e.name === ref);

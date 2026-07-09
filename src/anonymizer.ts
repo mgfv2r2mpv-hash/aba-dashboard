@@ -261,3 +261,44 @@ export function deAnonymizeText(text: string, map: AnonymizationMap): string {
   }
   return result;
 }
+
+const NARRATION_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const NARRATION_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const clock12 = (d: Date): { hm: string; mer: string } => {
+  let h = d.getHours();
+  const mer = h >= 12 ? 'PM' : 'AM';
+  h = h % 12; if (h === 0) h = 12;
+  return { hm: `${h}:${String(d.getMinutes()).padStart(2, '0')}`, mer };
+};
+// A short, human-readable session label for narration — e.g. "Tue Jul 14, 2:00–4:00 PM".
+function friendlyAptLabel(a: Appointment): string {
+  const s = new Date(a.startTime), e = new Date(a.endTime);
+  if (Number.isNaN(s.getTime())) return a.id;
+  const day = `${NARRATION_WEEKDAYS[s.getDay()]} ${NARRATION_MONTHS[s.getMonth()]} ${s.getDate()}`;
+  const cs = clock12(s), ce = clock12(e);
+  const time = Number.isNaN(e.getTime())
+    ? `${cs.hm} ${cs.mer}`
+    : cs.mer === ce.mer ? `${cs.hm}–${ce.hm} ${ce.mer}` : `${cs.hm} ${cs.mer}–${ce.hm} ${ce.mer}`;
+  return `${day}, ${time}`;
+}
+
+// De-anonymize CHAT NARRATION for display. Same as deAnonymizeText for client/tech
+// tokens (→ real names), but appointment tokens render as a readable session label
+// instead of the raw appointment UUID that map.reverse holds (that raw id is what op
+// FIELDS need, so parseToolTurn still uses deAnonymizeText — this is reply text only).
+export function deAnonymizeNarration(text: string, map: AnonymizationMap, data: ScheduleData): string {
+  const byId = new Map(data.appointments.map(a => [a.id, a]));
+  let result = text;
+  const tokens = Array.from(map.reverse.keys()).sort((a, b) => b.length - a.length);
+  for (const token of tokens) {
+    const original = map.reverse.get(token);
+    if (!original) continue;
+    let replacement = original;
+    if (token.startsWith('APT_')) {
+      const appt = byId.get(original);
+      replacement = appt ? friendlyAptLabel(appt) : original;
+    }
+    result = result.replace(new RegExp(token, 'g'), replacement);
+  }
+  return result;
+}

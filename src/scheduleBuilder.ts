@@ -16,7 +16,7 @@
 //     never silently missed. Everyone who CAN be placed is placed (partial
 //     success, never total failure).
 
-import { ScheduleData, Client, WishOp, WishSolution, DayOfWeek } from './types';
+import { ScheduleData, Client, WishOp, WishSolution, DayOfWeek, Appointment, MinSessionMinutes, resolveMinSessionMinutes } from './types';
 import { findAuthFor } from './authorization';
 import { DAYS, toMin, minToClock, Interval, intersect, subtract, normalize, windowsToIntervals, btCaseAvailability } from './intervals';
 import { Occupancy, LiveWindow, seedOccupancy, feasibleWindowsLive, reserve, dayOfWeekOf } from './builderOccupancy';
@@ -79,6 +79,10 @@ export interface BuildResult {
     directBuilt: boolean;
     supervisionBuilt: boolean;
     ptBuilt: boolean;
+    // Sessions the build proposed that fall under the company's per-type minimum
+    // length. They are NOT dropped — surfaced so the BCBA can grow them / run them as
+    // telehealth. Grouped by type with a count each; empty when all sessions clear it.
+    belowMinimum: { type: Appointment['type']; count: number }[];
   } & SupervisionMetrics & ParentTrainingMetrics;
 }
 
@@ -605,10 +609,33 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
       directBuilt: config.chaseDirect !== false,
       supervisionBuilt: chaseSupervision,
       ptBuilt: chasePT,
+      belowMinimum: flagBelowMinimum(finalOps, data.settings),
       ...supMetrics,
       ...ptMetrics,
     },
   };
+}
+
+// Which of the placed add-ops fall under the company's per-type minimum length. They
+// stay staged (the BCBA may grow them or run them as telehealth) — this just surfaces
+// them for a second look. Only the four configured types are checked.
+const MIN_MINUTES_KEY: Partial<Record<Appointment['type'], keyof MinSessionMinutes>> = {
+  'supervision': 'supervision',
+  'parent-training': 'parentTraining',
+  'case-planning': 'casePlanning',
+  'client-session': 'clientSession',
+};
+function flagBelowMinimum(ops: WishOp[], settings: ScheduleData['settings']): { type: Appointment['type']; count: number }[] {
+  const min = resolveMinSessionMinutes(settings);
+  const counts = new Map<Appointment['type'], number>();
+  for (const o of ops) {
+    if (o.op !== 'add') continue;
+    const key = MIN_MINUTES_KEY[o.type];
+    if (!key) continue;
+    const mins = (new Date(o.end).getTime() - new Date(o.start).getTime()) / 60_000;
+    if (mins < min[key] - 0.01) counts.set(o.type, (counts.get(o.type) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([type, count]) => ({ type, count }));
 }
 
 // Expand each recurring op across the horizon and check every dated occurrence
@@ -780,5 +807,12 @@ export function formatBuildSummary(result: BuildResult, hasStaged: boolean): str
   }
   let head = parts.length ? parts.join(' ') : `Placed ${round1(metrics.directHrsPlaced)}h.`;
   head += ' Review the proposal in the tray, then Accept.';
+  // Surface (never drop) sessions under the per-type minimum — the BCBA may grow them
+  // or run them as telehealth to save travel.
+  if (metrics.belowMinimum?.length) {
+    const label: Record<string, string> = { 'supervision': 'supervision', 'parent-training': 'parent-training', 'case-planning': 'case-planning', 'client-session': 'direct' };
+    const items = metrics.belowMinimum.map(b => `${b.count} ${label[b.type] ?? b.type}${b.count === 1 ? '' : 's'}`).join(', ');
+    head += `\nUnder your minimum length (${items}) — review: grow them, or run as telehealth.`;
+  }
   return blockLines.length === 0 ? head : `${head}\nCouldn’t fully fill:\n${blockLines.join('\n')}`;
 }

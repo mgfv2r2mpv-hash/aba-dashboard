@@ -734,6 +734,18 @@ console.log('fill (chat "fill my week to N"): tops BCBA billable over EXISTING d
   check('weeklyTargetOverride sets the per-week fill target (≈12 < default)',
     wk0Billable(lo.committed) <= 13.5 && wk0Billable(lo.committed) < wk0Billable(def.committed),
     `lo=${wk0Billable(lo.committed).toFixed(1)} def=${wk0Billable(def.committed).toFixed(1)}`);
+
+  // minSessionMinutes is a FLAG threshold, NOT a suppression gate. Raise the supervision
+  // minimum to 4h (above the 2h cap so EVERY supervision falls under it): the metric
+  // flags them, and — crucially — placement is UNCHANGED (present-not-suppress).
+  const strictBase = { ...base, settings: { ...base.settings, minSessionMinutes: { supervision: 240, parentTraining: 240, casePlanning: 240, clientSession: 240 } } };
+  const strict = run(strictBase, fillBuilderConfig(strictBase, NOW));
+  const defSupAdds = def.staged.filter(o => o.op === 'add' && (o as any).type === 'supervision').length;
+  const strictSupAdds = strict.staged.filter(o => o.op === 'add' && (o as any).type === 'supervision').length;
+  const flaggedSup = strict.result.metrics.belowMinimum.find(b => b.type === 'supervision');
+  check('sub-minimum sessions are flagged (belowMinimum metric)', !!flaggedSup && flaggedSup.count > 0);
+  check('a high minimum does NOT drop or change placement (present-not-suppress)', strictSupAdds === defSupAdds && strictSupAdds > 0);
+  check('raising the minimum flags at least as many as the default', (flaggedSup?.count ?? 0) >= (def.result.metrics.belowMinimum.find(b => b.type === 'supervision')?.count ?? 0));
 }
 
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed`);

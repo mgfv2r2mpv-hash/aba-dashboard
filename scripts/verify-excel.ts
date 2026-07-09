@@ -32,6 +32,7 @@ const data: ScheduleData = {
     supervisionMaxHoursPercent: 20, supervisionFloorPercent: 10, supervisionPreferredMinPercent: 15, supervisionPreferredMaxPercent: 20,
     rbtMinContactsPerMonth: 2,
     parentTraining: { minimumHours: 1, targetMinHours: 4, targetMaxHours: 6, periodUnit: 'month' },
+    minSessionMinutes: { supervision: 45, parentTraining: 30, casePlanning: 20, clientSession: 60 },
     clinicianAvailability: { Monday: [{ start: '08:00', end: '14:00' }, { start: '15:00', end: '19:00' }] },
     utilization: { bcbaWeeklyBillableHours: 25, btWeeklyDirectHours: 165, bcbaMonthlyBillableHours: 100, bcbaMonthlyBillableHours5Week: 125, bcbaWeeklyBillableMin: 22 },
     cancellationNotice: { unplannedHoursThreshold: 24, plannedDaysThreshold: 30 },
@@ -89,6 +90,8 @@ check('auth weekly + buckets + dates', a.weekly?.direct === 20 && a.buckets.reas
 const st = rt.settings;
 check('settings clinicianAvailability multi-window', st.clinicianAvailability?.Monday?.length === 2);
 check('settings utilization columns', st.utilization?.bcbaWeeklyBillableMin === 22 && st.utilization?.btWeeklyDirectHours === 165);
+check('settings minSessionMinutes round-trips', st.minSessionMinutes?.supervision === 45 && st.minSessionMinutes?.parentTraining === 30
+  && st.minSessionMinutes?.casePlanning === 20 && st.minSessionMinutes?.clientSession === 60);
 check('settings cancellationNotice columns', st.cancellationNotice?.unplannedHoursThreshold === 24);
 check('settings report leads', st.reportDraftLead?.value === 4 && st.reportFinalLead?.unit === 'weeks');
 

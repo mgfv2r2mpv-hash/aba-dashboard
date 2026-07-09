@@ -839,6 +839,12 @@
       "targetMaxHours": 4,
       "periodUnit": "month"
     },
+    "minSessionMinutes": {
+      "supervision": 30,
+      "parentTraining": 30,
+      "casePlanning": 30,
+      "clientSession": 30
+    },
     "clinicianAvailability": {
       "Monday": [
         {

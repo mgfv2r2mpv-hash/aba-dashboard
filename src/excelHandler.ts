@@ -4,6 +4,7 @@ import {
   Blackout, Authorization, ManualUsage, Cancellation, CancellationCode, AUTH_BUCKETS, TimeOff, CompanyHoliday,
   PtoConfig, AccrualRule, AccrualKind, PtoBucket, PtoOpeningBalance,
   BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS,
+  MinSessionMinutes, DEFAULT_MIN_SESSION_MINUTES,
   TravelSettings, DEFAULT_TRAVEL_SETTINGS, CityCenter, TravelCacheEntry,
 } from './types';
 import { v4 as uuidv4 } from 'uuid';
@@ -363,6 +364,17 @@ function parseSettings(
   for (const [col, key] of bsdMap) { const v = num(row[col]); if (v !== undefined) bsd[key] = v; }
   if (Object.keys(bsd).length) settings.bcbaSessionDefaults = { ...DEFAULT_BCBA_SESSION_DEFAULTS, ...bsd };
 
+  // Per-type minimum session length (minutes), own columns. Same partial-backfill.
+  const msm: Partial<MinSessionMinutes> = {};
+  const msmMap: [string, keyof MinSessionMinutes][] = [
+    ['minSessionSupervision', 'supervision'],
+    ['minSessionParentTraining', 'parentTraining'],
+    ['minSessionCasePlanning', 'casePlanning'],
+    ['minSessionClientSession', 'clientSession'],
+  ];
+  for (const [col, key] of msmMap) { const v = num(row[col]); if (v !== undefined) msm[key] = v; }
+  if (Object.keys(msm).length) settings.minSessionMinutes = { ...DEFAULT_MIN_SESSION_MINUTES, ...msm };
+
   // Custom cancellation reason codes (own child sheet).
   const codeRows = rowsOf(workbook, 'CancellationCodes').filter(r => r && !isBlank(r.value));
   if (codeRows.length) {
@@ -636,6 +648,7 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
       'ptoBillableDeductionRatio', 'ptoMode', 'ptoBuckets', 'ptoUnpaidEnabled',
       'bcbaSupervisionPctOfDirect', 'bcbaReassessmentHours', 'bcbaCasePlanningHours',
       'bcbaParentTrainingHours', 'bcbaOtherHours',
+      'minSessionSupervision', 'minSessionParentTraining', 'minSessionCasePlanning', 'minSessionClientSession',
       'homeBaseLabel', 'homeBaseAddress', 'homeBaseCity', 'homeBaseLat', 'homeBaseLng',
       'travelEnabled', 'travelWithinCityMin', 'travelPadPercent', 'travelAvgSpeedMph',
       'travelDefaultUnknownMin', 'travelHourBucketSize'],
@@ -653,6 +666,8 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
       W(s.bcbaSessionDefaults?.supervisionPercentOfWeeklyDirect), W(s.bcbaSessionDefaults?.reassessmentHours),
       W(s.bcbaSessionDefaults?.casePlanningHours), W(s.bcbaSessionDefaults?.parentTrainingHours),
       W(s.bcbaSessionDefaults?.otherHours),
+      W(s.minSessionMinutes?.supervision), W(s.minSessionMinutes?.parentTraining),
+      W(s.minSessionMinutes?.casePlanning), W(s.minSessionMinutes?.clientSession),
       W(s.homeBase?.label), W(s.homeBase?.address), W(s.homeBase?.city), W(s.homeBase?.lat), W(s.homeBase?.lng),
       WB(s.travel?.enabled), W(s.travel?.withinCityMin), W(s.travel?.padPercent), W(s.travel?.avgSpeedMph),
       W(s.travel?.defaultUnknownMin), W(s.travel?.hourBucketSize),

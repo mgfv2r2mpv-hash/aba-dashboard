@@ -481,6 +481,15 @@ export default function App() {
       : new Map(),
     [scheduleData],
   );
+  // Series about to run off their materialized horizon — feeds the dock's
+  // info-level "extend?" prompts. MUST live above the lockReady/locked early
+  // returns with the other hooks: a hook below them runs only after unlock,
+  // and the changed hook count across that transition crashes React (the
+  // white-screen-after-Face-ID bug).
+  const endingSeries = React.useMemo(
+    () => (scheduleData ? findEndingSeries(scheduleData, new Date()) : []),
+    [scheduleData],
+  );
 
   // Measure the header height (for the portrait fixed-header layout) and keep
   // it updated if the content/safe-area changes (e.g. data load changes toolbar).
@@ -1960,12 +1969,9 @@ export default function App() {
   // Normalize the live conflict + compliance feeds into the one-at-a-time queue.
   // Per-case cards (worst clients first, each with a case-scoped fix) + a tail
   // aggregate; the bare summary covers the async cache-rebuild window. Series
-  // about to run off their materialized horizon ride along as info-level
-  // "extend?" prompts (user decision: prompt, never silent adds).
-  const endingSeries = React.useMemo(
-    () => (scheduleData ? findEndingSeries(scheduleData, new Date()) : []),
-    [scheduleData],
-  );
+  // about to run off their materialized horizon (endingSeries, memoized above
+  // the lock gate) ride along as info-level "extend?" prompts (user decision:
+  // prompt, never silent adds).
   const dockIssues = buildDockIssues(
     activeConflicts,
     compSummary,

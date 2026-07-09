@@ -1405,20 +1405,26 @@ export default function App() {
   };
 
   // Add (new id) or edit (existing id) → stage as draft ops. Nothing commits
-  // until the user Accepts or overrides in the DraftTray.
-  const handleSaveAppointments = async (apps: Appointment[]) => {
-    if (apps.length === 0 || !scheduleData) return;
-    const ops = apps.map(a =>
-      scheduleData.appointments.some(x => x.id === a.id) ? newMoveOp(a) : newAddOp(a)
-    );
+  // until the user Accepts or overrides in the DraftTray. A series-scope edit
+  // can also REMOVE rows (re-space surplus, truncate, collapse) — those ride
+  // along as remove ops and always go through the tray.
+  const handleSaveAppointments = async (apps: Appointment[], removeIds: string[] = []) => {
+    if ((apps.length === 0 && removeIds.length === 0) || !scheduleData) return;
+    const ops = [
+      ...apps.map(a =>
+        scheduleData.appointments.some(x => x.id === a.id) ? newMoveOp(a) : newAddOp(a)
+      ),
+      ...removeIds.map(id => newRemoveOp(id)),
+    ];
     // Historical sessions already happened — there's nothing to reschedule. When
     // every staged session is in the past, solveDraft grades it purely on hard
     // timeslot conflicts (two billable activities can't share a slot). If it
     // comes back clean (green), commit straight away so compliance/goals update
     // without a draft round-trip; a blocking overlap still falls through to the
-    // tray for the user to resolve.
+    // tray for the user to resolve. Removals always go to the tray (a deletion
+    // deserves the review step).
     const nowMs = Date.now();
-    const allPast = ops.every(o => {
+    const allPast = removeIds.length === 0 && ops.every(o => {
       const iso = o.appt?.startTime;
       return !!iso && new Date(iso).getTime() < nowMs;
     });
@@ -2738,8 +2744,8 @@ export default function App() {
           technicians={scheduleData.technicians}
           clients={scheduleData.clients}
           settings={scheduleData.settings}
-          onSave={(apps) => {
-            handleSaveAppointments(apps);
+          onSave={(apps, removeIds) => {
+            handleSaveAppointments(apps, removeIds);
             if (startedTodoId) homeTodos.markDone(startedTodoId);
             clearSessionSeed();
           }}

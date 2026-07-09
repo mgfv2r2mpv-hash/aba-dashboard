@@ -286,5 +286,116 @@ console.log('tidy — idempotency');
   check('an already-tidy schedule yields zero auto ops', r.auto.ops.length === 0);
 }
 
+// ── Phase 6: two-stage pattern detection + cross-series consolidation ────────
+const NOW_MAY = new Date(2026, 4, 1); // May 1 — all June rows are pending/future
+const looseAt = (date: string, id: string, over: Partial<Appointment> = {}) =>
+  appt({ type: 'client-session', client: 'C1', technician: 'T1', date, start: '10:00', end: '12:00', id, ...over });
+
+console.log('tidy — a Mon–Fri same-clock cluster is ONE custom series, not five weekly ones');
+{
+  // Three M–F weeks (Jun 1–19) of loose rows, same identity + clock: 15 rows.
+  const days = ['2026-06-01', '2026-06-02', '2026-06-03', '2026-06-04', '2026-06-05',
+    '2026-06-08', '2026-06-09', '2026-06-10', '2026-06-11', '2026-06-12',
+    '2026-06-15', '2026-06-16', '2026-06-17', '2026-06-18', '2026-06-19'];
+  const r = analyzeTidy(mkData(days.map((d, i) => looseAt(d, `mf${i}`))), defaultTidyConfig(), NOW_MAY);
+  const regroups = r.suggestions.filter(s => s.ruleId === 'grouping' && s.ops.some(o => o.op === 'regroup'));
+  check('exactly ONE grouping card', regroups.length === 1, `got ${regroups.length}`);
+  const op = regroups[0]?.ops.find(o => o.op === 'regroup') as any;
+  check('the regroup covers all 15 rows', op?.appointmentIds.length === 15, String(op?.appointmentIds.length));
+  check("pattern is 'custom' (weekday set), not weekly", op?.recurringPattern === 'custom', op?.recurringPattern);
+  check('rationale names the multi-weekday shape', /Mon/.test(regroups[0]?.rationale ?? '') && /Fri/.test(regroups[0]?.rationale ?? ''), regroups[0]?.rationale);
+}
+
+console.log('tidy — biweekly and monthly runs are detected');
+{
+  const bi = analyzeTidy(mkData(['2026-06-01', '2026-06-15', '2026-06-29'].map((d, i) => looseAt(d, `bi${i}`))), defaultTidyConfig(), NOW_MAY);
+  const biOp = bi.suggestions.find(s => s.ruleId === 'grouping')?.ops.find(o => o.op === 'regroup') as any;
+  check('biweekly run still detected', biOp?.recurringPattern === 'biweekly', biOp?.recurringPattern);
+
+  const mo = analyzeTidy(mkData(['2026-06-15', '2026-07-15', '2026-08-15'].map((d, i) => looseAt(d, `mo${i}`))), defaultTidyConfig(), NOW_MAY);
+  const moOp = mo.suggestions.find(s => s.ruleId === 'grouping')?.ops.find(o => o.op === 'regroup') as any;
+  check('monthly same-date run detected', moOp?.recurringPattern === 'monthly', moOp?.recurringPattern);
+
+  // First Tuesdays of Jun/Jul/Aug/Sep 2026: Jun 2, Jul 7, Aug 4, Sep 1.
+  const nth = analyzeTidy(mkData(['2026-06-02', '2026-07-07', '2026-08-04', '2026-09-01'].map((d, i) => looseAt(d, `nt${i}`))), defaultTidyConfig(), NOW_MAY);
+  const nthOp = nth.suggestions.find(s => s.ruleId === 'grouping')?.ops.find(o => o.op === 'regroup') as any;
+  check("monthly first-Tuesday run detected (stored 'monthly')", nthOp?.recurringPattern === 'monthly', nthOp?.recurringPattern);
+}
+
+console.log('tidy — two clients at the same clock never fuse into one series');
+{
+  const rows = [
+    looseAt('2026-06-01', 'ca1'), looseAt('2026-06-08', 'ca2'), looseAt('2026-06-15', 'ca3'),
+    looseAt('2026-06-02', 'cb1', { client: 'C2', technician: 'T2' }),
+    looseAt('2026-06-09', 'cb2', { client: 'C2', technician: 'T2' }),
+    looseAt('2026-06-16', 'cb3', { client: 'C2', technician: 'T2' }),
+  ];
+  const r = analyzeTidy(mkData(rows), defaultTidyConfig(), NOW_MAY);
+  const regroups = r.suggestions.filter(s => s.ruleId === 'grouping');
+  const sets = regroups.map(s => (s.ops[0] as any)?.appointmentIds as string[]);
+  check('two separate weekly cards (one per client)', regroups.length === 2, String(regroups.length));
+  check('no card mixes the two clients', sets.every(ids => ids.every(id => id.startsWith('ca')) || ids.every(id => id.startsWith('cb'))));
+}
+
+console.log('tidy — lone-recurring (flag-only, pre-heal) rows are groupable');
+{
+  const rows = ['2026-06-01', '2026-06-08', '2026-06-15'].map((d, i) =>
+    looseAt(d, `lr${i}`, { isRecurring: true, recurringPattern: 'weekly' })); // flag but NO seriesId
+  const r = analyzeTidy(mkData(rows), defaultTidyConfig(), NOW_MAY);
+  check('flag-only rows form a grouping candidate', r.suggestions.some(s => s.ruleId === 'grouping' && s.ops.some(o => o.op === 'regroup')));
+}
+
+console.log('tidy — five weekly seriesIds forming one M–F block consolidate into one series');
+{
+  // The builder materialized Mon..Fri as five separate weekly series. The user's
+  // definition says that IS one series — surface a consolidation.
+  const rows: Appointment[] = [];
+  const weekdays = ['2026-06-01', '2026-06-02', '2026-06-03', '2026-06-04', '2026-06-05'];
+  for (let w = 0; w < 3; w++) {
+    weekdays.forEach((d0, wd) => {
+      const d = new Date(d0); d.setDate(d.getDate() + w * 7);
+      const day = d.toISOString().slice(0, 10);
+      rows.push(looseAt(day, `s${wd}w${w}`, { seriesId: `SER-${wd}`, isRecurring: true, recurringPattern: 'weekly' }));
+    });
+  }
+  const r = analyzeTidy(mkData(rows), defaultTidyConfig(), NOW_MAY);
+  const cons = r.suggestions.filter(s => s.ruleId === 'seriesConsolidate');
+  check('one consolidation card', cons.length === 1, String(cons.length));
+  const op = cons[0]?.ops.find(o => o.op === 'regroup') as any;
+  check('covers all 15 rows onto ONE seriesId with the measured custom pattern',
+    op?.appointmentIds.length === 15 && op?.recurringPattern === 'custom' && /^SER-/.test(op?.seriesId ?? ''),
+    JSON.stringify({ n: op?.appointmentIds.length, p: op?.recurringPattern, s: op?.seriesId }));
+  check('consolidation is review-only, never auto', !r.auto.ops.some(o => o.op === 'regroup'));
+}
+
+console.log('tidy — consolidation spares facts and stays pending/future-only');
+{
+  const rows: Appointment[] = [
+    // Two series that measure as ONE weekly line (alternating halves? no — same
+    // weekday, contiguous weeks split across two seriesIds by an extend bug).
+    looseAt('2026-06-01', 'h1', { seriesId: 'SA', isRecurring: true, recurringPattern: 'weekly' }),
+    looseAt('2026-06-08', 'h2', { seriesId: 'SA', isRecurring: true, recurringPattern: 'weekly' }),
+    looseAt('2026-06-15', 'h3', { seriesId: 'SB', isRecurring: true, recurringPattern: 'weekly' }),
+    looseAt('2026-06-22', 'h4', { seriesId: 'SB', isRecurring: true, recurringPattern: 'weekly' }),
+    // A completed fact inside SA — must never be re-stamped.
+    looseAt('2026-05-25', 'hf', { seriesId: 'SA', isRecurring: true, recurringPattern: 'weekly', status: 'completed' }),
+  ];
+  const r = analyzeTidy(mkData(rows), defaultTidyConfig(), NOW_MAY);
+  const cons = r.suggestions.filter(s => s.ruleId === 'seriesConsolidate');
+  check('split-in-two weekly series consolidates', cons.length === 1, String(cons.length));
+  const op = cons[0]?.ops.find(o => o.op === 'regroup') as any;
+  check('the completed fact is NOT in the regroup', !!op && !op.appointmentIds.includes('hf'));
+  check('measured pattern is weekly', op?.recurringPattern === 'weekly', op?.recurringPattern);
+}
+
+console.log('tidy — grouping candidates pass the equivalence oracle');
+{
+  const days = ['2026-06-01', '2026-06-02', '2026-06-03', '2026-06-08', '2026-06-09', '2026-06-10'];
+  const r = analyzeTidy(mkData(days.map((d, i) => looseAt(d, `eq${i}`))), defaultTidyConfig(), NOW_MAY);
+  const grp = r.suggestions.find(s => s.ruleId === 'grouping' && s.ops.some(o => o.op === 'regroup'));
+  check('custom regroup exists (M/T/W set)', !!grp);
+  check('custom regroup carries no metric delta (oracle-equivalent)', !!grp && !grp.metricDelta, grp?.metricDelta);
+}
+
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAILURES'} — ${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

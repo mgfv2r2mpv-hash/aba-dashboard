@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, Appointment, CompanyHoliday, TravelSettings, DEFAULT_TRAVEL_SETTINGS, HomeBase, SchedulingHints, SupervisionStyle, Daypart } from '../types';
+import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, Appointment, CompanyHoliday, TravelSettings, DEFAULT_TRAVEL_SETTINGS, HomeBase, SchedulingHints, SupervisionStyle, Daypart, resolveMinSessionMinutes } from '../types';
 import { AISettings, ClaudeModel } from './Settings';
 import { GoogleRoutingProvider, refreshTravelTimes } from '../routing';
 import { resolvePtoConfig, activeBuckets, ptoBucketLabel, computePtoBalances } from '../pto';
@@ -2356,6 +2356,12 @@ function CandcEditor({ settings, saving, onSave }: {
   const [bcbaMonthly5, setBcbaMonthly5] = useState(s(u.bcbaMonthlyBillableHours5Week));
   const [clientUtilPct, setClientUtilPct] = useState(s(settings.utilization?.clientUtilizationPercent ?? 80));
   const [minClientSessionHrs, setMinClientSessionHrs] = useState(s(settings.utilization?.minClientSessionHoursPerWeek ?? 10));
+  // Minimum session length (minutes) per type — a grow-toward/flag target, not a gate.
+  const msm = resolveMinSessionMinutes(settings);
+  const [minSupMin, setMinSupMin] = useState(s(msm.supervision));
+  const [minPtMin, setMinPtMin] = useState(s(msm.parentTraining));
+  const [minCpMin, setMinCpMin] = useState(s(msm.casePlanning));
+  const [minDirectMin, setMinDirectMin] = useState(s(msm.clientSession));
   // Cancellation
   const [codes, setCodes] = useState<CancellationCode[]>(() => resolveCancellationCodes(settings).map(c => ({ ...c })));
   const [unplannedHrs, setUnplannedHrs] = useState(s(settings.cancellationNotice?.unplannedHoursThreshold ?? 24));
@@ -2381,6 +2387,12 @@ function CandcEditor({ settings, saving, onSave }: {
         targetMinHours: num(ptTargetMin, settings.parentTraining.targetMinHours),
         targetMaxHours: num(ptTargetMax, settings.parentTraining.targetMaxHours),
         periodUnit,
+      },
+      minSessionMinutes: {
+        supervision: num(minSupMin, msm.supervision),
+        parentTraining: num(minPtMin, msm.parentTraining),
+        casePlanning: num(minCpMin, msm.casePlanning),
+        clientSession: num(minDirectMin, msm.clientSession),
       },
       utilization: {
         bcbaWeeklyBillableHours: num(bcbaWeekly, u.bcbaWeeklyBillableHours),
@@ -2464,6 +2476,16 @@ function CandcEditor({ settings, saving, onSave }: {
         <NumField label={`Minimum hours / ${periodUnit}`} value={ptMin} onChange={setPtMin} suffix="h" />
         <NumField label={`Target min hours / ${periodUnit}`} value={ptTargetMin} onChange={setPtTargetMin} suffix="h" />
         <NumField label={`Target max hours / ${periodUnit}`} value={ptTargetMax} onChange={setPtTargetMax} suffix="h" />
+      </SettingsSection>
+
+      <SettingsSection title="Minimum Session Length">
+        <p style={{ margin: '0 0 4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+          The builder flags proposed sessions shorter than these so you can review them (grow, or run as telehealth). Shorter sessions are still placed, never dropped.
+        </p>
+        <NumField label="Supervision" value={minSupMin} onChange={setMinSupMin} suffix="min" />
+        <NumField label="Parent training" value={minPtMin} onChange={setMinPtMin} suffix="min" />
+        <NumField label="Case planning" value={minCpMin} onChange={setMinCpMin} suffix="min" />
+        <NumField label="Direct session" value={minDirectMin} onChange={setMinDirectMin} suffix="min" />
       </SettingsSection>
 
       <SettingsSection title="Billable &amp; Utilization Targets">

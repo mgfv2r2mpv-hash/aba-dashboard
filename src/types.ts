@@ -247,6 +247,9 @@ export interface CompanySettings {
   // Absent = DEFAULT_BCBA_SESSION_DEFAULTS. Drives the auto-filled end time of a
   // new appointment in AppointmentForm. See BcbaSessionDefaults.
   bcbaSessionDefaults?: BcbaSessionDefaults;
+  // Per-type minimum session length (minutes) the builder sizes toward; absent =
+  // DEFAULT_MIN_SESSION_MINUTES. See MinSessionMinutes (grow-toward + flag, not a gate).
+  minSessionMinutes?: MinSessionMinutes;
   // --- Travel-time grounding (the single BCBA physically travels between sites) ---
   // The BCBA's home base — the day's travel origin/terminus and the ONLY exact
   // address in the model (the user's own home, not PHI). Clients are city-level only.
@@ -340,6 +343,29 @@ export const DEFAULT_BCBA_SESSION_DEFAULTS: BcbaSessionDefaults = {
   parentTrainingHours: 1,
   otherHours: 1,
 };
+
+// Per-type MINIMUM session length (minutes) the builder sizes toward. Not a hard
+// suppression gate: the builder grows a session up to this when the host window + cap
+// allow ("grow them"), but a session that can't reach it is still PLACED and PRESENTED
+// (the BCBA may make it work — grow it, run it as telehealth to save travel, etc.) and
+// flagged in the build summary. Absent = DEFAULT_MIN_SESSION_MINUTES.
+export interface MinSessionMinutes {
+  supervision: number;
+  parentTraining: number;
+  casePlanning: number;
+  clientSession: number;
+}
+
+export const DEFAULT_MIN_SESSION_MINUTES: MinSessionMinutes = {
+  supervision: 30,
+  parentTraining: 30,
+  casePlanning: 30,
+  clientSession: 30,
+};
+
+export function resolveMinSessionMinutes(settings: Pick<CompanySettings, 'minSessionMinutes'>): MinSessionMinutes {
+  return { ...DEFAULT_MIN_SESSION_MINUTES, ...settings.minSessionMinutes };
+}
 
 export const DEFAULT_CANCELLATION_NOTICE = {
   unplannedHoursThreshold: 24,

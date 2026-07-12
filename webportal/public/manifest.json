@@ -1,7 +1,7 @@
 {
   "name": "ABA Dashboard Portal",
   "short_name": "ABA Portal",
-  "description": "Read-only, browser-side-decrypted view of ABA schedules",
+  "description": "Browser-decrypted view and editor for ABA schedules",
   "theme_color": "#3b82f6",
   "background_color": "#f4f6f9",
   "display": "standalone",

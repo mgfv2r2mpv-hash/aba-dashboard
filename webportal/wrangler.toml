@@ -7,3 +7,9 @@ pages_build_output_dir = "dist"
 #   Build output dir : dist
 #   Root directory   : webportal
 #   Node version     : 20
+
+# Cloudflare Access gate config, read by functions/_middleware.js.
+# These are non-secret identifiers (POLICY_AUD is the app's Audience tag, not a secret).
+[vars]
+TEAM_DOMAIN = "https://t-nooutco-me.cloudflareaccess.com"
+POLICY_AUD = "4cbdc060e7b12fb88a66a79b369c45c11d311e590dac403de88317728eea1f0d"

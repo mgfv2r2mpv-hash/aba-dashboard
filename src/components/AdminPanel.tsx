@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
+import { validatePassword } from '../passwordPolicy';
+import { loadPasswordDict } from '../passwordDictLoader';
 import { ScheduleData, Technician, Client, DayOfWeek, TimeWindow, Blackout, CompanySettings, TrainingPeriodUnit, Authorization, ManualUsage, AuthBucketKey, AUTH_BUCKETS, SupervisionCadence, SUPERVISION_CADENCES, CancellationCode, resolveCancellationCodes, slugifyCancellationCode, TimeOff, PtoBucket, PtoConfig, AccrualRule, AccrualKind, PtoOpeningBalance, DEFAULT_PTO_DEDUCTION_RATIO, BcbaSessionDefaults, DEFAULT_BCBA_SESSION_DEFAULTS, Appointment, CompanyHoliday, TravelSettings, DEFAULT_TRAVEL_SETTINGS, HomeBase, SchedulingHints, SupervisionStyle, Daypart, resolveMinSessionMinutes } from '../types';
 import { AISettings, ClaudeModel } from './Settings';
 import { GoogleRoutingProvider, refreshTravelTimes } from '../routing';
@@ -2912,6 +2914,8 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   const [showPw, setShowPw] = useState(false);
   const [changingPw, setChangingPw] = useState(!hasExistingPw);
   const [pwError, setPwError] = useState<string | null>(null);
+  const [pwDict, setPwDict] = useState<ReadonlySet<string> | null>(null);
+  useEffect(() => { loadPasswordDict().then(setPwDict); }, []);
 
   // Track whether key state has been saved to know when to move AI settings position.
   // Also reset replacingKey when the key is cleared externally (e.g. via Clear button).
@@ -2946,7 +2950,12 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
         setPwError('Current password is incorrect.');
         return;
       }
-      schedulePassword = newPw.trim() || undefined;
+      const trimmed = newPw.trim();
+      if (trimmed && !validatePassword(trimmed, pwDict ?? undefined).valid) {
+        setPwError('New password does not meet the requirements below.');
+        return;
+      }
+      schedulePassword = trimmed || undefined;
     }
 
     setJustSaved(false);
@@ -3070,6 +3079,16 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
                 {showPw ? 'Hide' : 'Show'}
               </button>
             </div>
+            {changingPw && newPw.length > 0 && (
+              <ul style={{ listStyle: 'none', padding: 0, margin: '2px 0 0', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {validatePassword(newPw, pwDict ?? undefined).rules.map((r) => (
+                  <li key={r.id} style={{ display: 'flex', gap: 6, alignItems: 'baseline', fontSize: 11.5, color: r.ok ? 'var(--text-muted, #6b7280)' : 'var(--text, #374151)' }}>
+                    <span aria-hidden="true" style={{ fontWeight: 700, color: r.ok ? '#16a34a' : '#9ca3af' }}>{r.ok ? '✓' : '○'}</span>
+                    {r.label}
+                  </li>
+                ))}
+              </ul>
+            )}
             {pwError && <p style={{ fontSize: '12px', color: 'var(--status-behind)', margin: 0 }}>{pwError}</p>}
           </div>
         )}

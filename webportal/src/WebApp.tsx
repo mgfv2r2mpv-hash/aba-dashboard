@@ -2,10 +2,13 @@ import React, { useCallback, useRef, useState } from 'react';
 import { isEncryptedSchedule } from '@shared/clientCrypto';
 import { ScheduleData } from '@shared/types';
 import { ComplianceCache, buildCache } from '@shared/complianceCache';
+import { validatePassword } from '@shared/passwordPolicy';
 import UploadZone from './UploadZone';
 import PasswordForm from './PasswordForm';
 import ReadyView from './ReadyView';
-import type { WorkerResponse } from './parse.worker';
+import LogoutLink from './LogoutLink';
+import BackupPasswordDialog from './BackupPasswordDialog';
+import type { AiConfig, WorkerResponse } from './parse.worker';
 import type { SaveResponse } from './save.worker';
 
 type Phase = 'upload' | 'password' | 'decrypting' | 'ready';
@@ -16,15 +19,30 @@ export default function WebApp() {
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
   const [compCache, setCompCache]       = useState<ComplianceCache | null>(null);
   const [password, setPassword]         = useState<string>('');
-  const [apiKey, setApiKey]             = useState<string | null>(null);
+  const [aiConfig, setAiConfig]         = useState<AiConfig | null>(null);
   const [isDirty, setIsDirty]           = useState(false);
   const [isSaving, setIsSaving]         = useState(false);
   const [saveError, setSaveError]       = useState<string | null>(null);
   const [uploadError, setUploadError]   = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [pwDialogOpen, setPwDialogOpen] = useState(false);
+  const [dict, setDict]                 = useState<ReadonlySet<string> | null>(null);
 
   const parseWorkerRef = useRef<Worker | null>(null);
   const saveWorkerRef  = useRef<Worker | null>(null);
+  const dictPromiseRef = useRef<Promise<ReadonlySet<string>> | null>(null);
+
+  // Lazy, memoized load of the password dictionary (a separate chunk so it stays out
+  // of the landing bundle). Fails soft to an empty set — a blocked import must not
+  // block saving; the other strength rules still apply.
+  const loadDict = useCallback(() => {
+    if (!dictPromiseRef.current) {
+      dictPromiseRef.current = import('@shared/passwordDict')
+        .then(m => m.PASSWORD_DICT)
+        .catch(() => new Set<string>());
+    }
+    return dictPromiseRef.current;
+  }, []);
 
   const getParseWorker = useCallback(() => {
     if (!parseWorkerRef.current) {
@@ -44,7 +62,7 @@ export default function WebApp() {
     }
     if (!isEncryptedSchedule(bytes)) {
       setUploadError(
-        'This file is not encrypted. Export from the ABA Dashboard app with a schedule password, then try again.'
+        'This file is not encrypted. Export a JSON backup from the ABA Dashboard app with a schedule password, then try again.'
       );
       return;
     }
@@ -67,14 +85,16 @@ export default function WebApp() {
         setScheduleData(res.data);
         setCompCache(res.cache);
         setPassword(pwd);
-        setApiKey(res.apiKey ?? null);
+        setAiConfig(res.aiConfig ?? null);
         setIsDirty(false);
         setPhase('ready');
+        // Warm the password dictionary so the Save-time strength check is instant.
+        loadDict().then(setDict);
       } else if (res.isDOMException) {
         setPasswordError('Incorrect password. Please try again.');
         setPhase('password');
       } else {
-        setUploadError(`Failed to parse schedule: ${res.message}`);
+        setUploadError(res.message);
         setFileBytes(null);
         setPhase('upload');
       }
@@ -89,7 +109,7 @@ export default function WebApp() {
       setPhase('upload');
     };
     worker.postMessage({ bytes: fileBytes, password: pwd });
-  }, [fileBytes, getParseWorker]);
+  }, [fileBytes, getParseWorker, loadDict]);
 
   const handleDataChange = useCallback((next: ScheduleData) => {
     setScheduleData(next);
@@ -98,12 +118,15 @@ export default function WebApp() {
     setSaveError(null);
   }, []);
 
-  const handleApiKeyChange = useCallback((key: string | null) => {
-    setApiKey(key);
+  const handleAiConfigChange = useCallback((next: AiConfig | null) => {
+    setAiConfig(next);
   }, []);
 
-  const handleSave = useCallback(() => {
-    if (!scheduleData || !password) return;
+  // Spawn the save worker with the given password and download the encrypted backup.
+  // Records the password as the session password so subsequent saves reuse it.
+  const runSave = useCallback((pwd: string) => {
+    if (!scheduleData) return;
+    setPwDialogOpen(false);
     setIsSaving(true);
     setSaveError(null);
 
@@ -119,9 +142,10 @@ export default function WebApp() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'schedule.enc';
+        a.download = 'schedule-backup.enc.json';
         a.click();
         URL.revokeObjectURL(url);
+        setPassword(pwd);
         setIsDirty(false);
         setIsSaving(false);
       } else {
@@ -136,8 +160,22 @@ export default function WebApp() {
       setIsSaving(false);
     };
 
-    worker.postMessage({ data: scheduleData, password, apiKey: apiKey ?? undefined });
-  }, [scheduleData, password, apiKey]);
+    worker.postMessage({ data: scheduleData, password: pwd, aiConfig: aiConfig ?? undefined });
+  }, [scheduleData, aiConfig]);
+
+  // Save enforces the file-password policy: a compliant session password downloads
+  // in one click; a weak one opens the dialog to require a stronger one first.
+  const handleSave = useCallback(async () => {
+    if (!scheduleData || !password) return;
+    const d = dict ?? await loadDict();
+    if (!dict) setDict(d);
+    if (validatePassword(password, d).valid) {
+      runSave(password);
+    } else {
+      setSaveError(null);
+      setPwDialogOpen(true);
+    }
+  }, [scheduleData, password, dict, loadDict, runSave]);
 
   const reset = useCallback(() => {
     setPhase('upload');
@@ -145,12 +183,13 @@ export default function WebApp() {
     setScheduleData(null);
     setCompCache(null);
     setPassword('');
-    setApiKey(null);
+    setAiConfig(null);
     setIsDirty(false);
     setIsSaving(false);
     setSaveError(null);
     setUploadError(null);
     setPasswordError(null);
+    setPwDialogOpen(false);
     parseWorkerRef.current?.terminate();
     parseWorkerRef.current = null;
     saveWorkerRef.current?.terminate();
@@ -159,24 +198,35 @@ export default function WebApp() {
 
   if (phase === 'ready' && scheduleData && compCache) {
     return (
-      <ReadyView
-        scheduleData={scheduleData}
-        compCache={compCache}
-        isDirty={isDirty}
-        isSaving={isSaving}
-        saveError={saveError}
-        apiKey={apiKey}
-        onDataChange={handleDataChange}
-        onApiKeyChange={handleApiKeyChange}
-        onSave={handleSave}
-        onReset={reset}
-      />
+      <>
+        <ReadyView
+          scheduleData={scheduleData}
+          compCache={compCache}
+          isDirty={isDirty}
+          isSaving={isSaving}
+          saveError={saveError}
+          aiConfig={aiConfig}
+          onDataChange={handleDataChange}
+          onAiConfigChange={handleAiConfigChange}
+          onSave={handleSave}
+          onReset={reset}
+        />
+        {pwDialogOpen && (
+          <BackupPasswordDialog
+            initialPassword={password}
+            dict={dict}
+            onSubmit={runSave}
+            onCancel={() => setPwDialogOpen(false)}
+          />
+        )}
+      </>
     );
   }
 
   if (phase === 'decrypting') {
     return (
       <div className="portal centered-screen">
+        <LogoutLink fixed />
         <div className="spinner-wrap">
           <div className="spinner" aria-hidden="true" />
           <p className="spinner-label">Decrypting and loading schedule…</p>
@@ -187,17 +237,21 @@ export default function WebApp() {
 
   if (phase === 'password') {
     return (
-      <PasswordForm
-        onSubmit={handlePasswordSubmit}
-        onCancel={reset}
-        error={passwordError}
-        isLoading={false}
-      />
+      <>
+        <LogoutLink fixed />
+        <PasswordForm
+          onSubmit={handlePasswordSubmit}
+          onCancel={reset}
+          error={passwordError}
+          isLoading={false}
+        />
+      </>
     );
   }
 
   return (
     <div className="portal">
+      <LogoutLink fixed />
       <UploadZone onFile={handleFile} error={uploadError} />
     </div>
   );

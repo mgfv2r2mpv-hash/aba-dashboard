@@ -7,7 +7,7 @@
  */
 import { ScheduleData } from '../src/types';
 import {
-  wrapEnvelope, unwrapEnvelope, migrateScheduleData,
+  wrapEnvelope, unwrapEnvelope, unwrapBackup, migrateScheduleData,
   CURRENT_SCHEMA_VERSION, BLOB_FORMAT,
 } from '../src/scheduleMigrations';
 
@@ -46,6 +46,30 @@ console.log('envelope round-trip');
   check('round-trip preserves id/appointments', out.id === 'd' && out.appointments.length === 1);
   check('round-trip preserves confirmedConflicts', JSON.stringify(out.confirmedConflicts) === JSON.stringify(['k1']));
   check('round-trip preserves a blackout', (out.blackouts ?? []).length === 1);
+}
+
+console.log('aiConfig transport field (embedded AI settings)');
+{
+  // The obfuscated AI-config blob rides the envelope so a portable backup restores
+  // AI settings across the app↔portal handoff. It is transport metadata, never
+  // domain data — data must round-trip identically whether or not it is present.
+  const OBF = 'obf::{"apiKey":"sk-ant-x","model":"claude-sonnet-4-6"}'; // stand-in for an obfuscateKey() blob
+  const withCfg = wrapEnvelope(full, OBF);
+  const env = JSON.parse(withCfg);
+  check('wrap embeds aiConfig when provided', env.aiConfig === OBF);
+  const rtCfg = unwrapBackup(withCfg);
+  check('unwrapBackup returns the aiConfig blob', rtCfg.aiConfig === OBF);
+  check('unwrapBackup still migrates data', rtCfg.data.id === 'd' && rtCfg.data.appointments.length === 1);
+
+  const withoutCfg = wrapEnvelope(full);
+  check('wrap omits aiConfig key when absent', !('aiConfig' in JSON.parse(withoutCfg)));
+  check('omitting aiConfig is byte-identical to the old 1-arg wrap', withoutCfg === JSON.stringify({ blobFormat: BLOB_FORMAT, schemaVersion: CURRENT_SCHEMA_VERSION, gzip: false, data: full }));
+  check('unwrapBackup yields undefined aiConfig when absent', unwrapBackup(withoutCfg).aiConfig === undefined);
+
+  // A legacy bare ScheduleData (no envelope) has no aiConfig, and unwrapBackup must
+  // still adopt it as version-0 data without throwing.
+  const bare = unwrapBackup(JSON.stringify(full));
+  check('unwrapBackup adopts legacy bare JSON (no aiConfig)', bare.aiConfig === undefined && bare.data.id === 'd');
 }
 
 console.log('legacy bare-JSON adoption (pre-envelope store)');

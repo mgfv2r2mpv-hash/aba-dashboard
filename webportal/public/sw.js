@@ -1,6 +1,6 @@
 // Service Worker — stale-while-revalidate for all assets.
 // HTML (navigation) uses network-first so the shell stays up to date.
-const CACHE = 'aba-portal-v1';
+const CACHE = 'aba-portal-v2';
 
 self.addEventListener('install', () => self.skipWaiting());
 

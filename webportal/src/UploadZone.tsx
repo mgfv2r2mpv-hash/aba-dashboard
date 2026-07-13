@@ -35,7 +35,7 @@ export default function UploadZone({ onFile, error }: Props) {
     <div className="upload-screen">
       <div className="upload-hero">
         <h1>ABA Dashboard <span style={{ color: 'var(--c-primary)' }}>Portal</span></h1>
-        <p>Read-only schedule viewer &nbsp;·&nbsp; All decryption happens in your browser</p>
+        <p>Decrypt, edit, and re-download your schedule &nbsp;·&nbsp; Everything happens in your browser</p>
       </div>
 
       <label
@@ -51,7 +51,7 @@ export default function UploadZone({ onFile, error }: Props) {
         <input
           ref={inputRef}
           type="file"
-          accept=".xlsx"
+          accept=".json"
           onChange={onChange}
           aria-hidden="true"
           tabIndex={-1}
@@ -60,7 +60,7 @@ export default function UploadZone({ onFile, error }: Props) {
         <span className="drop-zone-icon">🔒</span>
         <span className="drop-zone-label">Drop encrypted schedule file</span>
         <span className="drop-zone-sublabel">
-          or tap to browse &nbsp;·&nbsp; <code>.enc.xlsx</code> only
+          or tap to browse &nbsp;·&nbsp; <code>.enc.json</code> backup
         </span>
       </label>
 

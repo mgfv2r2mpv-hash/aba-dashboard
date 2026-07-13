@@ -1,4 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { validatePassword } from '../passwordPolicy';
+import { loadPasswordDict } from '../passwordDictLoader';
 
 export type ClaudeModel = 'claude-opus-4-8' | 'claude-sonnet-4-6' | 'claude-haiku-4-5-20251001';
 
@@ -96,6 +98,8 @@ export default function Settings({ settings, onSave, onClose, onClearKey, onRequ
   const [newPw, setNewPw] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [pwError, setPwError] = useState<string | null>(null);
+  const [pwDict, setPwDict] = useState<ReadonlySet<string> | null>(null);
+  useEffect(() => { loadPasswordDict().then(setPwDict); }, []);
 
   const handleSave = () => {
     let schedulePassword = settings.schedulePassword;
@@ -104,7 +108,12 @@ export default function Settings({ settings, onSave, onClose, onClearKey, onRequ
         setPwError('Current password is incorrect.');
         return;
       }
-      schedulePassword = newPw.trim() || undefined;
+      const trimmed = newPw.trim();
+      if (trimmed && !validatePassword(trimmed, pwDict ?? undefined).valid) {
+        setPwError('New password does not meet the requirements below.');
+        return;
+      }
+      schedulePassword = trimmed || undefined;
     }
     // When the key is sealed and untouched, keep it. While replacing, a blank
     // field is treated as "leave it" too — use the explicit Clear button to
@@ -248,6 +257,16 @@ export default function Settings({ settings, onSave, onClose, onClearKey, onRequ
                   {showPw ? 'Hide' : 'Show'}
                 </button>
               </div>
+              {changingPw && newPw.length > 0 && (
+                <ul style={{ listStyle: 'none', padding: 0, margin: '2px 0 0', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {validatePassword(newPw, pwDict ?? undefined).rules.map((r) => (
+                    <li key={r.id} style={{ display: 'flex', gap: 6, alignItems: 'baseline', fontSize: 11.5, color: r.ok ? '#6b7280' : '#374151' }}>
+                      <span aria-hidden="true" style={{ fontWeight: 700, color: r.ok ? '#16a34a' : '#9ca3af' }}>{r.ok ? '✓' : '○'}</span>
+                      {r.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {hasExistingPw && (
                 <p style={{ fontSize: '11px', color: '#b45309', margin: 0 }}>
                   Changing this won't re-encrypt files already exported with the old

@@ -9,6 +9,8 @@ import AdminPanel from '@shared/components/AdminPanel';
 import { useMinWidth } from '@shared/useMediaQuery';
 import ApptDetail from './ApptDetail';
 import SaveBar from './SaveBar';
+import LogoutLink from './LogoutLink';
+import type { AiConfig } from './parse.worker';
 
 type Tab = 'calendar' | 'compliance' | 'caseload' | 'admin' | 'settings';
 
@@ -28,9 +30,9 @@ export default function ReadyView({
   isDirty,
   isSaving,
   saveError,
-  apiKey,
+  aiConfig,
   onDataChange,
-  onApiKeyChange,
+  onAiConfigChange,
   onSave,
   onReset,
 }: {
@@ -39,12 +41,13 @@ export default function ReadyView({
   isDirty: boolean;
   isSaving: boolean;
   saveError: string | null;
-  apiKey: string | null;
+  aiConfig: AiConfig | null;
   onDataChange: (next: ScheduleData) => void;
-  onApiKeyChange: (key: string | null) => void;
+  onAiConfigChange: (next: AiConfig | null) => void;
   onSave: () => void;
   onReset: () => void;
 }) {
+  const apiKey = aiConfig?.apiKey || null;
   const [tab, setTab]             = useState<Tab>('calendar');
   const [calDate, setCalDate]     = useState(new Date());
   const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null);
@@ -87,7 +90,13 @@ export default function ReadyView({
 
   const handleSaveApiKey = () => {
     const trimmed = apiKeyDraft.trim();
-    onApiKeyChange(trimmed || null);
+    // Preserve the app's model/maps key across the round-trip; clearing the Claude
+    // key keeps the rest only if there is still a maps key to carry, else drops config.
+    onAiConfigChange(
+      trimmed
+        ? { apiKey: trimmed, model: aiConfig?.model ?? 'claude-sonnet-4-6', mapsApiKey: aiConfig?.mapsApiKey }
+        : (aiConfig?.mapsApiKey ? { ...aiConfig, apiKey: '' } : null),
+    );
     setApiKeyMasked(!!trimmed);
   };
 
@@ -95,10 +104,6 @@ export default function ReadyView({
     setApiKeyDraft('');
     setApiKeyMasked(false);
   };
-
-  const aiSettings = apiKey
-    ? { apiKey, model: 'claude-sonnet-4-6' as const, anonymize: true }
-    : undefined;
 
   return (
     <div className="portal">
@@ -128,6 +133,7 @@ export default function ReadyView({
         <button className="btn-ghost" onClick={onReset} aria-label="Close file">
           ✕ Close
         </button>
+        <LogoutLink />
       </header>
 
       {/* ── Body ── */}
@@ -163,7 +169,6 @@ export default function ReadyView({
               data={scheduleData}
               cache={compCache}
               conflicts={[]}
-              aiSettings={aiSettings}
               onMarkComplete={handleMarkComplete}
               onRequestCancel={handleRequestCancel}
               onSelectAppointment={handleSelectAppt}
@@ -190,16 +195,16 @@ export default function ReadyView({
               <section className="settings-section">
                 <h3 className="settings-section-title">Claude API Key</h3>
                 <p className="settings-section-desc">
-                  Enables AI features (Fix It / Wish It) on the Compliance tab.
-                  The key is held in memory only and embedded (obfuscated) in the
-                  downloaded file so it restores on next upload.
+                  Enables AI features (Fix It / Wish It) on the Compliance tab. The key is held in
+                  memory and embedded (obfuscated) in the encrypted backup you download, so it
+                  restores automatically the next time you open that file — here or in the app.
                 </p>
 
                 {apiKeyMasked ? (
                   <div className="api-key-set-row">
                     <span className="api-key-set-label">🔒 API key is set</span>
                     <button className="btn-ghost" onClick={handleReplaceApiKey}>Replace…</button>
-                    <button className="btn-ghost danger" onClick={() => { onApiKeyChange(null); setApiKeyDraft(''); setApiKeyMasked(false); }}>
+                    <button className="btn-ghost danger" onClick={() => { onAiConfigChange(aiConfig?.mapsApiKey ? { ...aiConfig, apiKey: '' } : null); setApiKeyDraft(''); setApiKeyMasked(false); }}>
                       Clear
                     </button>
                   </div>

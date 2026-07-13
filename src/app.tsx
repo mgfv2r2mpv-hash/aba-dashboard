@@ -57,7 +57,9 @@ import {
   isFaceIdEnabled, enableFaceId, disableFaceId, recoverPinViaBiometric,
   clearStaleAtRest,
 } from './appLock';
-import { migrateScheduleData, wrapEnvelope, unwrapEnvelope, collectUnresolvedRefs } from './scheduleMigrations';
+import { migrateScheduleData, wrapEnvelope, unwrapBackup, collectUnresolvedRefs } from './scheduleMigrations';
+import { validatePassword } from './passwordPolicy';
+import { loadPasswordDict } from './passwordDictLoader';
 import { nameOf } from './entityRefs';
 import { RosterProvider } from './rosterContext';
 import { resolveAtRestAIConfig } from './aiConfigPolicy';
@@ -284,9 +286,9 @@ export default function App() {
   const unlockedPinRef = React.useRef<string | null>(null);
 
   // Schedule-decrypt password modal (replaces window.prompt for AutoFill).
-  const [pwPrompt, setPwPrompt] = useState<{ title: string; message: string; placeholder?: string; submitLabel?: string } | null>(null);
+  const [pwPrompt, setPwPrompt] = useState<{ title: string; message: string; placeholder?: string; submitLabel?: string; policy?: boolean } | null>(null);
   const pwResolverRef = React.useRef<((pw: string | null) => void) | null>(null);
-  const askPassword = (title: string, message: string, opts?: { placeholder?: string; submitLabel?: string }) =>
+  const askPassword = (title: string, message: string, opts?: { placeholder?: string; submitLabel?: string; policy?: boolean }) =>
     new Promise<string | null>((resolve) => {
       pwResolverRef.current = resolve;
       setPwPrompt({ title, message, ...opts });
@@ -886,12 +888,15 @@ export default function App() {
       // a JSON backup envelope ('{'). Route an envelope through the lossless
       // migration path; everything else stays on the xlsx parser.
       if (looksLikeJsonEnvelope(bytes)) {
-        const data = unwrapEnvelope(new TextDecoder().decode(bytes));
+        // A JSON backup may carry the AI settings (obfuscated) so they restore on
+        // import — the same round-trip the retired .xlsx _Config gave, now portable
+        // between the app and the web portal.
+        const { data, aiConfig } = unwrapBackup(new TextDecoder().decode(bytes));
         if (scheduleData) {
-          setPendingImport({ bytes, fileName: file.name, data, embeddedConfig: undefined });
+          setPendingImport({ bytes, fileName: file.name, data, embeddedConfig: aiConfig });
           return;
         }
-        await applyImported(bytes, data, undefined);
+        await applyImported(bytes, data, aiConfig);
         return;
       }
 
@@ -1570,13 +1575,26 @@ export default function App() {
   const handleBackupDownload = async () => {
     if (!scheduleData) return;
     try {
-      const password = aiSettings.schedulePassword
+      // Enforce the file-password policy on every backup write: reuse the saved
+      // schedule password only when it already complies, otherwise require a strong
+      // one through the policy-gated prompt.
+      const dict = await loadPasswordDict();
+      const reusable = aiSettings.schedulePassword && validatePassword(aiSettings.schedulePassword, dict).valid
+        ? aiSettings.schedulePassword
+        : null;
+      const password = reusable
         || (await askPassword(
           'Backup password',
-          'This backup contains client data. Choose a password to encrypt it — you\'ll need the same password to restore.',
-          { placeholder: 'Backup password', submitLabel: 'Encrypt & save' }));
+          'This backup contains client data. Choose a strong password to encrypt it — you\'ll need the same password to restore.',
+          { placeholder: 'Backup password', submitLabel: 'Encrypt & save', policy: true }));
       if (!password) return; // never emit an unencrypted backup
-      const json = wrapEnvelope(scheduleData);
+      // Carry the AI settings (obfuscated) so they restore on the other side — the
+      // portable equivalent of the retired .xlsx _Config. The schedule password is
+      // never embedded (it is the file's own key).
+      const embeddedConfig = (aiSettings.apiKey || aiSettings.mapsApiKey)
+        ? await obfuscateKey(JSON.stringify({ apiKey: aiSettings.apiKey, model: aiSettings.model, mapsApiKey: aiSettings.mapsApiKey }))
+        : undefined;
+      const json = wrapEnvelope(scheduleData, embeddedConfig);
       const bytes = await encryptBytes(new TextEncoder().encode(json), password);
       await saveBytesToDevice(bytes, 'schedule-backup.enc.json');
     } catch (error: any) {
@@ -2877,6 +2895,7 @@ export default function App() {
           message={pwPrompt.message}
           placeholder={pwPrompt.placeholder}
           submitLabel={pwPrompt.submitLabel}
+          policy={pwPrompt.policy}
           onSubmit={(pw) => resolvePassword(pw)}
           onCancel={() => resolvePassword(null)}
         />

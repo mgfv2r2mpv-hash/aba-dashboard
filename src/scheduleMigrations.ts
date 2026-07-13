@@ -21,11 +21,16 @@ export const BLOB_FORMAT = 'aba-schedule';
 export const CURRENT_SCHEMA_VERSION = 4;
 
 // The on-disk (pre-encryption) shape. `data` is a ScheduleData at `schemaVersion`.
+// `aiConfig` is an optional, app-obfuscated transport blob ({ apiKey, model,
+// mapsApiKey }) so a portable backup restores AI settings on the other side (app
+// or web portal) without re-entry — parity with the retired xlsx `_Config` sheet.
+// It is NOT domain data and never touches ScheduleData; the at-rest blob omits it.
 export interface ScheduleEnvelope {
   blobFormat: typeof BLOB_FORMAT;
   schemaVersion: number;
   gzip: boolean;
   data: ScheduleData;
+  aiConfig?: string;
 }
 
 // One N→N+1 transform, keyed by the version it upgrades FROM. Each must be pure
@@ -159,13 +164,17 @@ export function migrateScheduleData(raw: unknown): ScheduleData {
 }
 
 // Wrap a ScheduleData in the current envelope for persistence. The caller
-// encrypts the returned JSON string.
-export function wrapEnvelope(data: ScheduleData): string {
+// encrypts the returned JSON string. `aiConfig`, when provided, is an already-
+// obfuscated transport blob (the caller owns the obfuscation, keeping this module
+// crypto-free); it is omitted from the envelope when absent, so at-rest callers
+// that pass only `data` produce byte-identical output to before.
+export function wrapEnvelope(data: ScheduleData, aiConfig?: string): string {
   const env: ScheduleEnvelope = {
     blobFormat: BLOB_FORMAT,
     schemaVersion: CURRENT_SCHEMA_VERSION,
     gzip: false,
     data,
+    ...(aiConfig ? { aiConfig } : {}),
   };
   return JSON.stringify(env);
 }
@@ -174,4 +183,15 @@ export function wrapEnvelope(data: ScheduleData): string {
 // ScheduleData. Throws only on invalid JSON — callers already fail-soft on that.
 export function unwrapEnvelope(json: string): ScheduleData {
   return migrateScheduleData(JSON.parse(json));
+}
+
+// Like unwrapEnvelope, but also surfaces the (still-obfuscated) aiConfig transport
+// field when the blob is an envelope that carries one. Used by the app/portal
+// backup paths that restore embedded AI settings; the at-rest path stays on
+// unwrapEnvelope (data only). A legacy bare JSON has no aiConfig.
+export function unwrapBackup(json: string): { data: ScheduleData; aiConfig?: string } {
+  const raw = JSON.parse(json);
+  const data = migrateScheduleData(raw);
+  const aiConfig = isEnvelope(raw) && typeof raw.aiConfig === 'string' ? raw.aiConfig : undefined;
+  return { data, aiConfig };
 }

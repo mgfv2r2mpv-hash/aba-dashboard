@@ -655,3 +655,67 @@ body {
   font-weight: 500;
 }
 .appt-detail-val { color: var(--c-text); }
+
+/* ── Log out (Cloudflare Access) ── */
+/* Pinned control for the pre-load screens, which have no header. In ReadyView the
+   LogoutLink renders inline in .portal-header instead (no wrapper). */
+.portal-logout-fixed {
+  position: fixed;
+  top: max(12px, var(--safe-top));
+  right: max(12px, var(--safe-right));
+  z-index: 400;
+}
+
+/* ── Backup password dialog (file-password policy on Save) ── */
+.pw-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 350;
+  background: oklch(0% 0 0 / 0.4);
+  display: flex;
+  align-items: flex-end;
+  animation: fadeIn var(--duration-fast) var(--ease-out-expo);
+}
+@media (min-width: 640px) {
+  .pw-dialog-overlay { align-items: center; justify-content: center; }
+}
+
+.pw-dialog {
+  background: var(--c-surface);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  padding: 24px 20px max(24px, var(--safe-bottom));
+  width: 100%;
+  max-height: 88dvh;
+  overflow-y: auto;
+  animation: slideUp var(--duration-normal) var(--ease-out-expo);
+}
+@media (min-width: 640px) {
+  .pw-dialog {
+    border-radius: var(--radius-xl);
+    width: min(440px, 92vw);
+    max-height: 86vh;
+    padding: 28px;
+  }
+}
+
+.pw-dialog-title { font-size: var(--text-lg); font-weight: 700; color: var(--c-text); margin-bottom: 8px; }
+.pw-dialog-desc { font-size: var(--text-sm); color: var(--c-text-secondary); line-height: 1.5; margin-bottom: 16px; }
+
+.pw-input-row { display: flex; gap: 8px; align-items: stretch; margin-bottom: 14px; }
+.pw-input-row .form-input { flex: 1; }
+
+.pw-checklist { list-style: none; display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
+.pw-checklist li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--text-sm);
+  transition: color var(--duration-fast) var(--ease-out-expo);
+}
+.pw-checklist li > span { flex: none; font-weight: 700; }
+.pw-rule-ok  { color: var(--c-text-secondary); }
+.pw-rule-ok  > span { color: var(--c-success); }
+.pw-rule-no  { color: var(--c-text); }
+.pw-rule-no  > span { color: var(--c-text-muted); }
+
+.pw-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }

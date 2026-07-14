@@ -29,6 +29,7 @@ const data: ScheduleData = {
     availability: { Tuesday: [{ start: '15:00', end: '19:00' }] },
   }],
   settings: {
+    practiceName: 'Sunrise ABA',
     supervisionDirectHoursPercent: 10, supervisionRBTHoursPercent: 10, supervisionTechHoursPercent: 8,
     supervisionMaxHoursPercent: 20, supervisionFloorPercent: 10, supervisionPreferredMinPercent: 15, supervisionPreferredMaxPercent: 20,
     rbtMinContactsPerMonth: 2,

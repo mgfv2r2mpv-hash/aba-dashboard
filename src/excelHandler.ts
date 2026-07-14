@@ -320,6 +320,9 @@ function parseSettings(
     if (v !== undefined) (settings as any)[key] = v;
   }
 
+  const pn = text(row.practiceName);
+  if (pn) settings.practiceName = pn;
+
   // Utilization targets (own columns).
   const util: any = {};
   for (const key of [
@@ -657,7 +660,7 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
       'minSessionSupervision', 'minSessionParentTraining', 'minSessionCasePlanning', 'minSessionClientSession',
       'homeBaseLabel', 'homeBaseAddress', 'homeBaseCity', 'homeBaseLat', 'homeBaseLng',
       'travelEnabled', 'travelWithinCityMin', 'travelPadPercent', 'travelAvgSpeedMph',
-      'travelDefaultUnknownMin', 'travelHourBucketSize'],
+      'travelDefaultUnknownMin', 'travelHourBucketSize', 'practiceName'],
     [[
       s.supervisionDirectHoursPercent, s.supervisionRBTHoursPercent, W(s.supervisionTechHoursPercent),
       W(s.supervisionMaxHoursPercent), W(s.supervisionFloorPercent), W(s.supervisionPreferredMinPercent),
@@ -676,7 +679,7 @@ function buildWorkbook(data: ScheduleData, embeddedConfig?: string): XLSX.WorkBo
       W(s.minSessionMinutes?.casePlanning), W(s.minSessionMinutes?.clientSession),
       W(s.homeBase?.label), W(s.homeBase?.address), W(s.homeBase?.city), W(s.homeBase?.lat), W(s.homeBase?.lng),
       WB(s.travel?.enabled), W(s.travel?.withinCityMin), W(s.travel?.padPercent), W(s.travel?.avgSpeedMph),
-      W(s.travel?.defaultUnknownMin), W(s.travel?.hourBucketSize),
+      W(s.travel?.defaultUnknownMin), W(s.travel?.hourBucketSize), W(s.practiceName),
     ]]);
 
   // City centroids (geocode cache) + routed-duration cache. Both are normalized

@@ -1,5 +1,5 @@
 {
-	"appId": "com.abascheduling",
+	"appId": "com.abascheduler",
 	"appName": "SAssi Cal",
 	"webDir": "dist-client",
 	"packageClassList": [

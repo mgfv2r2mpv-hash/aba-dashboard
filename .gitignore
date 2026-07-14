@@ -13,3 +13,6 @@ ios/App/Pods/
 ios/App/App/public/
 android/app/build/
 android/.gradle/
+
+# Per-user Xcode state — never shareable
+ios/**/xcuserdata/

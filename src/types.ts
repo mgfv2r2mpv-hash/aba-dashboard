@@ -154,6 +154,9 @@ export interface UtilizationSettings {
 }
 
 export interface CompanySettings {
+  // Practice/owner display name. Optional; labels exported backup filenames
+  // (see lib/backupFilename) and rides inside backups/workbooks like any setting.
+  practiceName?: string;
   // Per-client (case) supervision target — % of direct hours per client per period.
   supervisionDirectHoursPercent: number;
   // Per-RBT supervision target — % of THAT RBT's direct hours (any client).

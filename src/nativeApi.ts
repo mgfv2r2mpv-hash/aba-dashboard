@@ -5,7 +5,6 @@
 //
 // Limitations vs. the Node server:
 //   - /api/appointment/:id returns solutions=[] (Claude is not invoked here).
-//   - /api/download returns a plain .xlsx; no AES-CBC encryption (Node-only).
 //   - /api/upload is handled in app.tsx via xlsx + parseWorkbook directly.
 
 import axios, { AxiosAdapter, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
@@ -92,16 +91,6 @@ async function route(method: string, path: string, body: any): Promise<any> {
       }
     });
     return { success: true, data, conflicts: validate(data) };
-  }
-
-  if (m === 'POST' && path === '/api/download') {
-    const data = requireData();
-    const embeddedConfig = body?.embeddedConfig as string | undefined;
-    const { generateExcelFile } = await import('./excelHandler');
-    const bytes = generateExcelFile(data, embeddedConfig);
-    return new Blob([bytes as any], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
   }
 
   const techIdMatch = path.match(/^\/api\/admin\/technician\/([^/]+)$/);

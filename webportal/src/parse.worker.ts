@@ -46,8 +46,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     if (kind !== 'json') {
       throw new Error(
         kind === 'xlsx'
-          ? 'This is a legacy Excel export. In the ABA Dashboard app, download a JSON backup (.enc.json) and upload that here.'
-          : 'This file is not a JSON schedule backup. Export a backup from the ABA Dashboard app.',
+          ? 'This is a legacy Excel export. In the SAssi Cal app, save a backup (.sassi) and upload that here.'
+          : 'This file is not a schedule backup. Export a backup from the SAssi Cal app.',
       );
     }
 

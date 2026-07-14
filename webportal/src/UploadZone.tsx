@@ -51,7 +51,7 @@ export default function UploadZone({ onFile, error }: Props) {
         <input
           ref={inputRef}
           type="file"
-          accept=".json"
+          accept=".json,.sassi"
           onChange={onChange}
           aria-hidden="true"
           tabIndex={-1}
@@ -60,7 +60,7 @@ export default function UploadZone({ onFile, error }: Props) {
         <span className="drop-zone-icon">🔒</span>
         <span className="drop-zone-label">Drop encrypted schedule file</span>
         <span className="drop-zone-sublabel">
-          or tap to browse &nbsp;·&nbsp; <code>.enc.json</code> backup
+          or tap to browse &nbsp;·&nbsp; <code>.sassi</code> backup (legacy <code>.enc.json</code> works too)
         </span>
       </label>
 

@@ -55,9 +55,10 @@ npm start
 
 ### Data Management
 - **HIPAA-Compliant**: No data stored server-side
-- Excel files downloaded encrypted (AES-256)
-- Download sets encryption password automatically
-- Re-upload encrypted files by entering password
+- The only export is the encrypted backup (AES-256), named
+  `<practiceName>_<date>_<time>.sassi` — plaintext Excel export was removed
+- Backups always require a password (policy-checked) to write
+- Restore a backup (or import a legacy `.xlsx` / `.enc.json`) via the upload picker
 
 ### Admin Panel
 - Manage technician RBT certification
@@ -97,13 +98,14 @@ APT2| Supervision Weekly  | Sarah      |        | 2025-05-06T14:00:00   | 2025-0
 
 Types: `client-session`, `supervision`, `parent-training`, `internal-task`, `other`
 
-### Download Format
-Downloaded files are encrypted with `.enc.xlsx` extension.
+### Backup Format
+Backups are encrypted envelopes with the `.sassi` extension (legacy
+`.enc.json` backups restore identically). Excel is import-only.
 
-**To decrypt locally:**
-1. Save the password shown when downloading
-2. Store in a secure location
-3. When re-uploading, paste the password
+**To restore:**
+1. Keep the backup password stored securely — it is the file's only key
+2. Upload the `.sassi` file through the normal picker
+3. Enter the same password when prompted
 
 ## Constraints Enforced
 
@@ -159,7 +161,6 @@ model: 'claude-sonnet-4-6', // or 'claude-haiku-4-5'
 - `GET /api/schedule` - Get current schedule
 - `POST /api/appointment/:id` - Update appointment
 - `POST /api/apply-solution` - Apply suggested solution
-- `GET /api/download` - Download as encrypted Excel
 - `GET /api/encryption-password` - Get encryption password
 - `POST /api/encryption-password` - Set new password
 
@@ -176,14 +177,13 @@ model: 'claude-sonnet-4-6', // or 'claude-haiku-4-5'
 - Fallback to algorithmic solution generation (shown in UI)
 
 ### Encryption Errors
-- Ensure password is stored separately from file
-- On re-upload, enter the exact same password
-- Default password shown in download response
+- Ensure the backup password is stored separately from the file
+- On restore, enter the exact same password
 
 ### Data Not Persisting
-- Changes only persist in server memory
-- Download Excel file to save your work
-- Re-upload to continue editing
+- Changes only persist in server memory (dev-server mode)
+- Save a `.sassi` backup (Settings → Data → Backup) to keep your work
+- Restore the backup to continue editing
 
 ### Port Already in Use
 - Change port in `.env` and vite config
@@ -209,6 +209,6 @@ model: 'claude-sonnet-4-6', // or 'claude-haiku-4-5'
 4. Visit `http://localhost:3000`
 5. Upload sample_schedule.xlsx to test
 6. Try modifying an appointment to see conflict resolution
-7. Download encrypted file to save your work
+7. Save an encrypted `.sassi` backup to keep your work
 
 Enjoy managing your ABA schedules efficiently!

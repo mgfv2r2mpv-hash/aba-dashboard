@@ -27,7 +27,7 @@ npx cap sync ios            # copy web assets + sync plugins
 - **Weekend hidden by default** in `DayAvailabilityRow` with a "Show weekend" checkbox; auto-shows when existing data has Sat/Sun.
 
 ### Earlier this session
-- iOS download via Capacitor Filesystem + Share plugins (was silently a no-op via `<a download>` in WKWebView). See `handleDownload` in `src/app.tsx`.
+- iOS export via Capacitor Filesystem + Share plugins (was silently a no-op via `<a download>` in WKWebView). See `handleBackupDownload` in `src/app.tsx` — since then the plaintext .xlsx download was removed; the encrypted `.sassi` backup is the only export.
 - AdminPanel: technicians editable (availability + name + RBT toggle), clients editable (availability + parent-training max), add/remove buttons, all persisted via the API.
 - Server: added create/delete endpoints for technicians, clients, appointments.
 - SetupWizard: per-case parent-training cap on clients; clinician availability section at the top of the company step.
@@ -63,7 +63,7 @@ After 1 + 2, build and check:
 - Wizard "Clinician availability" section: vertical day rows, no horizontal overflow.
 - Grid view in clients/tech steps: grid + type-able editor render and scroll horizontally.
 - AdminPanel: edit a tech's availability, save persists across navigations.
-- Download still works (Capacitor share sheet on native).
+- Backup export still works (Capacitor share sheet on native; `.sassi` encrypted envelope — the plaintext Excel download was removed).
 
 ## Don't break
 - **Anonymizer must still scrub PII before any Claude call** — see `src/anonymizer.ts`. Don't add fields to the Claude prompt without considering anonymization.

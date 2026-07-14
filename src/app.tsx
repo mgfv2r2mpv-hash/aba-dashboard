@@ -38,6 +38,7 @@ import { buildSeriesEdit, summarizeSeriesEdit } from './seriesEdit';
 import { findEndingSeries } from './seriesHorizon';
 import { useHomeTodos } from './hooks/useHomeTodos';
 import type { HomeTodo } from './hooks/useHomeTodos';
+import { backupFilename } from './lib/backupFilename';
 import type { RitualAction } from './components/HomeView';
 
 const HomeView = React.lazy(() => import('./components/HomeView'));
@@ -1515,32 +1516,6 @@ export default function App() {
     }
   };
 
-  const handleDownload = async () => {
-    try {
-      // Layer 1: the API + maps keys (if any) ride inside the workbook, app-obfuscated
-      // (no user password) so they load automatically on re-import.
-      const embeddedConfig = (aiSettings.apiKey || aiSettings.mapsApiKey)
-        ? await obfuscateKey(JSON.stringify({ apiKey: aiSettings.apiKey, model: aiSettings.model, mapsApiKey: aiSettings.mapsApiKey }))
-        : undefined;
-
-      const response = await axios.post(
-        `${API_BASE}/download`,
-        { embeddedConfig },
-        { responseType: 'blob' }
-      );
-      let bytes: Uint8Array = new Uint8Array(await (response.data as Blob).arrayBuffer());
-
-      // Layer 2: if a schedule password is set, encrypt the whole file so it's
-      // opaque in a file browser and unopenable without the password.
-      const password = aiSettings.schedulePassword;
-      if (password) bytes = await encryptBytes(bytes, password);
-      const filename = password ? 'schedule.enc.xlsx' : 'schedule.xlsx';
-      await saveBytesToDevice(bytes, filename);
-    } catch (error: any) {
-      alert('Error downloading file: ' + (error.message || error));
-    }
-  };
-
   // Save raw bytes to the device. iOS WKWebView ignores <a download>, so on native
   // we write to the Cache dir and pop the share sheet; on web we click a blob link.
   const saveBytesToDevice = async (bytes: Uint8Array, filename: string) => {
@@ -1549,7 +1524,7 @@ export default function App() {
       const base64 = await blobToBase64(blob);
       const written = await Filesystem.writeFile({ path: filename, data: base64, directory: Directory.Cache });
       try {
-        await Share.share({ title: 'ABA Schedule', url: written.uri, dialogTitle: 'Save your schedule' });
+        await Share.share({ title: 'SAssi Cal backup', url: written.uri, dialogTitle: 'Save your backup' });
       } catch (shareErr: any) {
         // User canceled the share sheet — not an error worth alerting on.
         if (!/cancel/i.test(shareErr?.message || '')) throw shareErr;
@@ -1566,12 +1541,12 @@ export default function App() {
     }
   };
 
-  // Encrypted-JSON backup. Unlike the normalized v2 .xlsx (which is lossy), this is
-  // the full versioned envelope — lossless and migration-aware — so it's the safe
-  // archival copy. It carries client data, so it is ALWAYS password-encrypted; a
-  // plaintext backup must never hit disk (CLAUDE.md §2). Restored through the normal
-  // upload picker, which sniffs the decrypted bytes and routes an envelope through
-  // unwrapEnvelope. The .xlsx up/download path is untouched — both file types work.
+  // Encrypted .sassi backup — the app's ONLY export (the plaintext .xlsx download
+  // was removed: it could leave the device carrying real client names). This is
+  // the full versioned envelope — lossless and migration-aware — and it is ALWAYS
+  // password-encrypted; a plaintext backup must never hit disk (CLAUDE.md §2).
+  // Restored through the normal upload picker, which sniffs the decrypted bytes
+  // and routes an envelope through unwrapEnvelope; .xlsx remains import-only.
   const handleBackupDownload = async () => {
     if (!scheduleData) return;
     try {
@@ -1596,7 +1571,7 @@ export default function App() {
         : undefined;
       const json = wrapEnvelope(scheduleData, embeddedConfig);
       const bytes = await encryptBytes(new TextEncoder().encode(json), password);
-      await saveBytesToDevice(bytes, 'schedule-backup.enc.json');
+      await saveBytesToDevice(bytes, backupFilename(scheduleData.settings.practiceName));
     } catch (error: any) {
       alert('Error creating backup: ' + (error.message || error));
     }
@@ -2372,7 +2347,6 @@ export default function App() {
                   persist={serverPersist}
                   onImportFile={triggerImportPicker}
                   onRerunWizard={() => setShowWizard(true)}
-                  onDownload={handleDownload}
                   onBackup={handleBackupDownload}
                   onClearData={handleClearData}
                   aiSettings={aiSettings}
@@ -2633,7 +2607,7 @@ export default function App() {
       <input
         ref={importInputRef}
         type="file"
-        accept=".xlsx,.xls,.json"
+        accept=".xlsx,.xls,.json,.sassi"
         style={{ display: 'none' }}
         onChange={e => {
           const file = e.target.files?.[0];

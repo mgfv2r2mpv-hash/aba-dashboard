@@ -5,7 +5,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { ScheduleData, Appointment, ScheduleSolution } from './types';
-import { parseExcelFile, generateExcelFile } from './excelHandler';
+import { parseExcelFile } from './excelHandler';
 import { ConstraintValidator } from './constraintValidator';
 import { ClaudeScheduler, ClaudeModel } from './claudeScheduler';
 import { ExcelEncryption } from './encryption';
@@ -185,32 +185,6 @@ app.post('/api/apply-solution', express.json(), (req: Request, res: Response) =>
       data: currentScheduleData,
       conflicts,
     });
-  } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-
-// Download schedule as encrypted Excel
-// Optional: pass ?embedConfig=<base64-encrypted-blob> to embed user's API key + model
-// in the file. The blob is encrypted client-side; the server never sees plaintext keys.
-app.post('/api/download', express.json(), (req: Request, res: Response) => {
-  if (!currentScheduleData) {
-    return res.status(400).json({ error: 'No schedule loaded' });
-  }
-
-  try {
-    const { embeddedConfig } = req.body as { embeddedConfig?: string };
-    // Return PLAIN workbook bytes. Whole-file encryption (when the user has set
-    // a schedule password) is applied client-side so it works identically on
-    // native and web; the server never holds the password.
-    const buffer = generateExcelFile(currentScheduleData, embeddedConfig);
-
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'attachment; filename=schedule.xlsx');
-    res.send(buffer);
   } catch (error: any) {
     res.status(500).json({
       success: false,

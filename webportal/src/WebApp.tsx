@@ -3,6 +3,7 @@ import { isEncryptedSchedule } from '@shared/clientCrypto';
 import { ScheduleData } from '@shared/types';
 import { ComplianceCache, buildCache } from '@shared/complianceCache';
 import { validatePassword } from '@shared/passwordPolicy';
+import { backupFilename } from '@shared/lib/backupFilename';
 import UploadZone from './UploadZone';
 import PasswordForm from './PasswordForm';
 import ReadyView from './ReadyView';
@@ -62,7 +63,7 @@ export default function WebApp() {
     }
     if (!isEncryptedSchedule(bytes)) {
       setUploadError(
-        'This file is not encrypted. Export a JSON backup from the ABA Dashboard app with a schedule password, then try again.'
+        'This file is not encrypted. Export a backup (.sassi) from the SAssi Cal app with a schedule password, then try again.'
       );
       return;
     }
@@ -142,7 +143,7 @@ export default function WebApp() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'schedule-backup.enc.json';
+        a.download = backupFilename(scheduleData.settings.practiceName);
         a.click();
         URL.revokeObjectURL(url);
         setPassword(pwd);

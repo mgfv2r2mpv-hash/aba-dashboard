@@ -10,6 +10,7 @@ import { computeAuthUsage, computeReportDates } from '../authorization';
 import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, isPresetActive, togglePreset } from '../availabilityUtils';
 import { resolveUtilization } from '../utilization';
 import { planArchive, unarchiveClient, sessionsCutByArchive } from '../clientArchive';
+import { backupFilename } from '../lib/backupFilename';
 
 // Platform-specific persistence adapter. Each method is optional: absent = apply
 // change locally only (webportal saves via encrypted download; native app must
@@ -62,9 +63,8 @@ interface AdminPanelProps {
   // Data-lifecycle actions surfaced at the bottom of the Settings tab.
   onImportFile?: () => void;
   onRerunWizard?: () => void;
-  // Download the current schedule (moved here from the top bar).
-  onDownload?: () => void;
-  // Encrypted-JSON backup (lossless, migration-aware) of the current schedule.
+  // Encrypted .sassi backup (lossless, migration-aware) of the current schedule —
+  // the only export; the plaintext .xlsx download was removed (PHI risk).
   onBackup?: () => void;
   // Clear the loaded schedule from the app (confirmed before wiping).
   onClearData?: () => void;
@@ -86,7 +86,7 @@ const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday
 const ymdLocal = (d: Date): string =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-export default function AdminPanel({ data, onDataChange, onCommitLogged, tabs, initialTab, persist, onImportFile, onRerunWizard, onDownload, onBackup, onClearData, onOpenAISettings, aiSettings, onSaveAISettings, onClearKey, onRequestUnlock, faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin }: AdminPanelProps) {
+export default function AdminPanel({ data, onDataChange, onCommitLogged, tabs, initialTab, persist, onImportFile, onRerunWizard, onBackup, onClearData, onOpenAISettings, aiSettings, onSaveAISettings, onClearKey, onRequestUnlock, faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin }: AdminPanelProps) {
   const visibleTabs = (tabs && tabs.length > 0 ? tabs : ALL_ADMIN_TABS);
   const showTabBar = visibleTabs.length > 1;
   const [activeTab, setActiveTab] = useState<AdminTab>(
@@ -561,7 +561,6 @@ export default function AdminPanel({ data, onDataChange, onCommitLogged, tabs, i
             onSave={persistSettings}
             onImportFile={onImportFile}
             onRerunWizard={onRerunWizard}
-            onDownload={onDownload}
             onBackup={onBackup}
             onClearData={onClearData}
             aiSettings={aiSettings}
@@ -2863,7 +2862,7 @@ function ClinicianAvailEditor({ settings, saving, onSave }: {
 
 // ── Settings editor (residual: Data, AI, Lock, Report dates, Session defaults) ─
 
-function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard, onDownload, onBackup, onClearData,
+function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard, onBackup, onClearData,
   aiSettings, onSaveAISettings, onClearKey, onRequestUnlock,
   faceIdAvailable, faceIdEnabled, biometryLabel, onToggleFaceId, onChangePin
 }: {
@@ -2872,7 +2871,6 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   onSave: (next: CompanySettings) => void | Promise<boolean | void>;
   onImportFile?: () => void;
   onRerunWizard?: () => void;
-  onDownload?: () => void;
   onBackup?: () => void;
   onClearData?: () => void;
   aiSettings?: AISettings;
@@ -2887,6 +2885,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
 }) {
   const [justSaved, setJustSaved] = useState(false);
   const s = (n: number | undefined) => (n === undefined ? '' : String(n));
+  const [practiceName, setPracticeName] = useState(settings.practiceName ?? '');
   const [draftLeadVal, setDraftLeadVal] = useState(s(settings.reportDraftLead?.value ?? 4));
   const [draftLeadUnit, setDraftLeadUnit] = useState<'days' | 'weeks'>(settings.reportDraftLead?.unit ?? 'weeks');
   const [finalLeadVal, setFinalLeadVal] = useState(s(settings.reportFinalLead?.value ?? 2));
@@ -2933,6 +2932,7 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
   const save = async () => {
     const next: CompanySettings = {
       ...settings,
+      practiceName: practiceName.trim() || undefined,
       reportDraftLead: { value: num(draftLeadVal, 4), unit: draftLeadUnit },
       reportFinalLead: { value: num(finalLeadVal, 2), unit: finalLeadUnit },
       bcbaSessionDefaults: {
@@ -3136,13 +3136,14 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
       </div>
 
       {/* ── TOP: Data always first ── */}
-      {(onImportFile || onRerunWizard || onDownload || onBackup || onClearData) && (
+      {(onImportFile || onRerunWizard || onBackup || onClearData) && (
         <SettingsSection title="Data">
           <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
             Re-run the wizard to edit company settings, clients, and technicians
             (your appointments are kept), or load a different schedule file.
             Neither replaces your current data until you confirm. Upload restores
-            either an <strong>.xlsx</strong> or an encrypted <strong>.json backup</strong>.
+            either an <strong>.xlsx</strong> or an encrypted <strong>.sassi backup</strong>
+            (older <strong>.enc.json</strong> backups restore too).
           </p>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {onRerunWizard && (
@@ -3163,19 +3164,10 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
                 }}
               >Upload schedule…</button>
             )}
-            {onDownload && (
-              <button
-                onClick={onDownload}
-                style={{
-                  padding: '8px 14px', backgroundColor: 'var(--brand-primary)', color: 'var(--brand-primary-text)',
-                  border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                }}
-              >↓ Download schedule</button>
-            )}
             {onBackup && (
               <button
                 onClick={onBackup}
-                title="Save a lossless, password-encrypted .json backup of the full schedule."
+                title="Save a lossless, password-encrypted .sassi backup of the full schedule."
                 style={{
                   padding: '8px 14px', backgroundColor: 'var(--surface-raised)', color: 'var(--text-body)',
                   border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -3187,17 +3179,17 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
             <div style={{ marginTop: 12, paddingTop: 12, borderTop: 'var(--border-hairline)' }}>
               <p style={{ fontSize: '12px', color: '#6b7280', margin: '0 0 6px' }}>
                 Clearing wipes the schedule loaded in the app. If you haven't saved
-                your work, <strong>download it first</strong> — this can't be undone.
+                your work, <strong>back it up first</strong> — this can't be undone.
               </p>
-              {onDownload && (
+              {onBackup && (
                 <div style={{ marginBottom: 8 }}>
                   <button
-                    onClick={onDownload}
+                    onClick={onBackup}
                     style={{
                       background: 'none', border: 'none', padding: 0, cursor: 'pointer',
                       fontSize: 12, color: 'var(--status-behind)', textDecoration: 'underline', fontWeight: 600,
                     }}
-                  >↓ Download schedule first</button>
+                  >⤓ Backup first</button>
                 </div>
               )}
               <button
@@ -3211,6 +3203,22 @@ function SettingsEditor({ settings, saving, onSave, onImportFile, onRerunWizard,
           )}
         </SettingsSection>
       )}
+
+      <SettingsSection title="Practice">
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'grid', gap: 4 }}>
+          Your name / practice (optional)
+          <input
+            type="text"
+            value={practiceName}
+            onChange={(e) => setPracticeName(e.target.value)}
+            placeholder="e.g. Sunrise ABA"
+            style={inputStyle}
+          />
+        </label>
+        <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
+          Names your backup files — e.g. <code>{backupFilename(practiceName.trim() || undefined)}</code>.
+        </p>
+      </SettingsSection>
 
       {/* AI Integration CTA — top when not yet configured */}
       {!keySavedState && aiSettings && onSaveAISettings && aiSection}

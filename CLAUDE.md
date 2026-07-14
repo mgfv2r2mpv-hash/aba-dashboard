@@ -72,7 +72,7 @@ Direct pushes to `main` are denied by the harness proxy (HTTP 403). `dev` → PR
 
 ## Repo essentials
 
-- **iOS build:** `npm run cap:ios` → vite build → `npx cap copy ios`. Don't track `dist-client/`.
+- **iOS build:** `npm run cap:ios` → vite build → `npx cap sync ios` → plist/version patch scripts. Don't track `dist-client/`. `scripts/sync-ios-version.cjs` keeps `MARKETING_VERSION` = package.json version; run `npm run ios:stamp` before every archive/upload (stamps a monotonic UTC build number — required once a stamped build has shipped).
 - **Native API routing:** Capacitor WebView has no server. All `/api/*` calls route through `src/nativeApi.ts` (axios adapter → in-memory ScheduleData). Mirror new endpoints there.
 - **Build stamp:** Vite-injected `__BUILD_TIME__` in footer shows current version (useful for detecting stale iOS builds).
 
@@ -85,14 +85,15 @@ Direct pushes to `main` are denied by the harness proxy (HTTP 403). `dev` → PR
 - **References:** Child sheets use id or name fallback (mirrors `find(x => x.id===v || x.name===v)`).
 - **Legacy:** v1 files upgraded once via `scripts/migrate-legacy-xlsx.ts`. Self-contained v1 reader folds `reportLeadWeeks*` into modern `reportDraftLead`/`reportFinalLead`.
 - **Sample:** Generated from `src/sampleSchedule.json` via `npx tsx src/createSampleData.ts`. Round-trip via `npx tsx scripts/verify-excel.ts`.
+- **xlsx is import/tooling-only.** The app's sole export is the encrypted envelope backup, named `<practiceName>_<YYYY-MM-DD>_<HHMM>.sassi` via `src/lib/backupFilename.ts` (legacy `.enc.json` backups still restore — imports are content-sniffed, never extension-routed). The plaintext `.xlsx` download was removed (PHI risk); `generateExcelFile` remains for import/migration/sample tooling.
 
 ## App lock & at-rest persistence (native only)
 
 - **Lock gate:** Numeric PIN, **never stored**. Both `pin.verifier` (constant) and `schedule.enc` (ScheduleData) are AES-GCM, key PBKDF2-derived from PIN via `clientCrypto`. Correct PIN = decryption success. See `src/appLock.ts` + `src/secureStore.ts` (blobs in `Directory.Data`, namespaced `lock_*`). Cold launch only; web has no lock.
 - **Lifecycle:** First launch → LockScreen "create" mode (PIN mandatory on native). Schedule re-encrypted every change (debounced 400ms) on unlock → only cross-launch persistence (no GET on mount).
 - **Biometric:** `@aparajita/capacitor-biometric-auth` v9 (Capacitor 8 compatible). `src/biometric.ts` via `registerPlugin('BiometricAuth')` (no static import → web build safe). `getBiometryLabel()` maps iOS type (1=Touch, 2=Face) to UI. Opt-in stashes PIN under obfuscation (`pin.stash`) for biometric recovery — convenience/strength tradeoff, off by default. **Setup:** `npm install` → `npx cap sync ios` → add `NSFaceIDUsageDescription` to `ios/App/App/Info.plist` (Face ID requires it; Touch ID doesn't). **Note:** `@aparajita/capacitor-biometric-auth` was removed from `ios/App/CapApp-SPM/Package.swift` — native biometric will not link until restored via `npx cap sync`.
-- **Claude API key:** Two paths: (1) **workbook embed** (`_Config` sheet, app-obfuscated via `obfuscateKey`) for download→upload round-trip (no prompt); (2) **native at-rest** (`aiconfig.enc` blob via `saveAIConfig`/`loadAIConfig`, re-keyed on PIN change, cleared on lock clear). **Display:** Never shown after set ("🔒 API key is set" + Replace/Clear). Replace gated by `onRequestUnlock` (Face ID or PIN). Blank field on save = keep existing. Stores `schedulePassword` alongside for persistence across reinstalls.
-- **Schedule password:** Optional whole-file encryption (workbook download). Never re-displayed; stored encrypted at rest. Changing requires current password (gate).
+- **Claude API key:** Two paths: (1) **backup embed** — the `aiConfig` field of the encrypted `.sassi` envelope (app-obfuscated via `obfuscateKey`) restores settings on import; the xlsx `_Config` sheet is read on legacy import only (no longer written — xlsx export is gone); (2) **native at-rest** (`aiconfig.enc` blob via `saveAIConfig`/`loadAIConfig`, re-keyed on PIN change, cleared on lock clear). **Display:** Never shown after set ("🔒 API key is set" + Replace/Clear). Replace gated by `onRequestUnlock` (Face ID or PIN). Blank field on save = keep existing. Stores `schedulePassword` alongside for persistence across reinstalls.
+- **Schedule password:** Reused as the backup-export password when it meets policy (backups are always encrypted). Never re-displayed; stored encrypted at rest. Changing requires current password (gate).
 - **AutoFill:** Schedule-decrypt prompt is real `<form>` (`PasswordPrompt.tsx`, `autocomplete="current-password"`) for iOS AutoFill support.
 
 ## Compliance rules (BCBA-confirmed; do not re-derive)

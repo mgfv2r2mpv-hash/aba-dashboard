@@ -26,6 +26,7 @@ import { ScheduleData, Appointment, WishOp, WishSolution, StoredRecurrencePatter
 import { applyWishSolution } from './wish';
 import { checkEquivalence, summarizeDiffs, EquivReport } from './tidyEquivalence';
 import { measurePattern } from './seriesProfile';
+import { overlaps as rangeOverlaps } from './kernel/overlap';
 import { v4 as uuidv4 } from 'uuid';
 
 const MS_PER_MIN = 60_000;
@@ -108,7 +109,7 @@ const flag = (ruleId: TidyRuleId, rationale: string): Candidate => ({ ruleId, op
 // mostly recurring dated occurrences, so merge must NOT skip recurring rows.
 const identityKey = (a: Appointment): string => [a.type, a.client ?? '', a.technician ?? '', billable(a), a.isFixed].join('|');
 
-const overlaps = (a: Appointment, b: Appointment): boolean => ms(a.startTime) < ms(b.endTime) && ms(b.startTime) < ms(a.endTime);
+const overlaps = (a: Appointment, b: Appointment): boolean => rangeOverlaps(ms(a.startTime), ms(a.endTime), ms(b.startTime), ms(b.endTime));
 // The BCBA-run session types (supervision / parent-training / case-planning /
 // reassessment). These INTENTIONALLY overlap a BT's direct — concurrent care, not a
 // double-book — so the conflict scan never crosses a direct with one of these.

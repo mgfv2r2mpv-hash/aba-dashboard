@@ -18,6 +18,7 @@ import {
   SupervisionCadence, SUPERVISION_CADENCES, TimeWindow, DayOfWeek,
 } from './types';
 import { toMin, DAYS, Interval, windowsToIntervals, intersect, btCaseAvailability } from './intervals';
+import { overlaps, overlapsAny } from './kernel/overlap';
 import { inAuthSpan } from './authorization';
 import { travelMinutes, TravelContext, LocKey } from './travel';
 import type { BuilderConfig, ClientBlock } from './scheduleBuilder';
@@ -61,7 +62,7 @@ export type BcbaBusy = { s: number; e: number; loc?: LocKey }[];
 // ── single-BCBA occupancy primitive (immutable) ────────────────────────────────
 // Raw overlap test (no travel notion) — the BCBA can't be in two sessions at once.
 export function isBcbaFree(busy: BcbaBusy, sMs: number, eMs: number): boolean {
-  return !busy.some(b => b.s < eMs && b.e > sMs);
+  return !overlapsAny(sMs, eMs, busy);
 }
 export function reserveBcba(busy: BcbaBusy, sMs: number, eMs: number, loc?: LocKey): BcbaBusy {
   return [...busy, { s: sMs, e: eMs, loc }];
@@ -191,7 +192,7 @@ const isActive = (a: Appointment) => a.status !== 'canceled' && !a.isGhost;
 interface Busy { s: number; e: number; tech?: string; client?: string; }
 function collides(existing: Busy[], sMs: number, eMs: number, tech?: string, client?: string): boolean {
   return existing.some(x =>
-    x.s < eMs && x.e > sMs &&
+    overlaps(sMs, eMs, x.s, x.e) &&
     ((tech !== undefined && x.tech === tech) || (client !== undefined && x.client === client)));
 }
 

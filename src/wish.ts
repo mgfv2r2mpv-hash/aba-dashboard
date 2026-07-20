@@ -13,6 +13,7 @@ import {
 } from './types';
 import { computeClientCompliance, computeTechCompliance, monthPeriod, CompliancePeriod } from './compliance';
 import { DraftOp, newAddOp, newMoveOp, newRemoveOp, newEditOp, applyOps } from './draft';
+import { overlaps, overlapsAny } from './kernel/overlap';
 import { buildTravelContext, travelMinutes } from './travel';
 import { normalizeRecurrenceFields } from './seriesProfile';
 import { v4 as uuidv4 } from 'uuid';
@@ -262,7 +263,7 @@ export function dropInfeasibleTravelOps(ops: WishOp[], data: ScheduleData): Wish
 
   const feasible = (cand: Session, others: Session[]): boolean => {
     for (const b of others) {
-      if (b.s < cand.e && b.e > cand.s) { // overlap
+      if (overlaps(cand.s, cand.e, b.s, b.e)) { // overlap
         if ((b.loc || '') !== (cand.loc || '')) return false; // two places at once
         continue;
       }
@@ -315,7 +316,7 @@ export function dropDoubleBookedOps(ops: WishOp[], data: ScheduleData): WishOp[]
   for (const o of ops) {
     const cand = slotOf(o);
     if (!cand) { kept.push(o); continue; }
-    if (accepted.some(b => b.s < cand.e && b.e > cand.s)) continue; // double-book — drop
+    if (overlapsAny(cand.s, cand.e, accepted)) continue; // double-book — drop
     kept.push(o); accepted.push(cand);
   }
   return kept;

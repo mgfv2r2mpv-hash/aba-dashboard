@@ -20,6 +20,7 @@ import { ScheduleData, Appointment, DayOfWeek, TimeWindow } from './types';
 import { findAuthFor } from './authorization';
 import { computeClientCompliance, CompliancePeriod } from './compliance';
 import { DAYS, toMin, minToClock, MIN_SLOT_MINS, intersect, subtract, windowsToIntervals, btCaseAvailability } from './intervals';
+import { overlapsAny } from './kernel/overlap';
 
 const isActive = (a: Appointment) => a.status !== 'canceled' && !a.isGhost;
 const dirHours = (a: Appointment) => (new Date(a.endTime).getTime() - new Date(a.startTime).getTime()) / 3_600_000;
@@ -162,7 +163,7 @@ function isBcbaBusyFn(data: ScheduleData) {
   const busy = data.appointments
     .filter(a => isActive(a) && BCBA_TYPES.has(a.type))
     .map(a => ({ s: new Date(a.startTime).getTime(), e: new Date(a.endTime).getTime() }));
-  return (startMs: number, endMs: number) => busy.some(b => b.s < endMs && b.e > startMs);
+  return (startMs: number, endMs: number) => overlapsAny(startMs, endMs, busy);
 }
 
 function isBcbaAvailableAtFn(data: ScheduleData) {

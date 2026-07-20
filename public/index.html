@@ -37,6 +37,11 @@
         height: 100%;
         overflow: hidden;
         overscroll-behavior: none;
+        /* Dark-slate backstop: holds BEFORE the external token CSS resolves
+           var(--surface-page), so a cold launch never flashes black/white
+           while the JS bundle boots. The body rule below repaints light once
+           tokens load; html stays this color as the permanent backstop. */
+        background-color: #333f45;
         /* The app shell must never pinch-zoom as a whole. Calendars implement
            their own scoped zoom (see usePinchZoom) inside their scroll panes. */
         touch-action: pan-x pan-y;
@@ -82,10 +87,64 @@
       .af-btn:hover { filter: brightness(0.96); }
       .af-btn:active { transform: translateY(1px); }
       .af-chip { transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease; }
+
+      /* Cold-launch splash — bridges the gap between the native launch
+         storyboard dismissing and React's first paint. Pure CSS so it plays
+         the instant the WebView paints (before the JS bundle even parses).
+         React's createRoot() replaces #root on mount, clearing this. Every
+         launch layer shares #333f45, so the swap is invisible. */
+      .app-launch {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        background-color: #333f45;
+      }
+      .app-launch__icon {
+        width: 120px;
+        height: 120px;
+        border-radius: 26px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+        /* icon drops in from the top */
+        animation: launchIconIn 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+      .app-launch__word {
+        font-family: 'Atkinson Hyperlegible', system-ui, sans-serif;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        color: #eef0da;
+        /* wordmark rises from the bottom to meet the icon in the middle */
+        animation: launchWordIn 620ms cubic-bezier(0.16, 1, 0.3, 1) 60ms both;
+      }
+      @keyframes launchIconIn {
+        from { opacity: 0; transform: translateY(-72px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes launchWordIn {
+        from { opacity: 0; transform: translateY(72px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .app-launch__icon, .app-launch__word {
+          animation: none;
+          opacity: 1;
+          transform: none;
+        }
+      }
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="app-launch" aria-hidden="true">
+        <img class="app-launch__icon" src="/launch-icon.svg" alt="" width="120" height="120" />
+        <div class="app-launch__word">SAssi Calendar</div>
+      </div>
+    </div>
     <script type="module" src="../src/index.tsx"></script>
   </body>
 </html>

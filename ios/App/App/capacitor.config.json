@@ -2,6 +2,10 @@
 	"appId": "com.abascheduler",
 	"appName": "SAssi Cal",
 	"webDir": "dist-client",
+	"backgroundColor": "#333f45",
+	"ios": {
+		"backgroundColor": "#333f45"
+	},
 	"packageClassList": [
 		"BiometricAuthNative",
 		"FilesystemPlugin",

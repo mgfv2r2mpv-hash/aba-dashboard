@@ -50,6 +50,7 @@ const SetupWizard = React.lazy(() => import('./components/SetupWizard'));
 const CprView = React.lazy(() => import('./components/CprView'));
 import { useMinWidth, useMaxWidth, useIsTablet, useIsLandscape } from './useMediaQuery';
 import LockScreen from './components/LockScreen';
+import LaunchSplash from './components/LaunchSplash';
 import PasswordPrompt from './components/PasswordPrompt';
 import {
   hasPin, setPin, verifyPin, changePin,
@@ -1601,10 +1602,11 @@ export default function App() {
     </button>
   );
 
-  // Brief dark splash while we decide whether to lock — avoids flashing the
-  // (empty) main UI before the gate appears on native.
+  // Branded launch splash while we decide whether to lock — matches the native
+  // storyboard and the pre-React HTML splash (same #333f45), so there's no
+  // black/color flash before the gate appears on native.
   if (!lockReady) {
-    return <div style={{ position: 'fixed', inset: 0, backgroundColor: '#1f2937' }} />;
+    return <LaunchSplash />;
   }
 
   if (locked) {

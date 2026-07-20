@@ -170,7 +170,6 @@ export default function App() {
   // deep-links to the editable 'candc' tab; normal Admin entry resets to settings.
   const [adminInitialTab, setAdminInitialTab] = useState<AdminTab>('settings');
   const [showWizard, setShowWizard] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [showAddAppointment, setShowAddAppointment] = useState(false);
   // Home to-dos (net-new, local-only) + the seed for "Start → session": an
   // id-less appointment the form treats as new and prefills from the to-do.

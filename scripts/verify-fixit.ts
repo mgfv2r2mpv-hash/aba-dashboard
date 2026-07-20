@@ -4,7 +4,7 @@
  * Run: npx tsx scripts/verify-fixit.ts
  */
 import { DEFAULT_FIXIT_OPTIONS, FixItOptions } from '../src/types';
-import { allowedStrategies, summarizeFixIt } from '../src/fixit';
+import { allowedStrategies } from '../src/fixit';
 
 let passed = 0, failed = 0;
 function check(name: string, cond: boolean, extra?: string) {
@@ -40,16 +40,6 @@ console.log('allowedStrategies');
     includeCasePlanning: true,
   };
   check('all strategies → 5 entries', allowedStrategies(all).length === 5);
-}
-
-console.log('summarizeFixIt');
-{
-  const soft = summarizeFixIt({ ...DEFAULT_FIXIT_OPTIONS, softenBillableMinimum: true });
-  check('soften mentions softened', /soften/i.test(soft));
-  const hard = summarizeFixIt(DEFAULT_FIXIT_OPTIONS);
-  check('default keeps billable at/above min', /at or above its minimum/i.test(hard));
-  const excl = summarizeFixIt({ ...DEFAULT_FIXIT_OPTIONS, excludedClientIds: ['a', 'b'] });
-  check('summary reports excluded count', excl.includes('Excluding 2 client'));
 }
 
 console.log(`\n${failed === 0 ? 'ALL PASS' : 'FAIL'} — ${passed} passed, ${failed} failed`);

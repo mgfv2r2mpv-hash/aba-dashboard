@@ -6,7 +6,7 @@
 // reply reuses parseWishSolutions (both flows emit the same op shape), and
 // applying a chosen solution reuses applyWishSolution / wishSolutionToDraft.
 
-import { FixItOptions, Client } from './types';
+import { FixItOptions } from './types';
 
 // The allowed-strategies clause, derived from the toggles. Kept terse on purpose
 // — only the enabled tools are listed, so the model isn't tempted to reach for a
@@ -24,21 +24,4 @@ export function allowedStrategies(o: FixItOptions): string[] {
   if (o.includeCasePlanning)
     out.push('Add case-planning / coordination-of-care sessions (count toward supervision only when they name a BT and overlap that BT\'s direct).');
   return out;
-}
-
-// A short human brief of the fix-it request, used both in the prompt and as the
-// panel's live preview.
-export function summarizeFixIt(o: FixItOptions, clients: Client[] = []): string {
-  const strategies = allowedStrategies(o);
-  const toolText = strategies.length
-    ? `Allowed strategies: ${strategies.length} selected.`
-    : 'No remediation strategies selected — turn at least one on.';
-  const billable = o.softenBillableMinimum
-    ? 'The BCBA billable minimum may be softened if needed.'
-    : 'Keep the BCBA billable at or above its minimum.';
-  const excluded = o.excludedClientIds.length
-    ? `Excluding ${o.excludedClientIds.length} client(s) from consideration.`
-    : 'Considering all clients.';
-  const horizon = o.horizonWeeks ? ` Look ahead ${o.horizonWeeks} weeks.` : '';
-  return `${toolText} ${billable} ${excluded}${horizon}`;
 }

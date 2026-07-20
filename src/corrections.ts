@@ -70,7 +70,7 @@ export interface CorrectionFlag {
   techId?: string;
   concern: string;           // the need this addresses
   message: string;           // user-facing flag listing the open windows
-  windows: SlotCandidate[];
+  windows: OpenSlot[];
 }
 
 export interface CorrectionReport {
@@ -349,7 +349,7 @@ export interface SlotQuery {
   mustOverlapDirect?: boolean; // PT with parent-not-available-outside-sessions
 }
 
-export interface SlotCandidate {
+export interface OpenSlot {
   date: string;   // YYYY-MM-DD
   day: DayOfWeek;
   start: string;  // HH:MM
@@ -358,7 +358,7 @@ export interface SlotCandidate {
 
 const DAY_NAMES: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as any;
 
-export function findOpenSlots(data: ScheduleData, q: SlotQuery, limit = 8): SlotCandidate[] {
+export function findOpenSlots(data: ScheduleData, q: SlotQuery, limit = 8): OpenSlot[] {
   const from = q.fromDate || new Date();
   const period = monthPeriod(from);
   // Hard month boundary unless a later deadline is explicitly given AND still
@@ -373,7 +373,7 @@ export function findOpenSlots(data: ScheduleData, q: SlotQuery, limit = 8): Slot
   // BCBA travel context — only used when the query treats the clinician as busy
   // (a BCBA-session search); self-disables when travel is off.
   const travelCtx = q.clinicianBusy ? buildTravelContext(data) : undefined;
-  const out: SlotCandidate[] = [];
+  const out: OpenSlot[] = [];
 
   // Corrections operate on now-and-future only. Never propose a slot that has
   // already begun today; the cursor itself only moves forward from `from`.

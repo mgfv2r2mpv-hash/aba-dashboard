@@ -14,9 +14,9 @@
 
 import { Appointment, ScheduleData, Technician, countsAsSupervision } from './types';
 import { overlapHours, monthPeriod } from './compliance';
-import { findOpenSlots, SlotCandidate } from './corrections';
+import { findOpenSlots, OpenSlot } from './corrections';
 
-export interface MoveOption extends SlotCandidate {
+export interface MoveOption extends OpenSlot {
   techId?: string;
   techName?: string;
   improvesCompliance?: boolean;

@@ -14,6 +14,7 @@
 import { ScheduleData, WishSolution, WishOp, Appointment } from './types';
 import { feasibleDirectWindows, _isBcbaAvailableAtFn } from './fillSchedule';
 import { findAuthFor } from './authorization';
+import { overlapsAny } from './kernel/overlap';
 import { holidaysInRange, holidayAdjustTarget } from './holidayAdjust';
 import { startOfWeek } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
@@ -178,7 +179,7 @@ export function solveMeetPace(data: ScheduleData, clientRef: string, now: Date):
   const bcbaBusy = data.appointments
     .filter(a => isLive(a) && ['supervision', 'parent-training', 'case-planning', 'reassessment'].includes(a.type))
     .map(a => ({ s: new Date(a.startTime).getTime(), e: new Date(a.endTime).getTime() }));
-  const bcbaFree = (s: number, e: number) => !bcbaBusy.some(b => b.s < e && b.e > s);
+  const bcbaFree = (s: number, e: number) => !overlapsAny(s, e, bcbaBusy);
 
   let supGap = supGap0;
   if (supTarget > 0 && supGap0 >= MIN_SESSION_HRS) {

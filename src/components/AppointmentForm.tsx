@@ -246,6 +246,9 @@ export default function AppointmentForm({
   ));
   const [customDates, setCustomDates] = useState<string>(''); // newline-separated YYYY-MM-DD
   const [recurrenceEnd, setRecurrenceEnd] = useState<string>('');
+  // Monthly only: repeat by the same ordinal weekday (availability-safe default)
+  // or the same day-of-month. See seriesMaterialize / kernel/recurrence.
+  const [monthlyMode, setMonthlyMode] = useState<'weekday' | 'date'>('weekday');
   const [editScope, setEditScope] = useState<EditScope>('instance');
   // Extend-series horizon defaults to the client's authorization end (never schedule
   // past auth); the user can shorten it. Empty when the client has no auth on file.
@@ -366,7 +369,7 @@ export default function AppointmentForm({
     })();
     return {
       appointments: materializeSeries({
-        base, recurrence,
+        base, recurrence, monthlyMode,
         selectedDays: [...selectedDays],
         customDates: customDates.split(/\s+/).filter(Boolean),
         recurrenceEnd: recurrenceEnd || undefined,
@@ -748,6 +751,27 @@ export default function AppointmentForm({
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Monthly cadence flavor — only meaningful for a NEW monthly series.
+              Default 'weekday' keeps every occurrence on the same weekday (so it
+              stays inside the client/tech availability); 'date' keeps the number. */}
+          {!hasSeries && recurrence === 'monthly' && (
+            <div>
+              <label style={labelStyle}>Monthly repeats by</label>
+              <select
+                value={monthlyMode}
+                onChange={(e) => setMonthlyMode(e.target.value as 'weekday' | 'date')}
+                style={inputStyle}
+              >
+                <option value="weekday">Same weekday (e.g. 1st Tuesday each month)</option>
+                <option value="date">Same date (e.g. the 6th each month)</option>
+              </select>
+              <p style={{ fontSize: '11px', color: '#6b7280', marginTop: 4 }}>
+                “Same weekday” keeps sessions on a day the client and technician are
+                available; “same date” lets the weekday drift month to month.
+              </p>
             </div>
           )}
 

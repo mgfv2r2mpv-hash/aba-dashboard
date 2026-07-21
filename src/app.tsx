@@ -5,7 +5,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { ConstraintValidator } from './constraintValidator';
 import { installNativeAdapter, setCurrentData as setNativeStore } from './nativeApi';
-import { ScheduleData, Appointment, ScheduleConflict, ScheduleSolution, WishSolution, WishOp, Cancellation, Blackout, cancellationReasonLabel, DEFAULT_FIXIT_OPTIONS, ActionLogEntry, SchedulingHints } from './types';
+import { ScheduleData, Appointment, ScheduleConflict, WishSolution, WishOp, Cancellation, Blackout, cancellationReasonLabel, DEFAULT_FIXIT_OPTIONS, ActionLogEntry, SchedulingHints } from './types';
 import { deriveActionEntry, viewOnlyEntry, pruneLog, buildInverse, summarizeOps, type ActionMeta } from './actionLog';
 import { detectHintSignals, type HintSignal } from './hintCapture';
 import ActivityLog from './components/ActivityLog';
@@ -16,7 +16,6 @@ import { solveMeetPace } from './localSolver';
 import { buildDossier, type Dossier } from './dossier';
 import Calendar, { HoursSummary } from './components/Calendar';
 import { conflictKey } from './components/ConflictPanel';
-import SolutionPanel from './components/SolutionPanel';
 import type { AdminPersist, AdminTab } from './components/AdminPanel';
 import FileUpload from './components/FileUpload';
 import { AISettings, ClaudeModel } from './components/Settings';
@@ -121,15 +120,6 @@ function formatLocalISO(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-// Apply an AI solution's time-move changes onto a schedule (pure).
-function applySolutionChanges(data: ScheduleData, sol: ScheduleSolution): ScheduleData {
-  const appointments = data.appointments.map(a => {
-    const ch = sol.changes.find(c => c.appointmentId === a.id);
-    return ch ? { ...a, startTime: ch.newTime.start, endTime: ch.newTime.end } : a;
-  });
-  return { ...data, appointments };
-}
-
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -163,7 +153,6 @@ export default function App() {
   // hidden outright and persisted in scheduleData.confirmedConflicts so they
   // survive page reloads and round-trip through the Excel export.
   const [mutedConflicts, setMutedConflicts] = useState<string[]>([]);
-  const [solutions, setSolutions] = useState<ScheduleSolution[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [view, setView] = useState<'home' | 'schedule' | 'admin' | 'compliance' | 'caseload' | 'cpr'>('schedule');
   // Which Admin section opens on entry. The C&C hub's view-only settings popup
@@ -241,7 +230,7 @@ export default function App() {
   const [recoveryTarget, setRecoveryTarget] = useState<Appointment | null>(null);
   // Local "find a spot" rescheduler target (Move This / Replace This).
   const [findTime, setFindTime] = useState<{ apt: Appointment; mode: 'move' | 'replace' } | null>(null);
-  const [recoverySolutions, setRecoverySolutions] = useState<{ title: string; solutions: WishSolution[] } | null>(null);
+  const [recoverySolutions, setRecoverySolutions] = useState<{ title: string; solutions: WishSolution[]; fromDraft?: boolean } | null>(null);
   // The month/week the calendar is showing. Conflicts are scoped to this so the
   // Issues panel reflects what you're looking at, not just today.
   const [viewDate, setViewDate] = useState<Date>(new Date());
@@ -844,7 +833,6 @@ export default function App() {
     };
     setNativeStore(migrated);
     commitFull(migrated);
-    setSolutions([]);
     // Surface any references the ID migration couldn't heal (a since-deleted entity,
     // or an ambiguous stale name) so the user can reassign those sessions in Admin —
     // rather than letting them silently orphan as before.
@@ -1076,7 +1064,7 @@ export default function App() {
       try { setHintSignals(detectHintSignals(buildResult.solution.ops, next)); } catch { /* detection must never block a commit */ }
     }
     await commitScheduleData(next, draftMeta());
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); setSassiHints([]); setTidyResult(null); setPendingUndo(null); sassi.reset();
+    setDraftOps([]); setSelectedAppointment(null); setSassiBlackouts([]); setSassiHints([]); setTidyResult(null); setPendingUndo(null); sassi.reset();
   };
 
   // One-tap hint capture from the chip: patch the client's schedulingHints with
@@ -1098,10 +1086,10 @@ export default function App() {
     if (!confirm('Save this schedule as-is, with the flagged conflicts?')) return;
     const meta = draftMeta();
     await commitScheduleData(withUndoExtras(withSassiHints(withSassiBlackouts(applyOps(scheduleData, draftOps)))), { ...meta, label: `${meta.label} (saved with conflicts)` });
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]); setSassiHints([]); setTidyResult(null); setPendingUndo(null); sassi.reset();
+    setDraftOps([]); setSelectedAppointment(null); setSassiBlackouts([]); setSassiHints([]); setTidyResult(null); setPendingUndo(null); sassi.reset();
   };
 
-  const cancelDraft = () => { setDraftOps([]); setSolutions([]); setSassiBlackouts([]); setSassiHints([]); setBuildResult(null); setTidyResult(null); setPendingUndo(null); sassi.reset(); };
+  const cancelDraft = () => { setDraftOps([]); setSassiBlackouts([]); setSassiHints([]); setBuildResult(null); setTidyResult(null); setPendingUndo(null); sassi.reset(); };
   const resetOp = (opId: string) => {
     setDraftOps(ops => ops.filter(o => o.id !== opId));
     // Removing the last staged op empties the draft (no commit fires), so the
@@ -1182,47 +1170,34 @@ export default function App() {
     }
   };
 
-  // ---- AI escalation (browser-side ClaudeScheduler over the preview) --------
+  // ---- AI escalation: hand the STAGED draft (preview + its residual conflicts) to
+  // the wish engine, then route the options through the graded recovery modal. This
+  // replaces the retired text-parsed Fix-It path — same entry (the tray "AI" button)
+  // and same job (fix the conflicts my edits created), but richer ops (not moves
+  // only) and every option is solveDraft-graded before it can land.
   const runDraftAI = async () => {
     if (!scheduleData || !aiSettings.apiKey) return;
     const preview = applyOps(scheduleData, draftOps);
-    const changed = draftOps.find(o => o.appt)?.appt || preview.appointments[0];
-    if (!changed) return;
     setAiLoading(true);
     try {
       const messages = new ConstraintValidator(preview).validateSchedule().map(c => c.message);
       const { ClaudeScheduler } = await import('./claudeScheduler');
       const scheduler = new ClaudeScheduler(aiSettings.apiKey, preview, aiSettings.model);
-      const sols = await scheduler.generateSolutions(changed, messages);
-      setSolutions(sols);
-      if (sols.length === 0) setDebugMsg('AI returned no in-month options.');
+      const note = messages.length
+        ? `Resolve the scheduling conflicts these staged changes created, keeping every session compliant: ${messages.join('; ')}`
+        : 'Refine these staged changes to reach the supervision and billable targets while staying compliant';
+      const sols = await scheduler.generateWishSolutions({ kind: 'freeform', note });
+      if (sols.length === 0) {
+        alert('AI returned no options for your staged changes. Try Wish It for a broader rework.');
+      } else {
+        setRecoverySolutions({ title: 'AI options for your staged changes', solutions: sols, fromDraft: true });
+      }
     } catch (error: any) {
       alert('AI error: ' + (error.message || error));
     } finally {
       setAiLoading(false);
     }
   };
-
-  const acceptAiSolution = async (sol: ScheduleSolution) => {
-    if (!scheduleData) return;
-    const next = applySolutionChanges(applyOps(scheduleData, draftOps), sol);
-    await commitScheduleData(next);
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null);
-  };
-
-  const customizeAiSolution = (sol: ScheduleSolution) => {
-    if (!scheduleData) return;
-    const preview = applyOps(scheduleData, draftOps);
-    const moves: DraftOp[] = [];
-    for (const ch of sol.changes) {
-      const a = preview.appointments.find(x => x.id === ch.appointmentId);
-      if (a) moves.push(newMoveOp({ ...a, startTime: ch.newTime.start, endTime: ch.newTime.end }));
-    }
-    stageOps(moves);
-    setSolutions([]);
-  };
-
-  const rejectAiSet = () => setSolutions([]);
 
   // Shared by Wish It / Fix It Accept: the model's own ops can still
   // double-book a tech/BCBA/client against each other or the live schedule, so
@@ -1269,6 +1244,57 @@ export default function App() {
   const customizeWish = (sol: WishSolution) => {
     if (!scheduleData) return;
     const { ops, blackouts, hintChanges } = draftFromSolution(sol, scheduleData);
+    if (blackouts.length || hintChanges.length) {
+      commitScheduleData(
+        { ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts], clients: applyHintChanges(scheduleData.clients, hintChanges) },
+        { label: 'Day-offs / preferences recorded', source: 'wish' },
+      );
+    }
+    stageOps(ops);
+    setView('schedule');
+  };
+
+  // Draft-tray AI escalation accept/customize. Unlike recovery (which reworks the
+  // committed schedule), these layer the AI's ops ON TOP of the staged draft — so
+  // unrelated staged edits survive and the whole thing commits through the graded
+  // path. Accept commits the combined when it grades clean (red → left in the tray
+  // to resolve); Customize merges the ops into the tray for further editing.
+  const acceptDraftEscalation = async (sol: WishSolution) => {
+    if (!scheduleData) return;
+    setRecoverySolutions(null);
+    const base = applyOps(scheduleData, draftOps);
+    const { ops, blackouts, hintChanges } = draftFromSolution(sol, base);
+    const status = solveDraft(base, ops, new Date(), scheduleData.settings);
+    if (status.grade === 'red') {
+      // Can't land cleanly — merge the AI ops into the tray (plus any solution-level
+      // day-offs/hints) and let the graded tray Accept fold everything in later. The
+      // sAssI/tidy/undo draft extras stay staged, so nothing is lost.
+      if (blackouts.length || hintChanges.length) {
+        commitScheduleData(
+          { ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts], clients: applyHintChanges(scheduleData.clients, hintChanges) },
+          { label: 'Day-offs / preferences recorded', source: 'wish' },
+        );
+      }
+      stageOps(ops);
+      return;
+    }
+    // Clean grade — commit the combined draft EXACTLY as the tray's Accept does:
+    // fold in the solution's own day-offs/hints AND the sAssI/undo draft extras, then
+    // clear every piece of draft state (parity with acceptDraft — see its cleanup).
+    let resolved = status.resolved || applyOps(base, ops);
+    if (blackouts.length) resolved = { ...resolved, blackouts: [...(resolved.blackouts || []), ...blackouts] };
+    if (hintChanges.length) resolved = { ...resolved, clients: applyHintChanges(resolved.clients, hintChanges) };
+    const next = withUndoExtras(withSassiHints(withSassiBlackouts(resolved)));
+    await commitScheduleData(next, draftMeta());
+    setDraftOps([]); setSelectedAppointment(null); setSassiBlackouts([]); setSassiHints([]); setTidyResult(null); setPendingUndo(null); sassi.reset();
+    setView('schedule');
+  };
+
+  const customizeDraftEscalation = (sol: WishSolution) => {
+    if (!scheduleData) return;
+    setRecoverySolutions(null);
+    const base = applyOps(scheduleData, draftOps);
+    const { ops, blackouts, hintChanges } = draftFromSolution(sol, base);
     if (blackouts.length || hintChanges.length) {
       commitScheduleData(
         { ...scheduleData, blackouts: [...(scheduleData.blackouts || []), ...blackouts], clients: applyHintChanges(scheduleData.clients, hintChanges) },
@@ -1356,7 +1382,6 @@ export default function App() {
     setScheduleData(null);
     setCompCache(null);
     setConflicts([]);
-    setSolutions([]);
     setDraftOps([]);
     setSassiBlackouts([]);
     setBuildResult(null);
@@ -1375,7 +1400,7 @@ export default function App() {
       ? { ...scheduleData, appointments: [...scheduleData.appointments, ...ghosts] }
       : scheduleData;
     await commitScheduleData(next, { label: `Logged ${ghosts.length} request${ghosts.length === 1 ? '' : 's'} as ghost${ghosts.length === 1 ? '' : 's'}`, source: 'manual' });
-    setDraftOps([]); setSolutions([]); setSelectedAppointment(null); setSassiBlackouts([]);
+    setDraftOps([]); setSelectedAppointment(null); setSassiBlackouts([]);
   };
 
   // ---- Ghost lifecycle (committed) ------------------------------------------
@@ -1505,7 +1530,6 @@ export default function App() {
         actionLog: pruneLog([...(built.actionLog ?? []), viewOnlyEntry(built, { label: 'Setup wizard created the schedule', source: 'admin' })]),
       });
       setConflicts(response.data.conflicts || []);
-      setSolutions([]);
       setShowWizard(false);
       setDebugMsg(null);
     } catch (error: any) {
@@ -2185,16 +2209,7 @@ export default function App() {
       {tidyResult && (
         <TidyPanel result={tidyResult} onApplySuggestion={applyTidySuggestion} onDismiss={() => setTidyResult(null)} />
       )}
-      {solutions.length > 0 && (
-        <SolutionPanel
-          solutions={solutions}
-          heading="AI options (within the month)"
-          onAccept={acceptAiSolution}
-          onCustomize={customizeAiSolution}
-          onReject={rejectAiSet}
-        />
-      )}
-      {!draftActive && solutions.length === 0 && dockIssues.length === 0 && !selectedAppointment && (
+      {!draftActive && dockIssues.length === 0 && !selectedAppointment && (
         <AgendaRail
           appointments={scheduleData.appointments}
           date={viewDate}
@@ -2788,11 +2803,11 @@ export default function App() {
                 <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>{sol.reasoning}</div>
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                   <button
-                    onClick={() => { setRecoverySolutions(null); customizeWish(sol); }}
+                    onClick={() => recoverySolutions.fromDraft ? customizeDraftEscalation(sol) : (setRecoverySolutions(null), customizeWish(sol))}
                     style={{ padding: '5px 12px', border: '1px solid #d1d5db', borderRadius: 6, background: 'white', cursor: 'pointer', fontSize: 12 }}
                   >Customize</button>
                   <button
-                    onClick={() => { setRecoverySolutions(null); acceptWish(sol); }}
+                    onClick={() => recoverySolutions.fromDraft ? acceptDraftEscalation(sol) : (setRecoverySolutions(null), acceptWish(sol))}
                     style={{ padding: '5px 12px', border: 'none', borderRadius: 6, background: 'var(--brand-primary)', color: 'white', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
                   >Accept</button>
                 </div>

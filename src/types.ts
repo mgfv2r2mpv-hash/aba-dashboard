@@ -810,20 +810,6 @@ export interface ScheduleConflict {
   availabilityDetail?: AvailabilityConflictDetail;
 }
 
-export interface ScheduleSolution {
-  id: string;
-  description: string;
-  affectedWeeks: number;
-  weekSpan: { startDate: string; endDate: string };
-  changes: {
-    appointmentId: string;
-    oldTime: { start: string; end: string };
-    newTime: { start: string; end: string };
-  }[];
-  reasoning: string;
-  violatesConstraints: boolean;
-}
-
 // ── "Wish It" — goal-driven AI schedule rework (Change 3) ────────────────────
 // Unlike "Fix It" (resolve a conflict the user already created), "Wish It" takes
 // a forward-looking GOAL and asks the AI for up to 3 ways to reshape the schedule

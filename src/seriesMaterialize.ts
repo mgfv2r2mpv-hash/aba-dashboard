@@ -9,6 +9,7 @@
 // typed pattern) so no half-state can enter through this path.
 
 import { Appointment, DayOfWeek, StoredRecurrencePattern } from './types';
+import { nextMonthly } from './kernel/recurrence';
 import { v4 as uuidv4 } from 'uuid';
 
 export type MaterializeRecurrence = 'weekly' | 'biweekly' | 'monthly' | 'custom-days' | 'custom-dates';
@@ -20,6 +21,7 @@ export interface MaterializeSeriesInput {
   customDates?: string[];      // custom-dates: explicit YYYY-MM-DD list
   recurrenceEnd?: string;      // YYYY-MM-DD horizon override
   authEnd?: string;            // YYYY-MM-DD client authorization end
+  monthlyMode?: 'weekday' | 'date'; // monthly only; default 'weekday' (see below)
 }
 
 const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -46,6 +48,13 @@ export function materializeSeries(input: MaterializeSeriesInput): Appointment[] 
   const pattern: StoredRecurrencePattern =
     recurrence === 'custom-days' || recurrence === 'custom-dates' ? 'custom' : recurrence;
 
+  // Monthly stepping unifies behind kernel/recurrence.nextMonthly. The default is
+  // 'weekday' — re-anchoring to the same ordinal weekday (1st Tuesday → 1st
+  // Tuesday) keeps every occurrence on the same weekday, so it stays inside the
+  // tech's availability instead of drifting off it like a naive day-of-month step.
+  const isMonthly = recurrence === 'monthly';
+  const monthlyMode: 'weekday' | 'date' = input.monthlyMode ?? 'weekday';
+
   const result: Appointment[] = [];
   const emit = (occStart: Date): void => {
     result.push({
@@ -56,17 +65,22 @@ export function materializeSeries(input: MaterializeSeriesInput): Appointment[] 
       seriesId,
       isRecurring: true,
       recurringPattern: pattern,
+      // Only monthly rows carry the mode; it recovers the flavor without measuring.
+      ...(isMonthly ? { monthlyMode } : {}),
     });
   };
 
   if (recurrence === 'weekly' || recurrence === 'biweekly' || recurrence === 'monthly') {
     // Date-arithmetic stepping (not ms) keeps the local clock stable across DST.
-    const occ = new Date(start);
+    let occ = new Date(start);
     while (occ <= end) {
       emit(new Date(occ));
-      if (recurrence === 'monthly') occ.setMonth(occ.getMonth() + 1);
-      else occ.setDate(occ.getDate() + (recurrence === 'weekly' ? 7 : 14));
-      occ.setHours(start.getHours(), start.getMinutes(), 0, 0);
+      if (isMonthly) {
+        occ = nextMonthly(occ, monthlyMode);
+      } else {
+        occ.setDate(occ.getDate() + (recurrence === 'weekly' ? 7 : 14));
+        occ.setHours(start.getHours(), start.getMinutes(), 0, 0);
+      }
     }
   } else if (recurrence === 'custom-days') {
     const selected = new Set(input.selectedDays ?? []);

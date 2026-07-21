@@ -17,6 +17,7 @@ function appt(p: Partial<Appointment> & { start: string; end: string }): Appoint
     startTime: p.start, endTime: p.end,
     isFixed: p.isFixed ?? false, isBillable: p.isBillable !== false, status: p.status ?? 'scheduled',
     isRecurring: p.isRecurring, recurringPattern: p.recurringPattern, seriesId: p.seriesId,
+    monthlyMode: p.monthlyMode,
   };
 }
 function mkData(appts: Appointment[]): ScheduleData {
@@ -191,6 +192,38 @@ console.log("extend — monthly last-Friday steps to the next LAST Friday (nth='
   const adds = r.ops.filter(o => o.op === 'add') as Extract<typeof r.ops[number], { op: 'add' }>[];
   check('adds Apr 24 + May 29 (last Fridays)',
     adds.length === 2 && adds.some(a => a.start.startsWith('2026-04-24')) && adds.some(a => a.start.startsWith('2026-05-29')),
+    adds.map(a => a.start.slice(0, 10)).join(','));
+}
+
+// ── Stored monthlyMode is honored over measurement ──────────────────────────
+console.log("extend — a young series stored monthlyMode='weekday' extends nth-weekday");
+{
+  const S = 's';
+  // Two first-Tuesdays (Jan 6, Feb 3). Two members → measurement can't derive a
+  // flavor (falls back to the 'monthly' label with no nth), so ONLY the stored
+  // mode keeps it on the first Tuesday: Mar 3, Apr 7 (never the same-date Apr 3).
+  const rows = ['2026-01-06', '2026-02-03'].map((d, i) =>
+    appt({ id: `wm${i}`, start: `${d}T10:00:00`, end: `${d}T11:00:00`, seriesId: S, isRecurring: true, recurringPattern: 'monthly', monthlyMode: 'weekday' }));
+  const r = extendSeries(mkData(rows), S, '2026-04-30', new Date('2026-02-10T08:00:00'));
+  const adds = r.ops.filter(o => o.op === 'add') as Extract<typeof r.ops[number], { op: 'add' }>[];
+  check('adds Mar 3 + Apr 7 (first Tuesdays), never Apr 3',
+    adds.length === 2 && adds.some(a => a.start.startsWith('2026-03-03')) && adds.some(a => a.start.startsWith('2026-04-07'))
+    && !adds.some(a => a.start.startsWith('2026-04-03')),
+    adds.map(a => a.start.slice(0, 10)).join(','));
+  check('every add is a Tuesday', adds.every(a => new Date(a.start).getDay() === 2));
+}
+
+console.log("extend — stored monthlyMode='date' overrides a measured nth-weekday flavor");
+{
+  const S = 's';
+  // Three first-Tuesdays (measurement → nth-weekday nth=1), but the series was
+  // stored as same-DATE. The stored mode wins: Apr 3 (same day-of-month), not Apr 7.
+  const rows = ['2026-01-06', '2026-02-03', '2026-03-03'].map((d, i) =>
+    appt({ id: `dm${i}`, start: `${d}T10:00:00`, end: `${d}T11:00:00`, seriesId: S, isRecurring: true, recurringPattern: 'monthly', monthlyMode: 'date' }));
+  const r = extendSeries(mkData(rows), S, '2026-04-30', new Date('2026-03-10T08:00:00'));
+  const adds = r.ops.filter(o => o.op === 'add') as Extract<typeof r.ops[number], { op: 'add' }>[];
+  check('adds Apr 3 (same-date), never the nth-weekday Apr 7',
+    adds.length === 1 && adds.some(a => a.start.startsWith('2026-04-03')) && !adds.some(a => a.start.startsWith('2026-04-07')),
     adds.map(a => a.start.slice(0, 10)).join(','));
 }
 

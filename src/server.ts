@@ -4,10 +4,9 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { ScheduleData, Appointment, ScheduleSolution } from './types';
+import { ScheduleData, Appointment } from './types';
 import { parseExcelFile } from './excelHandler';
 import { ConstraintValidator } from './constraintValidator';
-import { ClaudeScheduler, ClaudeModel } from './claudeScheduler';
 import { ExcelEncryption } from './encryption';
 
 dotenv.config();
@@ -124,65 +123,9 @@ app.post('/api/appointment/:id', express.json(), async (req: Request, res: Respo
     const validator = new ConstraintValidator(currentScheduleData);
     const conflicts = validator.validateSchedule();
 
-    // Get API key and model from headers (per-request only, never stored)
-    const apiKey = req.headers['x-claude-api-key'] as string | undefined;
-    const model = req.headers['x-claude-model'] as ClaudeModel | undefined;
-
-    // If conflicts exist and user has provided API key, generate solutions
-    let solutions: ScheduleSolution[] = [];
-    let claudeError: string | undefined;
-    if (conflicts.length > 0 && apiKey) {
-      try {
-        const scheduler = new ClaudeScheduler(apiKey, currentScheduleData, model);
-        const conflictMessages = conflicts.map(c => c.message);
-        solutions = await scheduler.generateSolutions(appointment, conflictMessages);
-      } catch (err: any) {
-        console.error('Claude API error:', err.message);
-        claudeError = err.message;
-      }
-    }
-
     res.json({
       success: true,
       appointment,
-      conflicts,
-      solutions,
-      claudeError,
-      hasApiKey: !!apiKey,
-    });
-  } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-
-// Apply solution
-app.post('/api/apply-solution', express.json(), (req: Request, res: Response) => {
-  try {
-    if (!currentScheduleData) {
-      return res.status(400).json({ error: 'No schedule loaded' });
-    }
-
-    const { solutionId, changes } = req.body;
-
-    // Apply changes to appointments
-    changes.forEach((change: any) => {
-      const appointment = currentScheduleData!.appointments.find(a => a.id === change.appointmentId);
-      if (appointment) {
-        appointment.startTime = change.newTime.start;
-        appointment.endTime = change.newTime.end;
-      }
-    });
-
-    // Revalidate
-    const validator = new ConstraintValidator(currentScheduleData);
-    const conflicts = validator.validateSchedule();
-
-    res.json({
-      success: true,
-      data: currentScheduleData,
       conflicts,
     });
   } catch (error: any) {

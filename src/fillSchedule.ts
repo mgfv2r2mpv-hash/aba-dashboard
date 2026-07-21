@@ -19,8 +19,9 @@
 import { ScheduleData, Appointment, DayOfWeek, TimeWindow } from './types';
 import { findAuthFor } from './authorization';
 import { computeClientCompliance, CompliancePeriod } from './compliance';
-import { DAYS, toMin, minToClock, MIN_SLOT_MINS, intersect, subtract, windowsToIntervals, btCaseAvailability } from './intervals';
+import { DAYS, toMin, minToClock, windowsToIntervals, btCaseAvailability } from './intervals';
 import { overlapsAny } from './kernel/overlap';
+import { computeWindowSlots, TechFeasibility } from './kernel/windows';
 
 const isActive = (a: Appointment) => a.status !== 'canceled' && !a.isGhost;
 const dirHours = (a: Appointment) => (new Date(a.endTime).getTime() - new Date(a.startTime).getTime()) / 3_600_000;
@@ -86,37 +87,23 @@ export function feasibleDirectWindows(data: ScheduleData, weekStart: Date): Feas
         .filter(a => isActive(a) && (a.client === client.id || a.client === client.name) && a.startTime.startsWith(date))
         .map(a => ({ start: minOf(a.startTime), end: minOf(a.endTime) }));
 
-      // Assigned BTs for this client.
+      // Assigned BTs for this client. Busy is RESCANNED from the schedule and keyed
+      // by BT id (a static snapshot, unlike the builder's live occupancy).
       const assignedTechs = data.technicians.filter(t => (t.assignments || []).some(a => a.clientId === client.id || a.clientId === client.name));
-
-      // Per free window, collect which BTs are available for the whole window.
-      const windowTechs = new Map<string, { id: string; name: string }[]>(); // key `${start}-${end}`
-      for (const tech of assignedTechs) {
-        const techCaseAvail = btCaseAvailability(tech, client.id, day).length
+      const techs: TechFeasibility[] = assignedTechs.map(tech => ({
+        tech: { id: tech.id, name: tech.name },
+        caseAvail: btCaseAvailability(tech, client.id, day).length
           ? btCaseAvailability(tech, client.id, day)
-          : btCaseAvailability(tech, client.name, day);
-        if (techCaseAvail.length === 0) continue;
-        const techBusy = data.appointments
+          : btCaseAvailability(tech, client.name, day),
+        busy: data.appointments
           .filter(a => isActive(a) && a.technician === tech.id && a.startTime.startsWith(date))
-          .map(a => ({ start: minOf(a.startTime), end: minOf(a.endTime) }));
+          .map(a => ({ start: minOf(a.startTime), end: minOf(a.endTime) })),
+      }));
 
-        // Free = clientAvail ∩ techCaseAvail − clientBusy − techBusy
-        let free = intersect(clientAvail, techCaseAvail);
-        free = subtract(free, [...clientBusy, ...techBusy]);
-        for (const seg of free) {
-          if (seg.end - seg.start < MIN_SLOT_MINS) continue;
-          const key = `${seg.start}-${seg.end}`;
-          const arr = windowTechs.get(key) || [];
-          arr.push({ id: tech.id, name: tech.name });
-          windowTechs.set(key, arr);
-        }
-      }
-
-      for (const [key, techs] of windowTechs) {
-        const [start, end] = key.split('-').map(Number);
+      for (const s of computeWindowSlots(clientAvail, clientBusy, techs)) {
         out.push({
           clientId: client.id, clientName: client.name, day, date,
-          start: minToClock(start), end: minToClock(end), minutes: end - start, techs,
+          start: minToClock(s.start), end: minToClock(s.end), minutes: s.end - s.start, techs: s.techs,
         });
       }
     }

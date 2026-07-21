@@ -13,9 +13,10 @@
 
 import { ScheduleData, Client, DayOfWeek } from './types';
 import {
-  Interval, MIN_SLOT_MINS, DAYS,
-  minToClock, normalize, intersect, subtract, windowsToIntervals, btCaseAvailability,
+  Interval, DAYS,
+  minToClock, normalize, windowsToIntervals, btCaseAvailability,
 } from './intervals';
+import { computeWindowSlots, TechFeasibility } from './kernel/windows';
 
 // weekday → merged busy intervals (minutes-of-day) for one entity.
 type DayBusy = Partial<Record<DayOfWeek, Interval[]>>;
@@ -97,30 +98,21 @@ export function feasibleWindowsLive(
   const assignedTechs = data.technicians.filter(t =>
     (t.assignments || []).some(a => a.clientId === client.id || a.clientId === client.name));
 
-  const windowTechs = new Map<string, { id: string; name: string }[]>(); // key `${start}-${end}`
-  for (const tech of assignedTechs) {
-    let techCaseAvail = btCaseAvailability(tech, client.id, day);
-    if (techCaseAvail.length === 0) techCaseAvail = btCaseAvailability(tech, client.name, day);
-    if (techCaseAvail.length === 0) continue;
-    const techBusy = occ.tech.get(tech.name)?.[day] ?? [];
+  // Busy comes from the LIVE occupancy, keyed by BT name (how appointments store
+  // the tech) — this is what makes the builder anti-double-book as it places.
+  const techs: TechFeasibility[] = assignedTechs.map(tech => {
+    let caseAvail = btCaseAvailability(tech, client.id, day);
+    if (caseAvail.length === 0) caseAvail = btCaseAvailability(tech, client.name, day);
+    return {
+      tech: { id: tech.id, name: tech.name },
+      caseAvail,
+      busy: occ.tech.get(tech.name)?.[day] ?? [],
+    };
+  });
 
-    let free = intersect(clientAvail, techCaseAvail);
-    free = subtract(free, [...clientBusy, ...techBusy]);
-    for (const seg of free) {
-      if (seg.end - seg.start < MIN_SLOT_MINS) continue;
-      const key = `${seg.start}-${seg.end}`;
-      const arr = windowTechs.get(key) ?? [];
-      arr.push({ id: tech.id, name: tech.name });
-      windowTechs.set(key, arr);
-    }
-  }
-
-  const out: LiveWindow[] = [];
-  for (const [key, techs] of windowTechs) {
-    const [start, end] = key.split('-').map(Number);
-    out.push({ start: minToClock(start), end: minToClock(end), day, date, techs });
-  }
-  return out;
+  return computeWindowSlots(clientAvail, clientBusy, techs).map(s => ({
+    start: minToClock(s.start), end: minToClock(s.end), day, date, techs: s.techs,
+  }));
 }
 
 // Record a placement so the next feasibleWindowsLive excludes it — the

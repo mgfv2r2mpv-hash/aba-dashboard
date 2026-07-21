@@ -1,5 +1,6 @@
 import { Appointment, ScheduleData, StoredRecurrencePattern, WishOp } from './types';
 import { seriesProfileOf } from './seriesProfile';
+import { nthWeekdayOf, weekdayOrdinalOf } from './kernel/recurrence';
 
 // Extend a recurring series forward. Recurrence in this app is a set of dated rows
 // materialized up to a fixed end date (AppointmentForm), NOT a live rule — the
@@ -13,10 +14,13 @@ import { seriesProfileOf } from './seriesProfile';
 // stored label can lie; a mislabeled biweekly must not extend weekly and double
 // every occurrence). Weekly / biweekly / custom advance per (weekday, start-clock)
 // slot on a 7/14-day period, the most-recent member as the slot's template
-// (client/tech/type/duration/title). Monthly advances as ONE sequence per month
-// honoring the measured flavor — same day-of-month, or nth-weekday incl. 'last'
-// (a naive setMonth(+1) drifts off the weekday). The emitted ops ride the normal
-// add/regroup → wishSolutionToDraft → draft-tray pipeline for review.
+// (client/tech/type/duration/title). Monthly advances as ONE sequence per month:
+// when members carry a STORED monthlyMode (created via materializeSeries) it is
+// honored directly — 'weekday' (nth-weekday incl. 'last') or 'date' (same
+// day-of-month); a legacy series with no mode falls back to the MEASURED flavor,
+// exactly as before. Both route through kernel/recurrence so nthWeekdayOf has one
+// home. The emitted ops ride the normal add/regroup → wishSolutionToDraft →
+// draft-tray pipeline for review.
 
 export interface ExtendSeriesResult {
   ops: WishOp[];
@@ -36,20 +40,6 @@ const atClock = (day: string, hh: number, mm: number): Date => {
   const [y, mo, d] = day.split('-').map(Number);
   return new Date(y, mo - 1, d, hh, mm, 0, 0);
 };
-
-// The nth <weekday> of a month (nth 1..5 or 'last'). Returns null when the month
-// has no nth occurrence (a 5th Friday doesn't exist every month).
-function nthWeekdayOf(year: number, month: number, weekday: number, nth: number | 'last'): Date | null {
-  if (nth === 'last') {
-    const last = new Date(year, month + 1, 0);
-    const diff = (last.getDay() - weekday + 7) % 7;
-    return new Date(year, month, last.getDate() - diff);
-  }
-  const first = new Date(year, month, 1);
-  const offset = (weekday - first.getDay() + 7) % 7;
-  const d = new Date(year, month, 1 + offset + (nth - 1) * 7);
-  return d.getMonth() === month ? d : null;
-}
 
 export function extendSeries(
   data: ScheduleData,
@@ -108,6 +98,10 @@ export function extendSeries(
     const tmpl = bySort[bySort.length - 1];
     const durationMs = new Date(tmpl.endTime).getTime() - new Date(tmpl.startTime).getTime();
     const [hh, mm] = clockOf(tmpl.startTime).split(':').map(Number);
+    // The series' STORED intent, when it carries one (created via materializeSeries):
+    // 'weekday' → nth-weekday, 'date' → same day-of-month. Legacy series carry no
+    // mode, so the MEASURED flavor (profile) drives them exactly as before.
+    const storedMode = members.map(m => m.monthlyMode).find(Boolean);
     // Anchor = latest covered day (member or absorbed orphan).
     let anchorDay = dayOf(tmpl.startTime);
     for (const a of data.appointments) {
@@ -119,14 +113,20 @@ export function extendSeries(
     const anchor = atClock(anchorDay, hh, mm);
     const weekday = anchor.getDay();
     const dom = anchor.getDate();
+    const ord = weekdayOrdinalOf(anchor); // fixed ordinal for the stored-'weekday' path
+    const sameDate = (y: number, mo: number): Date =>
+      new Date(y, mo, Math.min(dom, new Date(y, mo + 1, 0).getDate())); // clamped to short months
     for (let step = 1; ; step++) {
       const y = anchor.getFullYear();
       const mo = anchor.getMonth() + step;
       if (new Date(y, mo, 1).getTime() > atClock(endDay, 23, 59).getTime()) break;
-      const occDate = profile.monthlyFlavor === 'nth-weekday' && profile.nth !== undefined
-        ? nthWeekdayOf(y, mo, weekday, profile.nth)
-        // same-date (measured or fallback): same day-of-month, clamped to short months.
-        : new Date(y, mo, Math.min(dom, new Date(y, mo + 1, 0).getDate()));
+      const occDate =
+        storedMode === 'weekday' ? nthWeekdayOf(y, mo, ord.weekday, ord.nth)
+        : storedMode === 'date' ? sameDate(y, mo)
+        // legacy: measured flavor drives it (nth-weekday when consistent, else same-date).
+        : profile.monthlyFlavor === 'nth-weekday' && profile.nth !== undefined
+          ? nthWeekdayOf(y, mo, weekday, profile.nth)
+          : sameDate(y, mo);
       if (!occDate) continue; // no nth weekday in this month
       occDate.setHours(hh, mm, 0, 0);
       const day = dayOf(localISO(occDate));

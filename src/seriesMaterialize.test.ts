@@ -57,6 +57,8 @@ describe('materializeSeries — weekly', () => {
     expect(r.every(a => durMs(a) === 60 * 60_000)).toBe(true);
     expect(r.every(a => a.startTime.endsWith('T09:00:00'))).toBe(true);
     expect(r.every(a => a.endTime.endsWith('T10:00:00'))).toBe(true);
+    // monthlyMode is a monthly-only field — never stamped on a weekly series.
+    expect(r.every(a => a.monthlyMode === undefined)).toBe(true);
     // Occurrence 0 is the untouched base start (id-stable edit path).
     expect(r[0].startTime).toBe('2026-07-15T09:00:00');
   });
@@ -107,34 +109,57 @@ describe('materializeSeries — biweekly', () => {
 });
 
 describe('materializeSeries — monthly', () => {
-  it('steps to the same day-of-month each month (same-date)', () => {
+  const modes = (r: Appointment[]) => r.map(a => a.monthlyMode);
+
+  // NEW DEFAULT (no monthlyMode): monthly re-anchors to the ordinal WEEKDAY, so a
+  // "first Tuesday" anchor lands on the first Tuesday of every following month —
+  // it stays on Tuesday (availability-safe) instead of drifting off the weekday.
+  it('defaults to weekday mode — re-anchors to the same ordinal weekday', () => {
+    const r = materializeSeries({
+      base: base('2026-01-06T09:00:00'), // Jan 6 2026 is the first Tuesday
+      recurrence: 'monthly',
+      recurrenceEnd: '2026-04-30',
+    });
+    // First Tuesdays of Jan–Apr 2026: Jan 6, Feb 3, Mar 3, Apr 7 (never Feb/Mar/Apr 6).
+    expect(dates(r)).toEqual(['2026-01-06', '2026-02-03', '2026-03-03', '2026-04-07']);
+    expect(r).toHaveLength(4);
+    expect(r.every(a => new Date(a.startTime).getDay() === 2)).toBe(true); // all Tuesdays
+    expect(r.every(a => a.startTime.endsWith('T09:00:00'))).toBe(true);    // clock held
+    expect(modes(r)).toEqual(['weekday', 'weekday', 'weekday', 'weekday']); // stamped
+    expectSharedTrio(r, 'monthly');
+  });
+
+  // Opt-in monthlyMode: 'date' preserves the old same-day-of-month stepping.
+  it("monthlyMode: 'date' keeps the same day-of-month (weekday drifts)", () => {
     const r = materializeSeries({
       base: base('2026-01-15T09:00:00'),
       recurrence: 'monthly',
+      monthlyMode: 'date',
       recurrenceEnd: '2026-05-20',
     });
     expect(dates(r)).toEqual([
       '2026-01-15', '2026-02-15', '2026-03-15', '2026-04-15', '2026-05-15',
     ]);
     expect(r).toHaveLength(5);
+    // Jan 15 is a Thursday; Feb 15 (a Sunday) is NOT — the weekday drifts by design.
+    expect(new Date(r[0].startTime).getDay()).toBe(4);
+    expect(new Date(r[1].startTime).getDay()).not.toBe(4);
+    expect(modes(r)).toEqual(['date', 'date', 'date', 'date', 'date']); // stamped
     expectSharedTrio(r, 'monthly');
   });
 
-  // CHARACTERIZATION: unlike extendSeries, materializeSeries does NAIVE setMonth(+1)
-  // stepping — it keeps the same DATE-OF-MONTH and does NOT re-anchor to the nth
-  // weekday. Seeding a "first Tuesday" anchor drifts off the weekday by design.
-  it('does NOT correct to nth-weekday — it drifts to the same date-of-month', () => {
+  // weekday mode fallback: a 5th-weekday anchor has no 5th counterpart in months
+  // that lack one, so those occurrences fall back to the LAST weekday.
+  it('weekday mode falls back to the last weekday when there is no 5th', () => {
     const r = materializeSeries({
-      base: base('2026-01-06T09:00:00'), // Jan 6 2026 is a Tuesday (first Tuesday)
+      base: base('2026-01-30T09:00:00'), // Jan 30 2026 is the 5th (and last) Friday
       recurrence: 'monthly',
-      recurrenceEnd: '2026-04-30',
+      recurrenceEnd: '2026-05-31',
     });
-    expect(dates(r)).toEqual(['2026-01-06', '2026-02-06', '2026-03-06', '2026-04-06']);
-    expect(r).toHaveLength(4);
-    // Anchor is a Tuesday; the next occurrence (Feb 6, a Friday) is NOT — proving
-    // no nth-weekday re-anchoring happens here.
-    expect(new Date(r[0].startTime).getDay()).toBe(2); // Tuesday
-    expect(new Date(r[1].startTime).getDay()).not.toBe(2);
+    // Last Fridays Jan–May 2026: Jan 30, Feb 27, Mar 27, Apr 24, May 29.
+    expect(dates(r)).toEqual(['2026-01-30', '2026-02-27', '2026-03-27', '2026-04-24', '2026-05-29']);
+    expect(r.every(a => new Date(a.startTime).getDay() === 5)).toBe(true); // all Fridays
+    expect(modes(r)).toEqual(['weekday', 'weekday', 'weekday', 'weekday', 'weekday']);
     expectSharedTrio(r, 'monthly');
   });
 });

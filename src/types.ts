@@ -554,6 +554,12 @@ export interface Appointment {
   makeupForId?: string;
   isRecurring?: boolean;
   recurringPattern?: StoredRecurrencePattern;
+  // For MONTHLY series only: how each month's occurrence is chosen. 'weekday'
+  // re-anchors to the same ordinal weekday (e.g. 1st Tuesday), keeping the series
+  // on a consistent weekday for tech availability; 'date' keeps the same
+  // day-of-month. Undefined on non-monthly rows and on legacy monthly series
+  // (whose flavor is recovered by measurement — seriesProfile.measurePattern).
+  monthlyMode?: 'weekday' | 'date';
   // Shared by all occurrences of a recurring series — set when the series is
   // first expanded. Lets edit/delete operations target "this and following"
   // or "all in series" without having to match by signature.

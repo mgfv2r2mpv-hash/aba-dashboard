@@ -8,9 +8,9 @@ import CasesHome from './CasesHome';
 import CCSettingsPopup from './CCSettingsPopup';
 
 // Consolidated "C&C" hub — the single home for compliance & cases. Replaces the
-// old "Fix" tab. Home is the cases summary (CaseloadView for now; CasesHome in
-// Phase 2). Roster (clients/technicians) and auths are mounted here by scoping
-// AdminPanel to a single section, pulling them out of the ⚙️ Admin view.
+// old "Fix" tab. The cases tab is the CasesHome table; the issues tab is the
+// ComplianceDashboard. Roster (clients/technicians) and auths are mounted here
+// by scoping AdminPanel to a single section, pulling them out of the ⚙️ Admin view.
 export type HubTab = 'cases' | 'issues' | 'clients' | 'technicians' | 'auths';
 
 interface Props {

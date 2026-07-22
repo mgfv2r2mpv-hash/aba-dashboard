@@ -14,7 +14,7 @@ import UndoPreview from './components/UndoPreview';
 import CaptureChip from './components/CaptureChip';
 import { solveMeetPace } from './localSolver';
 import { buildDossier, type Dossier } from './dossier';
-import Calendar, { HoursSummary } from './components/Calendar';
+import Calendar from './components/Calendar';
 import { conflictKey } from './components/ConflictPanel';
 import type { AdminPersist, AdminTab } from './components/AdminPanel';
 import FileUpload from './components/FileUpload';
@@ -1964,20 +1964,23 @@ export default function App() {
   const activityBtn = scheduleData
     ? compactBtn('🕘', 'Activity — committed changes & undo', () => setShowActivity(true), '#374151')
     : null;
+  // "+ New session" is a global action once a schedule exists — every view can
+  // add a session, not just the calendar (it opens the same AppointmentForm,
+  // then stages/commits through the normal path).
   const commandActions = !scheduleData ? (
     <>
       {compactBtn('Wizard', 'Setup Wizard', () => setShowWizard(true), 'var(--brand-ai)')}
       <FileUpload onUpload={handleFileUpload} loading={loading} />
       {compactBtn('CPR', 'CPR & Analysis', () => setView('cpr'), view === 'cpr' ? 'var(--brand-accent)' : '#374151')}
     </>
-  ) : view === 'schedule' ? (
+  ) : (
     <>
       {activityBtn}
       <Button variant="primary" size="sm" onClick={() => setShowAddAppointment(true)} aria-label="Add appointment">
         + New session
       </Button>
     </>
-  ) : activityBtn;
+  );
 
   const hereText = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   const nextText = pendingReview.length > 0
@@ -2105,11 +2108,10 @@ export default function App() {
   // calm idle state. Conflicts now flow through the dock's issue queue, and the
   // selected appointment rides the dock's `selected` slot (column) or its own
   // phone sheet — so neither of those renders here.
+  // The hours/utilization totals live on the Calendar itself now (one home) —
+  // the dock no longer mirrors them.
   const scheduleContextTop = view === 'schedule' && scheduleData ? (
     <>
-      {!draftActive && calLens !== 'client' && (
-        <HoursSummary appointments={calendarAppointments} lens={calLens} settings={scheduleData.settings} timeOff={scheduleData.timeOff} currentDate={viewDate} />
-      )}
       {!draftActive && (
         <button
           type="button"
@@ -2336,7 +2338,6 @@ export default function App() {
                     onSelectAppointment={setSelectedAppointment}
                     onViewDateChange={setViewDate}
                     onLensChange={setCalLens}
-                    hideTotals={dockMode === 'column'}
                     draftMarks={calendarMarks}
                     onMoveThis={handleMoveThis}
                     onReplaceThis={handleReplaceThis}

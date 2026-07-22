@@ -31,9 +31,6 @@ interface CalendarProps {
   // Reports the active lens (bcba/bt/client) so the parent can render the hours
   // totals in a docked side pane instead of inline.
   onLensChange?: (lens: 'bcba' | 'bt' | 'client') => void;
-  // When true, the parent renders the hours totals in the docked pane, so the
-  // calendar suppresses its own inline ribbon.
-  hideTotals?: boolean;
   // When a draft is open, marks staged appointments (add/move/shorten/remove)
   // so they render as "proposed"/tombstoned rather than committed sessions.
   draftMarks?: Map<string, DraftMark>;
@@ -80,7 +77,6 @@ export default function Calendar({
   onSelectAppointment,
   onViewDateChange,
   onLensChange,
-  hideTotals,
   draftMarks,
   onAddAppointment,
   onMoveThis,
@@ -262,11 +258,6 @@ export default function Calendar({
       {lens !== 'client' && view === 'month' && (
         <MonthView currentDate={currentDate} appointments={lensAppts} lens={lens as 'bcba' | 'bt'} settings={settings} timeOff={timeOff} onSelectAppointment={onSelectAppointment} onPickDay={setPickedDay} draftMarks={draftMarks} roomy={roomy} sessionFlags={sessionFlags} />
       )}
-      {lens !== 'client' && view === 'month' && !hideTotals && (
-        <div style={{ marginTop: 16 }}>
-          <HoursSummary appointments={appointments} lens={lens as 'bcba' | 'bt'} settings={settings} timeOff={timeOff} currentDate={currentDate} />
-        </div>
-      )}
       {lens !== 'client' && view === 'week' && (
         <TimeGrid
           days={weekDays}
@@ -303,6 +294,14 @@ export default function Calendar({
         <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
           Rotate to landscape to drag appointments to a new time.
         </p>
+      )}
+      {/* Hours/utilization totals — the one home for these now (the dock no
+          longer mirrors them), shown under every sub-view so week/day keep the
+          weekly + monthly pace in sight. */}
+      {lens !== 'client' && (
+        <div style={{ marginTop: 16 }}>
+          <HoursSummary appointments={appointments} lens={lens as 'bcba' | 'bt'} settings={settings} timeOff={timeOff} currentDate={currentDate} />
+        </div>
       )}
 
       {pickedDay && (

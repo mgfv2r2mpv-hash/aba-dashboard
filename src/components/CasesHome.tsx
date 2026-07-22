@@ -74,7 +74,7 @@ export default function CasesHome({ data, now = new Date() }: Props) {
   }, [data, now]);
 
   const monthLabel = rows[0]?.state.monthLabel || '';
-  const HEADERS = ['Risk', 'Case', 'Util (Wk / Mo)', 'Cancels', 'Adm/BCBA', 'Sup % (A/P)', 'PT (A/P)', 'Status', 'Factors'];
+  const HEADERS = ['Risk', 'Case', 'Util (Wk / Mo)', 'Cancels', 'Adm/BCBA', 'Sup % (A/P)', 'Floor', 'Cadence', 'Contacts', 'PT (A/P)', 'Cliff', 'Status', 'Factors'];
 
   return (
     <div style={{ padding: '8px 4px' }}>
@@ -142,6 +142,18 @@ function CaseRow({ row, settings, onOpenCancels }: {
   const weekColor = s.direct.authPerWk === 0 ? '#9ca3af' : s.direct.belowTarget ? '#b45309' : '#15803d';
   const ptColor = s.parentTraining.goalMonth === 0 ? '#6b7280' : s.parentTraining.gap > 0.01 ? '#b45309' : '#15803d';
 
+  // Ported from the retired Caseload table: floor/preferred band, cadence
+  // pacing, supervision contacts, and the binding cliff (auth service-end vs
+  // month-end) — the deadline pressure the projection alone doesn't show.
+  const cadenceLabel = s.supervision.cadenceGoal ? `${s.supervision.cadenceGoal}` : '—';
+  const contactStr = s.supervision.contactsRequiredByCadence !== undefined
+    ? `${s.supervision.contactsThisMonth}/${s.supervision.contactsRequiredByCadence}`
+    : `${s.supervision.contactsThisMonth}`;
+  const cliffColor = s.cliffs.binding === 'service-end' && (s.cliffs.daysToServiceEnd ?? 99) <= 21 ? '#b91c1c' : '#6b7280';
+  const cliffText = s.cliffs.binding === 'service-end'
+    ? `auth ${s.cliffs.daysToServiceEnd ?? '?'}d`
+    : `mo ${s.cliffs.daysToMonthEnd}d`;
+
   return (
     <tr>
       {/* Risk */}
@@ -173,12 +185,22 @@ function CaseRow({ row, settings, onOpenCancels }: {
         <span style={{ color: '#9ca3af' }}> / </span>
         <span style={{ color: projStatus.color, fontWeight: 600 }}>{proj && proj.directHours > 0 ? `${hrs(proj.pct)}%` : '—'}</span>
       </td>
+      {/* Floor / preferred band (company floor / BCBA preferred min–max) */}
+      <td style={{ ...td, whiteSpace: 'nowrap', color: '#6b7280' }}>
+        {s.supervision.floorPct}/{s.supervision.preferredMinPct}–{s.supervision.preferredMaxPct}
+      </td>
+      {/* Supervision cadence goal */}
+      <td style={{ ...td, whiteSpace: 'nowrap' }}>{cadenceLabel}</td>
+      {/* Supervision contacts this month / required by cadence */}
+      <td style={{ ...td, whiteSpace: 'nowrap' }}>{contactStr}</td>
       {/* Parent training actual / projected (vs monthly goal) */}
       <td style={{ ...td, whiteSpace: 'nowrap', color: ptColor }}>
         {s.parentTraining.goalMonth > 0 || s.parentTraining.deliveredMonth > 0
           ? `${hrs(ptActual)}/${hrs(s.parentTraining.deliveredMonth)} · goal ${hrs(s.parentTraining.goalMonth)}h`
           : '—'}
       </td>
+      {/* Binding cliff — auth service-end vs month-end (red inside 3 weeks) */}
+      <td style={{ ...td, whiteSpace: 'nowrap', color: cliffColor }}>{cliffText}</td>
       {/* Supervision band status */}
       <td style={td}>
         <span style={chip(status.color)}>{status.text}</span>

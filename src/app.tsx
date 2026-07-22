@@ -2221,6 +2221,30 @@ export default function App() {
     </>
   ) : null;
 
+  // The three SAssiDock render sites (column / sheet / chip) share one prop
+  // block; only `variant`, `selected`, and the three handlers that first close
+  // the sheet/overlay differ per site, so those are set after the spread.
+  const sharedDockProps = {
+    issues: view === 'schedule' && draftActive ? [] : dockIssues,
+    issueCount,
+    aiEnabled: aiActive,
+    contextTop: scheduleContextTop,
+    onMuteConflict: muteConflictIssue,
+    onFixPace: (id: string) => openMeetPace(id, 'behind'),
+    dossier,
+    canDoctor,
+    onDoctor: openDoctor,
+    onClearDossier: () => setDossier(null),
+    onAskAboutFocus: askAboutFocus,
+    seedRequest: meetPaceSeed,
+    onSeedResolve: resolveMeetPace,
+    graderCtx: meetPaceGraderCtx,
+    onAsk: sassi.send,
+    chat: sassiChat,
+    onAcceptWish: acceptWish,
+    onCustomizeWish: customizeWish,
+  };
+
   return (
     <RosterProvider clients={scheduleData?.clients ?? []} technicians={scheduleData?.technicians ?? []}>
     <div style={{
@@ -2461,28 +2485,11 @@ export default function App() {
           selected-session detail/edit (P5b — replaces the old inline pane). */}
       {dockMode === 'column' && (view !== 'schedule' || scheduleData) && (
         <SAssiDock
-          issues={view === 'schedule' && draftActive ? [] : dockIssues}
-          issueCount={issueCount}
-          aiEnabled={aiActive}
-          contextTop={scheduleContextTop}
+          {...sharedDockProps}
           selected={view === 'schedule' && selectedAppointment ? renderDetailOrEdit(selectedAppointment) : undefined}
           onReviewConflict={reviewConflictIssue}
-          onMuteConflict={muteConflictIssue}
           onFixCompliance={() => { setCcInitialTab('issues'); setView('compliance'); }}
-          onFixPace={(id) => openMeetPace(id, 'behind')}
           onExtendSeries={handleExtendSeries}
-          dossier={dossier}
-          canDoctor={canDoctor}
-          onDoctor={openDoctor}
-          onClearDossier={() => setDossier(null)}
-          onAskAboutFocus={askAboutFocus}
-          seedRequest={meetPaceSeed}
-          onSeedResolve={resolveMeetPace}
-          graderCtx={meetPaceGraderCtx}
-          onAsk={sassi.send}
-          chat={sassiChat}
-          onAcceptWish={acceptWish}
-          onCustomizeWish={customizeWish}
         />
       )}
 
@@ -2547,28 +2554,11 @@ export default function App() {
               >✕</button>
             </div>
             <SAssiDock
+              {...sharedDockProps}
               variant="sheet"
-              issues={view === 'schedule' && draftActive ? [] : dockIssues}
-              issueCount={issueCount}
-              aiEnabled={aiActive}
-              contextTop={scheduleContextTop}
               onReviewConflict={(i) => { setDockSheetOpen(false); reviewConflictIssue(i); }}
-              onMuteConflict={muteConflictIssue}
               onFixCompliance={() => { setDockSheetOpen(false); setCcInitialTab('issues'); setView('compliance'); }}
-              onFixPace={(id) => openMeetPace(id, 'behind')}
               onExtendSeries={(sid, end) => { setDockSheetOpen(false); handleExtendSeries(sid, end); }}
-              dossier={dossier}
-              canDoctor={canDoctor}
-              onDoctor={openDoctor}
-              onClearDossier={() => setDossier(null)}
-              onAskAboutFocus={askAboutFocus}
-              seedRequest={meetPaceSeed}
-              onSeedResolve={resolveMeetPace}
-              graderCtx={meetPaceGraderCtx}
-              onAsk={sassi.send}
-              chat={sassiChat}
-              onAcceptWish={acceptWish}
-              onCustomizeWish={customizeWish}
             />
           </div>
         </>
@@ -2579,28 +2569,11 @@ export default function App() {
       {dockMode === 'chip' && scheduleData && (
         <DockOverlay id="sassi-dock-overlay" open={dockOpen} onClose={() => setDockOpen(false)}>
           <SAssiDock
-            issues={view === 'schedule' && draftActive ? [] : dockIssues}
-            issueCount={issueCount}
-            aiEnabled={aiActive}
-            contextTop={scheduleContextTop}
+            {...sharedDockProps}
             selected={view === 'schedule' && selectedAppointment ? renderDetailOrEdit(selectedAppointment) : undefined}
             onReviewConflict={reviewConflictIssue}
-            onMuteConflict={muteConflictIssue}
             onFixCompliance={() => { setDockOpen(false); setCcInitialTab('issues'); setView('compliance'); }}
-            onFixPace={(id) => openMeetPace(id, 'behind')}
             onExtendSeries={handleExtendSeries}
-            dossier={dossier}
-            canDoctor={canDoctor}
-            onDoctor={openDoctor}
-            onClearDossier={() => setDossier(null)}
-            onAskAboutFocus={askAboutFocus}
-            seedRequest={meetPaceSeed}
-            onSeedResolve={resolveMeetPace}
-            graderCtx={meetPaceGraderCtx}
-            onAsk={sassi.send}
-            chat={sassiChat}
-            onAcceptWish={acceptWish}
-            onCustomizeWish={customizeWish}
           />
         </DockOverlay>
       )}

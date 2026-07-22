@@ -10,7 +10,7 @@ import { agendaFromReports, type AgendaGap } from '../agenda';
 import { BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
 import {
   ActualLevel, ProjectedLevel,
-  getActualLevel, getProjectedLevel, actualSectionStatus, projectedSectionStatus,
+  getActualLevel, getProjectedLevel, deriveSupervisionLevels,
 } from '../caseStatus';
 import CompleteTimePrompt from './CompleteTimePrompt';
 import { useRoster } from '../rosterContext';
@@ -554,11 +554,10 @@ function ClientCard({ report, targetPct, preferredPct, preferredMaxPct, maxPct }
   const { client, actual, projected } = report;
   const noDirect = actual.directHours === 0 && projected.directHours === 0;
 
-  const aLevel = getActualLevel(actual.directHours, actual.pct, targetPct, preferredPct, preferredMaxPct, maxPct);
-  const pLevel = getProjectedLevel(projected.directHours, projected.pct, targetPct, preferredPct, preferredMaxPct, maxPct);
+  const { actLevel: aLevel, projLevel: pLevel, actualStatus, projStatus } = deriveSupervisionLevels(
+    actual, projected, { targetPct, preferredPct, preferredMaxPct, maxPct },
+  );
   const badge = overallBadge(aLevel, pLevel, noDirect, actual.pct, projected.pct, targetPct, preferredPct, preferredMaxPct, maxPct);
-  const actualStatus = actualSectionStatus(aLevel);
-  const projStatus = projectedSectionStatus(pLevel);
 
   return (
     <div style={{

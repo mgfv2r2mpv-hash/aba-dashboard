@@ -92,6 +92,33 @@ export function resolveSupervisionThresholds(
   };
 }
 
+export interface SupervisionLevels {
+  actLevel: ActualLevel;
+  projLevel: ProjectedLevel;
+  actualStatus: { text: string; color: string };
+  projStatus: { text: string; color: string };
+}
+
+// One derivation of the displayed supervision band from a compliance report's
+// actual/projected metrics — the row model shared by the Cases table and the
+// Compliance dashboard card so they can never drift. Each caller supplies its
+// own thresholds (the Cases table resolves them per-client; the dashboard passes
+// its company-wide set), so this packaging is behavior-preserving.
+export function deriveSupervisionLevels(
+  actual: { directHours: number; pct: number },
+  projected: { directHours: number; pct: number },
+  th: SupervisionThresholds,
+): SupervisionLevels {
+  const actLevel = getActualLevel(actual.directHours, actual.pct, th.targetPct, th.preferredPct, th.preferredMaxPct, th.maxPct);
+  const projLevel = getProjectedLevel(projected.directHours, projected.pct, th.targetPct, th.preferredPct, th.preferredMaxPct, th.maxPct);
+  return {
+    actLevel,
+    projLevel,
+    actualStatus: actualSectionStatus(actLevel),
+    projStatus: projectedSectionStatus(projLevel),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Overall month projection risk for a case (the table's far-left column).
 // ---------------------------------------------------------------------------

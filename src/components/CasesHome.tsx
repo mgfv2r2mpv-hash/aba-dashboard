@@ -4,8 +4,7 @@ import { computeCaseState, CaseState } from '../caseModel';
 import { computeClientCompliance, monthPeriod, ClientCompliance } from '../compliance';
 import { analyzeCorrections, CorrectionNeed } from '../corrections';
 import {
-  getActualLevel, getProjectedLevel, actualSectionStatus, projectedSectionStatus,
-  resolveSupervisionThresholds, computeCaseRisk, CaseRisk,
+  deriveSupervisionLevels, resolveSupervisionThresholds, computeCaseRisk, CaseRisk,
 } from '../caseStatus';
 import {
   computeCaseCancels, CaseCancelSummary, EntityCancels, CancelWindow,
@@ -134,10 +133,11 @@ function CaseRow({ row, settings, onOpenCancels }: {
 
   const act = compliance?.actual;
   const proj = compliance?.projected;
-  const actLevel = getActualLevel(act?.directHours ?? 0, act?.pct ?? 0, th.targetPct, th.preferredPct, th.preferredMaxPct, th.maxPct);
-  const projLevel = getProjectedLevel(proj?.directHours ?? 0, proj?.pct ?? 0, th.targetPct, th.preferredPct, th.preferredMaxPct, th.maxPct);
-  const status = actualSectionStatus(actLevel);
-  const projStatus = projectedSectionStatus(projLevel);
+  const { actualStatus: status, projStatus } = deriveSupervisionLevels(
+    { directHours: act?.directHours ?? 0, pct: act?.pct ?? 0 },
+    { directHours: proj?.directHours ?? 0, pct: proj?.pct ?? 0 },
+    th,
+  );
 
   const weekColor = s.direct.authPerWk === 0 ? '#9ca3af' : s.direct.belowTarget ? '#b45309' : '#15803d';
   const ptColor = s.parentTraining.goalMonth === 0 ? '#6b7280' : s.parentTraining.gap > 0.01 ? '#b45309' : '#15803d';

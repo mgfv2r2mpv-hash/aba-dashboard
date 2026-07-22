@@ -35,8 +35,8 @@ const base: ScheduleData = {
 
 console.log('summarizeWish');
 {
-  check('vacation summary mentions the range', summarizeWish({ kind: 'vacation', dateStart: '2026-07-06', dateEnd: '2026-07-10' }).includes('2026-07-06'));
   check('freeform falls back to the note', summarizeWish({ kind: 'freeform', note: 'do the thing' }) === 'do the thing');
+  check('freeform with empty note uses the generic brief', summarizeWish({ kind: 'freeform' }) === 'Rework the schedule as described.');
 }
 
 console.log('parseWishSolutions');

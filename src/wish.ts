@@ -22,37 +22,10 @@ const APPT_TYPES: Appointment['type'][] = [
   'supervision', 'parent-training', 'internal-task', 'client-session', 'reassessment', 'case-planning', 'other',
 ];
 
-function fmtTime(hhmm?: string): string { return hhmm || '—'; }
-
-// A short human brief of the wish, used both in the prompt and as the composer's
-// live preview. Kept terse on purpose — the structured fields carry the specifics
-// so we don't pay tokens for prose.
+// A short human brief of the wish, used in the prompt. Kept terse on purpose —
+// the free-text note IS the brief; every live wish is freeform.
 export function summarizeWish(w: WishRequest): string {
-  const horizon = w.horizonWeeks ? ` over the next ${w.horizonWeeks} weeks` : '';
-  const shave = w.shaveDown ? ' Also shave over-served supervision sessions down toward the minimum to free up capacity.' : '';
-  let base: string;
-  switch (w.kind) {
-    case 'vacation':
-      base = `Block off ${w.dateStart || '?'}–${w.dateEnd || '?'} for time away and reschedule any of my sessions in that range while staying compliant.`;
-      break;
-    case 'clearWindow':
-      base = `Keep ${w.weekday || 'a chosen day'} ${fmtTime(w.windowStart)}–${fmtTime(w.windowEnd)}${w.everyOtherWeek ? ' (every other week)' : ''} free${horizon}, moving any sessions there elsewhere with minimal week-to-week change.`;
-      break;
-    case 'addRecurring':
-      base = `Add a recurring ${w.newType || 'session'}${w.client ? ` for ${w.client}` : ''} around ${w.weekday || 'a weekday'} ${fmtTime(w.windowStart)}${w.durationMins ? ` (${w.durationMins} min)` : ''}${horizon}, juggling the schedule to fit it with minimal disruption.`;
-      break;
-    case 'shaveDown':
-      base = `Trim over-served supervision sessions toward the compliance minimum${horizon} to free up capacity, without dropping below required floors.`;
-      break;
-    case 'fillSchedule':
-      base = `Fill my schedule out: maximize each case's DIRECT-service utilization toward 100% this week using the open windows, suggest supervision where it helps, and parent training only within scheduled sessions. Do not change my (BCBA) own schedule.`;
-      break;
-    case 'freeform':
-    default:
-      base = w.note?.trim() || 'Rework the schedule as described.';
-      break;
-  }
-  return base + (w.kind !== 'shaveDown' ? shave : '');
+  return w.note?.trim() || 'Rework the schedule as described.';
 }
 
 // Pull the first JSON object out of a model reply that may be fenced or prefaced

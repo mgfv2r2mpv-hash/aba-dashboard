@@ -111,21 +111,6 @@ export function feasibleDirectWindows(data: ScheduleData, weekStart: Date): Feas
   return out.sort((a, b) => a.date.localeCompare(b.date) || toMin(a.start) - toMin(b.start) || a.clientName.localeCompare(b.clientName));
 }
 
-// Compact context object for the Claude layer: only under-utilized cases and
-// their open windows (keeps the prompt small).
-export function buildFillContext(data: ScheduleData, weekStart: Date) {
-  const util = computeCaseUtilization(data, weekStart).filter(u => u.targetDirectHrs > 0);
-  const underserved = util.filter(u => u.gapHrs > 0.01);
-  const windows = feasibleDirectWindows(data, weekStart);
-  const underservedIds = new Set(underserved.map(u => u.clientId));
-  return {
-    weekStart: isoOf(weekStart),
-    cases: util,
-    underserved,
-    windows: windows.filter(w => underservedIds.has(w.clientId)),
-  };
-}
-
 // ── Supervisable windows for Fix It ──────────────────────────────────────────
 // Future direct sessions in [now, horizonEnd) where the BCBA is both available
 // (per clinicianAvailability) and not already double-booked by an existing

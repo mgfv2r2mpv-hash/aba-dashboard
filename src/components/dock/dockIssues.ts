@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ScheduleConflict } from '../../types';
-import type { ComplianceSummary, ComplianceAttention } from '../../complianceCache';
+import type { Agenda, TargetProgress } from '../../agenda';
 import { conflictKey } from '../ConflictPanel';
 
 /**
@@ -53,11 +53,14 @@ const CONFLICT_TITLE: Record<ScheduleConflict['type'], string> = {
 
 const SEVERITY_RANK: Record<DockIssue['severity'], number> = { error: 0, warning: 1, info: 2 };
 
-/** Normalize the live conflict + compliance feeds into one queue, worst first. */
+/**
+ * Normalize the live conflict + compliance feeds into one queue, worst first.
+ * The compliance half arrives as the single `Agenda` (typed gaps + counts) that
+ * every surface reads — the dock is just one more renderer of it.
+ */
 export function buildDockIssues(
   conflicts: ScheduleConflict[],
-  compliance: ComplianceSummary | null,
-  attention: ComplianceAttention[] = [],
+  agenda: Agenda | null,
   maxCaseCards = MAX_CASE_CARDS,
   endingSeries: EndingSeriesCard[] = [],
 ): DockIssue[] {
@@ -74,41 +77,44 @@ export function buildDockIssues(
     };
   });
 
+  const gaps = agenda?.gaps ?? [];
+  const progress = agenda?.targetProgress;
+
   // Per-case cards for the worst few CLIENTS (each carries a case-scoped fix);
   // everything else (overflow clients + techs) folds into one aggregate tail.
-  // When the attention list is empty but the summary still shows counts (the
-  // cache is mid-rebuild after a commit), fall back to the single aggregate so
-  // the queue never flickers empty.
-  const caseCards: DockIssue[] = attention
-    .filter(a => a.kind === 'client')
+  // The agenda couples gaps to counts, so they can't disagree — but if a caller
+  // ever hands counts without gaps (a mid-rebuild snapshot), fall back to the
+  // single aggregate so the queue never flickers empty.
+  const caseCards: DockIssue[] = gaps
+    .filter(g => g.entity === 'client')
     .slice(0, maxCaseCards)
-    .map(a => ({
-      id: `compliance:case:${a.id}`,
+    .map(g => ({
+      id: `compliance:case:${g.id}`,
       kind: 'compliance' as const,
-      severity: a.status === 'red' ? 'error' as const : 'warning' as const,
-      title: `${a.name} off pace`,
-      detail: a.detail,
-      clientId: a.id,
+      severity: g.status === 'red' ? 'error' as const : 'warning' as const,
+      title: `${g.name} off pace`,
+      detail: g.detail,
+      clientId: g.id,
     }));
-  const remainder = attention.length - caseCards.length;
-  const summaryCount = (compliance?.red ?? 0) + (compliance?.yellow ?? 0);
+  const remainder = gaps.length - caseCards.length;
+  const summaryCount = (progress?.red ?? 0) + (progress?.yellow ?? 0);
   const tail: DockIssue[] = [];
-  if (attention.length > 0 && remainder > 0) {
-    const worstLeft = attention.slice(caseCards.length);
+  if (gaps.length > 0 && remainder > 0) {
+    const worstLeft = gaps.slice(caseCards.length);
     tail.push({
       id: 'compliance:summary',
       kind: 'compliance' as const,
-      severity: worstLeft.some(a => a.status === 'red') ? 'error' : 'warning',
+      severity: worstLeft.some(g => g.status === 'red') ? 'error' : 'warning',
       title: 'More compliance attention',
       detail: `${remainder} more ${remainder === 1 ? 'entity' : 'entities'} off pace — open the compliance view for the full picture.`,
     });
-  } else if (attention.length === 0 && summaryCount > 0 && compliance) {
+  } else if (gaps.length === 0 && summaryCount > 0 && progress) {
     tail.push({
       id: 'compliance:summary',
       kind: 'compliance' as const,
-      severity: compliance.red > 0 ? 'error' : 'warning',
+      severity: progress.red > 0 ? 'error' : 'warning',
       title: 'Compliance attention',
-      detail: complianceDetail(compliance),
+      detail: complianceDetail(progress),
     });
   }
 
@@ -132,10 +138,10 @@ export function buildDockIssues(
   );
 }
 
-function complianceDetail(c: ComplianceSummary): string {
+function complianceDetail(p: TargetProgress): string {
   const parts: string[] = [];
-  if (c.red > 0) parts.push(`${c.red} at risk`);
-  if (c.yellow > 0) parts.push(`${c.yellow} to watch`);
+  if (p.red > 0) parts.push(`${p.red} at risk`);
+  if (p.yellow > 0) parts.push(`${p.yellow} to watch`);
   return `${parts.join(', ')} — supervision or hours off pace.`;
 }
 

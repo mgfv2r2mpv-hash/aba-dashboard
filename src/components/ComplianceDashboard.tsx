@@ -5,7 +5,8 @@ import {
   computeClientCompliance, computeTechCompliance, computeTechContactDays,
   pastIncompleteAppointments, monthPeriod,
 } from '../compliance';
-import { ComplianceCache, attentionFromReports, type ComplianceAttention } from '../complianceCache';
+import { ComplianceCache } from '../complianceCache';
+import { agendaFromReports, type AgendaGap } from '../agenda';
 import { BACB_RBT_SUPERVISION_MIN_PERCENT } from '../types';
 import {
   ActualLevel, ProjectedLevel,
@@ -63,12 +64,12 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], muted
   // The red/yellow "needs attention" set for the VIEWED month — exactly the "N
   // compliance" the header badge counts, but named, with deficits and a fix path.
   const attention = useMemo(
-    () => attentionFromReports(clientReports, techReports, data.settings),
+    () => agendaFromReports(clientReports, techReports, data.settings).gaps,
     [clientReports, techReports, data.settings],
   );
   // Tech id → red/yellow, for sorting the Staff cards critical-first.
   const attentionRank = useMemo(
-    () => new Map(attention.filter(a => a.kind === 'tech').map(a => [a.id, a.status] as const)),
+    () => new Map(attention.filter(a => a.entity === 'tech').map(a => [a.id, a.status] as const)),
     [attention],
   );
   const techContactDays = useMemo(() => {
@@ -217,12 +218,12 @@ export default function ComplianceDashboard({ data, cache, conflicts = [], muted
 // — a one-tap "Fix pace with SAssi". Techs jump to the Staff cards (their fix is
 // the underlying cases' supervision, not a single-case meet-pace).
 function NeedsAttention({ items, onFixPace, onViewStaff }: {
-  items: ComplianceAttention[];
+  items: AgendaGap[];
   onFixPace?: (clientId: string) => void;
   onViewStaff: () => void;
 }) {
   if (items.length === 0) return null;
-  const dot = (s: ComplianceAttention['status']) => s === 'red' ? 'var(--status-behind)' : 'var(--status-over)';
+  const dot = (s: AgendaGap['status']) => s === 'red' ? 'var(--status-behind)' : 'var(--status-over)';
   return (
     <div style={{ marginBottom: 16, border: '1px solid #fecaca', borderRadius: 8, overflow: 'hidden' }}>
       <div style={{ background: '#fef2f2', padding: '10px 12px', fontSize: 14, fontWeight: 700, color: '#991b1b' }}>
@@ -230,17 +231,17 @@ function NeedsAttention({ items, onFixPace, onViewStaff }: {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {items.map(a => (
-          <div key={`${a.kind}:${a.id}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderTop: '1px solid #f3f4f6' }}>
+          <div key={`${a.entity}:${a.id}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderTop: '1px solid #f3f4f6' }}>
             <span aria-hidden style={{ flexShrink: 0, width: 9, height: 9, borderRadius: 5, background: dot(a.status) }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
-                {a.name} <span style={{ fontWeight: 500, color: '#6b7280', fontSize: 11 }}>· {a.kind === 'client' ? 'case' : 'staff'}</span>
+                {a.name} <span style={{ fontWeight: 500, color: '#6b7280', fontSize: 11 }}>· {a.entity === 'client' ? 'case' : 'staff'}</span>
               </div>
               <div style={{ fontSize: 12, color: '#4b5563', lineHeight: 1.4 }}>{a.detail}</div>
             </div>
-            {a.kind === 'client' && onFixPace ? (
+            {a.entity === 'client' && onFixPace ? (
               <button onClick={() => onFixPace(a.id)} style={fixPaceBtn}>Fix pace with SAssi</button>
-            ) : a.kind === 'tech' ? (
+            ) : a.entity === 'tech' ? (
               <button onClick={onViewStaff} style={reviewBtn}>Review ↓</button>
             ) : null}
           </div>

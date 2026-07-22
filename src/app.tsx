@@ -67,9 +67,10 @@ import { resolveAtRestAIConfig } from './aiConfigPolicy';
 import { isBiometricAvailable, checkBiometryFull, biometricAuthenticate, getBiometryLabel, BiometryLabel, getCachedBiometryAvailable, getCachedBiometryLabel } from './biometric';
 import { pastIncompleteAppointments } from './compliance';
 import {
-  ComplianceCache, ComplianceSummary, ApptChange,
-  buildCache, recomputeCache, summarize, attentionList,
+  ComplianceCache, ApptChange,
+  buildCache, recomputeCache,
 } from './complianceCache';
+import { computeAgenda, EMPTY_AGENDA } from './agenda';
 import {
   obfuscateKey, deobfuscateKey, encryptBytes, decryptBytes, isEncryptedSchedule,
 } from './clientCrypto';
@@ -290,8 +291,10 @@ export default function App() {
     r?.(pw);
   };
 
-  const compSummary: ComplianceSummary | null =
-    scheduleData && compCache ? summarize(compCache, scheduleData) : null;
+  // One goal object every surface reads from — the dock queue, the ZenStrip
+  // pills, the Home rituals, and the nav badge all render this same value
+  // instead of each re-deriving "off pace" from the cache.
+  const agenda = scheduleData ? computeAgenda(compCache, scheduleData) : EMPTY_AGENDA;
 
   // Conflict triage: confirmed-and-dismissed are hidden outright (persisted);
   // muted are moved to the bin (session-only).
@@ -318,7 +321,7 @@ export default function App() {
   // "Fix It" is actionable when there's anything to fix — active calendar
   // conflicts (errors/warnings, minus muted/dismissed) and/or compliance
   // attention (clients/techs behind target). The wrench disables when 0.
-  const attentionCount = compSummary ? compSummary.red + compSummary.yellow : 0;
+  const attentionCount = agenda.targetProgress.attentionCount;
   const issueCount = activeConflicts.length + attentionCount;
   const hasIssues = issueCount > 0;
 
@@ -1992,8 +1995,7 @@ export default function App() {
   // prompt, never silent adds).
   const dockIssues = buildDockIssues(
     activeConflicts,
-    compSummary,
-    scheduleData && compCache ? attentionList(compCache, scheduleData) : [],
+    agenda,
     undefined,
     endingSeries,
   );

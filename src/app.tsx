@@ -44,7 +44,6 @@ const HomeView = React.lazy(() => import('./components/HomeView'));
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
 const CCHub = React.lazy(() => import('./components/CCHub'));
 import type { HubTab } from './components/CCHub';
-const CaseloadView = React.lazy(() => import('./components/CaseloadView'));
 const SetupWizard = React.lazy(() => import('./components/SetupWizard'));
 const CprView = React.lazy(() => import('./components/CprView'));
 import { useMinWidth, useMaxWidth, useIsTablet, useIsLandscape } from './useMediaQuery';
@@ -155,7 +154,7 @@ export default function App() {
   // survive page reloads and round-trip through the Excel export.
   const [mutedConflicts, setMutedConflicts] = useState<string[]>([]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [view, setView] = useState<'home' | 'schedule' | 'admin' | 'compliance' | 'caseload' | 'cpr'>('schedule');
+  const [view, setView] = useState<'home' | 'schedule' | 'admin' | 'compliance' | 'cpr'>('schedule');
   // Which Admin section opens on entry. The C&C hub's view-only settings popup
   // deep-links to the editable 'candc' tab; normal Admin entry resets to settings.
   const [adminInitialTab, setAdminInitialTab] = useState<AdminTab>('settings');
@@ -1921,7 +1920,7 @@ export default function App() {
   // Map the string view-state onto the left rail, and route rail taps back.
   const activeRail: RailKey =
     view === 'home' ? 'home'
-      : view === 'compliance' || view === 'caseload' ? 'caseload'
+      : view === 'compliance' ? 'caseload'
         : view === 'cpr' ? 'cpr'
           : view === 'admin' ? 'settings'
             : 'calendar';
@@ -1951,7 +1950,7 @@ export default function App() {
   const viewTitle =
     view === 'home' ? 'Home'
       : view === 'schedule' ? 'Calendar'
-        : view === 'compliance' || view === 'caseload' ? 'Caseload'
+        : view === 'compliance' ? 'Caseload'
           : view === 'cpr' ? 'CPR & analysis'
             : view === 'admin' ? 'Settings'
               : 'SAssi';
@@ -2080,7 +2079,7 @@ export default function App() {
   // screen there, so 'assistant' only needs a fallback on narrow widths.
   const homeGo = (action: RitualAction) => {
     switch (action) {
-      case 'assistant': if (!showDock) setView('caseload'); break;
+      case 'assistant': if (!showDock) { setCcInitialTab('cases'); setView('compliance'); } break;
       case 'week': setView('schedule'); break;
       case 'home':
       case 'todos': break; // handled within HomeView
@@ -2426,11 +2425,6 @@ export default function App() {
                   onFixPace={(id) => openMeetPace(id, 'behind')}
                   onOpenAdminCandC={() => { setAdminInitialTab('candc'); setView('admin'); }}
                 />
-              </React.Suspense>
-            )}
-            {view === 'caseload' && (
-              <React.Suspense fallback={null}>
-                <CaseloadView data={scheduleData} now={viewDate} />
               </React.Suspense>
             )}
             {view === 'home' && (

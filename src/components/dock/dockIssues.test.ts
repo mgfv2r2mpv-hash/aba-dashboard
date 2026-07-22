@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { ScheduleConflict } from '../../types';
-import type { ComplianceSummary, ComplianceAttention } from '../../complianceCache';
+import type { Agenda, AgendaGap } from '../../agenda';
 import { buildDockIssues, useIssueQueue, type DockIssue } from './dockIssues';
 
 const conflict = (
@@ -11,15 +11,24 @@ const conflict = (
   affectedAppointments?: string[],
 ): ScheduleConflict => ({ type, severity, message, affectedAppointments });
 
-const summary = (red: number, yellow: number): ComplianceSummary => ({
-  red,
-  yellow,
-  worst: red > 0 ? 'red' : yellow > 0 ? 'yellow' : 'green',
+// Counts without gaps — the defensive "mid-rebuild" snapshot the dock still
+// collapses into a single aggregate card.
+const progressOnly = (red: number, yellow: number): Agenda =>
+  ({ gaps: [], targetProgress: { red, yellow, attentionCount: red + yellow } });
+
+// A consistent agenda whose counts derive from its gaps (the real invariant).
+const agenda = (gaps: AgendaGap[]): Agenda => ({
+  gaps,
+  targetProgress: {
+    red: gaps.filter(g => g.status === 'red').length,
+    yellow: gaps.filter(g => g.status === 'yellow').length,
+    attentionCount: gaps.length,
+  },
 });
 
 describe('buildDockIssues', () => {
   it('returns an empty queue when nothing is wrong', () => {
-    expect(buildDockIssues([], summary(0, 0))).toEqual([]);
+    expect(buildDockIssues([], progressOnly(0, 0))).toEqual([]);
     expect(buildDockIssues([], null)).toEqual([]);
   });
 
@@ -41,7 +50,7 @@ describe('buildDockIssues', () => {
   });
 
   it('appends one compliance summary issue when entities need attention', () => {
-    const issues = buildDockIssues([], summary(2, 3));
+    const issues = buildDockIssues([], progressOnly(2, 3));
     expect(issues).toHaveLength(1);
     expect(issues[0].kind).toBe('compliance');
     expect(issues[0].severity).toBe('error'); // red > 0
@@ -50,7 +59,7 @@ describe('buildDockIssues', () => {
   });
 
   it('marks compliance as a warning when only yellow entities exist', () => {
-    const [issue] = buildDockIssues([], summary(0, 4));
+    const [issue] = buildDockIssues([], progressOnly(0, 4));
     expect(issue.severity).toBe('warning');
     expect(issue.detail).toContain('4 to watch');
     expect(issue.detail).not.toContain('at risk');
@@ -58,21 +67,22 @@ describe('buildDockIssues', () => {
 
   it('keeps a conflict ahead of an equal-severity compliance flag', () => {
     const err = conflict('availability-conflict', 'error', 'e');
-    const issues = buildDockIssues([err], summary(1, 0));
+    const issues = buildDockIssues([err], progressOnly(1, 0));
     expect(issues.map((i) => i.kind)).toEqual(['conflict', 'compliance']);
   });
 
-  // ── per-case cards (attention list) ──────────────────────────────────────
-  const att = (kind: 'client' | 'tech', id: string, status: 'red' | 'yellow', hoursToGo = 1): ComplianceAttention =>
-    ({ kind, id, name: `Name ${id}`, status, detail: `d-${id}`, hoursToGo });
+  // ── per-case cards (agenda gaps, worst-first) ────────────────────────────
+  const gap = (entity: 'client' | 'tech', id: string, status: 'red' | 'yellow', hoursToGo = 1): AgendaGap =>
+    ({ entity, id, name: `Name ${id}`, status, hoursToGo, detail: `d-${id}`,
+       kind: status === 'red' ? 'behind' : entity === 'client' ? 'over-served' : 'off-pace' });
 
   it('emits per-case cards with clientId, capped, plus a counting tail', () => {
-    const attention = [
-      att('client', 'c1', 'red', 3), att('client', 'c2', 'red', 2),
-      att('client', 'c3', 'yellow', 1), att('client', 'c4', 'yellow', 0.5),
-      att('tech', 't1', 'yellow', 1),
+    const gaps = [
+      gap('client', 'c1', 'red', 3), gap('client', 'c2', 'red', 2),
+      gap('client', 'c3', 'yellow', 1), gap('client', 'c4', 'yellow', 0.5),
+      gap('tech', 't1', 'yellow', 1),
     ];
-    const issues = buildDockIssues([], summary(2, 3), attention, 3);
+    const issues = buildDockIssues([], agenda(gaps), 3);
     const cases = issues.filter(i => i.id.startsWith('compliance:case:'));
     expect(cases).toHaveLength(3);
     expect(cases.map(i => i.clientId)).toEqual(['c1', 'c2', 'c3']);
@@ -86,19 +96,19 @@ describe('buildDockIssues', () => {
   });
 
   it('techs never become per-case cards (they fold into the tail)', () => {
-    const issues = buildDockIssues([], summary(1, 0), [att('tech', 't1', 'red', 2)], 3);
+    const issues = buildDockIssues([], agenda([gap('tech', 't1', 'red', 2)]), 3);
     expect(issues.filter(i => i.id.startsWith('compliance:case:'))).toHaveLength(0);
     expect(issues.find(i => i.id === 'compliance:summary')?.detail).toContain('1 more');
   });
 
-  it('no tail when every attention entry fits as a case card', () => {
-    const issues = buildDockIssues([], summary(1, 0), [att('client', 'c1', 'red')], 3);
+  it('no tail when every gap fits as a case card', () => {
+    const issues = buildDockIssues([], agenda([gap('client', 'c1', 'red')]), 3);
     expect(issues.filter(i => i.kind === 'compliance')).toHaveLength(1);
     expect(issues[0].clientId).toBe('c1');
   });
 
-  it('falls back to the single aggregate while the cache is rebuilding (empty attention, non-empty summary)', () => {
-    const issues = buildDockIssues([], summary(2, 1), [], 3);
+  it('falls back to the single aggregate while the cache is rebuilding (counts without gaps)', () => {
+    const issues = buildDockIssues([], progressOnly(2, 1), 3);
     expect(issues).toHaveLength(1);
     expect(issues[0].id).toBe('compliance:summary');
     expect(issues[0].detail).toContain('2 at risk');
@@ -110,7 +120,7 @@ describe('buildDockIssues', () => {
       seriesId: 'SER-1', clientName: 'Jordan', title: 'Session',
       lastOccurrence: '2026-07-13', suggestedThrough: '2026-08-31', pendingCount: 2,
     };
-    const issues = buildDockIssues([warn], summary(1, 0), [att('client', 'c1', 'red')], 3, [ending]);
+    const issues = buildDockIssues([warn], agenda([gap('client', 'c1', 'red')]), 3, [ending]);
     const card = issues.find(i => i.kind === 'series-ending');
     expect(card).toBeDefined();
     expect(card!.severity).toBe('info');
@@ -124,7 +134,7 @@ describe('buildDockIssues', () => {
 
   it('a red case card ranks ahead of a yellow conflict', () => {
     const warn = conflict('training-violation', 'warning', 'w');
-    const issues = buildDockIssues([warn], summary(1, 0), [att('client', 'c1', 'red')], 3);
+    const issues = buildDockIssues([warn], agenda([gap('client', 'c1', 'red')]), 3);
     expect(issues.map(i => i.id.startsWith('compliance:case:'))).toEqual([true, false]);
   });
 });

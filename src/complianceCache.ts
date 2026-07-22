@@ -12,7 +12,7 @@ import {
   ClientCompliance, TechCompliance, TechComplianceMetrics, CompliancePeriod,
   computeOneClientCompliance, computeOneTechCompliance, monthPeriod, overlapHours,
 } from './compliance';
-import { Appointment, ScheduleData, CompanySettings } from './types';
+import { Appointment, ScheduleData } from './types';
 
 export interface ComplianceCache {
   period: CompliancePeriod;
@@ -169,88 +169,7 @@ export function techStatus(report: TechCompliance): ComplianceStatus {
   return 'red';
 }
 
-export interface ComplianceSummary {
-  red: number;
-  yellow: number;
-  worst: ComplianceStatus;
-}
-
-// Count entities needing attention, for the "Comp" tab badge. RBT BACB %
-// defaults in when the company target isn't set, matching the dashboard.
-export function summarize(cache: ComplianceCache, data: ScheduleData): ComplianceSummary {
-  const clientTarget = data.settings.supervisionDirectHoursPercent || 5;
-  const preferredPct = data.settings.supervisionPreferredMinPercent ?? 15;
-  const maxPct = data.settings.supervisionMaxHoursPercent;
-  let red = 0;
-  let yellow = 0;
-  for (const r of cache.clients.values()) {
-    const s = clientStatus(r, clientTarget, preferredPct, maxPct);
-    if (s === 'red') red++;
-    else if (s === 'yellow') yellow++;
-  }
-  for (const r of cache.techs.values()) {
-    const s = techStatus(r);
-    if (s === 'red') red++;
-    else if (s === 'yellow') yellow++;
-  }
-  const worst: ComplianceStatus = red > 0 ? 'red' : yellow > 0 ? 'yellow' : 'green';
-  return { red, yellow, worst };
-}
-
-// ---- Per-entity attention list (drives the dock's per-case issue cards) ----
-// Same thresholds as summarize, but returns WHO with a one-line why — so the
-// dock can offer a case-scoped fix instead of one aggregate card whose CTA
-// only navigates. Clients before techs at equal severity (the case-scoped
-// meet-pace fix is client-shaped); worst deficit first within a band.
-
-export interface ComplianceAttention {
-  kind: 'client' | 'tech';
-  id: string;
-  name: string;
-  status: 'red' | 'yellow';
-  detail: string;      // e.g. "Projected 3.8% vs 5% floor — 1.2h to go this month."
-  hoursToGo: number;   // sort key (bigger deficit = more urgent)
-}
-
-export function attentionList(cache: ComplianceCache, data: ScheduleData): ComplianceAttention[] {
-  return attentionFromReports([...cache.clients.values()], [...cache.techs.values()], data.settings);
-}
-
-// Reports-based core — lets the Compliance dashboard build the same red/yellow
-// "needs attention" set for the VIEWED month (which may differ from the cache's).
-export function attentionFromReports(
-  clients: ClientCompliance[],
-  techs: TechCompliance[],
-  settings: CompanySettings,
-): ComplianceAttention[] {
-  const clientTarget = settings.supervisionDirectHoursPercent || 5;
-  const preferredPct = settings.supervisionPreferredMinPercent ?? 15;
-  const maxPct = settings.supervisionMaxHoursPercent;
-  const out: ComplianceAttention[] = [];
-
-  for (const r of clients) {
-    const s = clientStatus(r, clientTarget, preferredPct, maxPct);
-    if (s !== 'red' && s !== 'yellow') continue;
-    const toGo = r.projected.hoursToGo;
-    const detail = s === 'yellow' && maxPct !== undefined && r.actual.pct > maxPct
-      ? `Supervision at ${r.actual.pct.toFixed(1)}% — over the ${maxPct}% insurer cap.`
-      : `Projected ${r.projected.pct.toFixed(1)}% vs ${clientTarget}% floor — ${toGo.toFixed(1)}h to go this month.`;
-    out.push({ kind: 'client', id: r.client.id, name: r.client.name, status: s, detail, hoursToGo: toGo });
-  }
-  for (const r of techs) {
-    const s = techStatus(r);
-    if (s !== 'red' && s !== 'yellow') continue;
-    const toGo = Math.max(r.projected.companyHoursToGo, r.tech.isRBT ? (r.projected.bacbHoursToGo ?? 0) : 0);
-    out.push({
-      kind: 'tech', id: r.tech.id, name: r.tech.name, status: s,
-      detail: `${toGo.toFixed(1)}h of supervision to go for ${r.tech.isRBT ? 'the BACB floor / company target' : 'the company target'}.`,
-      hoursToGo: toGo,
-    });
-  }
-
-  return out.sort((a, b) => {
-    if (a.status !== b.status) return a.status === 'red' ? -1 : 1;
-    if (a.kind !== b.kind) return a.kind === 'client' ? -1 : 1;
-    return b.hoursToGo - a.hoursToGo;
-  });
-}
+// The aggregate "how close to target + who's off pace" fact lives in one place
+// now: `computeAgenda` / `agendaFromReports` in ./agenda.ts, built on the
+// clientStatus / techStatus primitives above. Every surface reads that single
+// Agenda instead of re-counting the cache here.

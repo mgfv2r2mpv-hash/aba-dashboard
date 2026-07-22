@@ -813,41 +813,19 @@ export interface ScheduleConflict {
 // ── "Wish It" — goal-driven AI schedule rework (Change 3) ────────────────────
 // Unlike "Fix It" (resolve a conflict the user already created), "Wish It" takes
 // a forward-looking GOAL and asks the AI for up to 3 ways to reshape the schedule
-// to honor it while staying compliant. The composer is a natural-language box
-// that's STRUCTURED — the kind + fields below capture the details the model needs
-// so the prompt stays compact (fewer tokens) and the parse is reliable.
-export type WishKind =
-  | 'vacation'              // block off a date range (reschedule my sessions out of it)
-  | 'clearWindow'           // free up a recurring weekday/time window, going forward
-  | 'addRecurring'          // add a recurring session into a tight schedule
-  | 'shaveDown'             // trim over-served supervision to free capacity
-  | 'fillSchedule'          // maximize direct-service case utilization toward 100%
-  | 'maximizeDirectHours'   // alias for fillSchedule used by Claude scheduler
-  | 'freeform';             // anything else, described in the note
-
+// to honor it while staying compliant. The structured composer that once built
+// typed kinds (vacation/clearWindow/addRecurring/…) is gone; every live caller
+// now sends a free-text brief (see app.tsx runDraftAI / runRecoveryAI), so the
+// request is just the note plus an optional date scope + forward horizon.
 export interface WishRequest {
-  kind: WishKind;
-  note?: string;                 // free-text detail (always allowed)
-  // vacation / general scope:
+  kind: 'freeform';
+  note?: string;                 // free-text detail — the brief the model reworks toward
+  // Optional date scope — the Move/Replace/Cancel recovery path passes these:
   dateStart?: string;            // YYYY-MM-DD
   dateEnd?: string;              // YYYY-MM-DD
-  // clearWindow / addRecurring:
-  weekday?: DayOfWeek;
-  windowStart?: string;          // HH:MM (24h)
-  windowEnd?: string;            // HH:MM
-  everyOtherWeek?: boolean;      // e.g. "every other Friday"
-  // addRecurring specifics:
-  newType?: Appointment['type'];
-  client?: string;               // client id/name the new session is for (optional)
-  durationMins?: number;
   // How far forward the rework applies (weeks from today). Bounds the AI's scope
-  // and the token budget. Default handled by the composer.
+  // and the token budget; default handled in buildWishPrompt.
   horizonWeeks?: number;
-  // "Shave down sessions where I can": when set, the AI is invited to trim
-  // over-served supervision sessions from the preferred-max band down toward the
-  // largest of (preferred min, company floor, BACB 5% for RBTs) to free capacity,
-  // never dropping below that binding minimum. See claudeScheduler.buildWishPrompt.
-  shaveDown?: boolean;
 }
 
 // ── "Fix It" — AI-assisted compliance remediation ───────────────────────────

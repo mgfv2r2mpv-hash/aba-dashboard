@@ -29,9 +29,8 @@ import { placeUnstaffedContact, fillToBillableTarget } from './builderFill';
 import { consolidateAdjacentBcba } from './builderConsolidate';
 import { startOfWeek, startOfDay, addWeeks } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
+import { MAX_DIRECT_SESSION_HRS, MIN_SESSION_HRS, directBlockHours } from './kernel/placement';
 
-const MAX_DIRECT_SESSION_HRS = 4;   // realistic direct block; also forces day-spread
-const MIN_SESSION_HRS = 0.5;        // ignore remainders smaller than 30 min
 const HR_MS = 3_600_000;
 
 export interface BuilderConfig {
@@ -443,7 +442,7 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
           if (capHrs < MIN_SESSION_HRS) continue;
           const tech = pickTech(w.techs, client);
           if (!tech) continue;
-          const sessHrs = Math.min(capHrs, gap, maxSessionHrs);
+          const sessHrs = directBlockHours(capHrs, gap, maxSessionHrs);
           if (sessHrs < MIN_SESSION_HRS) continue;
 
           const startMin = toMin(w.start);

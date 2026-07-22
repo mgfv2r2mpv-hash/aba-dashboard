@@ -15,6 +15,7 @@ import { ScheduleData, WishSolution, WishOp, Appointment } from './types';
 import { feasibleDirectWindows, _isBcbaAvailableAtFn } from './fillSchedule';
 import { findAuthFor } from './authorization';
 import { overlapsAny } from './kernel/overlap';
+import { MIN_SESSION_HRS, directBlockHours } from './kernel/placement';
 import { holidaysInRange, holidayAdjustTarget } from './holidayAdjust';
 import { startOfWeek } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
@@ -40,8 +41,6 @@ function toLocalIso(ms: number): string {
 // feasibleDirectWindows). Direct/supervision targets mirror computeHomeTrends so
 // the solver aims at exactly what the Home card shows.
 
-const MAX_DIRECT_SESSION_HRS = 4;   // realistic direct block; also forces day-spread
-const MIN_SESSION_HRS = 0.5;        // ignore remainders smaller than 30 min
 const HR_MS = 3_600_000;
 
 export interface MeetPaceResult {
@@ -143,7 +142,7 @@ export function solveMeetPace(data: ScheduleData, clientRef: string, now: Date):
           const slot = byDate.get(date)!.find(s => (s.endMs - s.cursor) / HR_MS >= MIN_SESSION_HRS);
           if (!slot) continue;
           const capHrs = (slot.endMs - slot.cursor) / HR_MS;
-          const sessHrs = Math.min(capHrs, directGap, MAX_DIRECT_SESSION_HRS);
+          const sessHrs = directBlockHours(capHrs, directGap);
           if (sessHrs < MIN_SESSION_HRS) continue;
           const sMs = slot.cursor;
           const eMs = sMs + sessHrs * HR_MS;

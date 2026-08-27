@@ -6,8 +6,9 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import { PRESET_WINDOWS, WEEKDAYS, mergeWindows } from '../availabilityUtils';
 import { useMinWidth } from '../useMediaQuery';
+import { checkIdentifier } from '../identifierPolicy';
 import {
-  SectionBand, Row, Pills, Disclosure, Callout, WeeklyAvailability, inputStyle,
+  SectionBand, Row, Pills, Disclosure, Callout, WeeklyAvailability, IdentifierField, inputStyle,
 } from './setup/SetupControls';
 
 interface SetupWizardProps {
@@ -309,16 +310,16 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
           <div>
             {clients.map(c => (
               <div key={c.id} style={entryCard}>
-                <div style={{ display: 'flex', gap: '9px', alignItems: 'center', marginBottom: '10px' }}>
-                  <input
-                    value={c.name}
-                    onChange={e => updateClient(c.id, { name: e.target.value })}
-                    placeholder="Case identifier, e.g. SB-04"
-                    aria-label="Case identifier"
-                    style={{ ...inputStyle, flex: 1, width: 'auto' }}
-                  />
-                  <button type="button" onClick={() => removeClient(c.id)} style={removeBtn} aria-label="Remove case">×</button>
-                </div>
+                <IdentifierField
+                  label="Case identifier"
+                  placeholder="Case identifier, e.g. SB-04"
+                  value={c.name}
+                  entityId={c.id}
+                  verdict={checkIdentifier(c.name)}
+                  onChange={v => updateClient(c.id, { name: v })}
+                  onRemove={() => removeClient(c.id)}
+                  removeLabel="Remove case"
+                />
                 <label style={labelSm}>
                   Parent-training max (per {settings.parentTraining.periodUnit}, optional)
                 </label>
@@ -356,21 +357,22 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
           <div>
             {technicians.map(t => (
               <div key={t.id} style={entryCard}>
-                <div style={{ display: 'flex', gap: '9px', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
-                  <input
-                    value={t.name}
-                    onChange={e => updateTechnician(t.id, { name: e.target.value })}
-                    placeholder="Staff identifier, e.g. TT"
-                    aria-label="Staff identifier"
-                    style={{ ...inputStyle, flex: '1 1 160px', width: 'auto' }}
-                  />
+                <IdentifierField
+                  label="Staff identifier"
+                  placeholder="Staff identifier, e.g. TT"
+                  value={t.name}
+                  entityId={t.id}
+                  verdict={checkIdentifier(t.name)}
+                  onChange={v => updateTechnician(t.id, { name: v })}
+                  onRemove={() => removeTechnician(t.id)}
+                  removeLabel="Remove technician"
+                >
                   <label style={{ display: 'flex', gap: '5px', alignItems: 'center', whiteSpace: 'nowrap', fontSize: '13px', cursor: 'pointer' }}>
                     <input type="checkbox" checked={t.isRBT}
                       onChange={e => updateTechnician(t.id, { isRBT: e.target.checked })} />
                     <span>RBT</span>
                   </label>
-                  <button type="button" onClick={() => removeTechnician(t.id)} style={removeBtn} aria-label="Remove technician">×</button>
-                </div>
+                </IdentifierField>
                 <WeeklyAvailability
                   idPrefix={`tech-${t.id}`}
                   availability={t.availability}

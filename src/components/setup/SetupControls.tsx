@@ -1,5 +1,6 @@
 import React from 'react';
 import { DayOfWeek, TimeWindow } from '../../types';
+import { IdentifierVerdict } from '../../identifierPolicy';
 import { PRESET_WINDOWS, PresetKey, PRESET_LABELS, isPresetActive, togglePreset } from '../../availabilityUtils';
 
 // Presentation primitives for the one-page setup surface.
@@ -154,6 +155,89 @@ export function Callout({ tone, title, children }: {
       margin: '12px 0',
     }}>
       <strong style={{ color: c.ink }}>{title}</strong>{' '}{children}
+    </div>
+  );
+}
+
+// An identifier entry: the name the clinician types, the uuid that is what
+// actually travels, and whatever the policy has to say about the name. The
+// warning never gates the field — it sits beside an entry that already stands.
+export function IdentifierField({
+  label, placeholder, value, entityId, verdict, onChange, onRemove, removeLabel, children,
+}: {
+  label: string;
+  placeholder: string;
+  value: string;
+  entityId: string;
+  verdict: IdentifierVerdict;
+  onChange: (v: string) => void;
+  onRemove: () => void;
+  removeLabel: string;
+  children?: React.ReactNode;
+}) {
+  const flagged = verdict.concern !== null;
+  return (
+    <div style={{ marginBottom: '10px' }}>
+      <div style={{ display: 'flex', gap: '9px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          value={value}
+          placeholder={placeholder}
+          aria-label={label}
+          aria-describedby={flagged ? `${entityId}-verdict` : undefined}
+          onChange={e => onChange(e.target.value)}
+          style={{
+            ...inputStyle,
+            flex: '1 1 160px',
+            width: 'auto',
+            ...(flagged ? { borderColor: 'var(--intent-warning)', boxShadow: '0 0 0 3px rgba(245, 158, 11, 0.16)' } : {}),
+          }}
+        />
+        {children}
+        <span
+          title="The ID this entry is linked by. This, never the name, is what leaves the browser."
+          style={{
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            fontSize: '11px',
+            padding: '3px 9px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--sage-100)',
+            color: 'var(--sage-700)',
+            border: '1px solid var(--sage-300)',
+            whiteSpace: 'nowrap',
+          }}
+        >{entityId.slice(0, 8)}…{entityId.slice(-4)}</span>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={removeLabel}
+          style={{
+            width: '32px', height: '32px', padding: 0, flexShrink: 0, cursor: 'pointer',
+            background: 'var(--status-behind-bg)', color: 'var(--status-behind)',
+            border: '1px solid var(--red-300)', borderRadius: 'var(--radius-sm)',
+            fontSize: '18px', lineHeight: 1,
+          }}
+        >×</button>
+      </div>
+      {flagged && verdict.message && (
+        <p id={`${entityId}-verdict`} role="status" style={{
+          margin: '9px 0 0',
+          padding: '9px 12px',
+          fontSize: '12.5px',
+          lineHeight: 1.5,
+          color: 'var(--text-body)',
+          background: 'var(--intent-warning-bg)',
+          border: '1px solid var(--intent-warning)',
+          borderLeft: '3px solid var(--intent-warning)',
+          borderRadius: 'var(--radius-md)',
+        }}>
+          {verdict.suggestion && (
+            <>
+              <strong style={{ color: 'var(--amber-700)' }}>Consider “{verdict.suggestion}”.</strong>{' '}
+            </>
+          )}
+          {verdict.message}
+        </p>
+      )}
     </div>
   );
 }

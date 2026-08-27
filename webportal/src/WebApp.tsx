@@ -5,6 +5,7 @@ import { ComplianceCache, buildCache } from '@shared/complianceCache';
 import { validatePassword } from '@shared/passwordPolicy';
 import { backupFilename } from '@shared/lib/backupFilename';
 import UploadZone from './UploadZone';
+import SetupWizard from '@shared/components/SetupWizard';
 import PasswordForm from './PasswordForm';
 import ReadyView from './ReadyView';
 import LogoutLink from './LogoutLink';
@@ -12,7 +13,7 @@ import BackupPasswordDialog from './BackupPasswordDialog';
 import type { AiConfig, WorkerResponse } from './parse.worker';
 import type { SaveResponse } from './save.worker';
 
-type Phase = 'upload' | 'password' | 'decrypting' | 'ready';
+type Phase = 'upload' | 'setup' | 'password' | 'decrypting' | 'ready';
 
 export default function WebApp() {
   const [phase, setPhase]               = useState<Phase>('upload');
@@ -111,6 +112,20 @@ export default function WebApp() {
     };
     worker.postMessage({ bytes: fileBytes, password: pwd });
   }, [fileBytes, getParseWorker, loadDict]);
+
+  // The portal's second front door: setup returns a complete ScheduleData, so
+  // it drops straight into 'ready' beside the decrypt path. A schedule created
+  // here has never been saved, so it starts dirty with no session password —
+  // Save will open the backup-password dialog on the first download.
+  const handleSetupComplete = useCallback((next: ScheduleData) => {
+    setScheduleData(next);
+    setCompCache(buildCache(next));
+    setAiConfig(null);
+    setIsDirty(true);
+    setSaveError(null);
+    setPhase('ready');
+    loadDict().then(setDict);
+  }, [loadDict]);
 
   const handleDataChange = useCallback((next: ScheduleData) => {
     setScheduleData(next);
@@ -224,6 +239,15 @@ export default function WebApp() {
     );
   }
 
+  if (phase === 'setup') {
+    return (
+      <SetupWizard
+        onComplete={handleSetupComplete}
+        onCancel={() => setPhase('upload')}
+      />
+    );
+  }
+
   if (phase === 'decrypting') {
     return (
       <div className="portal centered-screen">
@@ -253,7 +277,11 @@ export default function WebApp() {
   return (
     <div className="portal">
       <LogoutLink fixed />
-      <UploadZone onFile={handleFile} error={uploadError} />
+      <UploadZone
+        onFile={handleFile}
+        error={uploadError}
+        onStartSetup={() => setPhase('setup')}
+      />
     </div>
   );
 }

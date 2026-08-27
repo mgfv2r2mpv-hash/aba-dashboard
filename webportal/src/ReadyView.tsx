@@ -1,21 +1,24 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ScheduleData, Appointment } from '@shared/types';
-import { ComplianceCache, buildCache } from '@shared/complianceCache';
+import { ComplianceCache } from '@shared/complianceCache';
+import { ConstraintValidator } from '@shared/constraintValidator';
 import Calendar from '@shared/components/Calendar';
 import ComplianceDashboard from '@shared/components/ComplianceDashboard';
 import CasesHome from '@shared/components/CasesHome';
 import AgendaRail from '@shared/components/AgendaRail';
 import AdminPanel from '@shared/components/AdminPanel';
+import BuildPanel from './BuildPanel';
 import { useMinWidth } from '@shared/useMediaQuery';
 import ApptDetail from './ApptDetail';
 import SaveBar from './SaveBar';
 import LogoutLink from './LogoutLink';
 import type { AiConfig } from './parse.worker';
 
-type Tab = 'calendar' | 'compliance' | 'caseload' | 'admin' | 'settings';
+export type Tab = 'calendar' | 'build' | 'compliance' | 'caseload' | 'admin' | 'settings';
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'calendar',   label: 'Calendar',   icon: '📅' },
+  { id: 'build',      label: 'Build',      icon: '🧱' },
   { id: 'compliance', label: 'Compliance',  icon: '📊' },
   { id: 'caseload',   label: 'Caseload',    icon: '👥' },
   { id: 'admin',      label: 'Admin',       icon: '⚙️' },
@@ -31,6 +34,7 @@ export default function ReadyView({
   isSaving,
   saveError,
   aiConfig,
+  initialTab = 'calendar',
   onDataChange,
   onAiConfigChange,
   onSave,
@@ -42,13 +46,15 @@ export default function ReadyView({
   isSaving: boolean;
   saveError: string | null;
   aiConfig: AiConfig | null;
+  /** Where to land. A schedule that just came out of setup opens on Build. */
+  initialTab?: Tab;
   onDataChange: (next: ScheduleData) => void;
   onAiConfigChange: (next: AiConfig | null) => void;
   onSave: () => void;
   onReset: () => void;
 }) {
   const apiKey = aiConfig?.apiKey || null;
-  const [tab, setTab]             = useState<Tab>('calendar');
+  const [tab, setTab]             = useState<Tab>(initialTab);
   const [calDate, setCalDate]     = useState(new Date());
   const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null);
   const [apiKeyDraft, setApiKeyDraft]   = useState(apiKey ?? '');
@@ -57,6 +63,14 @@ export default function ReadyView({
   const isDesktop = useMinWidth(1024);
   const isTablet  = useMinWidth(640);
   const showRail  = isDesktop && tab === 'calendar';
+
+  // The conflicts the Compliance tab reads. Recomputed against the viewed month,
+  // the way the app does it - the portal used to pass an empty array, so every
+  // conflict the validator found went unsaid.
+  const conflicts = useMemo(
+    () => new ConstraintValidator(scheduleData, calDate).validateSchedule(),
+    [scheduleData, calDate],
+  );
 
   const handleSelectAppt = useCallback((a: Appointment | null) => setSelectedAppt(a), []);
 
@@ -168,11 +182,15 @@ export default function ReadyView({
             <ComplianceDashboard
               data={scheduleData}
               cache={compCache}
-              conflicts={[]}
+              conflicts={conflicts}
               onMarkComplete={handleMarkComplete}
               onRequestCancel={handleRequestCancel}
               onSelectAppointment={handleSelectAppt}
             />
+          )}
+
+          {tab === 'build' && (
+            <BuildPanel data={scheduleData} onApply={onDataChange} />
           )}
 
           {tab === 'caseload' && (

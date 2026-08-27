@@ -160,11 +160,24 @@ body {
 
 .portal-spacer { flex: 1; }
 
-/* Tab bar (desktop header) */
-.portal-tabs { display: flex; gap: 2px; }
+/* Tab bar (desktop header). The nav is the one part of the header that grows with
+   the number of views, so it is the part that gives: it shrinks and scrolls rather
+   than pushing Close and Log out off the right edge. Measured at 768px, where the
+   header overflowed the document by 23px before this and 102px after the Build tab
+   joined it; both are 0 now. */
+.portal-tabs {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.portal-tabs::-webkit-scrollbar { display: none; }
 
 .portal-tab {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 6px;
   padding: 6px 14px;
@@ -796,7 +809,25 @@ body {
   --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.25);
   --shadow-pop:   0 20px 60px rgba(0, 0, 0, 0.30);
   --shadow-focus: 0 0 0 3px rgba(107, 124, 71, 0.38);
+  --shadow-md:    0 2px 8px rgba(17, 24, 39, 0.12);
   --tap-target:   44px;
+  --space-6:      16px;
+  --dock-width:   340px;
+  --rail-width:   64px;
+
+  /* Type and motion tokens from the app's typography.css / spacing.css. Its
+     --text-* scale collides with the portal's own and is left out; these do
+     not collide. The app names Atkinson Hyperlegible first, which the portal
+     does not ship, so these point at the portal's own stacks rather than
+     claiming a face that is not loaded. */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+  --tracking-wide:   0.03em;
+  --duration-base: 0.25s;
+  --duration-slow: 0.3s;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* The app is light-only — it ships no dark palette, because it runs as an iOS
@@ -852,4 +883,59 @@ body {
     --intent-danger-bg:  oklch(25% 0.06 25);
     --intent-info-bg:    oklch(24% 0.05 255);
   }
+}
+
+
+/* ── Build tab ─────────────────────────────────────────────────────────────
+   The one place in the portal where a control changes the calendar rather
+   than describing it, so every field carries its consequence underneath it. */
+.build-field { margin-bottom: 20px; }
+.build-field .form-label { margin-bottom: 8px; }
+
+.build-hint {
+  font-size: var(--text-xs);
+  color: var(--c-text-secondary);
+  line-height: 1.5;
+  margin-top: 8px;
+  max-width: 62ch;
+}
+
+.build-date { max-width: 220px; }
+
+.build-blocked,
+.build-error {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+}
+
+.build-blocked {
+  color: var(--c-text-secondary);
+  background: var(--c-bg);
+  border: 1px solid var(--c-border);
+}
+
+.build-error {
+  color: var(--c-danger);
+  background: var(--c-danger-soft);
+  border: 1px solid var(--c-danger-border);
+}
+
+.build-decision {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--c-border);
+}
+
+.build-count {
+  flex: 1 1 16ch;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--c-text-secondary);
 }

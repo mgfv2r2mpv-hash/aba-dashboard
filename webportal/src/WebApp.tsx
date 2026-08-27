@@ -8,6 +8,7 @@ import UploadZone from './UploadZone';
 import SetupWizard from '@shared/components/SetupWizard';
 import PasswordForm from './PasswordForm';
 import ReadyView from './ReadyView';
+import type { Tab } from './ReadyView';
 import LogoutLink from './LogoutLink';
 import BackupPasswordDialog from './BackupPasswordDialog';
 import type { AiConfig } from './parse.worker';
@@ -28,6 +29,7 @@ export default function WebApp() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [pwDialogOpen, setPwDialogOpen] = useState(false);
   const [dict, setDict]                 = useState<ReadonlySet<string> | null>(null);
+  const [landOn, setLandOn]             = useState<Tab>('calendar');
 
   // Where schedules come from and go back to. One store today - an encrypted file
   // on this device - reached only through the seam, so Phase 2's server-backed
@@ -72,6 +74,7 @@ export default function WebApp() {
       setPassword(pwd);
       setAiConfig(opened.aiConfig);
       setIsDirty(false);
+      setLandOn('calendar');
       setPhase('ready');
       // Warm the password dictionary so the Save-time strength check is instant.
       loadDict().then(setDict);
@@ -98,6 +101,9 @@ export default function WebApp() {
     setAiConfig(null);
     setIsDirty(true);
     setSaveError(null);
+    // A brand-new schedule has a roster and no sessions, so the next thing it
+    // needs is a build - not an empty calendar to stare at.
+    setLandOn('build');
     setPhase('ready');
     loadDict().then(setDict);
   }, [loadDict]);
@@ -171,6 +177,7 @@ export default function WebApp() {
           isSaving={isSaving}
           saveError={saveError}
           aiConfig={aiConfig}
+          initialTab={landOn}
           onDataChange={handleDataChange}
           onAiConfigChange={handleAiConfigChange}
           onSave={handleSave}

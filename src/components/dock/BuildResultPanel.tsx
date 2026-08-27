@@ -13,20 +13,24 @@ interface BuildResultPanelProps {
   /** Whether the build actually staged sessions into the draft tray. When false
    *  (everything blocked, or nothing to place) there is no tray to review. */
   hasStagedProposal: boolean;
+  /** What to do next, on surfaces that are not the app's draft tray. Both routes
+   *  named here - review, and where authorizations are edited - differ per app. */
+  reviewStep?: string;
+  noAuthStep?: string;
   onDismiss: () => void;
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-export function BuildResultPanel({ result, hasStagedProposal, onDismiss }: BuildResultPanelProps) {
+export function BuildResultPanel({ result, hasStagedProposal, reviewStep, noAuthStep, onDismiss }: BuildResultPanelProps) {
   const { metrics, blocks } = result;
   // A from-scratch schedule with no authorizations must say WHY nothing placed
   // (the old copy read "everything is already at target" — actively misleading).
   const allNoAuth = blocks.length > 0 && blocks.every(b => b.bindingConstraint === 'no-authorization');
   const nextStep = hasStagedProposal
-    ? 'Review the proposal in the tray, then Accept.'
+    ? (reviewStep ?? 'Review the proposal in the tray, then Accept.')
     : allNoAuth
-      ? 'Nothing was placed — no case has an authorization with weekly direct hours yet. Add them under Caseload → Auths, then build again.'
+      ? (noAuthStep ?? 'Nothing was placed — no case has an authorization with weekly direct hours yet. Add them under Caseload → Auths, then build again.')
       : blocks.length > 0
         ? 'Nothing could be placed — see the blocks below.'
         : 'Nothing to place — everything is already at target.';

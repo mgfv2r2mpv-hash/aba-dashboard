@@ -1,5 +1,14 @@
 /* ─── ABA Portal Design System ─────────────────────────────────────────────── */
 
+/* The portal renders the app's own components (Calendar, CasesHome, setup, the
+   compliance dashboard) out of ../src, and those are styled entirely with the
+   app's design tokens. Without this import every one of them renders with its
+   custom properties unresolved: no surfaces, no borders, no brand colour.
+   colors.css collides with nothing in the --c-* set below; the app's radius and
+   shadow scales are deliberately NOT imported, so the portal keeps its own. */
+@import "../../src/styles/tokens/colors.css";
+
+
 /* ── Design tokens (oklch palette + ECC animation tokens) ── */
 :root {
   /* Palette */
@@ -416,6 +425,56 @@ body {
 .drop-zone-label  { font-size: var(--text-md); font-weight: 600; color: var(--c-text); }
 .drop-zone-sublabel { font-size: var(--text-xs); color: var(--c-text-secondary); line-height: 1.5; }
 
+/* ── Second front door ─────────────────────────────────────────────────────
+   The portal can now start a schedule as well as open one. The two doors sit
+   in the same column with an "or" rule between them so neither reads as the
+   fallback for the other. */
+.upload-alt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 440px;
+  margin: -6px 0;
+}
+.upload-alt-rule { flex: 1; height: 1px; background: var(--c-border); }
+.upload-alt-word {
+  font-size: var(--text-xs);
+  color: var(--c-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.start-fresh {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 440px;
+  padding: 22px 24px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-xl);
+  background: var(--c-surface);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color var(--duration-fast) var(--ease-out-expo),
+              background   var(--duration-fast) var(--ease-out-expo),
+              box-shadow   var(--duration-normal) var(--ease-out-expo);
+  -webkit-tap-highlight-color: transparent;
+}
+.start-fresh:hover {
+  border-color: var(--c-primary);
+  background: var(--c-primary-soft);
+  box-shadow: 0 0 0 4px oklch(61% 0.19 256 / 0.12);
+}
+.start-fresh:focus-visible { outline: 2px solid var(--c-primary); outline-offset: 2px; }
+.start-fresh-icon  { font-size: 26px; line-height: 1; }
+.start-fresh-label { font-size: var(--text-md); font-weight: 600; color: var(--c-text); }
+.start-fresh-sublabel { font-size: var(--text-xs); color: var(--c-text-secondary); line-height: 1.5; }
+
 .upload-hint {
   max-width: 380px;
   font-size: var(--text-xs);
@@ -719,3 +778,78 @@ body {
 .pw-rule-no  > span { color: var(--c-text-muted); }
 
 .pw-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+
+/* ── App design tokens the portal must supply ──────────────────────────────
+   colors.css brings the palette; these are the spacing/border tokens the
+   shared components reference that live in the app's spacing.css. Only the
+   ones the portal does not already define are listed, so the portal's own
+   radius and shadow scales stay authoritative. */
+:root {
+  --radius-xs:   3px;
+  --radius-md:   6px;
+  --radius-2xl:  16px;
+  --radius-pill: 999px;
+  --border-width:    1px;
+  --border-hairline: 1px solid var(--border-default);
+  --border-control:  1px solid var(--border-strong);
+  --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.25);
+  --shadow-pop:   0 20px 60px rgba(0, 0, 0, 0.30);
+  --shadow-focus: 0 0 0 3px rgba(107, 124, 71, 0.38);
+  --tap-target:   44px;
+}
+
+/* The app is light-only — it ships no dark palette, because it runs as an iOS
+   app with a fixed appearance. The portal has always honoured the OS setting,
+   so the app's SEMANTIC aliases are remapped here for dark. The base ramps
+   (--sage-500, --violet-600, the appointment-type accents) are deliberately
+   left alone: clinicians read session type by colour, and remapping those
+   would change what a colour means. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-page:   oklch(13% 0.02 255);
+    --surface-card:   oklch(20% 0.02 255);
+    --surface-sunken: oklch(17% 0.02 255);
+    --surface-overlay: rgba(0, 0, 0, 0.6);
+
+    --text-primary: oklch(96% 0.005 240);
+    --text-body:    oklch(84% 0.01 255);
+    --text-muted:   oklch(66% 0.015 255);
+    --text-faint:   oklch(60% 0.015 255);
+    --text-link:    var(--sage-300);
+
+    --border-default: oklch(28% 0.02 255);
+    --border-strong:  oklch(38% 0.02 255);
+
+    /* Brand and status washes are light tints in the app; in dark they have to
+       be dark tints or they read as solid blocks of colour. */
+    --sage-50:  oklch(22% 0.02 125);
+    --sage-100: oklch(26% 0.03 125);
+    --sage-200: oklch(32% 0.04 125);
+
+    /* The deep end of each ramp is used as INK on that ramp's light wash
+       (sage-700 on sage-100, amber-700 on amber-100, and so on). Once the
+       wash is dark the ink has to be light, so the deep end and the light end
+       swap roles. The mid tones (--sage-500/600, the type accents) keep their
+       values: those are fills and lines, not ink. */
+    --sage-700: #e0e3c2;
+    --sage-800: #eef0da;
+    --sage-900: #f7f8ee;
+    --green-800:  #86efac;
+    --amber-700:  #fcd34d;
+    --red-700:    #fca5a5;
+    --orange-700: #fdba74;
+    --blue-700:   #93c5fd;
+    --violet-700: #c4b5fd;
+
+    --status-met-bg:    oklch(24% 0.05 150);
+    --status-pace-bg:   oklch(25% 0.05 75);
+    --status-behind-bg: oklch(25% 0.06 25);
+    --status-over-bg:   oklch(25% 0.06 45);
+
+    --intent-success-bg: oklch(24% 0.05 150);
+    --intent-warning-bg: oklch(25% 0.05 75);
+    --intent-danger-bg:  oklch(25% 0.06 25);
+    --intent-info-bg:    oklch(24% 0.05 255);
+  }
+}

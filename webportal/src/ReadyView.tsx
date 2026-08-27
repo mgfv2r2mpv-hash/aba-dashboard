@@ -36,7 +36,6 @@ export default function ReadyView({
   aiConfig,
   initialTab = 'calendar',
   onDataChange,
-  onAiConfigChange,
   onSave,
   onReset,
 }: {
@@ -49,16 +48,12 @@ export default function ReadyView({
   /** Where to land. A schedule that just came out of setup opens on Build. */
   initialTab?: Tab;
   onDataChange: (next: ScheduleData) => void;
-  onAiConfigChange: (next: AiConfig | null) => void;
   onSave: () => void;
   onReset: () => void;
 }) {
-  const apiKey = aiConfig?.apiKey || null;
   const [tab, setTab]             = useState<Tab>(initialTab);
   const [calDate, setCalDate]     = useState(new Date());
   const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null);
-  const [apiKeyDraft, setApiKeyDraft]   = useState(apiKey ?? '');
-  const [apiKeyMasked, setApiKeyMasked] = useState(!!apiKey);
 
   const isDesktop = useMinWidth(1024);
   const isTablet  = useMinWidth(640);
@@ -101,23 +96,6 @@ export default function ReadyView({
   const handleAdminDataChange = useCallback((next: ScheduleData) => {
     onDataChange({ ...next });
   }, [onDataChange]);
-
-  const handleSaveApiKey = () => {
-    const trimmed = apiKeyDraft.trim();
-    // Preserve the app's model/maps key across the round-trip; clearing the Claude
-    // key keeps the rest only if there is still a maps key to carry, else drops config.
-    onAiConfigChange(
-      trimmed
-        ? { apiKey: trimmed, model: aiConfig?.model ?? 'claude-sonnet-4-6', mapsApiKey: aiConfig?.mapsApiKey }
-        : (aiConfig?.mapsApiKey ? { ...aiConfig, apiKey: '' } : null),
-    );
-    setApiKeyMasked(!!trimmed);
-  };
-
-  const handleReplaceApiKey = () => {
-    setApiKeyDraft('');
-    setApiKeyMasked(false);
-  };
 
   return (
     <div className="portal">
@@ -211,43 +189,18 @@ export default function ReadyView({
               <h2 className="settings-heading">Settings</h2>
 
               <section className="settings-section">
-                <h3 className="settings-section-title">Claude API Key</h3>
+                <h3 className="settings-section-title">The assistant</h3>
                 <p className="settings-section-desc">
-                  Enables AI features (Fix It / Wish It) on the Compliance tab. The key is held in
-                  memory and embedded (obfuscated) in the encrypted backup you download, so it
-                  restores automatically the next time you open that file — here or in the app.
+                  sAssI is on the Build tab, and there is no key to enter here. Its requests go to
+                  this site's own server, which holds the Anthropic key and checks the payload a
+                  second time before anything is sent. Your browser never holds a key, so none is
+                  written into the backup file you download.
                 </p>
-
-                {apiKeyMasked ? (
-                  <div className="api-key-set-row">
-                    <span className="api-key-set-label">🔒 API key is set</span>
-                    <button className="btn-ghost" onClick={handleReplaceApiKey}>Replace…</button>
-                    <button className="btn-ghost danger" onClick={() => { onAiConfigChange(aiConfig?.mapsApiKey ? { ...aiConfig, apiKey: '' } : null); setApiKeyDraft(''); setApiKeyMasked(false); }}>
-                      Clear
-                    </button>
-                  </div>
-                ) : (
-                  <div className="api-key-form">
-                    <label htmlFor="api-key-input" className="form-label">
-                      Anthropic API key
-                    </label>
-                    <input
-                      id="api-key-input"
-                      type="password"
-                      autoComplete="off"
-                      className="form-input"
-                      placeholder="sk-ant-…"
-                      value={apiKeyDraft}
-                      onChange={e => setApiKeyDraft(e.target.value)}
-                    />
-                    <button
-                      className="btn-primary"
-                      onClick={handleSaveApiKey}
-                      disabled={!apiKeyDraft.trim()}
-                    >
-                      Save key
-                    </button>
-                  </div>
+                {aiConfig?.apiKey && (
+                  <p className="settings-section-desc">
+                    This file still carries a key from the iOS app. The portal ignores it and keeps
+                    it intact, so the app goes on using it.
+                  </p>
                 )}
               </section>
 

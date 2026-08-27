@@ -92,8 +92,9 @@ export default function UploadZone({ onFile, error, onStartSetup }: Props) {
       )}
 
       <p className="upload-hint">
-        Uploads accept files exported with a schedule password set. No data is sent to any server —
-        decryption and scheduling both run entirely in your browser.
+        Uploads accept files exported with a schedule password set. Decryption and scheduling both
+        run entirely in your browser. Asking the assistant is the one thing that leaves it, and it
+        leaves with every name already replaced by an opaque token.
       </p>
     </div>
   );

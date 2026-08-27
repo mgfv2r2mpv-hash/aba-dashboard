@@ -4,6 +4,8 @@ pages_build_output_dir = "dist"
 # Cloudflare Pages dashboard settings (set these when connecting GitHub):
 #   Framework preset : None
 #   Build command    : npm install && npm run build
+#     (`build` runs `tsc --noEmit` first: the portal imports ../src across a seam
+#      the app's CI never builds, so a shared-component deletion must fail here.)
 #   Build output dir : dist
 #   Root directory   : webportal
 #   Node version     : 20

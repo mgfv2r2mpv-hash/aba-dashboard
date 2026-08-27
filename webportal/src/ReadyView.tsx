@@ -3,7 +3,7 @@ import { ScheduleData, Appointment } from '@shared/types';
 import { ComplianceCache, buildCache } from '@shared/complianceCache';
 import Calendar from '@shared/components/Calendar';
 import ComplianceDashboard from '@shared/components/ComplianceDashboard';
-import CaseloadView from '@shared/components/CaseloadView';
+import CasesHome from '@shared/components/CasesHome';
 import AgendaRail from '@shared/components/AgendaRail';
 import AdminPanel from '@shared/components/AdminPanel';
 import { useMinWidth } from '@shared/useMediaQuery';
@@ -176,7 +176,7 @@ export default function ReadyView({
           )}
 
           {tab === 'caseload' && (
-            <CaseloadView data={scheduleData} />
+            <CasesHome data={scheduleData} />
           )}
 
           {tab === 'admin' && (

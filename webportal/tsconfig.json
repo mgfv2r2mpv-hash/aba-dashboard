@@ -26,5 +26,8 @@
       "xlsx": ["./node_modules/xlsx"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Tests import vitest, which the Pages build never installs. They are
+  // typechecked by tsconfig.test.json instead - see npm run typecheck:test.
+  "exclude": ["src/test", "src/**/*.test.ts", "src/**/*.test.tsx"]
 }

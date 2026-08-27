@@ -1,7 +1,14 @@
 import React, { useState } from 'react';
-import { ScheduleData, Client, Technician, CompanySettings, DayOfWeek, TimeWindow, BACB_RBT_SUPERVISION_MIN_PERCENT, DEFAULT_CANCELLATION_NOTICE } from '../types';
+import {
+  ScheduleData, Client, Technician, CompanySettings, DayOfWeek,
+  BACB_RBT_SUPERVISION_MIN_PERCENT, DEFAULT_CANCELLATION_NOTICE, TrainingPeriodUnit,
+} from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { PRESET_WINDOWS, PRESET_LABELS, PresetKey, WEEKDAYS, isPresetActive, togglePreset, mergeWindows } from '../availabilityUtils';
+import { PRESET_WINDOWS, WEEKDAYS, mergeWindows } from '../availabilityUtils';
+import { useMinWidth } from '../useMediaQuery';
+import {
+  SectionBand, Row, Pills, Disclosure, Callout, WeeklyAvailability, inputStyle,
+} from './setup/SetupControls';
 
 interface SetupWizardProps {
   onComplete: (data: ScheduleData) => void;
@@ -12,40 +19,20 @@ interface SetupWizardProps {
   initialData?: ScheduleData;
 }
 
-type Step = 'welcome' | 'company' | 'clients' | 'technicians' | 'review';
-
-const DAYS: DayOfWeek[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: '6px',
-  fontSize: '14px',
-  boxSizing: 'border-box',
-};
-
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  fontWeight: '600',
-  marginBottom: '6px',
-  fontSize: '13px',
-};
-
-const cardStyle: React.CSSProperties = {
-  padding: '12px',
-  border: 'var(--border-hairline)',
-  borderRadius: 'var(--radius-md)',
-  backgroundColor: 'var(--surface-sunken)',
-  minWidth: 0,
-  overflow: 'hidden',
-};
-
+// Setup is ONE scrolling page: practice, cases and staff are all visible at
+// once and a single button at the foot creates the schedule. There is no step
+// machine — a clinician can see everything setup will ask for before they
+// answer any of it, and can go back to an earlier answer by scrolling.
+//
+// Identity note: every case and every technician is minted with a uuid here,
+// and every link (assignment, appointment) carries that uuid. The name is a
+// display label the clinician may change at any time without breaking a link,
+// and is never what leaves this device. See identifierPolicy.ts.
 export default function SetupWizard({ onComplete, onCancel, initialData }: SetupWizardProps) {
-  const [step, setStep] = useState<Step>('welcome');
-
+  const wide = useMinWidth(760);
   const seed = initialData?.settings;
 
+  const [practiceName, setPracticeName] = useState(seed?.practiceName ?? '');
   const [settings, setSettings] = useState<CompanySettings>(seed ?? {
     supervisionDirectHoursPercent: 5,
     supervisionRBTHoursPercent: BACB_RBT_SUPERVISION_MIN_PERCENT,
@@ -60,6 +47,8 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
     ),
   });
 
+  // Policy numbers are held as strings while being typed so a half-entered
+  // "1." does not round-trip through parseFloat and fight the caret.
   const [supDirectStr, setSupDirectStr] = useState(seed ? String(seed.supervisionDirectHoursPercent) : '5');
   const [supRBTStr, setSupRBTStr] = useState(seed ? String(seed.supervisionRBTHoursPercent) : String(BACB_RBT_SUPERVISION_MIN_PERCENT));
   const [rbtOverride, setRBTOverride] = useState(!!seed && seed.supervisionRBTHoursPercent !== BACB_RBT_SUPERVISION_MIN_PERCENT);
@@ -75,749 +64,413 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
   const [technicians, setTechnicians] = useState<Technician[]>(initialData ? initialData.technicians.map(t => ({ ...t })) : []);
   const [assignmentHoursStr, setAssignmentHoursStr] = useState<{ [key: string]: string }>({});
 
-  const addClient = () => setClients([...clients, {
-    id: uuidv4(),
-    name: `Client ${clients.length + 1}`,
-    availabilityWindows: {},
-  }]);
-
-  const updateClient = (id: string, patch: Partial<Client>) => {
+  const addClient = () => setClients([...clients, { id: uuidv4(), name: '', availabilityWindows: {} }]);
+  const updateClient = (id: string, patch: Partial<Client>) =>
     setClients(clients.map(c => c.id === id ? { ...c, ...patch } : c));
-  };
-
   const removeClient = (id: string) => setClients(clients.filter(c => c.id !== id));
 
   const addTechnician = () => setTechnicians([...technicians, {
-    id: uuidv4(),
-    name: `Tech ${technicians.length + 1}`,
-    isRBT: false,
-    assignments: [],
-    availability: {},
+    id: uuidv4(), name: '', isRBT: false, assignments: [], availability: {},
   }]);
-
-  const updateTechnician = (id: string, patch: Partial<Technician>) => {
+  const updateTechnician = (id: string, patch: Partial<Technician>) =>
     setTechnicians(technicians.map(t => t.id === id ? { ...t, ...patch } : t));
-  };
-
   const removeTechnician = (id: string) => setTechnicians(technicians.filter(t => t.id !== id));
 
-  const parseNumericString = (val: string, fallback: number = 0): number => {
+  const num = (val: string, fallback = 0): number => {
     const parsed = parseFloat(val);
     return isNaN(parsed) ? fallback : parsed;
   };
 
-  const updateSettingsFromStrings = (): CompanySettings => {
-    const rbtValue = rbtOverride
-      ? parseNumericString(supRBTStr, BACB_RBT_SUPERVISION_MIN_PERCENT)
-      : BACB_RBT_SUPERVISION_MIN_PERCENT;
-    return {
-      ...settings,
-      supervisionDirectHoursPercent: parseNumericString(supDirectStr, 5),
-      supervisionRBTHoursPercent: rbtValue,
-      supervisionTechHoursPercent: parseNumericString(supTechStr, 0),
-      supervisionMaxHoursPercent: supMaxStr.trim() === '' ? undefined : parseNumericString(supMaxStr, 20),
-      parentTraining: {
-        ...settings.parentTraining,
-        minimumHours: parseNumericString(minHoursStr, 1.5),
-        targetMinHours: parseNumericString(targetMinStr, 2),
-        targetMaxHours: parseNumericString(targetMaxStr, 4),
-      },
-      cancellationNotice: {
-        unplannedHoursThreshold: parseNumericString(unplannedHoursStr, DEFAULT_CANCELLATION_NOTICE.unplannedHoursThreshold),
-        plannedDaysThreshold: parseNumericString(plannedDaysStr, DEFAULT_CANCELLATION_NOTICE.plannedDaysThreshold),
-      },
-    };
-  };
+  const composeSettings = (): CompanySettings => ({
+    ...settings,
+    practiceName: practiceName.trim() || undefined,
+    supervisionDirectHoursPercent: num(supDirectStr, 5),
+    supervisionRBTHoursPercent: rbtOverride
+      ? num(supRBTStr, BACB_RBT_SUPERVISION_MIN_PERCENT)
+      : BACB_RBT_SUPERVISION_MIN_PERCENT,
+    supervisionTechHoursPercent: num(supTechStr, 0),
+    supervisionMaxHoursPercent: supMaxStr.trim() === '' ? undefined : num(supMaxStr, 20),
+    parentTraining: {
+      ...settings.parentTraining,
+      minimumHours: num(minHoursStr, 1.5),
+      targetMinHours: num(targetMinStr, 2),
+      targetMaxHours: num(targetMaxStr, 4),
+    },
+    cancellationNotice: {
+      unplannedHoursThreshold: num(unplannedHoursStr, DEFAULT_CANCELLATION_NOTICE.unplannedHoursThreshold),
+      plannedDaysThreshold: num(plannedDaysStr, DEFAULT_CANCELLATION_NOTICE.plannedDaysThreshold),
+    },
+  });
 
   const finish = () => {
     const techniciansWithParsedHours = technicians.map(t => ({
       ...t,
-      assignments: t.assignments.map((a, idx) => {
-        const key = `${t.id}_${idx}`;
-        const hoursStr = assignmentHoursStr[key] ?? String(a.hoursPerWeek);
-        return { ...a, hoursPerWeek: parseNumericString(hoursStr, 0) };
-      }),
+      assignments: t.assignments.map((a, idx) => ({
+        ...a,
+        hoursPerWeek: num(assignmentHoursStr[`${t.id}_${idx}`] ?? String(a.hoursPerWeek), 0),
+      })),
     }));
-    const data: ScheduleData = {
+    onComplete({
       // Re-running on an existing schedule edits only company/clients/techs;
-      // appointments and the auth/blackout/usage records carry through so the
-      // wizard never silently drops the calendar.
+      // appointments and the auth/blackout/usage records carry through so
+      // setup never silently drops the calendar.
       id: initialData?.id ?? uuidv4(),
       version: initialData?.version ?? 1,
       clients,
       technicians: techniciansWithParsedHours,
-      settings: updateSettingsFromStrings(),
+      settings: composeSettings(),
       appointments: initialData?.appointments ?? [],
       blackouts: initialData?.blackouts,
       authorizations: initialData?.authorizations,
       manualUsage: initialData?.manualUsage,
       lastModified: new Date().toISOString(),
-    };
-    onComplete(data);
+    });
   };
 
-  const stepIndex = ['welcome', 'company', 'clients', 'technicians', 'review'].indexOf(step);
-  const totalSteps = 5;
+  const twoCol: React.CSSProperties = wide
+    ? { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }
+    : { display: 'grid', gap: '14px' };
 
-  const goBack = () => {
-    if (step === 'welcome') return onCancel();
-    const order: Step[] = ['welcome', 'company', 'clients', 'technicians', 'review'];
-    const idx = order.indexOf(step);
-    if (idx > 0) setStep(order[idx - 1]!);
+  const rowProps = { narrow: !wide };
+  const entryCard: React.CSSProperties = {
+    padding: '14px',
+    border: '1px solid var(--border-default)',
+    borderRadius: 'var(--radius-md)',
+    background: 'var(--surface-sunken)',
+    marginBottom: '12px',
+    minWidth: 0,
   };
-
-  const goNext = () => {
-    if (step === 'company') setSettings(updateSettingsFromStrings());
-    const order: Step[] = ['welcome', 'company', 'clients', 'technicians', 'review'];
-    const idx = order.indexOf(step);
-    if (idx < order.length - 1) setStep(order[idx + 1]!);
+  const addBtn: React.CSSProperties = {
+    padding: '8px 14px',
+    fontSize: '13px',
+    fontWeight: 700,
+    cursor: 'pointer',
+    background: 'var(--surface-card)',
+    color: 'var(--text-link)',
+    border: '1px solid var(--sage-500)',
+    borderRadius: 'var(--radius-md)',
+  };
+  const removeBtn: React.CSSProperties = {
+    width: '32px', height: '32px', padding: 0, flexShrink: 0, cursor: 'pointer',
+    background: 'var(--status-behind-bg)', color: 'var(--status-behind)',
+    border: '1px solid var(--red-300)', borderRadius: 'var(--radius-sm)',
+    fontSize: '18px', lineHeight: 1,
   };
 
   return (
     <div style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      display: 'flex', alignItems: 'stretch', justifyContent: 'center', zIndex: 1000,
+      position: 'fixed', inset: 0, zIndex: 1000,
+      background: 'var(--surface-page)',
+      overflowY: 'auto', overflowX: 'hidden',
       paddingTop: 'env(safe-area-inset-top)',
       paddingBottom: 'env(safe-area-inset-bottom)',
-      paddingLeft: 'env(safe-area-inset-left)',
-      paddingRight: 'env(safe-area-inset-right)',
     }}>
       <div style={{
-        backgroundColor: 'var(--surface-card)',
-        borderRadius: 'var(--radius-lg)',
-        width: '100%',
-        maxWidth: '720px',
-        height: '100%',
-        maxHeight: '100%',
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column',
-        boxSizing: 'border-box',
-        minWidth: 0,
+        maxWidth: '880px', margin: '0 auto', padding: '26px 20px 40px',
+        boxSizing: 'border-box', minWidth: 0,
       }}>
 
-        {/* Fixed header */}
-        <div style={{ padding: '16px 20px 12px', borderBottom: '1px solid #e5e7eb', flexShrink: 0 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>Setup Wizard</h2>
-            <button onClick={onCancel} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', lineHeight: 1 }}>✕</button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={{ fontSize: '22px', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+              Set up your schedule
+            </h2>
+            <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', margin: '6px 0 0' }}>
+              Everything on one page. Nothing here is permanent — all of it stays editable in Admin
+              afterwards.
+            </p>
           </div>
-          <div style={{ display: 'flex', gap: '4px' }}>
-            {Array.from({ length: totalSteps }).map((_, i) => (
-              <div key={i} style={{
-                flex: 1, height: '4px',
-                backgroundColor: i <= stepIndex ? 'var(--brand-primary)' : 'var(--border-default)',
-                borderRadius: '2px',
-              }} />
-            ))}
-          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="Cancel setup"
+            style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', lineHeight: 1, color: 'var(--text-muted)', flexShrink: 0 }}
+          >✕</button>
         </div>
 
-        {/* Scrollable body */}
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '20px' }}>
+        {/* ── Practice ── */}
+        <SectionBand>Practice</SectionBand>
 
-          {step === 'welcome' && (
+        <Row {...rowProps} label="Practice name" htmlFor="setup-practice"
+          explainer="Used to name the backup file you download.">
+          <input
+            id="setup-practice"
+            value={practiceName}
+            onChange={e => setPracticeName(e.target.value)}
+            placeholder="e.g. Riverbend ABA"
+            style={inputStyle}
+          />
+        </Row>
+
+        <Row {...rowProps} label="Your availability"
+          explainer="When you, the supervising analyst, can be scheduled. Sessions cannot ethically be placed outside these windows.">
+          <WeeklyAvailability
+            idPrefix="clinician"
+            availability={settings.clinicianAvailability || {}}
+            onChange={av => setSettings({ ...settings, clinicianAvailability: av })}
+            defaultWindow={{ start: '09:00', end: '17:00' }}
+          />
+        </Row>
+
+        <Disclosure summary="Policy settings — supervision percentages, parent training, cancellation notice">
+          <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
+            These are pre-filled to BACB-aligned defaults and stay editable in Admin. Open this only if
+            your practice differs from the defaults.
+          </p>
+
+          <div style={twoCol}>
             <div>
-              <h3 style={{ fontSize: '18px', marginBottom: '12px' }}>Welcome! Let's set up your dashboard.</h3>
-              <p style={{ color: '#6b7280', marginBottom: '12px' }}>
-                We'll walk through 4 quick steps to configure your company:
-              </p>
-              <ol style={{ paddingLeft: '20px', color: 'var(--text-body)', lineHeight: '1.8' }}>
-                <li>Company supervision and training requirements</li>
-                <li>Client list with availability windows</li>
-                <li>Technicians with RBT status, availability, and assignments</li>
-                <li>Review &amp; create</li>
-              </ol>
-              <p style={{ color: '#6b7280', marginTop: '12px', fontSize: '13px' }}>
-                Use anonymized identifiers (e.g. "Client A") — never enter real names.
-                You can add appointments after the wizard completes.
-              </p>
+              <label htmlFor="sup-direct" style={labelSm}>Supervision: % of direct hours</label>
+              <input id="sup-direct" type="number" step="0.1" value={supDirectStr}
+                onChange={e => setSupDirectStr(e.target.value)} style={inputStyle} />
             </div>
-          )}
-
-          {step === 'company' && (
             <div>
-              <h3 style={{ fontSize: '18px', marginBottom: '12px' }}>Company Requirements</h3>
-              <p style={{ color: '#6b7280', marginBottom: '16px', fontSize: '13px' }}>
-                These are the constraints we'll check against. Defaults match BACB minimums and a common parent-training target.
-              </p>
-              <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: 'var(--surface-sunken)', border: 'var(--border-hairline)', borderRadius: 'var(--radius-md)', overflow: 'hidden', minWidth: 0 }}>
-                <label style={labelStyle}>Clinician (supervisor) availability</label>
-                <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '8px' }}>
-                  Sessions can't ethically be scheduled when you're not available to supervise.
-                  This sets the default visible range for the schedule grid.
-                </p>
+              <label htmlFor="sup-rbt" style={labelSm}>Supervision: % of RBT hours</label>
+              <input id="sup-rbt" type="number" step="0.1" disabled={!rbtOverride}
+                value={rbtOverride ? supRBTStr : String(BACB_RBT_SUPERVISION_MIN_PERCENT)}
+                onChange={e => setSupRBTStr(e.target.value)}
+                style={{ ...inputStyle, opacity: rbtOverride ? 1 : 0.6 }} />
+              <label style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px', marginTop: '6px', cursor: 'pointer' }}>
+                <input type="checkbox" checked={rbtOverride} onChange={e => setRBTOverride(e.target.checked)} />
+                <span>Override the BACB {BACB_RBT_SUPERVISION_MIN_PERCENT}% minimum</span>
+              </label>
+            </div>
+            <div>
+              <label htmlFor="sup-tech" style={labelSm}>Supervision: % of non-RBT BT hours</label>
+              <input id="sup-tech" type="number" step="0.1" min="0" value={supTechStr}
+                onChange={e => setSupTechStr(e.target.value)} style={inputStyle} />
+              <p style={hintSm}>No BACB rule applies. 0 skips the check.</p>
+            </div>
+            <div>
+              <label htmlFor="sup-max" style={labelSm}>Supervision cap (insurer max %)</label>
+              <input id="sup-max" type="number" step="0.1" min="0" placeholder="e.g. 20" value={supMaxStr}
+                onChange={e => setSupMaxStr(e.target.value)} style={inputStyle} />
+              <p style={hintSm}>Blank disables the cap warning.</p>
+            </div>
+          </div>
+
+          <div style={{ marginTop: '16px' }}>
+            <label style={labelSm}>Parent training period</label>
+            <Pills
+              ariaLabel="Parent training period"
+              value={settings.parentTraining.periodUnit}
+              onChange={(v: TrainingPeriodUnit) => setSettings({
+                ...settings, parentTraining: { ...settings.parentTraining, periodUnit: v },
+              })}
+              options={[
+                { value: 'week' as TrainingPeriodUnit, label: 'per week' },
+                { value: 'month' as TrainingPeriodUnit, label: 'per month' },
+                { value: 'sixMonths' as TrainingPeriodUnit, label: 'per 6 months' },
+                { value: 'year' as TrainingPeriodUnit, label: 'per year' },
+              ]}
+            />
+          </div>
+
+          <div style={{ ...twoCol, marginTop: '14px' }}>
+            <div>
+              <label htmlFor="pt-min" style={labelSm}>Parent training: min hours</label>
+              <input id="pt-min" type="number" step="0.1" value={minHoursStr}
+                onChange={e => setMinHoursStr(e.target.value)} style={inputStyle} />
+            </div>
+            <div>
+              <label htmlFor="pt-tmin" style={labelSm}>Target min</label>
+              <input id="pt-tmin" type="number" step="0.5" value={targetMinStr}
+                onChange={e => setTargetMinStr(e.target.value)} style={inputStyle} />
+            </div>
+            <div>
+              <label htmlFor="pt-tmax" style={labelSm}>Target max</label>
+              <input id="pt-tmax" type="number" step="0.5" value={targetMaxStr}
+                onChange={e => setTargetMaxStr(e.target.value)} style={inputStyle} />
+            </div>
+            <div>
+              <label htmlFor="cancel-hours" style={labelSm}>Unplanned cancellation: hours of notice</label>
+              <input id="cancel-hours" type="number" step="1" min="0" value={unplannedHoursStr}
+                onChange={e => setUnplannedHoursStr(e.target.value)} style={inputStyle} />
+            </div>
+            <div>
+              <label htmlFor="cancel-days" style={labelSm}>Planned cancellation: days of notice</label>
+              <input id="cancel-days" type="number" step="1" min="0" value={plannedDaysStr}
+                onChange={e => setPlannedDaysStr(e.target.value)} style={inputStyle} />
+            </div>
+          </div>
+        </Disclosure>
+
+        {/* ── Cases ── */}
+        <SectionBand>Cases</SectionBand>
+
+        <Callout tone="info" title="Use an anonymised identifier.">
+          Initials, a case code, or a first name and last initial — whatever you would write on a
+          whiteboard. SAssi links every session to a hidden ID, so you can rename a case at any time
+          without breaking anything.
+        </Callout>
+
+        <Row {...rowProps} label={`Cases (${clients.length})`}
+          explainer="One entry per client, with the windows they are available for sessions.">
+          <div>
+            {clients.map(c => (
+              <div key={c.id} style={entryCard}>
+                <div style={{ display: 'flex', gap: '9px', alignItems: 'center', marginBottom: '10px' }}>
+                  <input
+                    value={c.name}
+                    onChange={e => updateClient(c.id, { name: e.target.value })}
+                    placeholder="Case identifier, e.g. SB-04"
+                    aria-label="Case identifier"
+                    style={{ ...inputStyle, flex: 1, width: 'auto' }}
+                  />
+                  <button type="button" onClick={() => removeClient(c.id)} style={removeBtn} aria-label="Remove case">×</button>
+                </div>
+                <label style={labelSm}>
+                  Parent-training max (per {settings.parentTraining.periodUnit}, optional)
+                </label>
+                <input
+                  type="number" step="0.5" min="0"
+                  placeholder={`e.g. ${settings.parentTraining.targetMaxHours}`}
+                  value={c.parentTrainingMaxHours ?? ''}
+                  onChange={e => updateClient(c.id, {
+                    parentTrainingMaxHours: e.target.value === '' ? undefined : parseFloat(e.target.value) || 0,
+                  })}
+                  style={{ ...inputStyle, maxWidth: '180px', marginBottom: '12px' }}
+                />
                 <WeeklyAvailability
-                  availability={settings.clinicianAvailability || {}}
-                  onChange={(av) => setSettings({ ...settings, clinicianAvailability: av })}
-                  defaultWindow={{ start: '09:00', end: '17:00' }}
+                  idPrefix={`client-${c.id}`}
+                  availability={c.availabilityWindows}
+                  onChange={av => updateClient(c.id, { availabilityWindows: av })}
+                  defaultWindow={{ start: '15:00', end: '19:00' }}
                 />
               </div>
-              <div style={{ display: 'grid', gap: '12px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                  <div>
-                    <label style={labelStyle}>Supervision: % of direct hours</label>
-                    <input
-                      type="number" step="0.1"
-                      value={supDirectStr}
-                      onChange={(e) => setSupDirectStr(e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Supervision: % of RBT hours (BACB minimum)</label>
-                    <div style={{ flex: 1 }}>
-                      <input
-                        type="number" step="0.1"
-                        value={rbtOverride ? supRBTStr : String(BACB_RBT_SUPERVISION_MIN_PERCENT)}
-                        onChange={(e) => setSupRBTStr(e.target.value)}
-                        disabled={!rbtOverride}
-                        style={{ ...inputStyle, opacity: rbtOverride ? 1 : 0.6 }}
-                      />
-                    </div>
-                    <label style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px', marginTop: '6px', cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
-                        checked={rbtOverride}
-                        onChange={(e) => setRBTOverride(e.target.checked)}
-                      />
-                      <span>Override BACB minimum</span>
-                    </label>
-                    <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
-                      The BACB requires a minimum of {BACB_RBT_SUPERVISION_MIN_PERCENT}% for RBTs.
-                    </p>
-                  </div>
-                </div>
-                <div>
-                  <label style={labelStyle}>Supervision: % of non-RBT BT hours (company)</label>
-                  <input
-                    type="number" step="0.1" min="0"
-                    value={supTechStr}
-                    onChange={(e) => setSupTechStr(e.target.value)}
-                    style={inputStyle}
-                  />
-                  <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
-                    No BACB rule applies to non-RBT BTs. Set 0 to skip; any positive
-                    value flags non-RBT techs that fall below it.
-                  </p>
-                </div>
-                <div>
-                  <label style={labelStyle}>Supervision cap (insurer max %)</label>
-                  <input
-                    type="number" step="0.1" min="0"
-                    value={supMaxStr}
-                    onChange={(e) => setSupMaxStr(e.target.value)}
-                    placeholder="e.g. 20"
-                    style={inputStyle}
-                  />
-                  <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
-                    Many insurers cap supervision-to-direct ratio (typically 20%).
-                    Per-client and per-tech ratios above this turn orange in the
-                    Compliance dashboard so you don't burn through authorized
-                    supervision hours. Leave blank to disable.
-                  </p>
-                </div>
-                <div>
-                  <label style={labelStyle}>Parent training period</label>
-                  <select
-                    value={settings.parentTraining.periodUnit}
-                    onChange={(e) => setSettings({
-                      ...settings,
-                      parentTraining: { ...settings.parentTraining, periodUnit: e.target.value as any },
-                    })}
-                    style={inputStyle}
-                  >
-                    <option value="week">per week</option>
-                    <option value="month">per month</option>
-                    <option value="sixMonths">per 6 months</option>
-                    <option value="year">per year</option>
-                  </select>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-                  <div>
-                    <label style={labelStyle}>Min hours</label>
-                    <input
-                      type="number" step="0.1"
-                      value={minHoursStr}
-                      onChange={(e) => setMinHoursStr(e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Target min</label>
-                    <input
-                      type="number" step="0.5"
-                      value={targetMinStr}
-                      onChange={(e) => setTargetMinStr(e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Target max</label>
-                    <input
-                      type="number" step="0.5"
-                      value={targetMaxStr}
-                      onChange={(e) => setTargetMaxStr(e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
-                </div>
-
-                <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14, fontWeight: 600 }}>Cancellation notice thresholds</h4>
-                <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
-                  Used when logging cancellations. Defaults to 24 hours unplanned / 30 days planned;
-                  some companies use 48 hours or 2 months.
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                  <div>
-                    <label style={labelStyle}>Unplanned: hours of notice</label>
-                    <input
-                      type="number" step="1" min="0"
-                      value={unplannedHoursStr}
-                      onChange={(e) => setUnplannedHoursStr(e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Planned: days of notice</label>
-                    <input
-                      type="number" step="1" min="0"
-                      value={plannedDaysStr}
-                      onChange={(e) => setPlannedDaysStr(e.target.value)}
-                      style={inputStyle}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {step === 'clients' && (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '8px' }}>
-                <h3 style={{ fontSize: '18px', margin: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Clients ({clients.length})</h3>
-                <button onClick={addClient} style={{
-                  padding: '6px 12px', backgroundColor: 'var(--brand-primary)', color: 'var(--brand-primary-text)',
-                  border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '13px',
-                  flexShrink: 0, whiteSpace: 'nowrap',
-                }}>+ Add</button>
-              </div>
-              <p style={{ color: '#6b7280', fontSize: '13px', marginBottom: '12px' }}>
-                Use anonymized identifiers (e.g. "Client A"). Set availability windows per day.
+            ))}
+            {clients.length === 0 && (
+              <p style={{ color: 'var(--text-faint)', fontSize: '13px', margin: '0 0 12px' }}>
+                No cases yet.
               </p>
-              <div style={{ display: 'grid', gap: '12px' }}>
-                {clients.map(c => (
-                  <div key={c.id} style={cardStyle}>
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                      <input
-                        value={c.name}
-                        onChange={(e) => updateClient(c.id, { name: e.target.value })}
-                        placeholder="Client name (anonymized)"
-                        style={{ ...inputStyle, flex: 1, width: 'auto' }}
-                      />
-                      <button onClick={() => removeClient(c.id)} style={{
-                        width: '32px', height: '32px', padding: 0, backgroundColor: 'var(--status-behind-bg)', color: 'var(--status-behind)',
-                        border: '1px solid var(--red-300)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', flexShrink: 0,
-                        fontSize: '18px', lineHeight: 1,
-                      }} aria-label="Remove client">×</button>
-                    </div>
-                    <div style={{ marginBottom: '8px' }}>
-                      <label style={{ ...labelStyle, fontSize: '12px' }}>
-                        Parent-training max (per {settings.parentTraining.periodUnit}, optional)
-                      </label>
-                      <input
-                        type="number" step="0.5" min="0"
-                        placeholder={`e.g. ${settings.parentTraining.targetMaxHours}`}
-                        value={c.parentTrainingMaxHours ?? ''}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          updateClient(c.id, {
-                            parentTrainingMaxHours: v === '' ? undefined : parseFloat(v) || 0,
-                          });
-                        }}
-                        style={{ ...inputStyle, maxWidth: '180px' }}
-                      />
-                      <p style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
-                        Hard cap for this case. If lower than the company target floor, this cap wins.
-                      </p>
-                    </div>
-                    <WeeklyAvailability
-                      availability={c.availabilityWindows}
-                      onChange={(av) => updateClient(c.id, { availabilityWindows: av })}
-                      defaultWindow={{ start: '15:00', end: '19:00' }}
-                    />
-                  </div>
-                ))}
-                {clients.length === 0 && (
-                  <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>
-                    No clients yet. Click "+ Add Client" to start.
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
+            )}
+            <button type="button" onClick={addClient} style={addBtn}>+ Add case</button>
+          </div>
+        </Row>
 
-          {step === 'technicians' && (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '8px' }}>
-                <h3 style={{ fontSize: '18px', margin: 0, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Technicians ({technicians.length})</h3>
-                <button onClick={addTechnician} style={{
-                  padding: '6px 12px', backgroundColor: 'var(--brand-primary)', color: 'var(--brand-primary-text)',
-                  border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '13px',
-                  flexShrink: 0, whiteSpace: 'nowrap',
-                }}>+ Add</button>
-              </div>
-              <p style={{ color: '#6b7280', fontSize: '13px', marginBottom: '12px' }}>
-                Mark RBT certification (affects supervision math). Add availability and client assignments.
-              </p>
-              <div style={{ display: 'grid', gap: '12px' }}>
-                {technicians.map(t => (
-                  <div key={t.id} style={cardStyle}>
-                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
-                      <input
-                        value={t.name}
-                        onChange={(e) => updateTechnician(t.id, { name: e.target.value })}
-                        placeholder="Technician name"
-                        style={{ ...inputStyle, flex: 1, width: 'auto' }}
-                      />
-                      <label style={{ display: 'flex', gap: '4px', alignItems: 'center', whiteSpace: 'nowrap', flexShrink: 0 }}>
+        {/* ── Staff ── */}
+        <SectionBand>Staff</SectionBand>
+
+        <Row {...rowProps} label={`Technicians (${technicians.length})`}
+          explainer="Same naming guidance as cases. Tick the ones who are credentialed RBTs — that changes the supervision maths.">
+          <div>
+            {technicians.map(t => (
+              <div key={t.id} style={entryCard}>
+                <div style={{ display: 'flex', gap: '9px', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
+                  <input
+                    value={t.name}
+                    onChange={e => updateTechnician(t.id, { name: e.target.value })}
+                    placeholder="Staff identifier, e.g. TT"
+                    aria-label="Staff identifier"
+                    style={{ ...inputStyle, flex: '1 1 160px', width: 'auto' }}
+                  />
+                  <label style={{ display: 'flex', gap: '5px', alignItems: 'center', whiteSpace: 'nowrap', fontSize: '13px', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={t.isRBT}
+                      onChange={e => updateTechnician(t.id, { isRBT: e.target.checked })} />
+                    <span>RBT</span>
+                  </label>
+                  <button type="button" onClick={() => removeTechnician(t.id)} style={removeBtn} aria-label="Remove technician">×</button>
+                </div>
+                <WeeklyAvailability
+                  idPrefix={`tech-${t.id}`}
+                  availability={t.availability}
+                  onChange={av => updateTechnician(t.id, { availability: av })}
+                  defaultWindow={{ start: '15:00', end: '19:00' }}
+                />
+                <div style={{ marginTop: '12px' }}>
+                  <label style={labelSm}>Assignments</label>
+                  {t.assignments.map((a, idx) => {
+                    const key = `${t.id}_${idx}`;
+                    return (
+                      <div key={idx} style={{ display: 'flex', gap: '7px', marginBottom: '7px', alignItems: 'center' }}>
+                        <select
+                          value={a.clientId}
+                          aria-label="Assigned case"
+                          onChange={e => {
+                            const updated = [...t.assignments];
+                            updated[idx] = { ...a, clientId: e.target.value };
+                            updateTechnician(t.id, { assignments: updated });
+                          }}
+                          style={{ ...inputStyle, flex: 2, width: 'auto' }}
+                        >
+                          <option value="">— Pick a case —</option>
+                          {clients.map(c => (
+                            <option key={c.id} value={c.id}>{c.name || 'Unnamed case'}</option>
+                          ))}
+                        </select>
                         <input
-                          type="checkbox"
-                          checked={t.isRBT}
-                          onChange={(e) => updateTechnician(t.id, { isRBT: e.target.checked })}
+                          type="number" step="0.5" aria-label="Hours per week"
+                          value={assignmentHoursStr[key] ?? String(a.hoursPerWeek)}
+                          onChange={e => setAssignmentHoursStr({ ...assignmentHoursStr, [key]: e.target.value })}
+                          style={{ ...inputStyle, flex: 1, width: 'auto' }}
                         />
-                        <span>RBT</span>
-                      </label>
-                      <button onClick={() => removeTechnician(t.id)} style={{
-                        width: '32px', height: '32px', padding: 0, backgroundColor: 'var(--status-behind-bg)', color: 'var(--status-behind)',
-                        border: '1px solid var(--red-300)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', flexShrink: 0,
-                        fontSize: '18px', lineHeight: 1,
-                      }} aria-label="Remove technician">×</button>
-                    </div>
-                    <WeeklyAvailability
-                      availability={t.availability}
-                      onChange={(av) => updateTechnician(t.id, { availability: av })}
-                      defaultWindow={{ start: '15:00', end: '19:00' }}
-                    />
-                    <div style={{ marginTop: '8px' }}>
-                      <label style={labelStyle}>Assignments</label>
-                      {t.assignments.length > 0 && (
-                        <div style={{ display: 'flex', gap: '6px', marginBottom: '4px' }}>
-                          <div style={{ flex: 2, fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>Client</div>
-                          <div style={{ flex: 1, fontSize: '11px', color: '#6b7280', fontWeight: 600 }}>Hrs/wk</div>
-                          <div style={{ width: '36px' }} />
-                        </div>
-                      )}
-                      {t.assignments.map((a, idx) => {
-                        const key = `${t.id}_${idx}`;
-                        const hoursStr = assignmentHoursStr[key] ?? String(a.hoursPerWeek);
-                        return (
-                          <div key={idx} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
-                            <select
-                              value={a.clientId}
-                              onChange={(e) => {
-                                const updated = [...t.assignments];
-                                updated[idx] = { ...a, clientId: e.target.value };
-                                updateTechnician(t.id, { assignments: updated });
-                              }}
-                              style={{ ...inputStyle, flex: 2, width: 'auto' }}
-                            >
-                              <option value="">— Pick client —</option>
-                              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                            </select>
-                            <input
-                              type="number" step="0.5"
-                              value={hoursStr}
-                              onChange={(e) => setAssignmentHoursStr({ ...assignmentHoursStr, [key]: e.target.value })}
-                              style={{ ...inputStyle, flex: 1, width: 'auto' }}
-                            />
-                            <button onClick={() => {
-                              const newAssignments = t.assignments.filter((_, i) => i !== idx);
-                              const newHoursStr = { ...assignmentHoursStr };
-                              delete newHoursStr[key];
-                              setAssignmentHoursStr(newHoursStr);
-                              updateTechnician(t.id, { assignments: newAssignments });
-                            }} style={{
-                              width: '36px', padding: '4px', backgroundColor: 'var(--status-behind-bg)', color: 'var(--status-behind)',
-                              border: '1px solid var(--red-300)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', flexShrink: 0,
-                            }}>×</button>
-                          </div>
-                        );
-                      })}
-                      <button onClick={() => updateTechnician(t.id, {
-                        assignments: [...t.assignments, { clientId: '', hoursPerWeek: 0, billable: true }],
-                      })} style={{
-                        padding: '4px 10px', backgroundColor: 'var(--surface-card)', color: 'var(--brand-primary)',
-                        border: '1px solid var(--brand-primary)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '12px',
-                      }}>+ Assignment</button>
-                    </div>
-                  </div>
-                ))}
-                {technicians.length === 0 && (
-                  <p style={{ color: '#9ca3af', textAlign: 'center', padding: '20px' }}>
-                    No technicians yet. Click "+ Add Technician" to start.
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {step === 'review' && (
-            <div>
-              <h3 style={{ fontSize: '18px', marginBottom: '12px' }}>Review &amp; Create</h3>
-              <div style={{ display: 'grid', gap: '12px' }}>
-                <div style={cardStyle}>
-                  <strong>Company Settings</strong>
-                  <p style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
-                    Supervision: {settings.supervisionDirectHoursPercent}% direct + {settings.supervisionRBTHoursPercent}% RBT<br />
-                    Parent training: {settings.parentTraining.minimumHours}h min,
-                    target {settings.parentTraining.targetMinHours}–{settings.parentTraining.targetMaxHours}h/{settings.parentTraining.periodUnit}
-                  </p>
-                </div>
-                <div style={cardStyle}>
-                  <strong>{clients.length} client(s)</strong>
-                  <ul style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px', paddingLeft: '20px' }}>
-                    {clients.map(c => <li key={c.id}>{c.name}</li>)}
-                  </ul>
-                </div>
-                <div style={cardStyle}>
-                  <strong>{technicians.length} technician(s)</strong>
-                  <ul style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px', paddingLeft: '20px' }}>
-                    {technicians.map(t => (
-                      <li key={t.id}>{t.name} {t.isRBT && '(RBT)'} — {t.assignments.length} assignment(s)</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-              <p style={{ marginTop: '12px', fontSize: '13px', color: '#6b7280' }}>
-                Click Create to load this into the dashboard. You can add appointments after.
-              </p>
-            </div>
-          )}
-
-        </div>
-
-        {/* Fixed footer */}
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '12px 20px',
-          borderTop: '1px solid #e5e7eb',
-          backgroundColor: 'white',
-          flexShrink: 0,
-        }}>
-          <button onClick={goBack} style={{
-            padding: '8px 16px', border: 'var(--border-control)', borderRadius: 'var(--radius-md)',
-            background: 'var(--surface-card)', cursor: 'pointer', fontSize: '14px',
-          }}>
-            {step === 'welcome' ? 'Cancel' : 'Back'}
-          </button>
-          {step === 'review' ? (
-            <button onClick={finish} style={{
-              padding: '8px 16px', backgroundColor: 'var(--brand-primary)', color: 'var(--brand-primary-text)',
-              border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontWeight: '600', fontSize: '14px',
-            }}>Create Dashboard</button>
-          ) : (
-            <button onClick={goNext} style={{
-              padding: '8px 16px', backgroundColor: 'var(--brand-primary)', color: 'var(--brand-primary-text)',
-              border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: '14px',
-            }}>Next</button>
-          )}
-        </div>
-
-      </div>
-    </div>
-  );
-}
-
-interface WeeklyAvailabilityProps {
-  availability: { [key in DayOfWeek]?: TimeWindow[] };
-  onChange: (availability: { [key in DayOfWeek]?: TimeWindow[] }) => void;
-  defaultWindow?: TimeWindow;
-}
-
-function WeeklyAvailability({
-  availability,
-  onChange,
-  defaultWindow = { start: '09:00', end: '17:00' },
-}: WeeklyAvailabilityProps) {
-  const handleTogglePreset = (key: PresetKey) => {
-    const preset = PRESET_WINDOWS[key];
-    const active = isPresetActive(availability, preset);
-    onChange(togglePreset(availability, preset, !active));
-  };
-
-  const updateWindow = (day: DayOfWeek, idx: number, field: 'start' | 'end', value: string) => {
-    const next = { ...availability };
-    const list = (next[day] || []).slice();
-    list[idx] = { ...list[idx], [field]: value };
-    next[day] = list;
-    onChange(next);
-  };
-
-  const addWindow = (day: DayOfWeek) => {
-    const next = { ...availability };
-    next[day] = [...(next[day] || []), { ...defaultWindow }];
-    onChange(next);
-  };
-
-  const removeWindow = (day: DayOfWeek, idx: number) => {
-    const next = { ...availability };
-    next[day] = (next[day] || []).filter((_, i) => i !== idx);
-    if ((next[day] || []).length === 0) delete next[day];
-    onChange(next);
-  };
-
-  const clearDay = (day: DayOfWeek) => {
-    const next = { ...availability };
-    delete next[day];
-    onChange(next);
-  };
-
-  const copyMondayToWeekdays = () => {
-    const monWindows = availability['Monday'] || [];
-    const next = { ...availability };
-    (['Tuesday', 'Wednesday', 'Thursday', 'Friday'] as DayOfWeek[]).forEach(d => {
-      if (monWindows.length === 0) {
-        delete next[d];
-      } else {
-        next[d] = monWindows.map(w => ({ ...w }));
-      }
-    });
-    onChange(next);
-  };
-
-  const clearAll = () => onChange({});
-
-  return (
-    <div style={{ width: '100%', overflowX: 'hidden' }}>
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-        {(Object.keys(PRESET_WINDOWS) as PresetKey[]).map(key => (
-          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', cursor: 'pointer', userSelect: 'none' }}>
-            <input
-              type="checkbox"
-              checked={isPresetActive(availability, PRESET_WINDOWS[key])}
-              onChange={() => handleTogglePreset(key)}
-              style={{ cursor: 'pointer' }}
-            />
-            {PRESET_LABELS[key]}
-          </label>
-        ))}
-        <button onClick={copyMondayToWeekdays} style={presetBtn}>Copy Mon → Tue–Fri</button>
-        <button onClick={clearAll} style={{ ...presetBtn, color: 'var(--status-behind)', borderColor: 'var(--red-300)' }}>Clear all</button>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        {DAYS.map((day, dayIdx) => {
-          const windows = availability[day] || [];
-          return (
-            <div
-              key={day}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                flexWrap: 'wrap',
-                padding: '6px 8px',
-                borderRadius: '4px',
-                background: dayIdx % 2 === 0 ? 'var(--surface-sunken)' : 'var(--surface-card)',
-                border: '1px solid #e5e7eb',
-                boxSizing: 'border-box',
-                width: '100%',
-                minWidth: 0,
-              }}
-            >
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-body)', width: '36px', flexShrink: 0 }}>
-                {day.slice(0, 3)}
-              </span>
-              {windows.length === 0 && (
-                <span style={{ fontSize: '12px', color: '#9ca3af', fontStyle: 'italic' }}>Off</span>
-              )}
-              {windows.map((w, idx) => (
-                <span
-                  key={idx}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: '3px',
-                    backgroundColor: 'var(--sage-50)', border: '1px solid var(--sage-200)',
-                    borderRadius: 'var(--radius-sm)', padding: '2px 6px',
-                  }}
-                >
-                  <input
-                    type="time"
-                    step="900"
-                    value={w.start}
-                    onChange={(e) => updateWindow(day, idx, 'start', e.target.value)}
-                    style={chipTimeInput}
-                  />
-                  <span style={{ fontSize: '12px', color: '#6b7280' }}>–</span>
-                  <input
-                    type="time"
-                    step="900"
-                    value={w.end}
-                    onChange={(e) => updateWindow(day, idx, 'end', e.target.value)}
-                    style={chipTimeInput}
-                  />
+                        <button
+                          type="button"
+                          aria-label="Remove assignment"
+                          onClick={() => {
+                            const nextHours = { ...assignmentHoursStr };
+                            delete nextHours[key];
+                            setAssignmentHoursStr(nextHours);
+                            updateTechnician(t.id, { assignments: t.assignments.filter((_, i) => i !== idx) });
+                          }}
+                          style={removeBtn}
+                        >×</button>
+                      </div>
+                    );
+                  })}
                   <button
-                    onClick={() => removeWindow(day, idx)}
-                    style={chipRemoveBtn}
-                    title="Remove this window"
-                  >×</button>
-                </span>
-              ))}
-              <button onClick={() => addWindow(day)} style={addWindowBtn}>+ window</button>
-              {windows.length > 0 && (
-                <button
-                  onClick={() => clearDay(day)}
-                  style={{ ...presetBtn, fontSize: '11px', padding: '2px 8px', marginLeft: 'auto' }}
-                >Off</button>
-              )}
-            </div>
-          );
-        })}
+                    type="button"
+                    onClick={() => updateTechnician(t.id, {
+                      assignments: [...t.assignments, { clientId: '', hoursPerWeek: 0, billable: true }],
+                    })}
+                    style={{ ...addBtn, padding: '5px 11px', fontSize: '12px' }}
+                  >+ Assignment</button>
+                </div>
+              </div>
+            ))}
+            {technicians.length === 0 && (
+              <p style={{ color: 'var(--text-faint)', fontSize: '13px', margin: '0 0 12px' }}>
+                No technicians yet.
+              </p>
+            )}
+            <button type="button" onClick={addTechnician} style={addBtn}>+ Add staff</button>
+          </div>
+        </Row>
+
+        {/* ── Foot ── */}
+        <div style={{
+          display: 'flex', justifyContent: 'flex-end', gap: '12px',
+          marginTop: '26px', paddingTop: '20px', borderTop: '1px solid var(--border-default)',
+        }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{
+              padding: '10px 18px', border: '1px solid var(--border-strong)',
+              borderRadius: 'var(--radius-md)', background: 'var(--surface-card)',
+              color: 'var(--text-body)', cursor: 'pointer', fontSize: '14px',
+            }}
+          >Cancel</button>
+          <button
+            type="button"
+            onClick={finish}
+            style={{
+              padding: '10px 20px', border: 'none', borderRadius: 'var(--radius-md)',
+              background: 'var(--sage-500)', color: 'var(--brand-primary-text)',
+              cursor: 'pointer', fontWeight: 700, fontSize: '14px',
+            }}
+          >Create schedule</button>
+        </div>
       </div>
     </div>
   );
 }
 
-const presetBtn: React.CSSProperties = {
-  padding: '4px 10px',
-  fontSize: '12px',
-  border: '1px solid #d1d5db',
-  borderRadius: '4px',
-  background: 'white',
-  cursor: 'pointer',
-  color: 'var(--text-body)',
-  flexShrink: 0,
+const labelSm: React.CSSProperties = {
+  display: 'block', fontWeight: 700, fontSize: '12.5px',
+  color: 'var(--text-primary)', marginBottom: '5px',
 };
 
-const chipTimeInput: React.CSSProperties = {
-  fontSize: '12px',
-  padding: '1px 2px',
-  border: 'none',
-  background: 'transparent',
-  fontFamily: 'inherit',
-  width: '70px',
-  minWidth: 0,
-};
-
-const addWindowBtn: React.CSSProperties = {
-  padding: '3px 8px',
-  fontSize: '11px',
-  border: '1px dashed var(--sage-500)',
-  background: 'white',
-  color: 'var(--sage-600)',
-  borderRadius: '4px',
-  cursor: 'pointer',
-  flexShrink: 0,
-};
-
-const chipRemoveBtn: React.CSSProperties = {
-  padding: '1px 4px',
-  fontSize: '12px',
-  border: 'none',
-  background: 'transparent',
-  color: 'var(--sage-500)',
-  borderRadius: '3px',
-  cursor: 'pointer',
-  lineHeight: 1,
-  flexShrink: 0,
+const hintSm: React.CSSProperties = {
+  fontSize: '11.5px', color: 'var(--text-muted)', margin: '4px 0 0', lineHeight: 1.45,
 };

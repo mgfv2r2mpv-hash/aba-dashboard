@@ -3,9 +3,12 @@ import React, { useCallback, useRef, useState } from 'react';
 interface Props {
   onFile: (file: File) => void;
   error?: string | null;
+  // The second front door. Absent means the portal can only open an existing
+  // backup, which is what it could do before setup existed.
+  onStartSetup?: () => void;
 }
 
-export default function UploadZone({ onFile, error }: Props) {
+export default function UploadZone({ onFile, error, onStartSetup }: Props) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -35,7 +38,7 @@ export default function UploadZone({ onFile, error }: Props) {
     <div className="upload-screen">
       <div className="upload-hero">
         <h1>ABA Dashboard <span style={{ color: 'var(--c-primary)' }}>Portal</span></h1>
-        <p>Decrypt, edit, and re-download your schedule &nbsp;·&nbsp; Everything happens in your browser</p>
+        <p>Build, edit, and re-download your schedule &nbsp;·&nbsp; Everything happens in your browser</p>
       </div>
 
       <label
@@ -70,9 +73,27 @@ export default function UploadZone({ onFile, error }: Props) {
         </div>
       )}
 
+      {onStartSetup && (
+        <div className="upload-alt">
+          <span className="upload-alt-rule" aria-hidden="true" />
+          <span className="upload-alt-word">or</span>
+          <span className="upload-alt-rule" aria-hidden="true" />
+        </div>
+      )}
+
+      {onStartSetup && (
+        <button type="button" className="start-fresh" onClick={onStartSetup}>
+          <span className="start-fresh-icon" aria-hidden="true">✨</span>
+          <span className="start-fresh-label">Start a new schedule</span>
+          <span className="start-fresh-sublabel">
+            Enter your cases and staff, and SAssi builds the week
+          </span>
+        </button>
+      )}
+
       <p className="upload-hint">
-        This portal only accepts files exported from the ABA Dashboard app with a schedule
-        password set. No data is sent to any server — decryption runs entirely in your browser.
+        Uploads accept files exported with a schedule password set. No data is sent to any server —
+        decryption and scheduling both run entirely in your browser.
       </p>
     </div>
   );

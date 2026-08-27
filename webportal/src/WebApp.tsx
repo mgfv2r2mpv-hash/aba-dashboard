@@ -21,6 +21,9 @@ export default function WebApp() {
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
   const [compCache, setCompCache]       = useState<ComplianceCache | null>(null);
   const [password, setPassword]         = useState<string>('');
+  // Read-only here. The portal's own assistant needs no key (it goes through the
+  // proxy), but a file made by the iOS app may carry one, and the save path hands
+  // it back untouched so the app keeps working from the same file.
   const [aiConfig, setAiConfig]         = useState<AiConfig | null>(null);
   const [isDirty, setIsDirty]           = useState(false);
   const [isSaving, setIsSaving]         = useState(false);
@@ -115,10 +118,6 @@ export default function WebApp() {
     setSaveError(null);
   }, []);
 
-  const handleAiConfigChange = useCallback((next: AiConfig | null) => {
-    setAiConfig(next);
-  }, []);
-
   // Commit the schedule with the given password. Records that password as the
   // session password so subsequent saves reuse it.
   const runSave = useCallback(async (pwd: string) => {
@@ -179,7 +178,6 @@ export default function WebApp() {
           aiConfig={aiConfig}
           initialTab={landOn}
           onDataChange={handleDataChange}
-          onAiConfigChange={handleAiConfigChange}
           onSave={handleSave}
           onReset={reset}
         />

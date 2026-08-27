@@ -33,6 +33,16 @@ function substituteRef(text: string, ref: string, name: string): string {
   return text.replace(new RegExp(`(^|[^A-Za-z])${escaped}(?![A-Za-z])`, 'g'), (_m, pre) => `${pre}${name}`);
 }
 
+// An APIError's own `message` is the status line with the raw body glued on
+// ("503 {\"error\":{\"type\":...}}"), which is what the BCBA would otherwise read.
+// The body carries a sentence someone wrote to be read - the proxy's own refusals
+// say plainly what happened - so prefer that whenever it is there.
+export function readableError(err: any): string {
+  const fromBody = err?.error?.error?.message;
+  if (typeof fromBody === 'string' && fromBody.trim()) return fromBody.trim();
+  return err?.message || String(err);
+}
+
 export type SassiStatus = 'idle' | 'thinking' | 'error';
 
 export interface SassiSession {
@@ -48,6 +58,12 @@ export interface SassiSession {
 export interface UseSassiSessionParams {
   getSchedule: () => ScheduleData | null;
   apiKey: string;
+  /**
+   * Same-origin proxy to call instead of api.anthropic.com. The web portal sets
+   * it (its key lives on the server); the iOS app leaves it unset and calls
+   * direct with the user's own key. Either way the anonymizer runs in the client.
+   */
+  baseUrl?: string;
   model: ClaudeModel;
   /** Replace the live draft preview with the turn's complete proposal. */
   onProposal: (ops: WishOp[]) => void;
@@ -55,7 +71,7 @@ export interface UseSassiSessionParams {
   getFocusedAppointmentId: () => string | null;
 }
 
-export function useSassiSession({ getSchedule, apiKey, model, onProposal, getFocusedAppointmentId }: UseSassiSessionParams): SassiSession {
+export function useSassiSession({ getSchedule, apiKey, baseUrl, model, onProposal, getFocusedAppointmentId }: UseSassiSessionParams): SassiSession {
   const [messages, setMessages] = useState<SassiUiMessage[]>([]);
   const [status, setStatus] = useState<SassiStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +93,13 @@ export function useSassiSession({ getSchedule, apiKey, model, onProposal, getFoc
     const trimmed = text.trim();
     if (!trimmed) return;
     const data = getSchedule();
-    if (!data || !apiKey) {
+    if (!data) {
+      setError('Open a schedule before chatting with sAssI.');
+      setStatus('error');
+      return;
+    }
+    // A proxy stands in for a key: one of the two has to be there.
+    if (!apiKey && !baseUrl) {
       setError('Add a Claude API key in Settings to chat with sAssI.');
       setStatus('error');
       return;
@@ -94,7 +116,7 @@ export function useSassiSession({ getSchedule, apiKey, model, onProposal, getFoc
       // the Anthropic SDK stays out of the initial bundle.
       if (!schedulerRef.current || scheduleRef.current !== data) {
         const { ClaudeScheduler } = await import('../../claudeScheduler');
-        schedulerRef.current = new ClaudeScheduler(apiKey, data, model);
+        schedulerRef.current = new ClaudeScheduler(apiKey, data, model, baseUrl);
         scheduleRef.current = data;
         historyRef.current = [];
       }
@@ -158,10 +180,10 @@ export function useSassiSession({ getSchedule, apiKey, model, onProposal, getFoc
       if (res.ops.length > 0) onProposal(res.ops);
       setStatus('idle');
     } catch (e: any) {
-      setError(e?.message || String(e));
+      setError(readableError(e));
       setStatus('error');
     }
-  }, [getSchedule, apiKey, model, onProposal, getFocusedAppointmentId]);
+  }, [getSchedule, apiKey, baseUrl, model, onProposal, getFocusedAppointmentId]);
 
   return {
     messages,

@@ -14,6 +14,12 @@ export interface SassiChatProps {
   session: SassiSession;
   model: ClaudeModel;
   onToggleModel: () => void;
+  /**
+   * The line under the thread telling the BCBA where a proposal goes next. It
+   * names a surface, so each app states its own - the dock has a draft tray, the
+   * web portal decides right under the chat.
+   */
+  footnote?: string;
 }
 
 const MODEL_LABEL: Record<string, string> = {
@@ -22,7 +28,7 @@ const MODEL_LABEL: Record<string, string> = {
   'claude-opus-4-8': 'Opus',
 };
 
-export function SassiChat({ session, model, onToggleModel }: SassiChatProps) {
+export function SassiChat({ session, model, onToggleModel, footnote }: SassiChatProps) {
   const endRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' });
@@ -107,7 +113,7 @@ export function SassiChat({ session, model, onToggleModel }: SassiChatProps) {
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-        Proposed sessions preview on your calendar and in the tray above — check the grade, then Accept there. Ask “why” anytime.
+        {footnote ?? 'Proposed sessions preview on your calendar and in the tray above — check the grade, then Accept there. Ask “why” anytime.'}
       </div>
     </section>
   );

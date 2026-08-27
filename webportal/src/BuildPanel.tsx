@@ -3,6 +3,7 @@ import type { ScheduleData } from '@shared/types';
 import { Pills } from '@shared/components/setup/SetupControls';
 import { BuildResultPanel } from '@shared/components/dock/BuildResultPanel';
 import { runBuild, nextTemplateWeek, type BuildPasses, type BuildPreview } from './build/runBuild';
+import AssistantPanel from './AssistantPanel';
 
 const PASS_OPTIONS: { value: BuildPasses; label: string }[] = [
   { value: 'all',              label: 'Everything' },
@@ -27,10 +28,11 @@ const PASS_EXPLAINER: Record<BuildPasses, string> = {
 };
 
 /**
- * The portal's Build tab: run the deterministic builder, read what it placed and
- * what it could not, then decide. A build is never committed on the way out - the
- * preview holds the proposed schedule until it is applied, so a run that turns out
- * to place nothing costs a discard rather than an undo.
+ * The portal's Build tab: the two ways a schedule gets made. The builder places a
+ * whole month deterministically; sAssI, underneath it, handles the particulars the
+ * builder cannot know. Neither commits anything on the way out - each holds its
+ * proposal until it is applied, so a run that turns out badly costs a discard
+ * rather than an undo.
  */
 export default function BuildPanel({
   data,
@@ -72,6 +74,7 @@ export default function BuildPanel({
       <h2 className="settings-heading">Build a schedule</h2>
 
       <section className="settings-section">
+        <h3 className="settings-section-title">The builder</h3>
         <p className="settings-section-desc">
           The builder shapes one recurring week inside everyone's stated availability, then repeats
           it until each case's authorization runs out. It proposes; nothing reaches the calendar
@@ -146,6 +149,8 @@ export default function BuildPanel({
           </div>
         </section>
       )}
+
+      <AssistantPanel data={data} onApply={onApply} />
     </div>
   );
 }

@@ -10,9 +10,14 @@
 //   TECH_<n>     for technician identifiers
 //   APT_<n>      for appointment identifiers
 //
-// Free-text fields (title, description, notes) are scrubbed: any token
-// resembling a real name is removed entirely. We only keep enums (type,
-// recurringPattern), times, booleans, and numbers.
+// Free-text fields (title, description, notes, blackout reason) are dropped
+// entirely. We only keep enums (type, recurringPattern), times, booleans, and
+// numbers.
+//
+// Every id/name -> token lookup goes through entityToken, which FAILS CLOSED:
+// an entity missing from the map yields CLIENT_unknown/TECH_unknown/APT_unknown,
+// never the raw name or uuid it was looked up by. That is the whole point of the
+// layer - a lookup miss must cost the model a fact, not cost the client their name.
 
 import { ScheduleData, Appointment, Technician, Client } from './types';
 
@@ -54,13 +59,29 @@ export function buildAnonymizationMap(data: ScheduleData): AnonymizationMap {
   return map;
 }
 
+// Tokenize one entity, FAIL CLOSED. `id` and `name` are both tried against the
+// map (buildAnonymizationMap registers each entity under both), and a miss yields
+// the kind's unknown placeholder - never the raw value. Returning the raw value on
+// a miss is how a name or a uuid escapes an anonymizer that otherwise looks correct.
+export type TokenKind = 'CLIENT' | 'TECH' | 'APT';
+export function entityToken(
+  map: Map<string, string>,
+  id: string | null | undefined,
+  name: string | null | undefined,
+  kind: TokenKind,
+): string {
+  return (id ? map.get(id) : undefined)
+    || (name ? map.get(name) : undefined)
+    || `${kind}_unknown`;
+}
+
 // Strip free-text fields entirely - we cannot trust them to be PHI-free.
 // We only keep structured/enum fields that the scheduler actually needs.
 function scrubAppointment(a: Appointment, map: AnonymizationMap): any {
   return {
-    id: map.appointments.get(a.id) || `APT_unknown`,
-    technician: a.technician ? (map.technicians.get(a.technician) || 'TECH_unknown') : null,
-    client: a.client ? (map.clients.get(a.client) || 'CLIENT_unknown') : null,
+    id: entityToken(map.appointments, a.id, null, 'APT'),
+    technician: a.technician ? entityToken(map.technicians, a.technician, null, 'TECH') : null,
+    client: a.client ? entityToken(map.clients, a.client, null, 'CLIENT') : null,
     startTime: a.startTime,
     endTime: a.endTime,
     isFixed: a.isFixed,
@@ -74,10 +95,10 @@ function scrubAppointment(a: Appointment, map: AnonymizationMap): any {
 
 function scrubTechnician(t: Technician, map: AnonymizationMap): any {
   return {
-    id: map.technicians.get(t.id) || 'TECH_unknown',
+    id: entityToken(map.technicians, t.id, null, 'TECH'),
     isRBT: t.isRBT,
     assignments: t.assignments.map(a => ({
-      clientId: map.clients.get(a.clientId) || 'CLIENT_unknown',
+      clientId: entityToken(map.clients, a.clientId, null, 'CLIENT'),
       hoursPerWeek: a.hoursPerWeek,
       billable: a.billable,
     })),
@@ -88,17 +109,20 @@ function scrubTechnician(t: Technician, map: AnonymizationMap): any {
 
 function scrubClient(c: Client, map: AnonymizationMap): any {
   return {
-    id: map.clients.get(c.id) || 'CLIENT_unknown',
+    id: entityToken(map.clients, c.id, null, 'CLIENT'),
     availabilityWindows: c.availabilityWindows,
     // NOTE: name and notes intentionally omitted
   };
 }
 
+// NOTE: no `settings`. CompanySettings carries `practiceName` and rides raw, so a
+// field named as if it were anonymized was a standing invitation to emit it. No
+// prompt has ever read it; the policy numbers each prompt does use are pulled from
+// `this.data.settings` by name, one at a time, at the call site.
 export interface AnonymizedSchedule {
   technicians: any[];
   clients: any[];
   appointments: any[];
-  settings: any;
   blackouts: any[];
   timeOff: any[];
 }
@@ -108,13 +132,15 @@ export function anonymizeSchedule(data: ScheduleData, map: AnonymizationMap): An
     technicians: data.technicians.map(t => scrubTechnician(t, map)),
     clients: data.clients.map(c => scrubClient(c, map)),
     appointments: data.appointments.map(a => scrubAppointment(a, map)),
-    settings: data.settings,
+    // `reason` is deliberately NOT carried. It is a free-text box the clinician
+    // types into - the add form's own placeholder is "e.g. dentist appointment" -
+    // so it routinely holds a medical detail, and nothing downstream needs it: the
+    // model only has to know the day is unavailable for that entity.
     blackouts: (data.blackouts || []).map(b => ({
       entity: b.entityType === 'client'
-        ? (map.clients.get(b.entityId) || map.clients.get(b.entityName || '') || 'CLIENT_unknown')
-        : (map.technicians.get(b.entityId) || map.technicians.get(b.entityName || '') || 'TECH_unknown'),
+        ? entityToken(map.clients, b.entityId, b.entityName, 'CLIENT')
+        : entityToken(map.technicians, b.entityId, b.entityName, 'TECH'),
       date: b.date,
-      ...(b.reason ? { reason: b.reason } : {}),
     })),
     timeOff: (data.timeOff || []).map(t => ({ date: t.date, hours: t.hours })),
   };

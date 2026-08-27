@@ -51,6 +51,10 @@ export default defineConfig({
           alias: {
             '@shared': path.resolve(__dirname, './src'),
             '@capacitor/core': path.resolve(__dirname, './webportal/src/stubs/capacitorCore.ts'),
+            // The portal bundles ITS copy of the SDK (webportal/vite.config.ts does
+            // the same), so the suite exercises the version the portal ships rather
+            // than the app's newer one.
+            '@anthropic-ai/sdk': path.resolve(__dirname, './webportal/node_modules/@anthropic-ai/sdk'),
           },
         },
         test: {

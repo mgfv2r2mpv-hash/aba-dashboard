@@ -10,6 +10,11 @@ pages_build_output_dir = "dist"
 #   Root directory   : webportal
 #   Node version     : 20
 
+# SECRET, set in the Pages dashboard (Settings -> Variables and Secrets), for both
+# Production and Preview: ANTHROPIC_API_KEY. functions/api/claude/v1/messages.ts
+# reads it; until it is there the assistant answers 503 and says so on screen.
+# It is deliberately NOT in [vars] below - those are plaintext in the repo.
+
 # Cloudflare Access gate config, read by functions/_middleware.js.
 # These are non-secret identifiers (POLICY_AUD is the app's Audience tag, not a secret).
 [vars]

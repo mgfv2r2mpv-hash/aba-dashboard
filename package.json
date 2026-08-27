@@ -13,6 +13,7 @@
     "start": "node dist/server.js",
     "dev": "nodemon --exec tsx src/server.ts",
     "dev:client": "vite",
+    "typecheck": "tsc --noEmit -p tsconfig.json && npm --prefix webportal run typecheck && npm --prefix webportal run typecheck:test",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

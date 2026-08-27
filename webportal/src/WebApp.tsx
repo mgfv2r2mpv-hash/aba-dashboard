@@ -1,23 +1,22 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { isEncryptedSchedule } from '@shared/clientCrypto';
 import { ScheduleData } from '@shared/types';
 import { ComplianceCache, buildCache } from '@shared/complianceCache';
 import { validatePassword } from '@shared/passwordPolicy';
-import { backupFilename } from '@shared/lib/backupFilename';
+import { StoreError } from './store/scheduleStore';
+import { createFileScheduleStore, readBackupFile, type FileRef } from './store/fileScheduleStore';
 import UploadZone from './UploadZone';
 import SetupWizard from '@shared/components/SetupWizard';
 import PasswordForm from './PasswordForm';
 import ReadyView from './ReadyView';
 import LogoutLink from './LogoutLink';
 import BackupPasswordDialog from './BackupPasswordDialog';
-import type { AiConfig, WorkerResponse } from './parse.worker';
-import type { SaveResponse } from './save.worker';
+import type { AiConfig } from './parse.worker';
 
 type Phase = 'upload' | 'setup' | 'password' | 'decrypting' | 'ready';
 
 export default function WebApp() {
   const [phase, setPhase]               = useState<Phase>('upload');
-  const [fileBytes, setFileBytes]       = useState<Uint8Array | null>(null);
+  const [ref, setRef]                   = useState<FileRef | null>(null);
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
   const [compCache, setCompCache]       = useState<ComplianceCache | null>(null);
   const [password, setPassword]         = useState<string>('');
@@ -30,8 +29,10 @@ export default function WebApp() {
   const [pwDialogOpen, setPwDialogOpen] = useState(false);
   const [dict, setDict]                 = useState<ReadonlySet<string> | null>(null);
 
-  const parseWorkerRef = useRef<Worker | null>(null);
-  const saveWorkerRef  = useRef<Worker | null>(null);
+  // Where schedules come from and go back to. One store today - an encrypted file
+  // on this device - reached only through the seam, so Phase 2's server-backed
+  // store swaps in here and nothing else on this screen changes.
+  const storeRef       = useRef(createFileScheduleStore());
   const dictPromiseRef = useRef<Promise<ReadonlySet<string>> | null>(null);
 
   // Lazy, memoized load of the password dictionary (a separate chunk so it stays out
@@ -46,72 +47,46 @@ export default function WebApp() {
     return dictPromiseRef.current;
   }, []);
 
-  const getParseWorker = useCallback(() => {
-    if (!parseWorkerRef.current) {
-      parseWorkerRef.current = new Worker(new URL('./parse.worker.ts', import.meta.url), { type: 'module' });
-    }
-    return parseWorkerRef.current;
-  }, []);
-
   const handleFile = useCallback(async (file: File) => {
     setUploadError(null);
-    let bytes: Uint8Array;
     try {
-      bytes = new Uint8Array(await file.arrayBuffer());
-    } catch {
-      setUploadError('Could not read the file. Please try again.');
+      setRef(await readBackupFile(file));
+    } catch (err) {
+      setUploadError(err instanceof StoreError ? err.message : 'Could not read the file. Please try again.');
       return;
     }
-    if (!isEncryptedSchedule(bytes)) {
-      setUploadError(
-        'This file is not encrypted. Export a backup (.sassi) from the SAssi Cal app with a schedule password, then try again.'
-      );
-      return;
-    }
-    setFileBytes(bytes);
     setPasswordError(null);
     setPhase('password');
   }, []);
 
-  const handlePasswordSubmit = useCallback((pwd: string) => {
-    if (!fileBytes) return;
+  // A wrong password sends the person back to the password field; anything else
+  // means this source will never open, so they start again with another one.
+  const handlePasswordSubmit = useCallback(async (pwd: string) => {
+    if (!ref) return;
     setPhase('decrypting');
     setPasswordError(null);
-
-    const worker = getParseWorker();
-
-    const onMessage = (e: MessageEvent<WorkerResponse>) => {
-      worker.removeEventListener('message', onMessage);
-      const res = e.data;
-      if (res.ok) {
-        setScheduleData(res.data);
-        setCompCache(res.cache);
-        setPassword(pwd);
-        setAiConfig(res.aiConfig ?? null);
-        setIsDirty(false);
-        setPhase('ready');
-        // Warm the password dictionary so the Save-time strength check is instant.
-        loadDict().then(setDict);
-      } else if (res.isDOMException) {
-        setPasswordError('Incorrect password. Please try again.');
+    try {
+      const opened = await storeRef.current.load(ref, pwd);
+      setScheduleData(opened.data);
+      setCompCache(opened.cache);
+      setPassword(pwd);
+      setAiConfig(opened.aiConfig);
+      setIsDirty(false);
+      setPhase('ready');
+      // Warm the password dictionary so the Save-time strength check is instant.
+      loadDict().then(setDict);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (err instanceof StoreError && err.failure === 'bad-credential') {
+        setPasswordError(message);
         setPhase('password');
       } else {
-        setUploadError(res.message);
-        setFileBytes(null);
+        setUploadError(message);
+        setRef(null);
         setPhase('upload');
       }
-    };
-
-    worker.addEventListener('message', onMessage);
-    worker.onerror = (e) => {
-      worker.onerror = null;
-      worker.removeEventListener('message', onMessage);
-      setUploadError(`Worker failed: ${e.message ?? 'unknown error'}. Try refreshing.`);
-      setFileBytes(null);
-      setPhase('upload');
-    };
-    worker.postMessage({ bytes: fileBytes, password: pwd });
-  }, [fileBytes, getParseWorker, loadDict]);
+    }
+  }, [ref, loadDict]);
 
   // The portal's second front door: setup returns a complete ScheduleData, so
   // it drops straight into 'ready' beside the decrypt path. A schedule created
@@ -138,45 +113,22 @@ export default function WebApp() {
     setAiConfig(next);
   }, []);
 
-  // Spawn the save worker with the given password and download the encrypted backup.
-  // Records the password as the session password so subsequent saves reuse it.
-  const runSave = useCallback((pwd: string) => {
+  // Commit the schedule with the given password. Records that password as the
+  // session password so subsequent saves reuse it.
+  const runSave = useCallback(async (pwd: string) => {
     if (!scheduleData) return;
     setPwDialogOpen(false);
     setIsSaving(true);
     setSaveError(null);
-
-    const worker = new Worker(new URL('./save.worker.ts', import.meta.url), { type: 'module' });
-    saveWorkerRef.current?.terminate();
-    saveWorkerRef.current = worker;
-
-    worker.addEventListener('message', (e: MessageEvent<SaveResponse>) => {
-      worker.terminate();
-      const res = e.data;
-      if (res.ok) {
-        const blob = new Blob([res.bytes.buffer as ArrayBuffer], { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = backupFilename(scheduleData.settings.practiceName);
-        a.click();
-        URL.revokeObjectURL(url);
-        setPassword(pwd);
-        setIsDirty(false);
-        setIsSaving(false);
-      } else {
-        setSaveError(`Save failed: ${res.message}`);
-        setIsSaving(false);
-      }
-    });
-
-    worker.onerror = (e) => {
-      worker.terminate();
-      setSaveError(`Save worker failed: ${e.message ?? 'unknown error'}`);
+    try {
+      await storeRef.current.save(scheduleData, aiConfig, pwd);
+      setPassword(pwd);
+      setIsDirty(false);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
       setIsSaving(false);
-    };
-
-    worker.postMessage({ data: scheduleData, password: pwd, aiConfig: aiConfig ?? undefined });
+    }
   }, [scheduleData, aiConfig]);
 
   // Save enforces the file-password policy: a compliant session password downloads
@@ -195,7 +147,7 @@ export default function WebApp() {
 
   const reset = useCallback(() => {
     setPhase('upload');
-    setFileBytes(null);
+    setRef(null);
     setScheduleData(null);
     setCompCache(null);
     setPassword('');
@@ -206,10 +158,7 @@ export default function WebApp() {
     setUploadError(null);
     setPasswordError(null);
     setPwDialogOpen(false);
-    parseWorkerRef.current?.terminate();
-    parseWorkerRef.current = null;
-    saveWorkerRef.current?.terminate();
-    saveWorkerRef.current = null;
+    storeRef.current.dispose();
   }, []);
 
   if (phase === 'ready' && scheduleData && compCache) {

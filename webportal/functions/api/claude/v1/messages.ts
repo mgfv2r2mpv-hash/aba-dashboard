@@ -4,7 +4,7 @@
 // follow from that, and they are the whole reason it exists:
 //
 //   1. The key never enters the browser. It lives here as the Pages secret
-//      ANTHROPIC_API_KEY, so nothing sensitive rides in the encrypted backup and
+//      ANTHRO_API_KEY, so nothing sensitive rides in the encrypted backup and
 //      nothing is typed into a Settings box.
 //   2. The portal's CSP stays `connect-src 'self'`. Nothing in public/_headers
 //      changes to turn the assistant on.
@@ -23,7 +23,7 @@
 // surface needs no dependency of its own (see the note in wrangler.toml about
 // this project's build being the thing that fails silently).
 interface ProxyEnv {
-  ANTHROPIC_API_KEY?: string;
+  ANTHRO_API_KEY?: string;
 }
 interface ProxyContext {
   request: Request;
@@ -151,7 +151,7 @@ export const onRequest = async ({ request, env }: ProxyContext): Promise<Respons
     return json({ error: { type: 'method_not_allowed', message: 'This endpoint accepts POST only.' } }, 405);
   }
 
-  const apiKey = env.ANTHROPIC_API_KEY;
+  const apiKey = env.ANTHRO_API_KEY;
   if (!apiKey) {
     return json({ error: { type: 'not_configured', message: 'The assistant is not configured on this server yet.' } }, 503);
   }

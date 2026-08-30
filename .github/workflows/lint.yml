@@ -23,8 +23,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install portal dependencies
+        run: npm ci --prefix webportal
+
+      # `npm run typecheck` compiles the app, the portal and the portal's tests.
+      # Bare `tsc` here only ever saw the app, which is how a portal build break
+      # reached production unnoticed. `shell: bash` is load-bearing: it turns on
+      # pipefail, without which `tee` reports success no matter how tsc exits.
       - name: Type check
-        run: npx tsc --noEmit --pretty false --listFiles false 2>&1 | tee tsc-output.txt
+        shell: bash
+        run: npm run typecheck 2>&1 | tee tsc-output.txt
 
       - name: Parse type errors
         if: always() && github.event_name == 'pull_request'

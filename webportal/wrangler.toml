@@ -17,6 +17,13 @@ pages_build_output_dir = "dist"
 # ANTHROPIC_API_KEY. Rename the secret and this line together or neither.
 # It is deliberately NOT in [vars] below - those are plaintext in the repo.
 
+# BINDING, set in the Pages dashboard (Settings -> Bindings), for both Production and
+# Preview: a D1 database bound as PORTAL_DB. It holds the staff login store, and
+# migrations/0001_portal_users.sql is its schema. Bindings are project settings that a
+# deploy does not create, and they attach AT DEPLOY TIME: one added after a deployment
+# does not reach it, so add it and then redeploy. Until it is there every endpoint
+# under functions/api/auth and functions/api/admin answers 503 and says so on screen.
+
 # Cloudflare Access gate config, read by functions/_middleware.js.
 # These are non-secret identifiers (POLICY_AUD is the app's Audience tag, not a secret).
 [vars]

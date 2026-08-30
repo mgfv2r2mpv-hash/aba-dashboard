@@ -11,8 +11,10 @@ pages_build_output_dir = "dist"
 #   Node version     : 20
 
 # SECRET, set in the Pages dashboard (Settings -> Variables and Secrets), for both
-# Production and Preview: ANTHROPIC_API_KEY. functions/api/claude/v1/messages.ts
+# Production and Preview: ANTHRO_API_KEY. functions/api/claude/v1/messages.ts
 # reads it; until it is there the assistant answers 503 and says so on screen.
+# The name is the one on the project, not the vendor's conventional
+# ANTHROPIC_API_KEY. Rename the secret and this line together or neither.
 # It is deliberately NOT in [vars] below - those are plaintext in the repo.
 
 # Cloudflare Access gate config, read by functions/_middleware.js.

@@ -32,5 +32,17 @@
   "include": ["src", "functions"],
   // Tests import vitest, which the Pages build never installs. They are
   // typechecked by tsconfig.test.json instead - see npm run typecheck:test.
-  "exclude": ["src/test", "src/**/*.test.ts", "src/**/*.test.tsx"]
+  //
+  // `functions` is included above, so its tests need excluding here by name.
+  // Leaving them in is what broke the Pages build: its `npm install` runs inside
+  // webportal, where vitest and @types/node are not dependencies, so `tsc
+  // --noEmit` failed on the test files with TS2307 and TS2591 and took the whole
+  // deploy with it.
+  "exclude": [
+    "src/test",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "functions/**/*.test.ts",
+    "functions/**/*.test.tsx"
+  ]
 }

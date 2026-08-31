@@ -730,7 +730,7 @@ body {
 
 /* ── Log out (Cloudflare Access) ── */
 /* Pinned control for the pre-load screens, which have no header. In ReadyView the
-   LogoutLink renders inline in .portal-header instead (no wrapper). */
+   AccountMenu renders inline in .portal-header instead (no wrapper). */
 .portal-logout-fixed {
   position: fixed;
   top: max(12px, var(--safe-top));

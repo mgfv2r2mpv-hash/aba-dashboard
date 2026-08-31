@@ -11,7 +11,7 @@ import BuildPanel from './BuildPanel';
 import { useMinWidth } from '@shared/useMediaQuery';
 import ApptDetail from './ApptDetail';
 import SaveBar from './SaveBar';
-import LogoutLink from './LogoutLink';
+import AccountMenu from './auth/AccountMenu';
 import type { AiConfig } from './parse.worker';
 
 export type Tab = 'calendar' | 'build' | 'compliance' | 'caseload' | 'admin' | 'settings';
@@ -125,7 +125,7 @@ export default function ReadyView({
         <button className="btn-ghost" onClick={onReset} aria-label="Close file">
           ✕ Close
         </button>
-        <LogoutLink />
+        <AccountMenu />
       </header>
 
       {/* ── Body ── */}

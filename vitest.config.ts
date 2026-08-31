@@ -56,6 +56,25 @@ export default defineConfig({
             // the same), so the suite exercises the version the portal ships rather
             // than the app's newer one.
             '@anthropic-ai/sdk': path.resolve(__dirname, './webportal/node_modules/@anthropic-ai/sdk'),
+            // React is pinned to the ROOT copy, against the grain of everything
+            // else here, and it has to be.
+            //
+            // These test files live under webportal/, so Node's own resolution finds
+            // webportal/node_modules/react before it ever reaches the root - the
+            // portal installs its own, 19.2.7 against the root's 19.2.5. But
+            // @testing-library/react lives in the ROOT node_modules, is externalised
+            // rather than transformed, and resolves react-dom/client beside itself
+            // whatever this file says. Left alone the component renders on one React
+            // and the renderer runs on another, and every hook dies on 'Cannot read
+            // properties of null (reading useState)'.
+            //
+            // Only the component's side can be moved, so it is moved to meet the
+            // renderer. One React is the requirement; which of two patch releases it
+            // is matters far less. The BUILD is unaffected: webportal/vite.config.ts
+            // still points the shipped bundle at the portal's own copy.
+            'react': path.resolve(__dirname, './node_modules/react'),
+            'react/jsx-runtime': path.resolve(__dirname, './node_modules/react/jsx-runtime'),
+            'react-dom': path.resolve(__dirname, './node_modules/react-dom'),
           },
         },
         test: {

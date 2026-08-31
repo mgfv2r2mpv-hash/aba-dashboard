@@ -9,7 +9,7 @@ import SetupWizard from '@shared/components/SetupWizard';
 import PasswordForm from './PasswordForm';
 import ReadyView from './ReadyView';
 import type { Tab } from './ReadyView';
-import LogoutLink from './LogoutLink';
+import AccountMenu from './auth/AccountMenu';
 import BackupPasswordDialog from './BackupPasswordDialog';
 import type { AiConfig } from './parse.worker';
 
@@ -205,7 +205,7 @@ export default function WebApp() {
   if (phase === 'decrypting') {
     return (
       <div className="portal centered-screen">
-        <LogoutLink fixed />
+        <AccountMenu fixed />
         <div className="spinner-wrap">
           <div className="spinner" aria-hidden="true" />
           <p className="spinner-label">Decrypting and loading schedule…</p>
@@ -217,7 +217,7 @@ export default function WebApp() {
   if (phase === 'password') {
     return (
       <>
-        <LogoutLink fixed />
+        <AccountMenu fixed />
         <PasswordForm
           onSubmit={handlePasswordSubmit}
           onCancel={reset}
@@ -230,7 +230,7 @@ export default function WebApp() {
 
   return (
     <div className="portal">
-      <LogoutLink fixed />
+      <AccountMenu fixed />
       <UploadZone
         onFile={handleFile}
         error={uploadError}

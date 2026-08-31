@@ -30,7 +30,7 @@ async function absentHash(): Promise<string> {
   return absentAccountHash;
 }
 
-export const onRequest = async ({ request, env }: PortalContext): Promise<Response> => {
+export const onRequest = async ({ request, env, data }: PortalContext): Promise<Response> => {
   if (request.method !== 'POST') return fail(405, 'Use POST.', { Allow: 'POST' });
   if (!env.PORTAL_DB) return fail(503, 'Sign-in is not configured on this server yet.');
 
@@ -45,7 +45,7 @@ export const onRequest = async ({ request, env }: PortalContext): Promise<Respon
 
   // Keyed on the account being attacked and on who is attacking, so one person
   // hammering an address cannot lock everybody out of it.
-  const identity = `${foldEmail(email)}|${accessEmail(request) ?? request.headers.get('CF-Connecting-IP') ?? 'unknown'}`;
+  const identity = `${foldEmail(email)}|${accessEmail(data) ?? request.headers.get('CF-Connecting-IP') ?? 'unknown'}`;
   const now = new Date();
   if (isRateLimited(identity, now.getTime())) {
     return fail(429, 'Too many attempts. Wait a few minutes, then try again.', {

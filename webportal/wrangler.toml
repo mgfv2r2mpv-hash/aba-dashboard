@@ -24,8 +24,13 @@ pages_build_output_dir = "dist"
 # does not reach it, so add it and then redeploy. Until it is there every endpoint
 # under functions/api/auth and functions/api/admin answers 503 and says so on screen.
 
-# Cloudflare Access gate config, read by functions/_middleware.js.
+# Cloudflare Access gate config, read by functions/_middleware.ts.
 # These are non-secret identifiers (POLICY_AUD is the app's Audience tag, not a secret).
+#
+# They stay here even after app login becomes the door. Once PORTAL_DB is bound the
+# portal's own session is what gates the API, but the middleware still VERIFIES an
+# Access token when one is presented, because that verified email is what lets the
+# very first admin account be created before any account exists to sign in with.
 [vars]
 TEAM_DOMAIN = "https://t-nooutco-me.cloudflareaccess.com"
 POLICY_AUD = "4cbdc060e7b12fb88a66a79b369c45c11d311e590dac403de88317728eea1f0d"

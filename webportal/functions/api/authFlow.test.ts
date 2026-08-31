@@ -10,7 +10,10 @@ import { FakeD1 } from '../lib/fakeD1';
 import { resetRateLimits } from '../lib/loginRate';
 import type { PortalEnv } from '../lib/env';
 
-const ACCESS = { 'Cf-Access-Authenticated-User-Email': 'boss@clinic.org' };
+// What _middleware.ts hands down after verifying the Access token. NOT a header:
+// see the test at the bottom of this file for why that distinction is load-bearing.
+const ACCESS = { accessEmail: 'boss@clinic.org', sessionUserId: null };
+const RAW_HEADER = { 'Cf-Access-Authenticated-User-Email': 'boss@clinic.org' };
 let env: PortalEnv;
 
 beforeEach(() => {
@@ -36,7 +39,7 @@ function cookieFrom(response: Response, name: string): string | null {
 }
 
 async function makeFirstAdmin(email = 'boss@clinic.org') {
-  const response = await users({ request: post('/api/admin/users', { email }, ACCESS), env });
+  const response = await users({ request: post('/api/admin/users', { email }), env, data: ACCESS });
   return { response, body: await response.json() as Record<string, string> };
 }
 
@@ -50,7 +53,7 @@ describe('the first account', () => {
 
   it('closes that opening the moment one account exists', async () => {
     await makeFirstAdmin();
-    const second = await users({ request: post('/api/admin/users', { email: 'bt@clinic.org' }, ACCESS), env });
+    const second = await users({ request: post('/api/admin/users', { email: 'bt@clinic.org' }), env, data: ACCESS });
     expect(second.status).toBe(403);
     expect((await second.json() as { error: string }).error).toMatch(/Sign in first/);
   });
@@ -213,7 +216,7 @@ describe('sessions', () => {
 
   it('offers the Access email so the login screen can fill the field in', async () => {
     const response = await session({
-      request: new Request('https://sassi.nooutco.me/api/auth/session', { headers: ACCESS }), env,
+      request: new Request('https://sassi.nooutco.me/api/auth/session'), env, data: ACCESS,
     });
     expect(await response.json()).toMatchObject({ accessEmail: 'boss@clinic.org' });
   });
@@ -446,5 +449,35 @@ describe('administering accounts', () => {
     const body = await listed.text();
     expect(body).not.toContain('pbkdf2');
     expect(JSON.parse(body).users).toHaveLength(2);
+  });
+});
+
+describe('the Access identity is verified, not asserted', () => {
+  // Cloudflare strips a client-supplied Cf-Access-Authenticated-User-Email only while
+  // Access is in front of the origin. Relaxing Access is the entire point of app
+  // login, and from that moment the header is one anybody can send. _middleware.ts
+  // verifies the signed token and passes down what it actually contained; nothing
+  // downstream reads the header. This test is what stops that regressing.
+  it('refuses to open the first-run door for a spoofed header', async () => {
+    const response = await users({
+      request: post('/api/admin/users', { email: 'attacker@example.com' }, RAW_HEADER),
+      env,
+    });
+    expect(response.status).toBe(403);
+    expect((await response.json() as { error: string }).error).toMatch(/inside the Access gate/);
+  });
+
+  it('opens it for a verified identity handed down by the middleware', async () => {
+    const response = await users({
+      request: post('/api/admin/users', { email: 'boss@clinic.org' }), env, data: ACCESS,
+    });
+    expect(response.status).toBe(201);
+  });
+
+  it('does not echo a spoofed header back as the Access email', async () => {
+    const response = await session({
+      request: new Request('https://sassi.nooutco.me/api/auth/session', { headers: RAW_HEADER }), env,
+    });
+    expect(await response.json()).toMatchObject({ accessEmail: null });
   });
 });

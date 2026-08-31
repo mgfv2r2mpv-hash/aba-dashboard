@@ -9,7 +9,7 @@ import { fail, json, clearCookie, SESSION_COOKIE, CHANGE_COOKIE } from '../../li
 import { resolveSession, accessEmail } from '../../lib/authContext';
 import type { PortalContext } from '../../lib/env';
 
-export const onRequest = async ({ request, env }: PortalContext): Promise<Response> => {
+export const onRequest = async ({ request, env, data }: PortalContext): Promise<Response> => {
   if (!env.PORTAL_DB) return fail(503, 'Sign-in is not configured on this server yet.');
   const store = new D1UserStore(env.PORTAL_DB);
   const now = new Date();
@@ -23,7 +23,7 @@ export const onRequest = async ({ request, env }: PortalContext): Promise<Respon
         mustChangePassword: pending !== null,
         // Useful on the login screen: Access already knows who they are, so the
         // email field can be filled in for them.
-        accessEmail: accessEmail(request),
+        accessEmail: accessEmail(data),
       }, 200);
     }
     const { id, email, role, mustChangePassword } = context.user;

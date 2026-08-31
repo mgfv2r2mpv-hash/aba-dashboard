@@ -15,9 +15,12 @@
 //      phone number, no SSN. A payload carrying one of those means a mapping was
 //      missed upstream, and the request dies here rather than at Anthropic.
 //
-// Cloudflare Access already gates every request to this project (functions/
-// _middleware.js verifies the JWT), so this route inherits authentication and adds
-// only the request screen and the rate limit. The request body is never logged.
+// This route inherits its authentication from functions/_middleware.ts and adds only
+// the request screen and the rate limit. WHICH gate it inherits depends on how the
+// project is configured: with no login store bound it is Cloudflare Access, as it has
+// always been; with one bound it is a portal session, because /api/claude/ is an API
+// path and is not one of the self-authorizing ones. Either way nobody anonymous gets
+// this far. The request body is never logged.
 
 // Minimal shape of the Pages Functions context - typed locally so the Functions
 // surface needs no dependency of its own (see the note in wrangler.toml about
@@ -28,7 +31,11 @@ interface ProxyEnv {
 interface ProxyContext {
   request: Request;
   env: ProxyEnv;
+  /** Handed down by _middleware.ts. See identify() for why it is not a header read. */
+  data?: PortalData;
 }
+
+import type { PortalData } from '../../../lib/env';
 
 const UPSTREAM = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -136,17 +143,25 @@ export function isRateLimited(identity: string, now: number, calls = recentCalls
   return false;
 }
 
-// Access injects the authenticated email; the IP is the fallback for a request
-// that somehow reached here without one.
-function identify(request: Request): string {
-  return request.headers.get('Cf-Access-Authenticated-User-Email')
-    || request.headers.get('CF-Connecting-IP')
-    || 'unknown';
+/**
+ * Who this call is charged against, most specific first: the portal account holding
+ * the session, then the email out of a VERIFIED Access token, then the IP.
+ *
+ * It used to read Cf-Access-Authenticated-User-Email straight off the request. That
+ * was fine while Cloudflare Access sat in front of the origin and stripped any
+ * client-supplied copy. Once app login stands in front instead, the header is one
+ * anybody can send, and it is absent for everyone who arrives without Access - which
+ * would have collapsed every caller into a single shared bucket keyed 'unknown'.
+ */
+export function identify(request: Request, data?: PortalData): string {
+  if (data?.sessionUserId) return `user:${data.sessionUserId}`;
+  if (data?.accessEmail) return `access:${data.accessEmail}`;
+  return `ip:${request.headers.get('CF-Connecting-IP') || 'unknown'}`;
 }
 
 // One handler for every method: Pages resolves `onRequest` for all of them, and
 // two exported handlers would leave which one runs a POST up to the runtime.
-export const onRequest = async ({ request, env }: ProxyContext): Promise<Response> => {
+export const onRequest = async ({ request, env, data }: ProxyContext): Promise<Response> => {
   if (request.method !== 'POST') {
     return json({ error: { type: 'method_not_allowed', message: 'This endpoint accepts POST only.' } }, 405);
   }
@@ -156,7 +171,7 @@ export const onRequest = async ({ request, env }: ProxyContext): Promise<Respons
     return json({ error: { type: 'not_configured', message: 'The assistant is not configured on this server yet.' } }, 503);
   }
 
-  if (isRateLimited(identify(request), Date.now())) {
+  if (isRateLimited(identify(request, data), Date.now())) {
     return json(
       { error: { type: 'rate_limited', message: 'Too many assistant requests. Wait a minute and try again.' } },
       429,

@@ -1,10 +1,16 @@
 // Who is calling, and may they do this.
 //
 // Two identities are in play and they are not the same thing. Cloudflare Access says
-// which PERSON reached the origin, and functions/_middleware.js has already refused
-// the request if that answer is nobody. A portal session says which ACCOUNT they are
-// signed into. Access is the building's front door; a portal session is the desk you
-// are allowed to sit at.
+// which PERSON reached the origin; a portal session says which ACCOUNT they are signed
+// into. Access is the building's front door; a portal session is the desk you are
+// allowed to sit at.
+//
+// Which of the two is actually load-bearing depends on configuration, and that is
+// functions/_middleware.ts's business, not this file's. Before the login store is
+// bound, Access gates everything and no request reaches here without one. After it is
+// bound, Access may be relaxed entirely and the session is the gate. So nothing below
+// may ASSUME an Access identity is present - `accessEmail` returning null is an
+// ordinary case, not a misconfiguration.
 import { hashSessionToken } from './password';
 import { hasExpired } from './authPolicy';
 import { readCookie, SESSION_COOKIE, CHANGE_COOKIE } from './http';
@@ -46,9 +52,16 @@ export async function resolveSession(
   return { user, purpose, tokenHash };
 }
 
-/** The verified Access email, put there by Cloudflare in front of the origin. */
-export function accessEmail(request: Request): string | null {
-  return request.headers.get('Cf-Access-Authenticated-User-Email');
+/**
+ * The Access email _middleware.ts verified out of the signed token, or null.
+ *
+ * Deliberately NOT a read of Cf-Access-Authenticated-User-Email. Cloudflare strips a
+ * client-supplied copy of that header only while Access sits in front of the origin;
+ * once Access is relaxed it is a header anyone can send, and the first-run admin path
+ * below turns on this value.
+ */
+export function accessEmail(data?: { accessEmail: string | null }): string | null {
+  return data?.accessEmail ?? null;
 }
 
 export type AdminDecision =
@@ -65,7 +78,7 @@ export type AdminDecision =
  * authenticated into the site, so it is not an anonymous door.
  */
 export async function decideAdmin(
-  request: Request, store: UserStore, now: Date,
+  request: Request, store: UserStore, now: Date, data?: { accessEmail: string | null },
 ): Promise<AdminDecision> {
   const context = await resolveSession(request, store, 'session', now);
   if (context && context.user.role === 'admin') {
@@ -74,7 +87,7 @@ export async function decideAdmin(
 
   const everyone = await store.listUsers();
   if (everyone.length === 0) {
-    if (!accessEmail(request)) {
+    if (!accessEmail(data)) {
       return { kind: 'refused', reason: 'The first account can only be made from inside the Access gate.' };
     }
     return { kind: 'allowed', by: 'first-run' };

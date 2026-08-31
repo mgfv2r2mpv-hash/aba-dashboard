@@ -11,7 +11,24 @@ export interface PortalEnv {
   PORTAL_DB?: D1Like;
 }
 
+/**
+ * What _middleware.ts hands down. `accessEmail` comes out of a VERIFIED Access token,
+ * never off the raw Cf-Access-Authenticated-User-Email header: Cloudflare only strips
+ * a client-supplied copy of that header while Access is in front of the origin, and
+ * relaxing Access is exactly what app login is for.
+ */
+export interface PortalData {
+  accessEmail: string | null;
+  /**
+   * The account id behind the portal session cookie, or null. The middleware has to
+   * resolve the session anyway to decide the gate, so passing the answer down costs
+   * nothing and saves every endpoint a second lookup.
+   */
+  sessionUserId: string | null;
+}
+
 export interface PortalContext {
   request: Request;
   env: PortalEnv;
+  data?: PortalData;
 }

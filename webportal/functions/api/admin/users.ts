@@ -18,13 +18,13 @@ function isRole(value: unknown): value is UserRole {
   return typeof value === 'string' && (ROLES as readonly string[]).includes(value);
 }
 
-export const onRequest = async ({ request, env }: PortalContext): Promise<Response> => {
+export const onRequest = async ({ request, env, data }: PortalContext): Promise<Response> => {
   if (!env.PORTAL_DB) return fail(503, 'Sign-in is not configured on this server yet.');
 
   const store = new D1UserStore(env.PORTAL_DB);
   const now = new Date();
 
-  const decision = await decideAdmin(request, store, now);
+  const decision = await decideAdmin(request, store, now, data);
   if (decision.kind === 'refused') return fail(403, decision.reason);
 
   if (request.method === 'GET') {

@@ -2,9 +2,10 @@ import { defineConfig, configDefaults } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
-// Two suites, one runner. The app suite has always been here; the portal suite is
+// Three suites, one runner. The app suite has always been here. The portal suite is
 // new, and it needs its own aliases because webportal/src reaches the shared code
 // through '@shared' and stubs Capacitor out (there is no native layer on the web).
+// The portal-functions suite is server code and shares neither.
 const shared = {
   globals: true,
   environment: 'jsdom' as const,
@@ -61,16 +62,30 @@ export default defineConfig({
           ...shared,
           name: 'portal',
           setupFiles: './webportal/src/test/setup.ts',
-          // The Pages Functions tests live in webportal/functions-tests, deliberately
-          // NOT under webportal/functions. Cloudflare compiles every file it finds in
-          // the functions directory into the deployed Worker, so a test file sitting
-          // there ships to the edge and can take the whole deploy down - which is what
-          // userStore.sqlite.test.ts did, with its top-level await for node:sqlite.
-          // The tests still cover the code under functions/; they import across.
-          include: [
-            'webportal/src/**/*.{test,spec}.{js,ts,jsx,tsx}',
-            'webportal/functions-tests/**/*.{test,spec}.{js,ts,jsx,tsx}',
-          ],
+          include: ['webportal/src/**/*.{test,spec}.{js,ts,jsx,tsx}'],
+        },
+      },
+      {
+        // The Pages Functions are server code, so their tests run in the node
+        // environment rather than jsdom, and load none of the browser setup above.
+        //
+        // That is not cosmetic. vitest maps jsdom to vite's CLIENT environment, where
+        // noExternal is on and a Node builtin cannot be bundled at all. Under it,
+        // userStore.sqlite.test.ts died on the specifier - 'Cannot bundle Node.js
+        // built-in node:sqlite' - before its own try/catch and describe.skipIf could
+        // run, so the skip its author wrote for Node 20 never fired. Under node the
+        // import stays external: it skips on Node 20, which CI pins, and runs against
+        // real SQLite on Node 22 and up.
+        //
+        // These files live in webportal/functions-tests, deliberately NOT under
+        // webportal/functions. Cloudflare compiles every file it finds in the functions
+        // directory into the deployed Worker, so a test file sitting there ships to the
+        // edge - and this one's top-level await took a whole deploy down.
+        test: {
+          globals: true,
+          environment: 'node',
+          name: 'portal-functions',
+          include: ['webportal/functions-tests/**/*.{test,spec}.{js,ts}'],
         },
       },
     ],

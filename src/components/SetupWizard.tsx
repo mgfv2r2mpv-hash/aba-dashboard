@@ -177,7 +177,7 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
               Set up your schedule
             </h2>
             <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', margin: '6px 0 0' }}>
-              Everything on one page. Nothing here is permanent — all of it stays editable in Admin
+              Everything on one page. Nothing here is permanent - all of it stays editable in Admin
               afterwards.
             </p>
           </div>
@@ -213,7 +213,7 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
           />
         </Row>
 
-        <Disclosure summary="Policy settings — supervision percentages, parent training, cancellation notice">
+        <Disclosure summary="Policy settings - supervision percentages, parent training, cancellation notice">
           <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
             These are pre-filled to BACB-aligned defaults and stay editable in Admin. Open this only if
             your practice differs from the defaults.
@@ -300,7 +300,7 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
         <SectionBand>Cases</SectionBand>
 
         <Callout tone="info" title="Use an anonymised identifier.">
-          Initials, a case code, or a first name and last initial — whatever you would write on a
+          Initials, a case code, or a first name and last initial - whatever you would write on a
           whiteboard. SAssi links every session to a hidden ID, so you can rename a case at any time
           without breaking anything.
         </Callout>
@@ -353,7 +353,7 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
         <SectionBand>Staff</SectionBand>
 
         <Row {...rowProps} label={`Technicians (${technicians.length})`}
-          explainer="Same naming guidance as cases. Tick the ones who are credentialed RBTs — that changes the supervision maths.">
+          explainer="Same naming guidance as cases. Tick the ones who are credentialed RBTs - that changes the supervision maths.">
           <div>
             {technicians.map(t => (
               <div key={t.id} style={entryCard}>
@@ -395,7 +395,7 @@ export default function SetupWizard({ onComplete, onCancel, initialData }: Setup
                           }}
                           style={{ ...inputStyle, flex: 2, width: 'auto' }}
                         >
-                          <option value="">— Pick a case —</option>
+                          <option value="">Pick a case</option>
                           {clients.map(c => (
                             <option key={c.id} value={c.id}>{c.name || 'Unnamed case'}</option>
                           ))}

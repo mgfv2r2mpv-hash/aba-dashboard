@@ -65,7 +65,7 @@ export function checkIdentifier(raw: string): IdentifierVerdict {
     const initials = words.map(w => w[0]).join('');
     return {
       concern: 'full-name',
-      message: 'That looks like a full name. Nothing identifying is ever sent over the network either way — this is about what sits on your screen and in your backup file.',
+      message: 'That looks like a full name. Nothing identifying is ever sent over the network either way - this is about what sits on your screen and in your backup file.',
       suggestion: initials.length >= 2 ? initials : null,
     };
   }

@@ -38,7 +38,7 @@ const TOOL_REPLY = {
   stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 },
 };
 
-describe('findPhiShape — what token space never contains', () => {
+describe('findPhiShape - what token space never contains', () => {
   it('catches a raw uuid, which is what an unmapped id looks like', () => {
     expect(findPhiShape('{"client":"6f1c0e2a-1111-4222-8333-444455556666"}')).toBe('uuid');
   });
@@ -54,7 +54,7 @@ describe('findPhiShape — what token space never contains', () => {
   });
 });
 
-describe('findRequestFault — the request the proxy will forward', () => {
+describe('findRequestFault - the request the proxy will forward', () => {
   const valid = { model: 'claude-sonnet-4-6', max_tokens: 8000, messages: [{ role: 'user', content: 'hi' }] };
 
   it('accepts a well-formed request', () => {
@@ -80,7 +80,7 @@ describe('findRequestFault — the request the proxy will forward', () => {
   });
 });
 
-describe('isRateLimited — one identity, one window', () => {
+describe('isRateLimited - one identity, one window', () => {
   it('allows a burst and then refuses, and forgets once the window passes', () => {
     const calls = new Map<string, number[]>();
     const at = 1_000_000;

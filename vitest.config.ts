@@ -61,13 +61,15 @@ export default defineConfig({
           ...shared,
           name: 'portal',
           setupFiles: './webportal/src/test/setup.ts',
-          // `functions` is in here for the same reason it is in webportal/tsconfig.json:
-          // the Pages Functions bundler is otherwise the only thing that ever looks at
-          // that directory, and it looks at deploy time, where a failure is silent
-          // until the site is down. The login store lives there.
+          // The Pages Functions tests live in webportal/functions-tests, deliberately
+          // NOT under webportal/functions. Cloudflare compiles every file it finds in
+          // the functions directory into the deployed Worker, so a test file sitting
+          // there ships to the edge and can take the whole deploy down - which is what
+          // userStore.sqlite.test.ts did, with its top-level await for node:sqlite.
+          // The tests still cover the code under functions/; they import across.
           include: [
             'webportal/src/**/*.{test,spec}.{js,ts,jsx,tsx}',
-            'webportal/functions/**/*.{test,spec}.{js,ts,jsx,tsx}',
+            'webportal/functions-tests/**/*.{test,spec}.{js,ts,jsx,tsx}',
           ],
         },
       },

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { D1UserStore, DuplicateEmailError, type PortalUser } from './userStore';
-import { FakeD1 } from './fakeD1';
-import { hashPassword, verifyPassword, generateTempPassword } from './password';
-import { decideLogin, expiryFrom, hasExpired } from './authPolicy';
+import { D1UserStore, DuplicateEmailError, type PortalUser } from '../../functions/lib/userStore';
+import { FakeD1 } from '../../functions/lib/fakeD1';
+import { hashPassword, verifyPassword, generateTempPassword } from '../../functions/lib/password';
+import { decideLogin, expiryFrom, hasExpired } from '../../functions/lib/authPolicy';
 
 const FAST = 1_000;
 const NOW = new Date('2026-08-30T12:00:00.000Z');

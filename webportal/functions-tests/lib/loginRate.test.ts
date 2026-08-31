@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isRateLimited, clearRate, resetRateLimits,
   RATE_MAX_ATTEMPTS, RATE_WINDOW_MS, RATE_KEYS_MAX,
-} from './loginRate';
+} from '../../functions/lib/loginRate';
 
 describe('isRateLimited', () => {
   it('allows exactly the budget, then refuses', () => {

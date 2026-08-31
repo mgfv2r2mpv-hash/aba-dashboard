@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { ClaudeScheduler } from '@shared/claudeScheduler';
 import type { ScheduleData } from '@shared/types';
-import { findPhiShape, findRequestFault, isRateLimited } from '../../functions/api/claude/v1/messages';
+import { findPhiShape, findRequestFault, isRateLimited, identify } from '../../functions/api/claude/v1/messages';
 
 const data: ScheduleData = {
   id: 'sched-1', version: 2,
@@ -89,6 +89,53 @@ describe('isRateLimited — one identity, one window', () => {
     expect(isRateLimited('bcba@example.com', at, calls)).toBe(true);
     expect(isRateLimited('someone.else@example.com', at, calls)).toBe(false);
     expect(isRateLimited('bcba@example.com', at + 60_001, calls)).toBe(false);
+  });
+});
+
+describe('identify - whose bucket a proxied call is charged to', () => {
+  const withHeaders = (headers: Record<string, string>) =>
+    new Request('https://sassi.nooutco.me/api/claude/v1/messages', { headers });
+
+  it('ignores a Cf-Access header the client supplied itself', () => {
+    // The whole reason this function stopped reading headers. Cloudflare strips a
+    // client-supplied copy only while Access is in front of the origin, and app
+    // login is precisely the change that takes it out of the way.
+    const spoofed = withHeaders({
+      'Cf-Access-Authenticated-User-Email': 'boss@clinic.org',
+      'CF-Connecting-IP': '203.0.113.9',
+    });
+    expect(identify(spoofed)).toBe('ip:203.0.113.9');
+    expect(identify(spoofed)).not.toContain('boss@clinic.org');
+  });
+
+  it('charges the portal account when there is a session', () => {
+    const id = identify(withHeaders({ 'CF-Connecting-IP': '203.0.113.9' }), {
+      accessEmail: 'boss@clinic.org', sessionUserId: 'u-1',
+    });
+    expect(id).toBe('user:u-1');
+  });
+
+  it('falls back to the verified Access email, then to the IP', () => {
+    const request = withHeaders({ 'CF-Connecting-IP': '203.0.113.9' });
+    expect(identify(request, { accessEmail: 'boss@clinic.org', sessionUserId: null }))
+      .toBe('access:boss@clinic.org');
+    expect(identify(request, { accessEmail: null, sessionUserId: null }))
+      .toBe('ip:203.0.113.9');
+  });
+
+  it('keeps two signed-in people in separate buckets behind one office IP', () => {
+    // The failure this replaces: with Access relaxed, the old identify() found no
+    // header on anybody and returned the literal 'unknown' for every caller, so one
+    // busy user spent everyone else's fifteen calls a minute.
+    const at = 1_000_000;
+    const calls = new Map<string, number[]>();
+    const office = withHeaders({ 'CF-Connecting-IP': '203.0.113.9' });
+    const one = identify(office, { accessEmail: null, sessionUserId: 'u-1' });
+    const two = identify(office, { accessEmail: null, sessionUserId: 'u-2' });
+
+    Array.from({ length: 15 }, () => isRateLimited(one, at, calls));
+    expect(isRateLimited(one, at, calls)).toBe(true);
+    expect(isRateLimited(two, at, calls)).toBe(false);
   });
 });
 

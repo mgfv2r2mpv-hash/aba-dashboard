@@ -30,7 +30,7 @@ export function BuildResultPanel({ result, hasStagedProposal, reviewStep, noAuth
   const nextStep = hasStagedProposal
     ? (reviewStep ?? 'Review the proposal in the tray, then Accept.')
     : allNoAuth
-      ? (noAuthStep ?? 'Nothing was placed — no case has an authorization with weekly direct hours yet. Add them under Caseload → Auths, then build again.')
+      ? (noAuthStep ?? 'Nothing was placed - no case has an authorization with weekly direct hours yet. Add them under Caseload → Auths, then build again.')
       : blocks.length > 0
         ? 'Nothing could be placed — see the blocks below.'
         : 'Nothing to place — everything is already at target.';

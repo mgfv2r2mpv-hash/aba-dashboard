@@ -368,8 +368,8 @@ export function buildSchedule(data: ScheduleData, config: BuilderConfig, now: Da
           clientId: client.id, clientName: client.name, directGapRemaining: 0,
           bindingConstraint: 'no-authorization',
           detail: auth
-            ? `${client.name}'s authorization has no weekly direct hours — set one on the authorization.`
-            : `${client.name} has no authorization covering the week of ${config.weekStart} — add an authorization for that span.`,
+            ? `${client.name}'s authorization has no weekly direct hours - set one on the authorization.`
+            : `${client.name} has no authorization covering the week of ${config.weekStart} - add an authorization for that span.`,
         });
       }
       continue; // no authorization/target → nothing to build for this case

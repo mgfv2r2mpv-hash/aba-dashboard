@@ -126,7 +126,7 @@ export default function BuildPanel({
             result={preview.result}
             hasStagedProposal={preview.added > 0}
             reviewStep="Look it over on the calendar's Case and BT views, then apply it below."
-            noAuthStep="Nothing was placed — no case has an authorization with weekly direct hours yet. Add them under Admin → Auths, then build again."
+            noAuthStep="Nothing was placed - no case has an authorization with weekly direct hours yet. Add them under Admin → Auths, then build again."
             onDismiss={() => setPreview(null)}
           />
 

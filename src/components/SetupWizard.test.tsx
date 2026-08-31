@@ -21,7 +21,7 @@ async function enterOneCaseAndOneTech(caseName: string, techName: string) {
   return user;
 }
 
-describe('setup — one page, and the identity boundary it enforces', () => {
+describe('setup - one page, and the identity boundary it enforces', () => {
   it('renders every section at once, with no step navigation', () => {
     render(<SetupWizard onComplete={vi.fn()} onCancel={vi.fn()} />);
     expect(screen.getByText('Practice')).toBeInTheDocument();

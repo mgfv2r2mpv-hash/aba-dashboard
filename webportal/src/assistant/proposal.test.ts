@@ -21,7 +21,7 @@ const data: ScheduleData = {
   lastModified: '2026-07-01T00:00:00.000Z',
 };
 
-describe('describeOp — one sentence per change', () => {
+describe('describeOp - one sentence per change', () => {
   it('names the case, the technician and the span on an add', () => {
     const op: WishOp = { op: 'add', type: 'supervision', client: 'c1', technician: 't1', start: '2026-09-10T13:30:00', end: '2026-09-10T14:30:00' };
     const line = describeOp(op, data);
@@ -48,7 +48,7 @@ describe('describeOp — one sentence per change', () => {
   });
 });
 
-describe('buildProposal — the schedule it would produce', () => {
+describe('buildProposal - the schedule it would produce', () => {
   it('counts sessions gained without touching the schedule it was given', () => {
     const ops: WishOp[] = [
       { op: 'add', type: 'supervision', client: 'c1', technician: 't1', start: '2026-09-10T13:30:00', end: '2026-09-10T14:30:00' },

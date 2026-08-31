@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideGate, isApiPath, isSelfAuthorizingApiPath } from './gate';
+import { decideGate, isApiPath, isSelfAuthorizingApiPath } from '../../functions/lib/gate';
 
 const base = { storeConfigured: true, hasAccessIdentity: false, hasPortalSession: false };
 

@@ -12,8 +12,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { D1UserStore, DuplicateEmailError, type D1Like, type D1StatementLike } from './userStore';
-import { hashPassword } from './password';
+import { D1UserStore, DuplicateEmailError, type D1Like, type D1StatementLike } from '../../functions/lib/userStore';
+import { hashPassword } from '../../functions/lib/password';
 
 let DatabaseSync: (new (path: string) => SqliteDb) | null = null;
 try {

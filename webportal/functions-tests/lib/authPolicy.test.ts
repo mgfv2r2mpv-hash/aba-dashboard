@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   checkNewPassword, describeRejection, isUsableEmail, foldEmail, decideLogin,
   hasExpired, expiryFrom, MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH,
-} from './authPolicy';
+} from '../../functions/lib/authPolicy';
 
 describe('checkNewPassword', () => {
   it('accepts a password at and above the minimum', () => {

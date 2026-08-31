@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   hashPassword, verifyPassword, generateTempPassword,
   hashSessionToken, generateSessionToken, PBKDF2_ITERATIONS,
-} from './password';
+} from '../../functions/lib/password';
 
 // The real cost parameter is deliberately slow. Tests that only care about the
 // algorithm pass a small one; the two that care about the shipped constant say so.

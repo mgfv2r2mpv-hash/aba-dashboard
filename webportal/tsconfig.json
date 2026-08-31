@@ -29,6 +29,11 @@
   // `functions` is in here on purpose: the Pages Functions bundler is the only
   // other thing that compiles this directory, and it does so at deploy time, where
   // a failure is silent until the site is already down.
+  //
+  // Nothing that is not a Function may live under `functions`. Cloudflare compiles
+  // EVERY file it finds there into the deployed Worker, so the tests sit in
+  // ./functions-tests and import across. Putting one back here takes the deploy
+  // down, which is how the login store's sqlite test broke the portal.
   "include": ["src", "functions"],
   // Tests import vitest, which the Pages build never installs. They are
   // typechecked by tsconfig.test.json instead - see npm run typecheck:test.

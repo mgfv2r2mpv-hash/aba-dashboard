@@ -10,6 +10,7 @@
   "include": [
     "src",
     "functions",
+    "functions-tests",
     "../src/test"
   ],
   "exclude": []

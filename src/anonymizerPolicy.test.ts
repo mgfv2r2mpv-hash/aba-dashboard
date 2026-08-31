@@ -27,7 +27,7 @@ const data: ScheduleData = {
   lastModified: '2026-07-01T00:00:00.000Z',
 };
 
-describe('entityToken — the lookup fails closed', () => {
+describe('entityToken - the lookup fails closed', () => {
   const map = buildAnonymizationMap(data);
 
   it('tokenizes an entity the map knows, by id or by name', () => {
@@ -48,7 +48,7 @@ describe('entityToken — the lookup fails closed', () => {
   });
 });
 
-describe('anonymizeSchedule — free text and company detail stay home', () => {
+describe('anonymizeSchedule - free text and company detail stay home', () => {
   const anon = anonymizeSchedule(data, buildAnonymizationMap(data));
 
   it('keeps the blackout day and whose it is, and drops the reason', () => {
@@ -69,7 +69,7 @@ describe('anonymizeSchedule — free text and company detail stay home', () => {
   });
 });
 
-describe('buildSassiSystem — the prompt that actually leaves', () => {
+describe('buildSassiSystem - the prompt that actually leaves', () => {
   const prompt = new ClaudeScheduler('test-key', data).buildSassiSystem();
 
   it('never carries a blackout reason', () => {

@@ -113,7 +113,7 @@ export function SassiChat({ session, model, onToggleModel, footnote }: SassiChat
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-        {footnote ?? 'Proposed sessions preview on your calendar and in the tray above — check the grade, then Accept there. Ask “why” anytime.'}
+        {footnote ?? 'Proposed sessions preview on your calendar and in the tray above - check the grade, then Accept there. Ask “why” anytime.'}
       </div>
     </section>
   );

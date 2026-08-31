@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { checkIdentifier, isUuid, findIdentityLeaks } from './identifierPolicy';
 import { ScheduleData, Client, Technician, Appointment } from './types';
 
-describe('checkIdentifier — coaching, never blocking', () => {
+describe('checkIdentifier - coaching, never blocking', () => {
   it('says nothing about a case code', () => {
     expect(checkIdentifier('SB-04').concern).toBeNull();
   });
@@ -101,7 +101,7 @@ const schedule = (over: Partial<ScheduleData>): ScheduleData => ({
   ...over,
 });
 
-describe('findIdentityLeaks — the boundary the clinician cannot opt out of', () => {
+describe('findIdentityLeaks - the boundary the clinician cannot opt out of', () => {
   it('holds for a schedule whose links are all uuids', () => {
     const c = client('SB-04');
     const t = tech('TT', [{ clientId: c.id, hoursPerWeek: 10, billable: true }]);

@@ -2,13 +2,13 @@
 // an admin makes an account with a temp password, that password gets the person to
 // the change screen and nowhere else, and what they pick then persists.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { onRequest as login } from './auth/login';
-import { onRequest as password } from './auth/password';
-import { onRequest as session } from './auth/session';
-import { onRequest as users } from './admin/users';
-import { FakeD1 } from '../lib/fakeD1';
-import { resetRateLimits } from '../lib/loginRate';
-import type { PortalEnv } from '../lib/env';
+import { onRequest as login } from '../../functions/api/auth/login';
+import { onRequest as password } from '../../functions/api/auth/password';
+import { onRequest as session } from '../../functions/api/auth/session';
+import { onRequest as users } from '../../functions/api/admin/users';
+import { FakeD1 } from '../../functions/lib/fakeD1';
+import { resetRateLimits } from '../../functions/lib/loginRate';
+import type { PortalEnv } from '../../functions/lib/env';
 
 // What _middleware.ts hands down after verifying the Access token. NOT a header:
 // see the test at the bottom of this file for why that distinction is load-bearing.

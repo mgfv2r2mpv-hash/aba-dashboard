@@ -24,6 +24,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The portal suite aliases '@anthropic-ai/sdk' to
+      # webportal/node_modules/@anthropic-ai/sdk, deliberately, so it exercises the
+      # 0.53 the portal ships rather than the app's 0.91. The root has no npm
+      # workspaces, so `npm ci` above never creates that directory and the alias
+      # resolves to nothing. Same hole #164 closed in the type-check gate.
+      - name: Install portal dependencies
+        run: npm ci --prefix webportal
+
       - name: Run unit tests
         run: npm run test:coverage
 

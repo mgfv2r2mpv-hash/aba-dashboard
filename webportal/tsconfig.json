@@ -30,12 +30,28 @@
   // other thing that compiles this directory, and it does so at deploy time, where
   // a failure is silent until the site is already down.
   //
-  // Nothing that is not a Function may live under `functions`. Cloudflare compiles
-  // EVERY file it finds there into the deployed Worker, so the tests sit in
-  // ./functions-tests and import across. Putting one back here takes the deploy
-  // down, which is how the login store's sqlite test broke the portal.
+  // NO TEST FILE MAY SIT INSIDE A DIRECTORY NAMED HERE. Two separate build stages
+  // kill the deploy over this, and closing one leaves the other standing, so both
+  // are written down.
+  //
+  // `tsc --noEmit` runs first. Cloudflare sets this project's root directory to
+  // `webportal`, so the only `npm install` that runs is the one in here and no
+  // repo-root node_modules exists. A test file imports vitest, tsc has nothing to
+  // resolve it against, and the typecheck fails. A laptop carries that root tree
+  // and CI carries that root tree, so both stay green while every deploy dies,
+  // which is how this hid for three days.
+  //
+  // The Pages Functions bundler runs second, and it is the stage that actually took
+  // sassi.nooutco.me down. Cloudflare compiles EVERY file it finds under `functions`
+  // into the deployed Worker, tests included. userStore.sqlite.test.ts carried a
+  // top-level `await import('node:sqlite')`, the es2020 target above does not allow
+  // one, and wrangler refused to build the Worker. No tsconfig setting reaches that
+  // stage: the file has to leave the directory.
+  //
+  // So the Function tests live in ./functions-tests and import across.
+  // functions-tests/tsconfigSeam.test.ts fails if one lands back under `functions`.
   "include": ["src", "functions"],
-  // Tests import vitest, which the Pages build never installs. They are
-  // typechecked by tsconfig.test.json instead - see npm run typecheck:test.
+  // The src tests predate that rule and stay where they are, excluded by name.
+  // tsconfig.test.json is what typechecks them - see npm run typecheck:test.
   "exclude": ["src/test", "src/**/*.test.ts", "src/**/*.test.tsx"]
 }

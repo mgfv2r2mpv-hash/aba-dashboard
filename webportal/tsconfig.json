@@ -30,13 +30,25 @@
   // other thing that compiles this directory, and it does so at deploy time, where
   // a failure is silent until the site is already down.
   //
-  // NO TEST FILE MAY SIT INSIDE A DIRECTORY NAMED HERE. Cloudflare builds this
-  // project with the root directory set to `webportal`, so the only `npm install`
-  // that runs is the one in here and there is no repo-root node_modules at all.
-  // A test imports vitest, tsc resolves it by walking up to the root tree, and the
-  // build dies. A laptop has that tree and CI has that tree, so both stay green
-  // while every deploy fails, which is how it went unnoticed for three days. The
-  // Function tests live in ./functions-tests and import across;
+  // NO TEST FILE MAY SIT INSIDE A DIRECTORY NAMED HERE. Two separate build stages
+  // kill the deploy over this, and closing one leaves the other standing, so both
+  // are written down.
+  //
+  // `tsc --noEmit` runs first. Cloudflare sets this project's root directory to
+  // `webportal`, so the only `npm install` that runs is the one in here and no
+  // repo-root node_modules exists. A test file imports vitest, tsc has nothing to
+  // resolve it against, and the typecheck fails. A laptop carries that root tree
+  // and CI carries that root tree, so both stay green while every deploy dies,
+  // which is how this hid for three days.
+  //
+  // The Pages Functions bundler runs second, and it is the stage that actually took
+  // sassi.nooutco.me down. Cloudflare compiles EVERY file it finds under `functions`
+  // into the deployed Worker, tests included. userStore.sqlite.test.ts carried a
+  // top-level `await import('node:sqlite')`, the es2020 target above does not allow
+  // one, and wrangler refused to build the Worker. No tsconfig setting reaches that
+  // stage: the file has to leave the directory.
+  //
+  // So the Function tests live in ./functions-tests and import across.
   // functions-tests/tsconfigSeam.test.ts fails if one lands back under `functions`.
   "include": ["src", "functions"],
   // The src tests predate that rule and stay where they are, excluded by name.

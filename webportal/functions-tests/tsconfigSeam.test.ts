@@ -5,14 +5,23 @@ import { fileURLToPath } from 'node:url';
 
 // The seam that took sassi.nooutco.me down for three days, pinned.
 //
-// webportal/package.json builds with `tsc --noEmit && vite build`, and tsconfig.json
-// includes `functions`. Cloudflare builds this project with the root directory set to
-// `webportal`, so the only `npm install` that runs is the one inside it, and there is
-// no repo-root node_modules at all. A test file inside an included directory imports
-// vitest, tsc resolves that by walking up to the root tree, and the build fails.
+// A test file under webportal/functions breaks the deploy at two separate stages, and
+// this test guards the directory rather than either stage.
 //
-// A laptop has the root tree. CI has the root tree. Both stay green while every deploy
-// fails, which is why this needs a test rather than a comment.
+// webportal/package.json builds with `tsc --noEmit && vite build`, and tsconfig.json
+// includes `functions`. Cloudflare sets this project's root directory to `webportal`,
+// so the only `npm install` that runs is the one inside it and no repo-root
+// node_modules exists. A test file in an included directory imports vitest, tsc finds
+// nothing to resolve it against, and the typecheck fails. A laptop carries that root
+// tree and CI carries that root tree, so tsc resolves the import for both of them and
+// both stay green while every deploy dies. That is why this needs a test and not a
+// comment.
+//
+// The Pages Functions bundler then compiles every file it finds under `functions` into
+// the deployed Worker. userStore.sqlite.test.ts carried a top-level
+// `await import('node:sqlite')`, the es2020 target does not allow one, and wrangler
+// refused to build the Worker. No tsconfig setting reaches that stage, so the rule is
+// the directory itself: keep the tests out of it.
 const PORTAL = dirname(dirname(fileURLToPath(import.meta.url)));
 const TEST_SUFFIXES = ['.test.ts', '.test.tsx'];
 

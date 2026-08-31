@@ -78,10 +78,13 @@ export default defineConfig({
         // real SQLite on Node 22 and up.
         //
         // These files live in webportal/functions-tests, deliberately NOT under
-        // webportal/functions. webportal/tsconfig.json includes that directory, the
-        // Pages build typechecks it with no repo-root node_modules to resolve vitest
-        // from, and a test file sitting there fails every deploy while this suite and
-        // CI stay green. webportal/functions-tests/tsconfigSeam.test.ts pins that.
+        // webportal/functions, and two build stages enforce that. The Pages Functions
+        // bundler compiles every file it finds in the functions directory into the
+        // deployed Worker, so this file's top-level await took a whole deploy down.
+        // Before that, `tsc --noEmit` fails on the vitest import, because Cloudflare
+        // builds with the root directory set to webportal and no repo-root
+        // node_modules exists there. webportal/tsconfig.json spells both out, and
+        // webportal/functions-tests/tsconfigSeam.test.ts pins the rule.
         test: {
           globals: true,
           environment: 'node',

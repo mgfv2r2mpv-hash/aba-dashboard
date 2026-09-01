@@ -43,6 +43,12 @@ export interface NewUser {
   readonly passwordHash: string;
   /** Admin-issued passwords arrive spent; a person setting their own does not. */
   readonly mustChangePassword: boolean;
+  /**
+   * Whether the row lands turned off. An invited account is created disabled and has
+   * no usable password until an admin sends one, so the window between "the address
+   * was typed" and "the person was told" is not a window in which anybody can sign in.
+   */
+  readonly disabled?: boolean;
 }
 
 export class DuplicateEmailError extends Error {
@@ -172,7 +178,7 @@ export class D1UserStore implements UserStore {
       email: input.email.trim(),
       role: input.role,
       mustChangePassword: input.mustChangePassword,
-      disabledAt: null,
+      disabledAt: input.disabled ? stamp : null,
       createdAt: stamp,
       passwordSetAt: stamp,
       lastLoginAt: null,
@@ -193,7 +199,7 @@ export class D1UserStore implements UserStore {
           input.passwordHash,
           input.mustChangePassword ? 1 : 0,
           user.role,
-          null,
+          user.disabledAt,
           stamp,
           stamp,
           null,

@@ -270,12 +270,18 @@ export interface Issued {
   readonly tempPassword: string;
 }
 
-function asIssued(body: unknown): Issued {
-  if (!isRecord(body) || typeof body.tempPassword !== 'string') throw unreadable();
-  const user = asManagedUser(body.user);
-  if (!user) throw unreadable();
-  return { user, tempPassword: body.tempPassword };
-}
+/**
+ * What making an account produced.
+ *
+ * Two shapes because there are two situations, not because the server is inconsistent.
+ * An ordinary new account is INVITED: it lands turned off holding a password nobody
+ * has, and becomes usable when an admin sends a temporary one to the address. The very
+ * first admin cannot work that way - there is nobody to send it and nobody who could
+ * turn the account on - so first-run still hands the password straight back.
+ */
+export type Created =
+  | { readonly kind: 'issued'; readonly user: ManagedUser; readonly tempPassword: string }
+  | { readonly kind: 'invited'; readonly user: ManagedUser };
 
 /**
  * Makes an account.
@@ -284,8 +290,29 @@ function asIssued(body: unknown): Issued {
  * server forces 'admin', because the account that opens the store has to be able to
  * make the next one. Read the role off the returned user rather than off the request.
  */
-export async function createUser(email: string, role: UserRole): Promise<Issued> {
-  return asIssued(await post('/api/admin/users', { email, role }));
+export async function createUser(email: string, role: UserRole): Promise<Created> {
+  const body = await post('/api/admin/users', { email, role });
+  if (!isRecord(body)) throw unreadable();
+  const user = asManagedUser(body.user);
+  if (!user) throw unreadable();
+  return typeof body.tempPassword === 'string'
+    ? { kind: 'issued', user, tempPassword: body.tempPassword }
+    : { kind: 'invited', user };
+}
+
+/**
+ * The shape of an email address, matched the same way the server matches it.
+ *
+ * Deliberately loose, and the server's comment says why: the store cares that two
+ * people cannot claim the same address, not that it is deliverable, and a strict
+ * pattern only ever locks out somebody with a legitimate odd address. This copy exists
+ * so the form can refuse before a round trip, never so the server can trust it.
+ */
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function isValidEmail(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= 320 && EMAIL_SHAPE.test(trimmed);
 }
 
 async function patch(payload: Record<string, unknown>): Promise<unknown> {
@@ -300,8 +327,34 @@ export async function setUserDisabled(userId: string, disabled: boolean): Promis
   await patch({ userId, disabled });
 }
 
-export async function reissueTempPassword(userId: string): Promise<Issued> {
-  return asIssued(await patch({ userId, reissueTempPassword: true }));
+/**
+ * What sending a temporary password produced.
+ *
+ * 'sent' carries no password on purpose: it went to one inbox and was never on this
+ * screen. 'show' is the fallback, for when mail is not configured on the server or the
+ * send failed - the account is ready either way, so the password comes back rather
+ * than being lost, and `reason` says what went wrong so the admin knows why they are
+ * reading it off a screen instead.
+ */
+export type Sent =
+  | { readonly kind: 'sent'; readonly user: ManagedUser; readonly sentTo: string }
+  | { readonly kind: 'show'; readonly user: ManagedUser; readonly tempPassword: string; readonly reason: string };
+
+export async function sendTempPassword(userId: string): Promise<Sent> {
+  const body = await patch({ userId, sendTempPassword: true });
+  if (!isRecord(body)) throw unreadable();
+  const user = asManagedUser(body.user);
+  if (!user) throw unreadable();
+  if (body.sent === true) {
+    return { kind: 'sent', user, sentTo: typeof body.sentTo === 'string' ? body.sentTo : user.email };
+  }
+  if (typeof body.tempPassword !== 'string') throw unreadable();
+  return {
+    kind: 'show',
+    user,
+    tempPassword: body.tempPassword,
+    reason: typeof body.reason === 'string' ? body.reason : 'The password was not emailed.',
+  };
 }
 
 /**

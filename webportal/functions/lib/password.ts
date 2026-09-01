@@ -11,13 +11,37 @@ const DIGEST = 'sha256';
 const SALT_BYTES = 16;
 const KEY_BITS = 256;
 
-// OWASP's 2023 floor for PBKDF2-HMAC-SHA256. Measured at 17.8ms per derivation on an
-// M-series laptop, so budget about that much request CPU per login and per password
-// change. Logins are rare and nothing else in the portal is CPU-bound, but a Workers
-// FREE plan caps a request at 10ms of CPU: on that plan this number has to come down.
-// Lowering it is safe precisely because every stored hash carries the count it was
-// made with, and verifyPassword reports `needsRehash` when a hash is behind.
-export const PBKDF2_ITERATIONS = 210_000;
+// THIS IS A PLATFORM CEILING, NOT A CHOICE. Cloudflare's production Workers runtime
+// refuses any PBKDF2 above 100,000 iterations outright:
+//
+//   NotSupportedError: Pbkdf2 failed: iteration counts above 100000 are not
+//   supported (requested 210000).
+//
+// That throw is unhandled all the way out of the request, so asking for more does not
+// produce a slow login - it produces a Cloudflare 1101 page and no account. This code
+// shipped at 210,000 and every call that hashed a password failed in production.
+//
+// NO LOCAL TEST CAN CATCH THIS, which is the part worth remembering. Local workerd
+// under `wrangler dev` does not enforce the cap: it ran 210,000 iterations in 13ms and
+// returned a hash. The limit exists only on the deployed runtime, so password.cap.test.ts
+// pins the number here rather than pretending a local derivation proves anything.
+//
+// WHAT IT COSTS. OWASP recommends 600,000 iterations for PBKDF2-HMAC-SHA256, so this
+// is a sixth of the recommended work factor, and that is a real weakening rather than
+// a rounding. What stands in for it: the portal is a staff tool behind Cloudflare
+// Access, passwords are at least MIN_PASSWORD_LENGTH characters with no composition
+// rules pushing people towards short predictable ones, and lib/loginRate.ts throttles
+// guessing per account and per caller. Reaching 600,000 on this platform means chaining
+// six capped derivations, which is a decision about CPU per login and not a constant
+// to change quietly.
+//
+// Every stored hash carries the count it was made with and verifyPassword reports
+// `needsRehash` when a hash is behind, so this number can move again without
+// invalidating anybody's password.
+export const PBKDF2_ITERATIONS = 100_000;
+
+/** What the deployed runtime will actually accept. Above this it throws, it does not slow down. */
+export const PBKDF2_MAX_ITERATIONS = 100_000;
 
 // 32 characters, no I/O/0/1, so a temp password read off a screen and typed into a
 // phone does not turn into a support call. 256 is a whole multiple of 32, which is
@@ -85,6 +109,13 @@ export async function verifyPassword(plain: string, stored: string): Promise<Pas
 
   const iterations = Number(iterationText);
   if (!Number.isInteger(iterations) || iterations < 1) return { ok: false, reason: 'corrupt' };
+  // A count the runtime will not derive is unreadable in exactly the sense this
+  // branch already means: the row is there and nothing can check it. Without this,
+  // deriving throws NotSupportedError, nothing catches it, and a login that should
+  // say "ask an administrator" returns a Cloudflare 1101 page instead. No row is
+  // stored above the ceiling today; this is here so that raising PBKDF2_ITERATIONS
+  // past it again degrades into a message rather than into an outage.
+  if (iterations > PBKDF2_MAX_ITERATIONS) return { ok: false, reason: 'corrupt' };
 
   let salt: Uint8Array<ArrayBuffer>;
   let expected: Uint8Array<ArrayBuffer>;

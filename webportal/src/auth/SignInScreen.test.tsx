@@ -73,14 +73,14 @@ describe('an empty store, reached through Access', () => {
   });
 
   it('creates the account for the Access identity, not for anything typed', async () => {
-    createUser.mockResolvedValue({ user: FIRST_ADMIN, tempPassword: 'first-temp-pass' });
+    createUser.mockResolvedValue({ kind: 'issued', user: FIRST_ADMIN, tempPassword: 'first-temp-pass' });
     renderScreen('boss@clinic.org');
     fireEvent.click(await screen.findByRole('button', { name: 'Create administrator' }));
     await waitFor(() => { expect(createUser).toHaveBeenCalledWith('boss@clinic.org', 'admin'); });
   });
 
   it('shows the temporary password once, and says it is once', async () => {
-    createUser.mockResolvedValue({ user: FIRST_ADMIN, tempPassword: 'first-temp-pass' });
+    createUser.mockResolvedValue({ kind: 'issued', user: FIRST_ADMIN, tempPassword: 'first-temp-pass' });
     renderScreen('boss@clinic.org');
     fireEvent.click(await screen.findByRole('button', { name: 'Create administrator' }));
 
@@ -89,7 +89,7 @@ describe('an empty store, reached through Access', () => {
   });
 
   it('hands on to the sign-in form with the new address already filled in', async () => {
-    createUser.mockResolvedValue({ user: FIRST_ADMIN, tempPassword: 'first-temp-pass' });
+    createUser.mockResolvedValue({ kind: 'issued', user: FIRST_ADMIN, tempPassword: 'first-temp-pass' });
     renderScreen('boss@clinic.org');
     fireEvent.click(await screen.findByRole('button', { name: 'Create administrator' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Continue to sign in' }));

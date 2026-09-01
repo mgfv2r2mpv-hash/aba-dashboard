@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   readSession, signIn, signOut, setPassword,
-  listUsers, createUser, reissueTempPassword, setUserDisabled, isFirstRunOpen,
+  listUsers, createUser, sendTempPassword, setUserDisabled, isFirstRunOpen, isValidEmail,
   AuthError,
 } from './portalAuth';
 
@@ -197,10 +197,13 @@ describe('the account list', () => {
     expect(users[0]).toMatchObject({ email: 'bt@clinic.org', role: 'bt', lastLoginAt: null });
   });
 
-  it('returns the temp password the create response carries exactly once', async () => {
-    fetchMock.mockResolvedValue(withJson(201, { user: ROW, tempPassword: 'horse-battery-42' }));
-    const issued = await createUser('bt@clinic.org', 'bt');
-    expect(issued.tempPassword).toBe('horse-battery-42');
+  it('reads an ordinary creation as an invitation, with no password in it', async () => {
+    // The response the server sends for every account after the first. Nothing here
+    // can sign in yet, and the caller is told that by the shape rather than by a flag
+    // it might forget to read.
+    fetchMock.mockResolvedValue(withJson(201, { user: ROW, invited: true }));
+    const created = await createUser('bt@clinic.org', 'bt');
+    expect(created.kind).toBe('invited');
     expect(sent()).toMatchObject({
       path: '/api/admin/users',
       method: 'POST',
@@ -208,14 +211,38 @@ describe('the account list', () => {
     });
   });
 
-  it('reissues a temp password over PATCH', async () => {
-    fetchMock.mockResolvedValue(withJson(200, { user: ROW, tempPassword: 'second-one' }));
-    await expect(reissueTempPassword('u2')).resolves.toMatchObject({ tempPassword: 'second-one' });
+  it('reads a first-run creation as an issued password', async () => {
+    fetchMock.mockResolvedValue(withJson(201, { user: ROW, tempPassword: 'horse-battery-42' }));
+    const created = await createUser('boss@clinic.org', 'admin');
+    expect(created).toMatchObject({ kind: 'issued', tempPassword: 'horse-battery-42' });
+  });
+
+  it('sends a temp password over PATCH and reports where it went', async () => {
+    fetchMock.mockResolvedValue(withJson(200, { user: ROW, sent: true, sentTo: 'bt@clinic.org' }));
+    await expect(sendTempPassword('u2')).resolves.toMatchObject({
+      kind: 'sent', sentTo: 'bt@clinic.org',
+    });
     expect(sent()).toMatchObject({
       path: '/api/admin/users',
       method: 'PATCH',
-      body: { userId: 'u2', reissueTempPassword: true },
+      body: { userId: 'u2', sendTempPassword: true },
     });
+  });
+
+  it('keeps the password when the send failed, rather than losing it', async () => {
+    // The account already has this password by the time the server answers, so a
+    // client that discarded it here would strand the account.
+    fetchMock.mockResolvedValue(withJson(200, {
+      user: ROW, tempPassword: 'hand-this-over', sent: false, reason: 'no mail key',
+    }));
+    await expect(sendTempPassword('u2')).resolves.toMatchObject({
+      kind: 'show', tempPassword: 'hand-this-over', reason: 'no mail key',
+    });
+  });
+
+  it('refuses a send response it cannot read rather than inventing one', async () => {
+    fetchMock.mockResolvedValue(withJson(200, { user: ROW, sent: false }));
+    await expect(sendTempPassword('u2')).rejects.toThrow();
   });
 
   it('turns an account off over PATCH', async () => {
@@ -241,5 +268,28 @@ describe('isFirstRunOpen', () => {
     // That 403 is the ordinary case and must never reach the person as a message.
     fetchMock.mockResolvedValue(withJson(403, { error: 'Sign in first.' }));
     await expect(isFirstRunOpen()).resolves.toBe(false);
+  });
+});
+
+describe('the email shape the form checks before asking the server', () => {
+  it('accepts ordinary addresses, including the awkward legitimate ones', () => {
+    for (const address of [
+      'bt@clinic.org',
+      'first.last+tag@sub.domain.co.uk',
+      "o'brien@clinic.org",
+    ]) expect(isValidEmail(address)).toBe(true);
+  });
+
+  it('refuses what is plainly not an address', () => {
+    for (const value of ['', '   ', 'nobody', 'nobody@', '@clinic.org', 'a b@c.org', 'no@dots'])
+      expect(isValidEmail(value)).toBe(false);
+  });
+
+  it('trims, because a pasted address carries whitespace', () => {
+    expect(isValidEmail('  bt@clinic.org  ')).toBe(true);
+  });
+
+  it('refuses one longer than the column will hold', () => {
+    expect(isValidEmail('a'.repeat(320) + '@clinic.org')).toBe(false);
   });
 });

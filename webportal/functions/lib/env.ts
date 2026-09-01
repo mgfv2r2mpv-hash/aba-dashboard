@@ -9,6 +9,15 @@ import type { D1Like } from './userStore';
 
 export interface PortalEnv {
   PORTAL_DB?: D1Like;
+  /**
+   * Resend's API key, for the temporary-password invitation. Like PORTAL_DB this is a
+   * project setting rather than something a deploy creates, and it attaches at deploy
+   * time. Without it the portal still makes accounts; it just cannot post the password
+   * out, and says so instead of pretending it did.
+   */
+  RESEND_API_KEY?: string;
+  /** Overrides the address invitations are sent from. Defaults in lib/mail.ts. */
+  PORTAL_MAIL_FROM?: string;
 }
 
 /**

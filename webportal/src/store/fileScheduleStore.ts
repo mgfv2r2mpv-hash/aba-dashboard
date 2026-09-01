@@ -7,6 +7,11 @@ import { backupFilename } from '@shared/lib/backupFilename';
 import type { WorkerRequest, WorkerResponse } from '../parse.worker';
 import type { SaveRequest, SaveResponse } from '../save.worker';
 import {
+  browserRecovery,
+  describeWorkerFailure,
+  type Recovery,
+} from './workerRecovery';
+import {
   StoreError,
   type OpenedSchedule,
   type ScheduleStore,
@@ -67,14 +72,49 @@ const DESCRIPTION: StoreDescription = {
   needsCredential: true,
 };
 
+/**
+ * One request to an already-running parse worker.
+ *
+ * Used by the retry after a purge. It deliberately has no recovery arm of its own: the
+ * cache has just been emptied, so a second failure here is a real one and must surface
+ * rather than starting the cycle again.
+ */
+function once(worker: Worker, ref: FileRef, credential: string): Promise<OpenedSchedule> {
+  return new Promise<OpenedSchedule>((resolve, reject) => {
+    const detach = () => {
+      worker.removeEventListener('message', onMessage);
+      worker.onerror = null;
+    };
+    const onMessage = (e: MessageEvent<WorkerResponse>) => {
+      detach();
+      const res = e.data;
+      if (res.ok) resolve({ data: res.data, cache: res.cache, aiConfig: res.aiConfig ?? null });
+      else if (res.isDOMException) reject(new StoreError('bad-credential', 'Incorrect password. Please try again.'));
+      else reject(new StoreError('unreadable', res.message));
+    };
+    worker.addEventListener('message', onMessage);
+    worker.onerror = () => {
+      detach();
+      reject(new StoreError('failed',
+        'The decryption worker would not start even after clearing this browser\'s saved copies. '
+        + 'Reload the page, and if it happens again the file itself has not been touched.'));
+    };
+    worker.postMessage({ bytes: ref.bytes, password: credential } satisfies WorkerRequest);
+  });
+}
+
 export function createFileScheduleStore(
   workers: WorkerFactory = browserWorkers,
   deliver: Deliver = downloadToDisk,
+  recovery: Recovery = browserRecovery(),
 ): ScheduleStore<FileRef> {
   // The parse worker outlives one attempt so a retyped password does not pay for a
   // fresh module load. The save worker is one-shot: each save gets a clean one.
   let parseWorker: Worker | null = null;
   let saveWorker: Worker | null = null;
+  // One self-heal per session. A second attempt after a purge would be purging an
+  // empty cache, so it would spin rather than recover.
+  let healed = false;
 
   return {
     describe: () => DESCRIPTION,
@@ -102,13 +142,37 @@ export function createFileScheduleStore(
         };
 
         worker.addEventListener('message', onMessage);
-        worker.onerror = (e: ErrorEvent) => {
+        worker.onerror = () => {
           detach();
           // A worker that failed to start will fail the same way next time, so
           // drop it rather than retrying into the same corpse.
           parseWorker?.terminate();
           parseWorker = null;
-          reject(new StoreError('failed', `Worker failed: ${e.message ?? 'unknown error'}. Try refreshing.`));
+
+          // The ErrorEvent from a worker that never started carries no message, which
+          // is why this used to say "unknown error" and send people to a refresh that
+          // could not help. So the failure asks the browser what it actually has, and
+          // if it is holding a web page under a script URL it throws that away and
+          // tries once more. From the person's side the schedule simply opens.
+          void (async () => {
+            const poisoned = await recovery.inspect();
+            if (poisoned.length === 0 || healed) {
+              reject(new StoreError('failed', describeWorkerFailure(poisoned, null)));
+              return;
+            }
+            healed = true;
+            const purged = await recovery.purge();
+            try {
+              const fresh = (parseWorker = workers.parse());
+              resolve(await once(fresh, ref, credential));
+            } catch (cause) {
+              parseWorker?.terminate();
+              parseWorker = null;
+              reject(cause instanceof StoreError
+                ? cause
+                : new StoreError('failed', describeWorkerFailure(poisoned, purged)));
+            }
+          })();
         };
 
         worker.postMessage({ bytes: ref.bytes, password: credential } satisfies WorkerRequest);

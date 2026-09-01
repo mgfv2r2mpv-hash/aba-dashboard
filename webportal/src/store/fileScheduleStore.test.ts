@@ -102,6 +102,91 @@ describe('file store: load', () => {
     expect(parse.terminated).toBe(true);
   });
 
+  it('says what is wrong rather than "unknown error" when nothing local explains it', async () => {
+    // The old message named nothing and told the person to refresh, which could not
+    // help. A clean browser now gets a sentence that at least does not blame the file.
+    const { parse, store } = harness();
+    const opened = store.load({ bytes: encryptedBytes() }, 'hunter2');
+    parse.fail('boom');
+    const err = await opened.catch(e => e);
+    expect(err.message).not.toContain('unknown error');
+    expect(err.message).toMatch(/has not been touched/);
+  });
+
+  it('clears a poisoned cache and opens the schedule anyway', async () => {
+    // The whole self-heal, end to end. The first worker never starts, the browser turns
+    // out to be holding a web page under a script URL, and the person sees the schedule
+    // rather than a dead end.
+    const first = new FakeWorker();
+    const second = new FakeWorker();
+    const spawned = [first, second];
+    const purge = vi.fn(async () => ({ cachesDeleted: ['aba-portal-v2'], workersUnregistered: 1 }));
+    const recovery = {
+      inspect: async () => [{ url: 'https://x/assets/parse.worker-a.js', cacheName: 'aba-portal-v2', contentType: 'text/html' }],
+      purge,
+    };
+    const store = createFileScheduleStore(
+      { parse: () => spawned.shift() as unknown as Worker, save: () => new FakeWorker() as unknown as Worker },
+      () => {},
+      recovery,
+    );
+
+    const opened = store.load({ bytes: encryptedBytes() }, 'hunter2');
+    first.fail('');
+    await vi.waitFor(() => { expect(second.posted).toHaveLength(1); });
+    second.reply({ ok: true, data: schedule, cache });
+
+    await expect(opened).resolves.toMatchObject({ data: schedule });
+    expect(purge).toHaveBeenCalledTimes(1);
+    expect(first.terminated).toBe(true);
+  });
+
+  it('heals once, then reports honestly instead of purging on a loop', async () => {
+    // A second purge would be purging an empty cache, so it would spin rather than
+    // recover. The second failure has to reach the person.
+    const workers = [new FakeWorker(), new FakeWorker(), new FakeWorker()];
+    const purge = vi.fn(async () => ({ cachesDeleted: [], workersUnregistered: 0 }));
+    const store = createFileScheduleStore(
+      { parse: () => workers.shift() as unknown as Worker, save: () => new FakeWorker() as unknown as Worker },
+      () => {},
+      {
+        inspect: async () => [{ url: 'https://x/assets/parse.worker-a.js', cacheName: 'v2', contentType: 'text/html' }],
+        purge,
+      },
+    );
+
+    const [one, two] = [workers[0], workers[1]];
+    const firstTry = store.load({ bytes: encryptedBytes() }, 'p');
+    one.fail('');
+    await vi.waitFor(() => { expect(two.posted).toHaveLength(1); });
+    two.fail('');
+    const err = await firstTry.catch((e) => e);
+
+    expect(err.failure).toBe('failed');
+    expect(err.message).toMatch(/even after clearing/);
+    expect(purge).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not purge a healthy browser just because a worker died', async () => {
+    // Purging is destructive to the offline cache, so it is reserved for a browser that
+    // has actually been proven to hold something corrupt.
+    const purge = vi.fn();
+    const { parse, store: _ } = harness();
+    void _;
+    const worker = new FakeWorker();
+    const store = createFileScheduleStore(
+      { parse: () => worker as unknown as Worker, save: () => new FakeWorker() as unknown as Worker },
+      () => {},
+      { inspect: async () => [], purge },
+    );
+    void parse;
+
+    const opened = store.load({ bytes: encryptedBytes() }, 'p');
+    worker.fail('');
+    await opened.catch(() => {});
+    expect(purge).not.toHaveBeenCalled();
+  });
+
   it('reuses one parse worker across a retyped password', async () => {
     const spawn = vi.fn(() => new FakeWorker() as unknown as Worker);
     const worker = new FakeWorker();

@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  listUsers, createUser, setUserDisabled, reissueTempPassword, AuthError,
+  listUsers, createUser, setUserDisabled, sendTempPassword, isValidEmail, AuthError,
   ROLES, ROLE_LABELS,
-  type Account, type ManagedUser, type UserRole, type Issued,
+  type Account, type ManagedUser, type UserRole,
 } from './portalAuth';
 import TempPasswordNotice from './TempPasswordNotice';
 
@@ -13,11 +13,34 @@ import TempPasswordNotice from './TempPasswordNotice';
 // client would just produce a control that fails. Turning an account off is the
 // supported way to end somebody's access, and it takes their live sessions with it.
 
+/**
+ * What has happened to this account so far, in four states rather than three.
+ *
+ * "Not invited yet" and "Turned off" are both disabled rows, and telling them apart
+ * matters: one is an address somebody typed and has not acted on, the other is access
+ * that was deliberately taken away. Read together, `disabledAt` plus a password the
+ * person has never spent plus a sign-in that never happened can only be the first.
+ */
 function statusOf(user: ManagedUser): { readonly label: string; readonly tone: string } {
-  if (user.disabledAt !== null) return { label: 'Turned off', tone: 'is-off' };
+  if (user.disabledAt !== null) {
+    return user.mustChangePassword && user.lastLoginAt === null
+      ? { label: 'Not invited yet', tone: 'is-pending' }
+      : { label: 'Turned off', tone: 'is-off' };
+  }
   if (user.mustChangePassword) return { label: 'Temporary password', tone: 'is-pending' };
   return { label: 'Active', tone: 'is-active' };
 }
+
+/**
+ * The one thing that just happened, held so the screen can say it.
+ *
+ * A password only ever appears here when it could NOT be emailed, and `reason` says
+ * why. The ordinary path shows an address and no secret at all.
+ */
+type Notice =
+  | { readonly kind: 'invited'; readonly user: ManagedUser }
+  | { readonly kind: 'sent'; readonly user: ManagedUser; readonly sentTo: string }
+  | { readonly kind: 'password'; readonly user: ManagedUser; readonly tempPassword: string; readonly reason: string | null };
 
 function readableDate(iso: string | null): string {
   if (iso === null || iso.length === 0) return 'Never';
@@ -35,7 +58,7 @@ export default function UserAdminScreen({
   const [users, setUsers] = useState<readonly ManagedUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [issued, setIssued] = useState<Issued | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('bt');
@@ -53,13 +76,13 @@ export default function UserAdminScreen({
 
   // Every mutation ends the same way, so the wrapper owns the busy flag, the error
   // and the reload rather than each handler repeating them.
-  const run = useCallback(async (work: () => Promise<Issued | null>, whenItFails: string) => {
+  const run = useCallback(async (work: () => Promise<Notice | null>, whenItFails: string) => {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
       const result = await work();
-      if (result) setIssued(result);
+      if (result) setNotice(result);
       await refresh();
     } catch (cause) {
       setError(cause instanceof AuthError ? cause.message : whenItFails);
@@ -68,15 +91,21 @@ export default function UserAdminScreen({
     }
   }, [busy, refresh]);
 
+  const emailLooksRight = isValidEmail(newEmail);
+
   const addUser = useCallback((event: React.FormEvent) => {
     event.preventDefault();
     const email = newEmail.trim();
-    if (email.length === 0) return;
+    // The server checks this too, and its check is the one that counts. Refusing here
+    // only saves a round trip and puts the message next to the field it is about.
+    if (!isValidEmail(email)) return;
     void run(async () => {
-      const result = await createUser(email, newRole);
+      const created = await createUser(email, newRole);
       setNewEmail('');
       setNewRole('bt');
-      return result;
+      return created.kind === 'issued'
+        ? { kind: 'password' as const, user: created.user, tempPassword: created.tempPassword, reason: null }
+        : { kind: 'invited' as const, user: created.user };
     }, 'That account could not be made.');
   }, [newEmail, newRole, run]);
 
@@ -92,23 +121,46 @@ export default function UserAdminScreen({
       <main className="auth-admin-body">
         <h1 className="auth-admin-title">People</h1>
         <p className="auth-admin-lede">
-          Everybody who can sign in to this portal. A new account is issued a temporary
-          password, shown once here, and the portal makes them choose their own the
-          first time they use it.
+          Everybody who can sign in to this portal. A new account starts turned off and
+          holds no usable password. Send a temporary one when you are ready, and it goes
+          to their address rather than onto this screen. The portal makes them choose
+          their own the first time they use it.
         </p>
 
         {error && <div className="error-banner" role="alert">{error}</div>}
 
-        {issued && (
+        {notice && (
           <div className="password-card auth-issued">
-            <h2>{issued.user.email}</h2>
-            <p>
-              Signs in as {ROLE_LABELS[issued.user.role].toLowerCase()}. Hand them the
-              password below, however you would hand over any other secret.
-            </p>
-            <TempPasswordNotice tempPassword={issued.tempPassword} />
+            <h2>{notice.user.email}</h2>
+
+            {notice.kind === 'invited' && (
+              <p>
+                Added as {ROLE_LABELS[notice.user.role].toLowerCase()}, and turned off
+                until you send them a password. Nobody can sign in to it before then, so
+                a mistyped address costs nothing.
+              </p>
+            )}
+
+            {notice.kind === 'sent' && (
+              <p>
+                A temporary password is on its way to {notice.sentTo}. It is not shown
+                here, because it went to them and not to this screen. They will be asked
+                to choose their own the first time they sign in.
+              </p>
+            )}
+
+            {notice.kind === 'password' && (
+              <>
+                <p>
+                  {notice.reason
+                    ?? `Signs in as ${ROLE_LABELS[notice.user.role].toLowerCase()}. Hand them the password below, however you would hand over any other secret.`}
+                </p>
+                <TempPasswordNotice tempPassword={notice.tempPassword} />
+              </>
+            )}
+
             <div className="form-actions">
-              <button type="button" className="btn-ghost" onClick={() => { setIssued(null); }}>
+              <button type="button" className="btn-ghost" onClick={() => { setNotice(null); }}>
                 Done
               </button>
             </div>
@@ -129,7 +181,19 @@ export default function UserAdminScreen({
               placeholder="them@clinic.org"
               className="form-input"
               disabled={busy}
+              aria-describedby="new-user-email-rule"
+              aria-invalid={newEmail.trim().length > 0 && !emailLooksRight}
             />
+            {/* Said only once they have typed something wrong. An address rule shown
+                against an empty field is noise on every visit. */}
+            <p
+              id="new-user-email-rule"
+              className={`auth-rule${newEmail.trim().length > 0 && !emailLooksRight ? ' is-unmet' : ''}`}
+            >
+              {newEmail.trim().length > 0 && !emailLooksRight
+                ? 'That does not look like an email address, and the password has to be sent to one.'
+                : 'The account signs in with this address, and the temporary password is sent to it.'}
+            </p>
           </div>
           <div className="auth-add-field auth-add-field--role">
             <label htmlFor="new-user-role" className="form-label">Role</label>
@@ -148,7 +212,7 @@ export default function UserAdminScreen({
           <button
             type="submit"
             className="btn-primary auth-add-submit"
-            disabled={busy || newEmail.trim().length === 0}
+            disabled={busy || !emailLooksRight}
           >
             Add person
           </button>
@@ -188,15 +252,33 @@ export default function UserAdminScreen({
                         <button
                           type="button"
                           className="btn-ghost"
-                          disabled={busy}
+                          // Sending replaces the password and drops every session on
+                          // the account, so an administrator doing it to themselves
+                          // would be signed out mid-click. They change their own
+                          // password on the account screen, which proves the current
+                          // one first.
+                          disabled={busy || isSelf}
+                          title={isSelf ? 'Change your own password from your account instead.' : undefined}
                           onClick={() => {
-                            void run(
-                              () => reissueTempPassword(user.id),
-                              'That temporary password could not be issued.',
-                            );
+                            void run(async () => {
+                              const result = await sendTempPassword(user.id);
+                              // The server turns the account on as part of sending, so
+                              // this is the invite AND the "they lost it" button. It
+                              // only ever shows a password when the mail did not go.
+                              return result.kind === 'sent'
+                                ? { kind: 'sent' as const, user: result.user, sentTo: result.sentTo }
+                                : {
+                                    kind: 'password' as const,
+                                    user: result.user,
+                                    tempPassword: result.tempPassword,
+                                    reason: result.reason,
+                                  };
+                            }, 'That temporary password could not be sent.');
                           }}
                         >
-                          New temp password
+                          {user.lastLoginAt === null && user.disabledAt !== null
+                            ? 'Send temp password'
+                            : 'New temp password'}
                         </button>
                         <button
                           type="button"

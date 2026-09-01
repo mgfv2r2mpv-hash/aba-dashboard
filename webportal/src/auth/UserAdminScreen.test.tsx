@@ -10,14 +10,14 @@ vi.mock('./portalAuth', async (importOriginal) => {
     listUsers: vi.fn(),
     createUser: vi.fn(),
     setUserDisabled: vi.fn(),
-    reissueTempPassword: vi.fn(),
+    sendTempPassword: vi.fn(),
   };
 });
 
 const listUsers = vi.mocked(portalAuth.listUsers);
 const createUser = vi.mocked(portalAuth.createUser);
 const setUserDisabled = vi.mocked(portalAuth.setUserDisabled);
-const reissueTempPassword = vi.mocked(portalAuth.reissueTempPassword);
+const sendTempPassword = vi.mocked(portalAuth.sendTempPassword);
 
 const ADMIN = {
   id: 'u0', email: 'boss@clinic.org', role: 'admin' as const,
@@ -31,6 +31,15 @@ const PENDING_BT = {
   createdAt: '2026-08-30T00:00:00.000Z', passwordSetAt: '2026-08-30T00:00:00.000Z',
   lastLoginAt: null,
 };
+// The state every ordinary account is created in now: turned off, holding a password
+// nobody was ever shown, never signed in. Distinct from TURNED_OFF, which is access
+// somebody deliberately took away.
+const NOT_INVITED = {
+  id: 'u3', email: 'new@clinic.org', role: 'staff' as const,
+  mustChangePassword: true, disabledAt: '2026-08-31T00:00:00.000Z',
+  createdAt: '2026-08-31T00:00:00.000Z', passwordSetAt: '2026-08-31T00:00:00.000Z',
+  lastLoginAt: null,
+};
 const TURNED_OFF = {
   id: 'u2', email: 'gone@clinic.org', role: 'staff' as const,
   mustChangePassword: false, disabledAt: '2026-08-29T00:00:00.000Z',
@@ -40,7 +49,7 @@ const TURNED_OFF = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  listUsers.mockResolvedValue([ADMIN, PENDING_BT, TURNED_OFF]);
+  listUsers.mockResolvedValue([ADMIN, PENDING_BT, TURNED_OFF, NOT_INVITED]);
 });
 
 function renderAdmin() {
@@ -83,27 +92,47 @@ describe('the list', () => {
 });
 
 describe('adding somebody', () => {
-  it('sends the address and the chosen role, then shows the password once', async () => {
-    createUser.mockResolvedValue({ user: PENDING_BT, tempPassword: 'issued-once-only' });
+  it('sends the address and the chosen role, and shows NO password', async () => {
+    // The change that matters: adding somebody no longer produces a secret on screen.
+    // The account is turned off until somebody sends a password to the address.
+    createUser.mockResolvedValue({ kind: 'invited', user: NOT_INVITED });
     renderAdmin();
     await screen.findByText('boss@clinic.org');
 
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'bt@clinic.org' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new@clinic.org' } });
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'staff' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
 
-    await waitFor(() => { expect(createUser).toHaveBeenCalledWith('bt@clinic.org', 'staff'); });
-    expect(await screen.findByText('issued-once-only')).toBeInTheDocument();
-    expect(screen.getByText(/shown once and nothing can read it back/)).toBeInTheDocument();
+    await waitFor(() => { expect(createUser).toHaveBeenCalledWith('new@clinic.org', 'staff'); });
+    expect(await screen.findByText(/turned off until you send them a password/)).toBeInTheDocument();
+    expect(screen.queryByText(/shown once and nothing can read it back/)).not.toBeInTheDocument();
+  });
+
+  it('refuses an address that is not one, without asking the server', async () => {
+    renderAdmin();
+    await screen.findByText('boss@clinic.org');
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'not-an-address' } });
+    expect(screen.getByRole('button', { name: 'Add person' })).toBeDisabled();
+    expect(screen.getByText(/does not look like an email address/)).toBeInTheDocument();
+    expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it('accepts one that is', async () => {
+    renderAdmin();
+    await screen.findByText('boss@clinic.org');
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'someone@clinic.org' } });
+    expect(screen.getByRole('button', { name: 'Add person' })).toBeEnabled();
+    expect(screen.queryByText(/does not look like an email address/)).not.toBeInTheDocument();
   });
 
   it('reloads the list afterwards, so the new person is on it', async () => {
-    createUser.mockResolvedValue({ user: PENDING_BT, tempPassword: 'x' });
+    createUser.mockResolvedValue({ kind: 'invited', user: NOT_INVITED });
     renderAdmin();
     await screen.findByText('boss@clinic.org');
     expect(listUsers).toHaveBeenCalledTimes(1);
 
-    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'bt@clinic.org' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new@clinic.org' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
 
     await waitFor(() => { expect(listUsers).toHaveBeenCalledTimes(2); });
@@ -157,15 +186,66 @@ describe('turning an account off', () => {
   });
 });
 
-describe('reissuing a temporary password', () => {
-  it('asks for a new one and shows it once', async () => {
-    reissueTempPassword.mockResolvedValue({ user: PENDING_BT, tempPassword: 'the-second-one' });
+describe('sending a temporary password', () => {
+  it('calls it sending on an account nobody has invited yet', async () => {
+    // The label follows the state, because "New temp password" on an account that
+    // never had one reads as though something is being replaced.
+    renderAdmin();
+    expect(
+      within(await rowFor('new@clinic.org')).getByRole('button', { name: 'Send temp password' }),
+    ).toBeInTheDocument();
+  });
+
+  it('still calls it a new one for somebody already holding one', async () => {
+    renderAdmin();
+    expect(
+      within(await rowFor('bt@clinic.org')).getByRole('button', { name: 'New temp password' }),
+    ).toBeInTheDocument();
+  });
+
+  it('will not let an admin send one to themselves and sign themselves out', async () => {
+    // ADMIN is the signed-in account in these tests. Sending replaces the password and
+    // drops every session on the account, so the button that does it has to be shut
+    // on their own row the same way the turn-off button is.
+    renderAdmin();
+    expect(
+      within(await rowFor('boss@clinic.org')).getByRole('button', { name: /temp password/ }),
+    ).toBeDisabled();
+  });
+
+  it('says where it went and shows no password', async () => {
+    sendTempPassword.mockResolvedValue({ kind: 'sent', user: NOT_INVITED, sentTo: 'new@clinic.org' });
     renderAdmin();
     fireEvent.click(
-      within(await rowFor('bt@clinic.org')).getByRole('button', { name: 'New temp password' }),
+      within(await rowFor('new@clinic.org')).getByRole('button', { name: 'Send temp password' }),
     );
 
-    await waitFor(() => { expect(reissueTempPassword).toHaveBeenCalledWith('u1'); });
-    expect(await screen.findByText('the-second-one')).toBeInTheDocument();
+    await waitFor(() => { expect(sendTempPassword).toHaveBeenCalledWith('u3'); });
+    expect(await screen.findByText(/on its way to new@clinic.org/)).toBeInTheDocument();
+    expect(screen.queryByText(/shown once and nothing can read it back/)).not.toBeInTheDocument();
+  });
+
+  it('falls back to showing it when the mail did not go, and says why', async () => {
+    // The account has a new password by this point whatever happened to the email, so
+    // losing the password here would strand it. This is the path that must not regress.
+    sendTempPassword.mockResolvedValue({
+      kind: 'show', user: NOT_INVITED, tempPassword: 'hand-this-over',
+      reason: 'Email is not configured on this server, so the password was not sent.',
+    });
+    renderAdmin();
+    fireEvent.click(
+      within(await rowFor('new@clinic.org')).getByRole('button', { name: 'Send temp password' }),
+    );
+
+    expect(await screen.findByText('hand-this-over')).toBeInTheDocument();
+    expect(screen.getByText(/Email is not configured on this server/)).toBeInTheDocument();
+  });
+});
+
+describe('what a row says has happened to an account', () => {
+  it('tells an uninvited account apart from one that was turned off', async () => {
+    renderAdmin();
+    expect(within(await rowFor('new@clinic.org')).getByText('Not invited yet')).toBeInTheDocument();
+    expect(within(await rowFor('gone@clinic.org')).getByText('Turned off')).toBeInTheDocument();
   });
 });

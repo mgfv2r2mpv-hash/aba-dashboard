@@ -89,7 +89,16 @@ export default function SignInScreen({
     try {
       // The role asked for is a formality here: the server forces 'admin' on an empty
       // store whatever it is sent. Asking for 'admin' just keeps the request honest.
-      setMode({ kind: 'issued', issued: await createUser(accessEmail, 'admin') });
+      const created = await createUser(accessEmail, 'admin');
+      // First-run is the one creation that hands the password straight back, because
+      // there is nobody to email it to and nobody who could turn the account on. If a
+      // server ever answered this screen with an invitation instead, the person would
+      // be left looking at a first-run panel for an account they cannot reach, so this
+      // says so rather than rendering an empty notice.
+      if (created.kind !== 'issued') {
+        throw new AuthError(500, 'The account was made but no password came back. Ask for a temporary password.');
+      }
+      setMode({ kind: 'issued', issued: created });
     } catch (cause) {
       setError(cause instanceof AuthError ? cause.message : 'That account could not be made.');
     } finally {

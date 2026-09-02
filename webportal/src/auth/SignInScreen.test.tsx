@@ -157,3 +157,35 @@ describe('signing in', () => {
     expect(await screen.findByText('That email and password do not match.')).toBeInTheDocument();
   });
 });
+
+describe('where the cursor lands, and where it stays', () => {
+  // THE BUG THESE EXIST FOR. The landing effect used to depend on `email.length`, so
+  // every keystroke in an empty address box re-ran it, found a non-empty value, and
+  // threw the cursor into the password field mid-word. Typing an address was not
+  // possible: the first character went to Email and the second to Password.
+  it('leaves the cursor in the address box while somebody is typing an address', async () => {
+    renderScreen(null);
+    const email = await screen.findByLabelText('Email');
+    email.focus();
+
+    fireEvent.change(email, { target: { value: 'a' } });
+    expect(document.activeElement).toBe(email);
+
+    fireEvent.change(email, { target: { value: 'ab' } });
+    fireEvent.change(email, { target: { value: 'abc' } });
+    expect(document.activeElement).toBe(email);
+  });
+
+  it('lands in the address box when Access has not filled one in', async () => {
+    renderScreen(null);
+    const email = await screen.findByLabelText('Email');
+    await waitFor(() => expect(document.activeElement).toBe(email));
+  });
+
+  it('lands in the password box when Access already filled the address in', async () => {
+    isFirstRunOpen.mockResolvedValue(false);
+    renderScreen('boss@clinic.org');
+    const password = await screen.findByLabelText('Password');
+    await waitFor(() => expect(document.activeElement).toBe(password));
+  });
+});

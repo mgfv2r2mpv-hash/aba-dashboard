@@ -56,12 +56,21 @@ export default function SignInScreen({
     return () => { live = false; };
   }, [mode.kind]);
 
-  // Land the cursor where the person still has typing to do.
+  // Land the cursor where the person still has typing to do, once, as the form
+  // appears. Access prefills the address, so a box that already holds one means the
+  // password is the only thing left.
+  //
+  // THIS MUST NOT DEPEND ON WHAT THEY TYPE. It used to depend on `email.length`, and
+  // so every keystroke in an empty address box re-ran it, found a non-empty value,
+  // and threw the cursor into the password field mid-word. Typing an address was not
+  // possible: the first character landed in Email and the second in Password. Where
+  // the cursor LANDS is a question about the form appearing, not about typing, which
+  // is why the value is read off the field here rather than tracked as a dependency.
   useEffect(() => {
     if (mode.kind !== 'sign-in') return;
-    const field = email.length > 0 ? passwordRef.current : emailRef.current;
+    const field = emailRef.current?.value ? passwordRef.current : emailRef.current;
     field?.focus();
-  }, [mode.kind, email.length]);
+  }, [mode.kind]);
 
   const handleSignIn = useCallback(async (event: React.FormEvent) => {
     event.preventDefault();

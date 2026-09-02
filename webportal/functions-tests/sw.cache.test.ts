@@ -18,19 +18,43 @@ import { createContext, runInContext } from 'node:vm';
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const SW = join(HERE, '..', 'public', 'sw.js');
 
+interface FetchEventLike {
+  request: { method: string; url: string; mode: string; destination: string };
+  respondWith: (value: unknown) => void;
+}
+
 interface SwGlobals {
   safeToCache(request: { destination: string }, res: unknown): boolean;
   CACHE: string;
+  /** The listeners sw.js registered, by event name, so they can be dispatched. */
+  listeners: Map<string, ((event: FetchEventLike) => void)[]>;
 }
 
 /** Runs sw.js in a context with the globals a service worker gets, and hands it back. */
 function loadServiceWorker(): SwGlobals {
+  const listeners = new Map<string, ((event: FetchEventLike) => void)[]>();
   const sandbox: Record<string, unknown> = {
-    self: { addEventListener: () => {}, skipWaiting: () => {}, clients: { claim: () => {} } },
-    caches: { keys: async () => [], delete: async () => true, open: async () => ({}), match: async () => undefined },
-    fetch: async () => ({}),
+    self: {
+      addEventListener: (type: string, fn: (event: FetchEventLike) => void) => {
+        listeners.set(type, [...(listeners.get(type) ?? []), fn]);
+      },
+      skipWaiting: () => {},
+      clients: { claim: () => {} },
+    },
+    caches: {
+      keys: async () => [],
+      delete: async () => true,
+      // A whole Cache, not an empty object: the fetch handler calls match/put/delete on
+      // whatever open() hands back, and a stub missing them turns a real interception
+      // into an unhandled rejection that reads like a harness fault rather than a result.
+      open: async () => ({ match: async () => undefined, put: async () => {}, delete: async () => true }),
+      match: async () => undefined,
+    },
+    fetch: async () => ({ ok: true, redirected: false, type: 'basic', clone: () => ({}), headers: { get: () => null } }),
+    URL,
   };
   const ctx = createContext(sandbox);
+  ctx.listeners = listeners;
   // A function declaration lands on the context object; a top-level `const` does not,
   // it stays in the script's own lexical scope. So CACHE is handed out from inside the
   // same script rather than read off the context afterwards, where it reads undefined
@@ -86,11 +110,62 @@ describe('what the service worker is willing to keep', () => {
 });
 
 describe('the cache name', () => {
-  it('has moved past the version that could hold a poisoned entry', () => {
+  it('has moved past every version that could hold something wrong', () => {
     // `activate` deletes every cache that is not this one, so bumping the name is the
-    // only reach anyone has into a browser already holding the bad copy. If this ever
-    // goes back to v2, everyone who hit the bug keeps hitting it.
+    // only reach anyone has into a browser already holding a bad copy. Two versions
+    // are now disqualified for two different reasons: v2 could hold a challenge page
+    // filed under a script URL, and v3 could hold an authenticated people list,
+    // because it ran in front of `/api/`. Going back to either strands somebody.
     expect(loadServiceWorker().CACHE).not.toBe('aba-portal-v2');
-    expect(loadServiceWorker().CACHE).toMatch(/^aba-portal-v[3-9]\d*$/);
+    expect(loadServiceWorker().CACHE).not.toBe('aba-portal-v3');
+    expect(loadServiceWorker().CACHE).toMatch(/^aba-portal-v[4-9]\d*$/);
+  });
+});
+
+describe('what the service worker refuses to come between', () => {
+  /** Dispatches one GET at the worker's fetch handler and says whether it answered. */
+  function intercepted(url: string, over: Partial<{ mode: string; destination: string }> = {}) {
+    const sw = loadServiceWorker();
+    const handler = sw.listeners.get('fetch')?.[0];
+    if (!handler) throw new Error('sw.js registered no fetch listener');
+    let answered = false;
+    handler({
+      request: { method: 'GET', url, mode: over.mode ?? 'cors', destination: over.destination ?? '' },
+      respondWith: () => { answered = true; },
+    });
+    return answered;
+  }
+
+  // WHAT THIS IS PROTECTING, and it is two separate harms from one cause.
+  //
+  // The worker used to sit in front of every same-origin GET, `/api/` included. Those
+  // responses are authenticated and per-session, so a cached people list or session
+  // record outlived signing out, and stale-while-revalidate would hand the previous
+  // answer to whoever opened the browser next.
+  //
+  // It also put the cache layer in the failure path of every admin call. A rejection
+  // anywhere inside `respondWith` reaches the page as a fetch that threw carrying no
+  // response at all, which the portal can only report as "The server did not answer" -
+  // indistinguishable, from the page's side, from the network being down.
+  it('never answers for an API call', () => {
+    expect(intercepted('https://sassi.nooutco.me/api/admin/users')).toBe(false);
+    expect(intercepted('https://sassi.nooutco.me/api/auth/session')).toBe(false);
+    expect(intercepted('https://sassi.nooutco.me/api/claude/v1/messages')).toBe(false);
+  });
+
+  it('still answers for the assets it exists to cache', () => {
+    // The skip has to stay narrow. A worker that steps back from everything would
+    // "fix" this by turning itself off, which is not the same fix.
+    expect(intercepted('https://sassi.nooutco.me/assets/index-D6PC6tv9.js', { destination: 'script' })).toBe(true);
+    expect(intercepted('https://sassi.nooutco.me/assets/parse.worker-Cs9QSITe.js', { destination: 'worker' })).toBe(true);
+    expect(intercepted('https://sassi.nooutco.me/icon.svg', { destination: 'image' })).toBe(true);
+  });
+
+  it('does not mistake a path that merely starts with the letters api', () => {
+    expect(intercepted('https://sassi.nooutco.me/apiary/notes.js', { destination: 'script' })).toBe(true);
+  });
+
+  it('still takes navigation, which is how index.html stays fresh', () => {
+    expect(intercepted('https://sassi.nooutco.me/', { mode: 'navigate' })).toBe(true);
   });
 });

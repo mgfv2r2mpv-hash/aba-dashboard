@@ -7,7 +7,13 @@
 // challenge page filed under a script URL (see below), and there is no other way
 // to reach into a person's browser and remove it. Bump it whenever a past version
 // could be holding something wrong.
-const CACHE = 'aba-portal-v3';
+//
+// v3 could hold something wrong of a different kind: it ran in front of `/api/`, so
+// it wrote authenticated responses - the people list, the session record - into a
+// store that outlives signing out. The worker no longer intercepts those, which
+// makes any such entry unreadable but not gone. This bump is what actually removes
+// it from the disk of everyone who has already used the portal.
+const CACHE = 'aba-portal-v4';
 
 self.addEventListener('install', () => self.skipWaiting());
 
@@ -55,6 +61,18 @@ self.addEventListener('fetch', e => {
   const { request } = e;
   if (request.method !== 'GET') return;
   if (!request.url.startsWith('http')) return;
+
+  // THE API IS NEVER CACHED AND NEVER INTERCEPTED, and that is two harms from one
+  // cause. These responses are authenticated and per-session, so a cached people
+  // list or session record outlives signing out, and stale-while-revalidate would
+  // hand the previous answer to whoever opens this browser next.
+  //
+  // Standing aside also keeps this worker out of the failure path of every admin
+  // call. A rejection anywhere inside `respondWith` reaches the page as a fetch
+  // that threw carrying no response at all, and the portal can only report that as
+  // "The server did not answer" - from the page's side it is indistinguishable
+  // from the network being down, which is a miserable thing to debug.
+  if (new URL(request.url).pathname.startsWith('/api/')) return;
 
   // Navigation: network-first (keep index.html fresh)
   if (request.mode === 'navigate') {
